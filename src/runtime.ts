@@ -1,5 +1,11 @@
 import * as path from "@std/path";
-import { DEFAULT_GUARDRAILS, TOOL_REFERENCE_CONTEXT } from "./constants.ts";
+import {
+  DEFAULT_GUARDRAILS,
+  DEFAULT_SUSPENSE_DELAY_MS,
+  TOOL_ERROR_EVENT,
+  TOOL_REFERENCE_CONTEXT,
+  TOOL_SUSPENSE_EVENT,
+} from "./constants.ts";
 import { loadDeck } from "./loader.ts";
 import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
 import type {
@@ -10,6 +16,7 @@ import type {
   ModelProvider,
   ReferenceContext,
   ToolDefinition,
+  ToolCallResult,
 } from "./types.ts";
 
 function randomId(prefix: string) {
@@ -230,7 +237,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     const message = result.message;
     if (result.toolCalls && result.toolCalls.length > 0) {
       for (const call of result.toolCalls) {
-        const toolContent = await handleToolCall(call, {
+        const toolResult = await handleToolCall(call, {
           parentDeck: deck,
           modelProvider,
           guardrails,
@@ -252,8 +259,11 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           role: "tool",
           tool_call_id: call.id,
           name: call.name,
-          content: toolContent,
+          content: toolResult.toolContent,
         });
+        if (toolResult.extraMessages?.length) {
+          messages.push(...toolResult.extraMessages);
+        }
       }
       continue;
     }
@@ -283,36 +293,247 @@ async function handleToolCall(
     defaultModel?: string;
     modelOverride?: string;
   },
-): Promise<string> {
+): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
   if (!action) {
-    return JSON.stringify({
-      ok: false,
-      error: "unknown_action",
-      action: call.name,
-    });
+    return {
+      toolContent: JSON.stringify({
+        ok: false,
+        error: "unknown_action",
+        action: call.name,
+      }),
+    };
   }
 
+  const extraMessages: ModelMessage[] = [];
+  const started = performance.now();
+
+  const suspenseDelay = ctx.parentDeck.suspenseHandler?.delayMs ??
+    ctx.parentDeck.suspenseDelayMs ??
+    DEFAULT_SUSPENSE_DELAY_MS;
+
+  let suspenseTimer: number | undefined;
+  let suspenseFired = false;
+  let _suspenseElapsed = 0;
+
+  const childPromise = (async () => {
+    try {
+      const result = await runDeck({
+        path: action.path,
+        input: call.args,
+        modelProvider: ctx.modelProvider,
+        isRoot: false,
+        guardrails: ctx.guardrails,
+        depth: ctx.depth + 1,
+        parentActionCallId: call.id,
+        runId: ctx.runId,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+      });
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false as const, error: err };
+    } finally {
+      if (suspenseTimer !== undefined) {
+        clearTimeout(suspenseTimer);
+      }
+      _suspenseElapsed = performance.now() - started;
+    }
+  })();
+
+  if (ctx.parentDeck.suspenseHandler?.path) {
+    suspenseTimer = setTimeout(async () => {
+      suspenseFired = true;
+      const envelope = await runSuspenseHandler({
+        parentDeck: ctx.parentDeck,
+        action,
+        call,
+        runId: ctx.runId,
+        parentActionCallId: ctx.parentActionCallId,
+        handlerPath: ctx.parentDeck.suspenseHandler!.path,
+        modelProvider: ctx.modelProvider,
+        guardrails: ctx.guardrails,
+        depth: ctx.depth,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+        elapsedMs: performance.now() - started,
+      });
+      extraMessages.push(...envelope);
+    }, suspenseDelay) as unknown as number;
+  }
+
+  const childResult = await childPromise;
+
+  if (!childResult.ok) {
+    const handled = await maybeHandleError({
+      err: childResult.error,
+      call,
+      ctx,
+      action,
+    });
+    if (handled) {
+      if (handled.extraMessages) {
+        extraMessages.push(...handled.extraMessages);
+      }
+      const content = handled.toolContent;
+      return { toolContent: content, extraMessages };
+    }
+
+    throw childResult.error;
+  }
+
+  const toolContent = typeof childResult.result === "string"
+    ? childResult.result
+    : JSON.stringify(childResult.result);
+
+  if (suspenseFired && extraMessages.length === 0) {
+    // Suspense handler failed silently; no extra messages.
+  }
+
+  return { toolContent, extraMessages };
+}
+
+async function runSuspenseHandler(args: {
+  parentDeck: LoadedDeck;
+  action: { name: string; path: string; activity?: string; description?: string };
+  call: { id: string; name: string; args: Record<string, unknown> };
+  runId: string;
+  parentActionCallId?: string;
+  handlerPath: string;
+  modelProvider: ModelProvider;
+  guardrails: Guardrails;
+  depth: number;
+  defaultModel?: string;
+  modelOverride?: string;
+  elapsedMs: number;
+}): Promise<ModelMessage[]> {
   try {
-    const result = await runDeck({
-      path: action.path,
-      input: call.args,
-      modelProvider: ctx.modelProvider,
+    const input = {
+      kind: "suspense",
+      activity: args.action.activity ?? args.parentDeck.activity,
+      source: { deckPath: args.parentDeck.path, actionName: args.action.name },
+      trigger: { reason: "timeout" as const, elapsedMs: Math.floor(args.elapsedMs) },
+      childInput: args.call.args,
+    };
+    const envelope = await runDeck({
+      path: args.handlerPath,
+      input,
+      modelProvider: args.modelProvider,
       isRoot: false,
-      guardrails: ctx.guardrails,
-      depth: ctx.depth + 1,
-      parentActionCallId: call.id,
-      runId: ctx.runId,
-      defaultModel: ctx.defaultModel,
-      modelOverride: ctx.modelOverride,
+      guardrails: args.guardrails,
+      depth: args.depth + 1,
+      parentActionCallId: args.call.id,
+      runId: args.runId,
+      defaultModel: args.defaultModel,
+      modelOverride: args.modelOverride,
     });
-    return typeof result === "string" ? result : JSON.stringify(result);
-  } catch (err) {
-    return JSON.stringify({
-      ok: false,
-      error: "action_failed",
-      message: err instanceof Error ? err.message : String(err),
+    const content = typeof envelope === "string"
+      ? envelope
+      : JSON.stringify(envelope);
+    const callId = randomId("event");
+    return [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: {
+            name: TOOL_SUSPENSE_EVENT,
+            arguments: JSON.stringify({
+              runId: args.runId,
+              actionCallId: args.call.id,
+              parentActionCallId: args.parentActionCallId,
+            }),
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: callId,
+        name: TOOL_SUSPENSE_EVENT,
+        content,
+      },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+async function maybeHandleError(args: {
+  err: unknown;
+  call: { id: string; name: string; args: Record<string, unknown> };
+  ctx: {
+    parentDeck: LoadedDeck;
+    guardrails: Guardrails;
+    depth: number;
+    runId: string;
+    parentActionCallId?: string;
+    modelProvider: ModelProvider;
+    defaultModel?: string;
+    modelOverride?: string;
+  };
+  action: { name: string; path: string; activity?: string; description?: string };
+}): Promise<ToolCallResult | undefined> {
+  const handlerPath = args.ctx.parentDeck.errorHandler?.path;
+  if (!handlerPath) return undefined;
+
+  const message = args.err instanceof Error ? args.err.message : String(args.err);
+  const envelopeInput = {
+    kind: "error",
+    activity: args.action.activity ?? args.ctx.parentDeck.activity,
+    source: { deckPath: args.ctx.parentDeck.path, actionName: args.action.name },
+    error: { message },
+    childInput: args.call.args,
+  };
+
+  try {
+    const handlerOutput = await runDeck({
+      path: handlerPath,
+      input: envelopeInput,
+      modelProvider: args.ctx.modelProvider,
+      isRoot: false,
+      guardrails: args.ctx.guardrails,
+      depth: args.ctx.depth + 1,
+      parentActionCallId: args.call.id,
+      runId: args.ctx.runId,
+      defaultModel: args.ctx.defaultModel,
+      modelOverride: args.ctx.modelOverride,
     });
+
+    const content = typeof handlerOutput === "string"
+      ? handlerOutput
+      : JSON.stringify(handlerOutput);
+    const callId = randomId("event");
+
+    const extraMessages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: {
+            name: TOOL_ERROR_EVENT,
+            arguments: JSON.stringify({
+              runId: args.ctx.runId,
+              actionCallId: args.call.id,
+              parentActionCallId: args.ctx.parentActionCallId,
+            }),
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: callId,
+        name: TOOL_ERROR_EVENT,
+        content,
+      },
+    ];
+
+    return { toolContent: content, extraMessages };
+  } catch {
+    return undefined;
   }
 }
 

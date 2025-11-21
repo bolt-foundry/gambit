@@ -174,3 +174,8 @@ export type LoadedDeck = DeckDefinition & {
   actions: ActionDefinition[];
   executor?: DeckExecutor;
 };
+
+export type ToolCallResult = {
+  toolContent: string;
+  extraMessages?: ModelMessage[];
+};
