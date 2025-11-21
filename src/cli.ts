@@ -1,6 +1,7 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
+import { makeJsonlTracer } from "./trace.ts";
 
 type Args = {
   cmd: "run";
@@ -8,12 +9,14 @@ type Args = {
   input?: string;
   model?: string;
   modelForce?: string;
+  trace?: string;
+  stream?: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
   if (argv.length === 0) {
     throw new Error(
-      "Usage: gambit run <deck.ts> [--input <json|string>] [--model <id>] [--model-force <id>]",
+      "Usage: gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace file] [--stream]",
     );
   }
   const [cmd, deckPath, ...rest] = argv;
@@ -23,6 +26,8 @@ function parseArgs(argv: string[]): Args {
   let input: string | undefined;
   let model: string | undefined;
   let modelForce: string | undefined;
+  let trace: string | undefined;
+  let stream = false;
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i];
     if (token === "--input") {
@@ -31,10 +36,14 @@ function parseArgs(argv: string[]): Args {
       model = rest[++i];
     } else if (token === "--model-force") {
       modelForce = rest[++i];
+    } else if (token === "--trace") {
+      trace = rest[++i];
+    } else if (token === "--stream") {
+      stream = true;
     }
   }
 
-  return { cmd: "run", deckPath, input, model, modelForce };
+  return { cmd: "run", deckPath, input, model, modelForce, trace, stream };
 }
 
 function parseInput(raw?: string): unknown {
@@ -58,6 +67,8 @@ async function main() {
       baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
     });
 
+    const tracer = args.trace ? makeJsonlTracer(args.trace) : undefined;
+
     const result = await runDeck({
       path: args.deckPath,
       input: parseInput(args.input),
@@ -65,6 +76,8 @@ async function main() {
       isRoot: true,
       defaultModel: args.model,
       modelOverride: args.modelForce,
+      trace: tracer,
+      stream: args.stream,
     });
 
     if (typeof result === "string") {

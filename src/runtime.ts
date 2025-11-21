@@ -61,8 +61,34 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   ensureSchemaPresence(deck, isRoot);
 
   const validatedInput = validateInput(deck, opts.input, isRoot);
-  if (deck.modelParams?.model) {
-    return await runLlmDeck({
+  const shouldEmitRun = opts.depth === undefined || opts.depth === 0;
+  if (shouldEmitRun) {
+    opts.trace?.({ type: "run.start", runId });
+  }
+  try {
+    if (deck.modelParams?.model || deck.modelParams?.temperature !== undefined) {
+      return await runLlmDeck({
+        deck,
+        guardrails: effectiveGuardrails,
+        depth,
+        runId,
+        parentActionCallId: opts.parentActionCallId,
+        modelProvider: opts.modelProvider,
+        input: validatedInput,
+        defaultModel: opts.defaultModel,
+        modelOverride: opts.modelOverride,
+        trace: opts.trace,
+        stream: opts.stream,
+      });
+    }
+
+    if (!deck.executor) {
+      throw new Error(
+        `Deck ${deck.path} has no model and no executor (run or execute export)`,
+      );
+    }
+
+    return await runComputeDeck({
       deck,
       guardrails: effectiveGuardrails,
       depth,
@@ -73,27 +99,13 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       defaultModel: opts.defaultModel,
       modelOverride: opts.modelOverride,
       trace: opts.trace,
+      stream: opts.stream,
     });
+  } finally {
+    if (shouldEmitRun) {
+      opts.trace?.({ type: "run.end", runId });
+    }
   }
-
-  if (!deck.executor) {
-    throw new Error(
-      `Deck ${deck.path} has no model and no executor (run or execute export)`,
-    );
-  }
-
-  return await runComputeDeck({
-    deck,
-    guardrails: effectiveGuardrails,
-    depth,
-    runId,
-    parentActionCallId: opts.parentActionCallId,
-    modelProvider: opts.modelProvider,
-    input: validatedInput,
-    defaultModel: opts.defaultModel,
-    modelOverride: opts.modelOverride,
-    trace: opts.trace,
-  });
 }
 
 function ensureSchemaPresence(deck: LoadedDeck, isRoot: boolean) {
@@ -173,6 +185,7 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         defaultModel: ctx.defaultModel,
         modelOverride: ctx.modelOverride,
         trace: ctx.trace,
+        stream: ctx.stream,
       }),
     fail: (opts) => {
       throw new Error(opts.message);
@@ -329,6 +342,7 @@ async function handleToolCall(
     defaultModel?: string;
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
+    stream?: boolean;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -367,6 +381,7 @@ async function handleToolCall(
         defaultModel: ctx.defaultModel,
         modelOverride: ctx.modelOverride,
         trace: ctx.trace,
+        stream: ctx.stream,
       });
       return { ok: true, result };
     } catch (err) {
@@ -396,6 +411,7 @@ async function handleToolCall(
         modelOverride: ctx.modelOverride,
         elapsedMs: performance.now() - started,
         trace: ctx.trace,
+        stream: ctx.stream,
       });
       extraMessages.push(...envelope);
     }, suspenseDelay) as unknown as number;
@@ -446,6 +462,7 @@ async function runSuspenseHandler(args: {
   modelOverride?: string;
   elapsedMs: number;
   trace?: (event: import("./types.ts").TraceEvent) => void;
+  stream?: boolean;
 }): Promise<ModelMessage[]> {
   try {
     const input = {
@@ -467,6 +484,7 @@ async function runSuspenseHandler(args: {
       defaultModel: args.defaultModel,
       modelOverride: args.modelOverride,
       trace: args.trace,
+      stream: args.stream,
     });
     const content = typeof envelope === "string" ? envelope : JSON.stringify(envelope);
     const callId = randomId("event");
@@ -512,6 +530,7 @@ async function maybeHandleError(args: {
     defaultModel?: string;
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
+    stream?: boolean;
   };
   action: { name: string; path: string; activity?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -540,6 +559,7 @@ async function maybeHandleError(args: {
       defaultModel: args.ctx.defaultModel,
       modelOverride: args.ctx.modelOverride,
       trace: args.ctx.trace,
+      stream: args.ctx.stream,
     });
 
     const content = typeof handlerOutput === "string"
