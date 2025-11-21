@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
-import { createOpenAIProvider } from "./providers/openai.ts";
+import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
 
 type Args = {
@@ -49,11 +49,14 @@ function parseInput(raw?: string): unknown {
 async function main() {
   try {
     const args = parseArgs(Deno.args);
-    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!apiKey) {
-      throw new Error("OPENAI_API_KEY is required");
+      throw new Error("OPENROUTER_API_KEY is required");
     }
-    const provider = createOpenAIProvider({ apiKey });
+    const provider = createOpenRouterProvider({
+      apiKey,
+      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+    });
 
     const result = await runDeck({
       path: args.deckPath,

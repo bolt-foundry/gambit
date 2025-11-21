@@ -17,21 +17,21 @@ function normalizeMessage(
   };
 }
 
-export function createOpenAIProvider(opts: {
+export function createOpenRouterProvider(opts: {
   apiKey: string;
   baseURL?: string;
-  organization?: string;
 }): ModelProvider {
   const client = new OpenAI({
     apiKey: opts.apiKey,
-    baseURL: opts.baseURL,
-    organization: opts.organization,
+    baseURL: opts.baseURL ?? "https://openrouter.ai/api/v1",
   });
 
   return {
-    async chat(
-      input: { model: string; messages: ModelMessage[]; tools?: ToolDefinition[] },
-    ) {
+    async chat(input: {
+      model: string;
+      messages: ModelMessage[];
+      tools?: ToolDefinition[];
+    }) {
       const response = await client.chat.completions.create({
         model: input.model,
         messages: input
@@ -66,7 +66,7 @@ function safeJson(str: string): Record<string, JSONValue> {
       return parsed as Record<string, JSONValue>;
     }
   } catch {
-    // ignore
+    // ignore bad tool args
   }
   return {};
 }
