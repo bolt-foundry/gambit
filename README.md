@@ -33,6 +33,8 @@ model.
   that calls one child action.
 - Deno tasks: `ci` runs `deno fmt --check`, `deno lint`, `deno test`; CI workflow calls
   `deno task ci`. Include `deno.json`/`deno.lock`.
+- Model provider: CLI uses OpenRouter; set `OPENROUTER_API_KEY` (optionally
+  `OPENROUTER_BASE_URL`) before running.
 
 ## Deferred to v0.1
 
