@@ -2,8 +2,12 @@
   "version": "5",
   "specifiers": {
     "jsr:@std/assert@^1.0.6": "1.0.16",
+    "jsr:@std/collections@^1.1.3": "1.1.3",
+    "jsr:@std/front-matter@^1.0.9": "1.0.9",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@^1.0.6": "1.1.3",
+    "jsr:@std/toml@^1.0.3": "1.0.11",
+    "jsr:@std/yaml@^1.0.5": "1.0.10",
     "npm:openai@^4.78.1": "4.104.0_zod@3.25.76",
     "npm:zod-to-json-schema@^3.23.0": "3.25.0_zod@3.25.76",
     "npm:zod@^3.23.8": "3.25.76"
@@ -15,6 +19,16 @@
         "jsr:@std/internal"
       ]
     },
+    "@std/collections@1.1.3": {
+      "integrity": "bf8b0818886df6a32b64c7d3b037a425111f28278d69fd0995aeb62777c986b0"
+    },
+    "@std/front-matter@1.0.9": {
+      "integrity": "ee6201d06674cbef137dda2252f62477450b48249e7d8d9ab57a30f85ff6f051",
+      "dependencies": [
+        "jsr:@std/toml",
+        "jsr:@std/yaml"
+      ]
+    },
     "@std/internal@1.0.12": {
       "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
     },
@@ -23,6 +37,15 @@
       "dependencies": [
         "jsr:@std/internal"
       ]
+    },
+    "@std/toml@1.0.11": {
+      "integrity": "e084988b872ca4bad6aedfb7350f6eeed0e8ba88e9ee5e1590621c5b5bb8f715",
+      "dependencies": [
+        "jsr:@std/collections"
+      ]
+    },
+    "@std/yaml@1.0.10": {
+      "integrity": "245706ea3511cc50c8c6d00339c23ea2ffa27bd2c7ea5445338f8feff31fa58e"
     }
   },
   "npm": {
@@ -254,6 +277,8 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@^1.0.6",
+      "jsr:@std/front-matter@^1.0.9",
+      "jsr:@std/front_matter@~0.224.4",
       "jsr:@std/path@^1.0.6",
       "npm:openai@^4.78.1",
       "npm:zod-to-json-schema@^3.23.0",

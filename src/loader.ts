@@ -2,6 +2,7 @@ import * as path from "@std/path";
 import { RESERVED_TOOL_PREFIX } from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { mergeZodObjects } from "./schema.ts";
+import { isMarkdownFile, loadMarkdownCard, loadMarkdownDeck } from "./markdown.ts";
 import type {
   ActionDefinition,
   CardDefinition,
@@ -70,6 +71,9 @@ export async function loadCard(
   cardPath: string,
   parentPath?: string,
 ): Promise<LoadedCard> {
+  if (isMarkdownFile(cardPath)) {
+    return await loadMarkdownCard(cardPath, parentPath);
+  }
   return await loadCardInternal(cardPath, parentPath, []);
 }
 
@@ -77,6 +81,10 @@ export async function loadDeck(
   deckPath: string,
   parentPath?: string,
 ): Promise<LoadedDeck> {
+  if (isMarkdownFile(deckPath)) {
+    return await loadMarkdownDeck(deckPath, parentPath);
+  }
+
   const resolved = parentPath
     ? path.resolve(path.dirname(parentPath), deckPath)
     : path.resolve(deckPath);
