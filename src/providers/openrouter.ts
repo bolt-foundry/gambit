@@ -31,6 +31,8 @@ export function createOpenRouterProvider(opts: {
       model: string;
       messages: ModelMessage[];
       tools?: ToolDefinition[];
+      stream?: boolean;
+      state?: import("../state.ts").SavedState;
     }) {
       const response = await client.chat.completions.create({
         model: input.model,
@@ -38,6 +40,7 @@ export function createOpenRouterProvider(opts: {
           .messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
         tools: input.tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
         tool_choice: "auto",
+        stream: input.stream ?? false,
       });
 
       const choice = response.choices[0];
@@ -54,6 +57,7 @@ export function createOpenRouterProvider(opts: {
         finishReason: (choice.finish_reason as "stop" | "tool_calls" | "length" | null) ??
           "stop",
         toolCalls,
+        updatedState: input.state,
       };
     },
   };
