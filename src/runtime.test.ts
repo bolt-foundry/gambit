@@ -55,6 +55,52 @@ Deno.test("compute deck returns validated output", async () => {
   assertEquals(result, "ok:hello");
 });
 
+Deno.test("LLM deck streams via onStreamText", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "stream.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const chunks: string[] = [];
+  let sawStreamFlag = false;
+  const streamingProvider: ModelProvider = {
+    async chat(input) {
+      sawStreamFlag = Boolean(input.stream);
+      input.onStreamText?.("a");
+      input.onStreamText?.("b");
+      return {
+        message: { role: "assistant", content: "ab" },
+        finishReason: "stop",
+      };
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: streamingProvider,
+    isRoot: true,
+    stream: true,
+    onStreamText: (chunk) => chunks.push(chunk),
+  });
+
+  assertEquals(result, "ab");
+  assertEquals(chunks.join(""), "ab");
+  assertEquals(sawStreamFlag, true);
+});
+
 Deno.test("non-root missing schemas fails load", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

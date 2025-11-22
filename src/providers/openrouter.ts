@@ -24,6 +24,8 @@ export function createOpenRouterProvider(opts: {
   referer?: string;
   title?: string;
 }): ModelProvider {
+  const debugStream = Deno.env.get("GAMBIT_DEBUG_STREAM") === "1";
+
   const client = new OpenAI({
     apiKey: opts.apiKey,
     baseURL: opts.baseURL ?? "https://openrouter.ai/api/v1",
@@ -43,6 +45,14 @@ export function createOpenRouterProvider(opts: {
       onStreamText?: (chunk: string) => void;
     }) {
       if (input.stream) {
+        if (debugStream) {
+          console.log(
+            `[stream-debug] requesting stream model=${input.model} messages=${input.messages.length} tools=${
+              input.tools?.length ?? 0
+            }`,
+          );
+        }
+
         const stream = await client.chat.completions.create({
           model: input.model,
           messages: input
@@ -61,8 +71,11 @@ export function createOpenRouterProvider(opts: {
             function: { name?: string; arguments: string };
           }
         >();
+        let chunkCount = 0;
+        let streamedChars = 0;
 
         for await (const chunk of stream) {
+          chunkCount++;
           const choice = chunk.choices[0];
           finishReason = choice.finish_reason ?? finishReason;
           const delta = choice.delta;
@@ -70,12 +83,14 @@ export function createOpenRouterProvider(opts: {
           if (typeof delta.content === "string") {
             contentParts.push(delta.content);
             input.onStreamText?.(delta.content);
+            streamedChars += delta.content.length;
           } else if (Array.isArray(delta.content)) {
             const chunkStr = delta.content.map((c) => (typeof c === "string" ? c : ""))
               .join("");
             if (chunkStr) {
               contentParts.push(chunkStr);
               input.onStreamText?.(chunkStr);
+              streamedChars += chunkStr.length;
             }
           }
 
@@ -93,6 +108,12 @@ export function createOpenRouterProvider(opts: {
             }
             toolCallMap.set(idx, existing);
           }
+        }
+
+        if (debugStream) {
+          console.log(
+            `[stream-debug] completed stream chunks=${chunkCount} streamedChars=${streamedChars} finishReason=${finishReason}`,
+          );
         }
 
         const tool_calls = Array.from(toolCallMap.values()).map((tc) => ({

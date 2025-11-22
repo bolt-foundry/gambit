@@ -87,6 +87,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         stream: opts.stream,
         state: opts.state,
         onStateUpdate: opts.onStateUpdate,
+        onStreamText: opts.onStreamText,
       });
     }
 
@@ -108,6 +109,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       modelOverride: opts.modelOverride,
       trace: opts.trace,
       stream: opts.stream,
+      onStreamText: opts.onStreamText,
     });
   } finally {
     if (shouldEmitRun) {
