@@ -178,12 +178,17 @@ function simulatorHtml(deckPath: string): string {
     .row { display: flex; margin: 6px 0; }
     .row.user { justify-content: flex-end; }
     .row.assistant, .row.trace, .row.system, .row.error { justify-content: flex-start; }
-    .bubble { max-width: 70%; padding: 10px 12px; border-radius: 16px; line-height: 1.4; white-space: pre-wrap; }
+    .row.meta { justify-content: center; }
+    .bubble { max-width: 70%; padding: 10px 12px; border-radius: 16px; line-height: 1.4; white-space: pre-wrap; position: relative; }
     .bubble.user { background: #0b93f6; color: white; border-bottom-right-radius: 4px; }
     .bubble.assistant { background: #e5e5ea; color: #111; border-bottom-left-radius: 4px; }
     .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
-    .bubble.trace { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; }
+    .bubble.trace, .bubble.meta { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
     .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
+    .bubble.collapsible { cursor: pointer; }
+    .bubble .details { display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 12px; white-space: pre-wrap; }
+    .bubble.open .details { display: block; }
+    .bubble .chevron { position: absolute; right: 10px; top: 10px; font-size: 12px; color: #94a3b8; }
     form { margin-top: 12px; display: flex; gap: 8px; align-items: flex-end; }
     textarea { flex: 1; height: 100px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 10px; font-family: monospace; resize: vertical; background: white; }
     .controls { display: flex; align-items: center; gap: 8px; }
@@ -228,12 +233,27 @@ function simulatorHtml(deckPath: string): string {
       transcript.scrollTop = transcript.scrollHeight;
     }
 
-    function addBubble(role, text) {
+    function addBubble(role, text, opts = {}) {
       const row = document.createElement("div");
-      row.className = "row " + role;
+      row.className = "row " + (opts.middle ? "meta" : role);
       const bubble = document.createElement("div");
       bubble.className = "bubble " + role;
       bubble.textContent = text;
+      if (opts.collapsible) {
+        bubble.classList.add("collapsible", "meta");
+        const chev = document.createElement("span");
+        chev.textContent = "▾";
+        chev.className = "chevron";
+        bubble.appendChild(chev);
+        const details = document.createElement("div");
+        details.className = "details";
+        details.textContent = opts.details ?? "";
+        bubble.appendChild(details);
+        bubble.addEventListener("click", () => {
+          const open = bubble.classList.toggle("open");
+          chev.textContent = open ? "▴" : "▾";
+        });
+      }
       row.appendChild(bubble);
       transcript.appendChild(row);
       scrollBottom();
@@ -275,9 +295,17 @@ function simulatorHtml(deckPath: string): string {
           currentAssistant = null;
           status.textContent = "error";
           break;
-        case "trace":
-          addBubble("trace", "[trace] " + JSON.stringify(msg.event));
+        case "trace": {
+          const ev = msg.event || {};
+          const label = ev.type || "trace";
+          const summary = label.replace("action.", "action ").replace("deck.", "deck ");
+          addBubble("trace", "• " + summary, {
+            middle: true,
+            collapsible: true,
+            details: formatPayload(ev),
+          });
           break;
+        }
         default:
           addBubble("system", JSON.stringify(msg));
       }
@@ -313,7 +341,7 @@ function simulatorHtml(deckPath: string): string {
       const display = asJson.checked ? formatPayload(val) : String(val);
       addBubble("user", display);
       currentAssistant = null;
-      ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: false }));
+      ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
     });
   </script>
