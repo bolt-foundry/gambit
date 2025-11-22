@@ -168,52 +168,154 @@ function simulatorHtml(deckPath: string): string {
   <meta charset="utf-8" />
   <title>Gambit WebSocket Simulator</title>
   <style>
-    body { font-family: sans-serif; margin: 16px; max-width: 900px; }
-    textarea { width: 100%; height: 120px; font-family: monospace; }
-    pre { background: #111; color: #0f0; padding: 12px; height: 240px; overflow: auto; }
-    button { padding: 8px 12px; margin-top: 8px; }
-    code { background: #eee; padding: 2px 4px; }
+    body { font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: linear-gradient(135deg, #eaf2ff, #f7f9ff); color: #0f172a; }
+    .shell { max-width: 960px; margin: 24px auto; padding: 16px; }
+    .card { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); padding: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    header h1 { margin: 0; font-size: 20px; }
+    header .meta { font-size: 12px; color: #475569; }
+    .transcript { background: #f5f7fb; border-radius: 14px; padding: 12px; height: 420px; overflow-y: auto; border: 1px solid #e2e8f0; }
+    .row { display: flex; margin: 6px 0; }
+    .row.user { justify-content: flex-end; }
+    .row.assistant, .row.trace, .row.system, .row.error { justify-content: flex-start; }
+    .bubble { max-width: 70%; padding: 10px 12px; border-radius: 16px; line-height: 1.4; white-space: pre-wrap; }
+    .bubble.user { background: #0b93f6; color: white; border-bottom-right-radius: 4px; }
+    .bubble.assistant { background: #e5e5ea; color: #111; border-bottom-left-radius: 4px; }
+    .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
+    .bubble.trace { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; }
+    .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
+    form { margin-top: 12px; display: flex; gap: 8px; align-items: flex-end; }
+    textarea { flex: 1; height: 100px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 10px; font-family: monospace; resize: vertical; background: white; }
+    .controls { display: flex; align-items: center; gap: 8px; }
+    button { padding: 10px 14px; border: none; border-radius: 10px; background: #0b93f6; color: white; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    label { font-size: 13px; color: #475569; display: inline-flex; align-items: center; gap: 4px; }
   </style>
 </head>
 <body>
-  <h1>Gambit WebSocket Simulator</h1>
-  <p>Deck: <code>${deckPath}</code></p>
-  <p>Connects to <code>/websocket</code> and sends <code>{ type: "run", input }</code>. Streams and results appear below.</p>
-  <textarea id="input" placeholder='Type input (string or JSON)'></textarea>
-  <div>
-    <label><input type="checkbox" id="asJson" /> Parse input as JSON</label>
-    <button id="send">Send</button>
-    <span id="status">connecting...</span>
+  <div class="shell">
+    <div class="card">
+      <header>
+        <div>
+          <h1>Gambit WebSocket Simulator</h1>
+          <div class="meta">Deck: <code>${deckPath}</code> · Socket: <code>/websocket</code></div>
+        </div>
+        <div id="status">connecting...</div>
+      </header>
+      <div id="transcript" class="transcript"></div>
+      <form id="composer">
+        <textarea id="input" placeholder='Type input as text, or toggle JSON below.'></textarea>
+        <div class="controls">
+          <label><input type="checkbox" id="asJson" /> JSON</label>
+          <button type="submit" id="send">Send</button>
+        </div>
+      </form>
+    </div>
   </div>
-  <pre id="log"></pre>
   <script>
-    const log = document.getElementById("log");
+    const transcript = document.getElementById("transcript");
     const status = document.getElementById("status");
     const input = document.getElementById("input");
     const asJson = document.getElementById("asJson");
+    const composer = document.getElementById("composer");
     const btn = document.getElementById("send");
-
-    function append(line) {
-      const now = new Date().toISOString();
-      log.textContent += "[" + now + "] " + line + "\\n";
-      log.scrollTop = log.scrollHeight;
-    }
+    let currentAssistant = null;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
-    const ws = new WebSocket(wsUrl);
+    let ws = null;
 
-    ws.onopen = () => { status.textContent = "connected"; };
-    ws.onclose = () => { status.textContent = "closed"; };
-    ws.onerror = () => { status.textContent = "error"; };
-    ws.onmessage = (ev) => append(ev.data);
+    function scrollBottom() {
+      transcript.scrollTop = transcript.scrollHeight;
+    }
 
-    btn.onclick = () => {
+    function addBubble(role, text) {
+      const row = document.createElement("div");
+      row.className = "row " + role;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble " + role;
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      transcript.appendChild(row);
+      scrollBottom();
+      return bubble;
+    }
+
+    function formatPayload(p) {
+      if (typeof p === "string") return p;
+      try { return JSON.stringify(p, null, 2); } catch { return String(p); }
+    }
+
+    function handleMessage(msg) {
+      switch (msg.type) {
+        case "ready":
+          status.textContent = "ready";
+          addBubble("system", "Server ready.");
+          break;
+        case "pong":
+          status.textContent = "pong";
+          break;
+        case "stream":
+          if (!currentAssistant) currentAssistant = addBubble("assistant", "");
+          currentAssistant.textContent += msg.chunk ?? "";
+          scrollBottom();
+          break;
+        case "result": {
+          const content = formatPayload(msg.result);
+          if (!currentAssistant) {
+            addBubble("assistant", content);
+          } else if (!currentAssistant.textContent.trim()) {
+            currentAssistant.textContent = content;
+          }
+          currentAssistant = null;
+          status.textContent = "connected";
+          break;
+        }
+        case "error":
+          addBubble("error", "Error: " + (msg.message ?? "unknown"));
+          currentAssistant = null;
+          status.textContent = "error";
+          break;
+        case "trace":
+          addBubble("trace", "[trace] " + JSON.stringify(msg.event));
+          break;
+        default:
+          addBubble("system", JSON.stringify(msg));
+      }
+    }
+
+    function connect() {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => { status.textContent = "connected"; };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; };
+      ws.onerror = () => { status.textContent = "error"; };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          handleMessage(msg);
+        } catch {
+          addBubble("system", String(ev.data));
+        }
+      };
+    }
+
+    connect();
+
+    composer.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addBubble("system", "Socket not connected.");
+        return;
+      }
       let val = input.value;
       if (asJson.checked) {
-        try { val = JSON.parse(val); } catch (err) { append("JSON parse error: " + err); return; }
+        try { val = JSON.parse(val); } catch (err) { addBubble("error", "JSON parse error: " + err); return; }
       }
+      const display = asJson.checked ? formatPayload(val) : String(val);
+      addBubble("user", display);
+      currentAssistant = null;
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: false }));
-    };
+      status.textContent = "sent";
+    });
   </script>
 </body>
 </html>`;
