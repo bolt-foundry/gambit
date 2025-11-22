@@ -227,6 +227,7 @@ function simulatorHtml(deckPath: string): string {
     const btn = document.getElementById("send");
     let currentAssistant = null;
     let suspenseBubble = null;
+    let streamMode = "assistant";
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
@@ -278,8 +279,8 @@ function simulatorHtml(deckPath: string): string {
           break;
         case "stream": {
           const chunk = msg.chunk ?? "";
-          const looksSuspense = chunk.trim().startsWith("[suspense]");
-          if (looksSuspense) {
+          const target = streamMode === "suspense" ? "suspense" : "assistant";
+          if (target === "suspense") {
             if (!suspenseBubble) suspenseBubble = addBubble("suspense", "");
             suspenseBubble.textContent += chunk;
           } else {
@@ -298,6 +299,7 @@ function simulatorHtml(deckPath: string): string {
           }
           currentAssistant = null;
           suspenseBubble = null;
+          streamMode = "assistant";
           status.textContent = "connected";
           break;
         }
@@ -305,6 +307,7 @@ function simulatorHtml(deckPath: string): string {
           addBubble("error", "Error: " + (msg.message ?? "unknown"));
           currentAssistant = null;
           suspenseBubble = null;
+          streamMode = "assistant";
           status.textContent = "error";
           break;
         case "trace": {
@@ -316,6 +319,9 @@ function simulatorHtml(deckPath: string): string {
             collapsible: true,
             details: formatPayload(ev),
           });
+          if (ev.type === "event" && typeof ev.name === "string" && ev.name.startsWith("suspense.")) {
+            streamMode = "suspense";
+          }
           break;
         }
         default:
@@ -326,7 +332,7 @@ function simulatorHtml(deckPath: string): string {
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { status.textContent = "connected"; };
-      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; streamMode = "assistant"; };
       ws.onerror = () => { status.textContent = "error"; };
       ws.onmessage = (ev) => {
         try {
@@ -354,6 +360,7 @@ function simulatorHtml(deckPath: string): string {
       addBubble("user", display);
       currentAssistant = null;
       suspenseBubble = null;
+      streamMode = "assistant";
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
       input.value = "";

@@ -16,5 +16,5 @@ export default defineDeck({
 });
 
 export function run(ctx: { input: z.infer<typeof InputSchema> }) {
-  return `[suspense] Still working after ${ctx.input.trigger.elapsedMs}ms...`;
+  return `Still working after ${ctx.input.trigger.elapsedMs}ms...`;
 }
