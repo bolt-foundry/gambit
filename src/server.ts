@@ -343,6 +343,7 @@ function simulatorHtml(deckPath: string): string {
       currentAssistant = null;
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
+      input.value = "";
     });
 
     input.addEventListener("keydown", (e) => {
