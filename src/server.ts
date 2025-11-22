@@ -183,6 +183,7 @@ function simulatorHtml(deckPath: string): string {
     .bubble.user { background: #0b93f6; color: white; border-bottom-right-radius: 4px; }
     .bubble.assistant { background: #e5e5ea; color: #111; border-bottom-left-radius: 4px; }
     .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
+    .bubble.suspense { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
     .bubble.trace, .bubble.meta { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
     .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
     .bubble.collapsible { cursor: pointer; }
@@ -225,6 +226,7 @@ function simulatorHtml(deckPath: string): string {
     const composer = document.getElementById("composer");
     const btn = document.getElementById("send");
     let currentAssistant = null;
+    let suspenseBubble = null;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
@@ -274,11 +276,19 @@ function simulatorHtml(deckPath: string): string {
         case "pong":
           status.textContent = "pong";
           break;
-        case "stream":
-          if (!currentAssistant) currentAssistant = addBubble("assistant", "");
-          currentAssistant.textContent += msg.chunk ?? "";
+        case "stream": {
+          const chunk = msg.chunk ?? "";
+          const looksSuspense = chunk.trim().startsWith("[suspense]");
+          if (looksSuspense) {
+            if (!suspenseBubble) suspenseBubble = addBubble("suspense", "");
+            suspenseBubble.textContent += chunk;
+          } else {
+            if (!currentAssistant) currentAssistant = addBubble("assistant", "");
+            currentAssistant.textContent += chunk;
+          }
           scrollBottom();
           break;
+        }
         case "result": {
           const content = formatPayload(msg.result);
           if (!currentAssistant) {
@@ -287,12 +297,14 @@ function simulatorHtml(deckPath: string): string {
             currentAssistant.textContent = content;
           }
           currentAssistant = null;
+          suspenseBubble = null;
           status.textContent = "connected";
           break;
         }
         case "error":
           addBubble("error", "Error: " + (msg.message ?? "unknown"));
           currentAssistant = null;
+          suspenseBubble = null;
           status.textContent = "error";
           break;
         case "trace": {
@@ -314,7 +326,7 @@ function simulatorHtml(deckPath: string): string {
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { status.textContent = "connected"; };
-      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; };
       ws.onerror = () => { status.textContent = "error"; };
       ws.onmessage = (ev) => {
         try {
@@ -341,6 +353,7 @@ function simulatorHtml(deckPath: string): string {
       const display = asJson.checked ? formatPayload(val) : String(val);
       addBubble("user", display);
       currentAssistant = null;
+      suspenseBubble = null;
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
       input.value = "";
