@@ -1,6 +1,10 @@
 import { extract } from "@std/front-matter/any";
 import * as path from "@std/path";
-import { RESERVED_TOOL_PREFIX } from "./constants.ts";
+import {
+  MAX_TOOL_NAME_LENGTH,
+  RESERVED_TOOL_PREFIX,
+  TOOL_NAME_PATTERN,
+} from "./constants.ts";
 import { isCardDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
 import type {
@@ -28,7 +32,7 @@ async function maybeLoadSchema(
   return mod.default as ZodTypeAny;
 }
 
-function normalizeActions(actions: unknown): ActionDefinition[] {
+function normalizeActions(actions: unknown, basePath: string): ActionDefinition[] {
   if (!Array.isArray(actions)) return [];
   return actions
     .filter((a) => a && typeof a === "object")
@@ -41,7 +45,7 @@ function normalizeActions(actions: unknown): ActionDefinition[] {
       }
       return {
         name,
-        path: p,
+        path: path.resolve(path.dirname(basePath), p),
         description: typeof rec.description === "string" ? rec.description : undefined,
         activity: typeof rec.activity === "string" ? rec.activity : undefined,
       };
@@ -71,10 +75,15 @@ export async function loadMarkdownCard(
   if (isCardDefinition(candidate)) {
     // treat attrs as ts-shaped card
   }
-  const actions = normalizeActions((attrs as { actions?: unknown }).actions);
+  const actions = normalizeActions((attrs as { actions?: unknown }).actions, resolved);
   actions.forEach((a) => {
     if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
       throw new Error(`Action name ${a.name} is reserved`);
+    }
+    if (!TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH) {
+      throw new Error(
+        `Action name ${a.name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
+      );
     }
   });
   const inputFragment = await maybeLoadSchema(
@@ -117,10 +126,16 @@ export async function loadMarkdownDeck(
 
   const actions = normalizeActions(
     (deckMeta as unknown as { actions?: unknown }).actions,
+    resolved,
   );
   actions.forEach((a) => {
     if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
       throw new Error(`Action name ${a.name} is reserved`);
+    }
+    if (!TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH) {
+      throw new Error(
+        `Action name ${a.name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
+      );
     }
   });
 
@@ -141,6 +156,20 @@ export async function loadMarkdownDeck(
     cards.push(card);
   }
 
+  const errorHandler = deckMeta.errorHandler
+    ? {
+      ...deckMeta.errorHandler,
+      path: path.resolve(path.dirname(resolved), deckMeta.errorHandler.path),
+    }
+    : undefined;
+
+  const suspenseHandler = deckMeta.suspenseHandler
+    ? {
+      ...deckMeta.suspenseHandler,
+      path: path.resolve(path.dirname(resolved), deckMeta.suspenseHandler.path),
+    }
+    : undefined;
+
   return {
     kind: "gambit.deck",
     path: resolved,
@@ -153,8 +182,8 @@ export async function loadMarkdownDeck(
     guardrails: deckMeta.guardrails,
     inputSchema,
     outputSchema,
-    errorHandler: deckMeta.errorHandler,
-    suspenseHandler: deckMeta.suspenseHandler,
+    errorHandler,
+    suspenseHandler,
     suspenseDelayMs: deckMeta.suspenseDelayMs,
   };
 }

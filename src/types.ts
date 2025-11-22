@@ -159,6 +159,7 @@ export type ModelProvider = {
     tools?: ToolDefinition[];
     stream?: boolean;
     state?: SavedState;
+    onStreamText?: (chunk: string) => void;
   }) => Promise<{
     message: ModelMessage;
     finishReason: "stop" | "tool_calls" | "length";
