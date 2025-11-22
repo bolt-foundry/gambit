@@ -344,6 +344,13 @@ function simulatorHtml(deckPath: string): string {
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
     });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        btn.click();
+      }
+    });
   </script>
 </body>
 </html>`;
