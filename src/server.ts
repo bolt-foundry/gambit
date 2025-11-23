@@ -33,111 +33,115 @@ export function startWebSocketSimulator(opts: {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
 
-  const server = Deno.serve({ port, signal: opts.signal, onListen: () => {} }, (req) => {
-    const url = new URL(req.url);
-    if (url.pathname === "/") {
-      return new Response(simulatorHtml(opts.deckPath), {
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
-    }
+  const server = Deno.serve(
+    { port, signal: opts.signal, onListen: () => {} },
+    (req) => {
+      const url = new URL(req.url);
+      if (url.pathname === "/") {
+        return new Response(simulatorHtml(opts.deckPath), {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
 
-    if (url.pathname !== "/websocket") {
-      return new Response("Not found", { status: 404 });
-    }
+      if (url.pathname !== "/websocket") {
+        return new Response("Not found", { status: 404 });
+      }
 
-    if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-      return new Response("WebSocket endpoint", { status: 400 });
-    }
+      if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("WebSocket endpoint", { status: 400 });
+      }
 
-    const { socket, response } = Deno.upgradeWebSocket(req);
-    const decoder = new TextDecoder();
+      const { socket, response } = Deno.upgradeWebSocket(req);
+      const decoder = new TextDecoder();
 
-    let running = false;
-    let currentRunId: string | undefined;
+      let running = false;
+      let currentRunId: string | undefined;
 
-    const safeSend = (payload: OutgoingMessage) => {
-      try {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify(payload));
+      const safeSend = (payload: OutgoingMessage) => {
+        try {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(payload));
+          }
+        } catch {
+          // ignore send failures
         }
-      } catch {
-        // ignore send failures
-      }
-    };
+      };
 
-    const traceHandler = (forward: boolean) =>
-    (event: TraceEvent) => {
-      if (event.type === "run.start") currentRunId = event.runId;
-      consoleTracer?.(event);
-      if (forward) safeSend({ type: "trace", event });
-    };
+      const traceHandler = (forward: boolean) => (event: TraceEvent) => {
+        if (event.type === "run.start") currentRunId = event.runId;
+        consoleTracer?.(event);
+        if (forward) safeSend({ type: "trace", event });
+      };
 
-    socket.onopen = () => {
-      safeSend({ type: "ready", deck: opts.deckPath, port });
-    };
+      socket.onopen = () => {
+        safeSend({ type: "ready", deck: opts.deckPath, port });
+      };
 
-    socket.onmessage = async (ev) => {
-      const msg = parseIncoming(ev.data, decoder);
+      socket.onmessage = async (ev) => {
+        const msg = parseIncoming(ev.data, decoder);
 
-      if (!msg) {
-        safeSend({ type: "error", message: "Invalid message" });
-        return;
-      }
+        if (!msg) {
+          safeSend({ type: "error", message: "Invalid message" });
+          return;
+        }
 
-      if (msg.type === "ping") {
-        safeSend({ type: "pong" });
-        return;
-      }
+        if (msg.type === "ping") {
+          safeSend({ type: "pong" });
+          return;
+        }
 
-      if (running) {
-        safeSend({ type: "error", message: "Run already in progress" });
-        return;
-      }
+        if (running) {
+          safeSend({ type: "error", message: "Run already in progress" });
+          return;
+        }
 
-      running = true;
-      currentRunId = undefined;
+        running = true;
+        currentRunId = undefined;
 
-      const stream = msg.stream ?? true;
-      const forwardTrace = Boolean(msg.trace);
-      const tracer = forwardTrace || opts.verbose ? traceHandler(forwardTrace) : undefined;
+        const stream = msg.stream ?? true;
+        const forwardTrace = Boolean(msg.trace);
+        const tracer = forwardTrace || opts.verbose
+          ? traceHandler(forwardTrace)
+          : undefined;
 
-      try {
-        const result = await runDeck({
-          path: opts.deckPath,
-          input: msg.input ?? "",
-          modelProvider: opts.modelProvider,
-          isRoot: true,
-          defaultModel: msg.model ?? opts.model,
-          modelOverride: msg.modelForce ?? opts.modelForce,
-          trace: tracer,
-          stream,
-          onStreamText: (chunk) =>
-            safeSend({ type: "stream", chunk, runId: currentRunId }),
-        });
+        try {
+          const result = await runDeck({
+            path: opts.deckPath,
+            input: msg.input ?? "",
+            modelProvider: opts.modelProvider,
+            isRoot: true,
+            defaultModel: msg.model ?? opts.model,
+            modelOverride: msg.modelForce ?? opts.modelForce,
+            trace: tracer,
+            stream,
+            onStreamText: (chunk) =>
+              safeSend({ type: "stream", chunk, runId: currentRunId }),
+          });
 
-        safeSend({
-          type: "result",
-          result,
-          runId: currentRunId,
-          streamed: stream,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        safeSend({ type: "error", message, runId: currentRunId });
-      } finally {
+          safeSend({
+            type: "result",
+            result,
+            runId: currentRunId,
+            streamed: stream,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          safeSend({ type: "error", message, runId: currentRunId });
+        } finally {
+          running = false;
+        }
+      };
+
+      socket.onclose = () => {
         running = false;
-      }
-    };
+      };
+      socket.onerror = () => {
+        running = false;
+      };
 
-    socket.onclose = () => {
-      running = false;
-    };
-    socket.onerror = () => {
-      running = false;
-    };
-
-    return response;
-  });
+      return response;
+    },
+  );
 
   const listenPort = (server.addr as Deno.NetAddr).port;
   console.log(
@@ -146,9 +150,14 @@ export function startWebSocketSimulator(opts: {
   return server;
 }
 
-function parseIncoming(data: unknown, decoder: TextDecoder): IncomingMessage | null {
+function parseIncoming(
+  data: unknown,
+  decoder: TextDecoder,
+): IncomingMessage | null {
   try {
-    const raw = typeof data === "string" ? data : decoder.decode(data as ArrayBuffer);
+    const raw = typeof data === "string"
+      ? data
+      : decoder.decode(data as ArrayBuffer);
     const parsed = JSON.parse(raw) as { type?: unknown };
     if (parsed && typeof parsed === "object") {
       if (parsed.type === "run" || parsed.type === "ping") {
