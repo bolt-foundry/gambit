@@ -33,15 +33,11 @@ export type ActionDefinition = {
   label?: Label;
 };
 
-export type ErrorHandlerConfig = {
-  path: string;
-  label?: Label;
-};
-
-export type SuspenseHandlerConfig = {
-  path: string;
-  delayMs?: number;
-  label?: Label;
+export type ErrorHandlerConfig = { path: string; label?: Label };
+export type SuspenseHandlerConfig = { path: string; delayMs?: number; label?: Label };
+export type HandlersConfig = {
+  onError?: ErrorHandlerConfig;
+  onSuspense?: SuspenseHandlerConfig;
 };
 
 export type BaseDefinition = {
@@ -56,9 +52,7 @@ export type BaseDefinition = {
 export type DeckDefinition = BaseDefinition & {
   kind: "gambit.deck";
   modelParams?: ModelParams;
-  errorHandler?: ErrorHandlerConfig;
-  suspenseHandler?: SuspenseHandlerConfig;
-  suspenseDelayMs?: number;
+  handlers?: HandlersConfig;
   prompt?: string; // deprecated; prefer body
   body?: string;
   run?: DeckExecutor;
