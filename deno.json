@@ -19,7 +19,7 @@
     }
   },
   "fmt": {
-    "lineWidth": 90
+    "lineWidth": 80
   },
   "imports": {
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
