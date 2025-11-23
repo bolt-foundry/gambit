@@ -2,6 +2,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { JSONValue } from "./types.ts";
+import type { ZodTypeAny, ZodObject } from "zod";
 
 export function validateWithSchema<T>(
   schema: z.ZodType<T>,
@@ -38,4 +39,21 @@ export function assertZodSchema(
   if (typeof (value as { safeParse?: unknown }).safeParse !== "function") {
     throw new Error(`${label} must be a Zod schema (missing safeParse)`);
   }
+}
+
+export function mergeZodObjects(
+  base: ZodTypeAny | undefined,
+  fragment: ZodTypeAny | undefined,
+): ZodTypeAny | undefined {
+  if (!fragment) return base;
+  if (!base) return fragment;
+  const baseObj = asZodObject(base, "base schema");
+  const fragObj = asZodObject(fragment, "fragment schema");
+  const mergedShape = { ...fragObj.shape, ...baseObj.shape };
+  return z.object(mergedShape);
+}
+
+function asZodObject(schema: ZodTypeAny, label: string): ZodObject<any> {
+  if (schema instanceof z.ZodObject) return schema;
+  throw new Error(`${label} must be a Zod object schema to merge fragments`);
 }
