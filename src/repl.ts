@@ -1,7 +1,9 @@
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout } from "node:process";
-import type { ModelMessage } from "./types.ts";
 import { runDeck } from "./runtime.ts";
+import type { SavedState } from "./state.ts";
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const write = (text: string) => Deno.stdout.writeSync(encoder.encode(text));
 
 export async function startRepl(opts: {
   deckPath: string;
@@ -12,25 +14,20 @@ export async function startRepl(opts: {
   verbose?: boolean;
   userFirst?: boolean;
 }) {
-  const rl = createInterface({ input: stdin, output: stdout });
-  const history: ModelMessage[] = [];
-  let state: import("./state.ts").SavedState | undefined;
-
-  stdout.write("REPL started. Type 'exit' to quit.\n");
-  // Gracefully handle Ctrl+C to exit without blowing up top-level await.
-  rl.on("SIGINT", () => {
-    stdout.write("\n");
-    rl.close();
-  });
-
-  // When the interface closes (Ctrl+C or EOF), stop the loop.
+  const lineReader = createLineReader();
+  let state: SavedState | undefined;
   let closed = false;
-  rl.on("close", () => {
+
+  const handleSigint = () => {
     closed = true;
-  });
+    write("\n");
+    lineReader.cancel();
+  };
+  Deno.addSignalListener("SIGINT", handleSigint);
+
+  write("REPL started. Type 'exit' to quit.\n");
 
   const runOnce = async (line: string, assistantFirst = false) => {
-    history.push({ role: "user", content: line });
     const userFirstFlag = assistantFirst ? false : true;
     try {
       let streamed = false;
@@ -51,26 +48,23 @@ export async function startRepl(opts: {
         onStreamText: (chunk) => {
           if (!chunk) return;
           if (opts.verbose && !prefixPrinted) {
-            stdout.write("[assistant] ");
+            write("[assistant] ");
             prefixPrinted = true;
           }
           streamed = true;
-          stdout.write(chunk);
+          write(chunk);
         },
         userFirst: userFirstFlag,
       });
-    const formatted = formatResult(result);
+      const formatted = formatResult(result);
       if (streamed) {
-        if (!formatted.endsWith("\n")) stdout.write("\n");
+        if (!formatted.endsWith("\n")) write("\n");
       } else {
         const prefix = opts.verbose ? "[assistant] " : "";
-        stdout.write(`${prefix}${formatted}\n`);
+        write(`${prefix}${formatted}\n`);
       }
-      history.push({ role: "assistant", content: formatted });
     } catch (err) {
-      stdout.write(
-        `Error: ${err instanceof Error ? err.message : String(err)}\n`,
-      );
+      write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
     }
   };
 
@@ -78,22 +72,17 @@ export async function startRepl(opts: {
     await runOnce("", true);
   }
 
-  while (true) {
-    if (closed) break;
-    let line: string;
-    try {
-      line = await rl.question("> ");
-    } catch (err) {
-      // Gracefully exit on EOF/closed input rather than throwing.
-      if (err instanceof Error && err.message.includes("closed")) break;
-      throw err;
-    }
+  while (!closed) {
+    write("> ");
+    const line = await lineReader.readLine();
+    if (line === null) break;
     if (line.trim().toLowerCase() === "exit") break;
-
     await runOnce(line);
   }
 
-  rl.close();
+  closed = true;
+  await lineReader.close();
+  Deno.removeSignalListener("SIGINT", handleSigint);
 }
 
 function formatResult(result: unknown): string {
@@ -103,4 +92,52 @@ function formatResult(result: unknown): string {
   } catch {
     return String(result);
   }
+}
+
+function createLineReader() {
+  const reader = Deno.stdin.readable.getReader();
+  let buffer = "";
+  let cancelled = false;
+
+  const readLine = async (): Promise<string | null> => {
+    while (true) {
+      const newlineIdx = buffer.indexOf("\n");
+      if (newlineIdx !== -1) {
+        const line = buffer.slice(0, newlineIdx).replace(/\r$/, "");
+        buffer = buffer.slice(newlineIdx + 1);
+        return line;
+      }
+      if (cancelled) return null;
+      const { value, done } = await reader.read().catch((err) => {
+        if (cancelled) return { value: undefined, done: true };
+        throw err;
+      });
+      if (done || value === undefined) {
+        if (buffer.length > 0) {
+          const trailing = buffer.replace(/\r$/, "");
+          buffer = "";
+          return trailing;
+        }
+        return null;
+      }
+      buffer += decoder.decode(value, { stream: true });
+    }
+  };
+
+  const cancel = () => {
+    if (cancelled) return;
+    cancelled = true;
+    reader.cancel().catch(() => {});
+  };
+
+  const close = async () => {
+    cancel();
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  };
+
+  return { readLine, cancel, close };
 }
