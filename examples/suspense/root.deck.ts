@@ -10,14 +10,14 @@ export default defineDeck({
   suspenseHandler: {
     path: "./suspense_handler.deck.ts",
     delayMs: 500,
-    activity: "demo_suspense",
+    label: "demo_suspense",
   },
   actions: [
     {
       name: "slow_action",
       path: "./slow_action.deck.ts",
       description: "Simulate slow work",
-      activity: "demo_suspense",
+      label: "demo_suspense",
     },
   ],
 });
