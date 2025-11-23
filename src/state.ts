@@ -12,7 +12,9 @@ export function loadState(filePath: string): SavedState | undefined {
   try {
     const text = Deno.readTextFileSync(resolved);
     const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && Array.isArray(parsed.messages)) {
+    if (
+      parsed && typeof parsed === "object" && Array.isArray(parsed.messages)
+    ) {
       return parsed as SavedState;
     }
   } catch {
