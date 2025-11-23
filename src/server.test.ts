@@ -45,7 +45,8 @@ Deno.test("websocket simulator streams responses", async () => {
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-  const messages: Array<{ type?: string; chunk?: string; result?: unknown }> = [];
+  const messages: Array<{ type?: string; chunk?: string; result?: unknown }> =
+    [];
 
   const homepage = await fetch(`http://127.0.0.1:${port}/`);
   const html = await homepage.text();
@@ -53,34 +54,38 @@ Deno.test("websocket simulator streams responses", async () => {
     throw new Error("Simulator page missing expected content");
   }
 
-  const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), 2000);
+  const resultPromise = new Promise<Record<string, unknown>>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 2000);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data as string) as {
-        type?: string;
-        chunk?: string;
-        result?: unknown;
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data as string) as {
+          type?: string;
+          chunk?: string;
+          result?: unknown;
+        };
+        messages.push(msg);
+        if (msg.type === "result") {
+          clearTimeout(timer);
+          ws.close();
+          resolve(msg as Record<string, unknown>);
+        }
       };
-      messages.push(msg);
-      if (msg.type === "result") {
-        clearTimeout(timer);
-        ws.close();
-        resolve(msg as Record<string, unknown>);
-      }
-    };
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "run", input: "hello" }));
-    };
-  });
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "run", input: "hello" }));
+      };
+    },
+  );
 
   const resultMsg = await resultPromise;
   await server.shutdown();
   await server.finished;
 
   assertEquals(resultMsg.result, "hi");
-  const streams = messages.filter((m) => m.type === "stream").map((m) => m.chunk ?? "")
+  const streams = messages.filter((m) => m.type === "stream").map((m) =>
+    m.chunk ?? ""
+  )
     .join("");
   assertEquals(streams, "hi");
 

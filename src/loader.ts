@@ -6,7 +6,11 @@ import {
 } from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { mergeZodObjects } from "./schema.ts";
-import { isMarkdownFile, loadMarkdownCard, loadMarkdownDeck } from "./markdown.ts";
+import {
+  isMarkdownFile,
+  loadMarkdownCard,
+  loadMarkdownDeck,
+} from "./markdown.ts";
 import type {
   ActionDefinition,
   CardDefinition,
@@ -59,27 +63,40 @@ async function loadCardInternal(
     : path.resolve(cardPath);
 
   if (stack.includes(resolved)) {
-    throw new Error(`Card/embed cycle detected: ${[...stack, resolved].join(" -> ")}`);
+    throw new Error(
+      `Card/embed cycle detected: ${[...stack, resolved].join(" -> ")}`,
+    );
   }
 
   const mod = await import(toFileUrl(resolved));
   const card = mod.default;
   if (!isCardDefinition(card)) {
-    throw new Error(`Card at ${resolved} did not export a valid card definition`);
+    throw new Error(
+      `Card at ${resolved} did not export a valid card definition`,
+    );
   }
   const cardLabel = card.label;
 
   const embeds = card.embeds ?? [];
   const embeddedCards: LoadedCard[] = [];
   for (const embed of embeds) {
-    const loaded = await loadCardInternal(embed, resolved, [...stack, resolved]);
+    const loaded = await loadCardInternal(embed, resolved, [
+      ...stack,
+      resolved,
+    ]);
     embeddedCards.push(loaded);
   }
 
   const actions = normalizeActions(card.actions, resolved);
   actions.forEach(checkReserved);
   const { label: _l, ...rest } = card as CardDefinition;
-  return { ...rest, label: cardLabel, actions, path: resolved, cards: embeddedCards };
+  return {
+    ...rest,
+    label: cardLabel,
+    actions,
+    path: resolved,
+    cards: embeddedCards,
+  };
 }
 
 export async function loadCard(
@@ -106,7 +123,9 @@ export async function loadDeck(
   const mod = await import(toFileUrl(resolved));
   const deck = mod.default;
   if (!isDeckDefinition(deck)) {
-    throw new Error(`Deck at ${resolved} did not export a valid deck definition`);
+    throw new Error(
+      `Deck at ${resolved} did not export a valid deck definition`,
+    );
   }
 
   const deckLabel = deck.label;
@@ -155,13 +174,19 @@ export async function loadDeck(
       onError: deck.handlers.onError
         ? {
           ...deck.handlers.onError,
-          path: path.resolve(path.dirname(resolved), deck.handlers.onError.path),
+          path: path.resolve(
+            path.dirname(resolved),
+            deck.handlers.onError.path,
+          ),
         }
         : undefined,
       onSuspense: deck.handlers.onSuspense
         ? {
           ...deck.handlers.onSuspense,
-          path: path.resolve(path.dirname(resolved), deck.handlers.onSuspense.path),
+          path: path.resolve(
+            path.dirname(resolved),
+            deck.handlers.onSuspense.path,
+          ),
         }
         : undefined,
     }

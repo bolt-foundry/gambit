@@ -34,7 +34,11 @@ export type ActionDefinition = {
 };
 
 export type ErrorHandlerConfig = { path: string; label?: Label };
-export type SuspenseHandlerConfig = { path: string; delayMs?: number; label?: Label };
+export type SuspenseHandlerConfig = {
+  path: string;
+  delayMs?: number;
+  label?: Label;
+};
 export type HandlersConfig = {
   onError?: ErrorHandlerConfig;
   onSuspense?: SuspenseHandlerConfig;
@@ -122,11 +126,15 @@ export type ExecutionContext = {
   label?: Label;
   input: unknown;
   spawnAndWait: (opts: { path: string; input: unknown }) => Promise<unknown>;
-  fail: (opts: { message: string; code?: string; details?: JSONValue }) => never;
+  fail: (
+    opts: { message: string; code?: string; details?: JSONValue },
+  ) => never;
   return: (payload: unknown) => Promise<unknown>;
 };
 
-export type DeckExecutor = (ctx: ExecutionContext) => unknown | Promise<unknown>;
+export type DeckExecutor = (
+  ctx: ExecutionContext,
+) => unknown | Promise<unknown>;
 
 export type ModelMessage = {
   role: "system" | "user" | "assistant" | "tool";
