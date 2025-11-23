@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import type { SavedState } from "./state.ts";
 
 export type JSONValue =
   | string
@@ -157,6 +158,7 @@ export type ModelProvider = {
     messages: ModelMessage[];
     tools?: ToolDefinition[];
     stream?: boolean;
+    state?: SavedState;
   }) => Promise<{
     message: ModelMessage;
     finishReason: "stop" | "tool_calls" | "length";
@@ -165,6 +167,7 @@ export type ModelProvider = {
       name: string;
       args: Record<string, JSONValue>;
     }>;
+    updatedState?: SavedState;
   }>;
 };
 
