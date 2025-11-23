@@ -2,7 +2,7 @@ import { defineDeck } from "../../mod.ts";
 import { z } from "zod";
 
 export default defineDeck({
-  prompt:
+  body:
     "You are a concise assistant. Call the `echo` action to repeat the user's text and return the final answer in one sentence.",
   inputSchema: z.string(),
   outputSchema: z.string(),
