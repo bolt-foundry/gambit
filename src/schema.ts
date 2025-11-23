@@ -2,7 +2,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 import type { JSONValue } from "./types.ts";
-import type { ZodTypeAny, ZodObject } from "zod";
+import type { ZodObject, ZodRawShape, ZodTypeAny } from "zod";
 
 export function validateWithSchema<T>(
   schema: z.ZodType<T>,
@@ -53,7 +53,7 @@ export function mergeZodObjects(
   return z.object(mergedShape);
 }
 
-function asZodObject(schema: ZodTypeAny, label: string): ZodObject<any> {
+function asZodObject(schema: ZodTypeAny, label: string): ZodObject<ZodRawShape> {
   if (schema instanceof z.ZodObject) return schema;
   throw new Error(`${label} must be a Zod object schema to merge fragments`);
 }
