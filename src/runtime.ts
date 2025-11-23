@@ -18,9 +18,12 @@ import type {
   ToolCallResult,
   ToolDefinition,
 } from "./types.ts";
+import type { SavedState } from "./state.ts";
 
 function randomId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
+  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  // Keep IDs short enough for OpenAI/OpenRouter tool_call id limits (~40 chars).
+  return `${prefix}-${suffix}`;
 }
 
 type RunOptions = {
@@ -37,6 +40,9 @@ type RunOptions = {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   repl?: boolean;
   stream?: boolean;
+  state?: SavedState;
+  onStateUpdate?: (state: SavedState) => void;
+  onStreamText?: (chunk: string) => void;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -48,7 +54,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   if (depth >= guardrails.maxDepth) {
     throw new Error(`Max depth ${guardrails.maxDepth} exceeded`);
   }
-  const runId = opts.runId ?? randomId("run");
+  const runId = opts.runId ?? opts.state?.runId ?? randomId("run");
 
   const deck = await loadDeck(opts.path);
   const deckGuardrails = deck.guardrails ?? {};
@@ -79,6 +85,8 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         modelOverride: opts.modelOverride,
         trace: opts.trace,
         stream: opts.stream,
+        state: opts.state,
+        onStateUpdate: opts.onStateUpdate,
       });
     }
 
@@ -159,6 +167,9 @@ type RuntimeCtxBase = {
   modelOverride?: string;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
+  state?: SavedState;
+  onStateUpdate?: (state: SavedState) => void;
+  onStreamText?: (chunk: string) => void;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -172,9 +183,12 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     depth: ctx.depth,
     input: ctx.input,
     activity: deck.activity,
-    spawnAndWait: async (opts) =>
-      await runDeck({
-        path: opts.path,
+    spawnAndWait: async (opts) => {
+      const childPath = path.isAbsolute(opts.path)
+        ? opts.path
+        : path.resolve(path.dirname(deck.path), opts.path);
+      return await runDeck({
+        path: childPath,
         input: opts.input,
         modelProvider: ctx.modelProvider,
         isRoot: false,
@@ -186,7 +200,11 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         modelOverride: ctx.modelOverride,
         trace: ctx.trace,
         stream: ctx.stream,
-      }),
+        state: ctx.state,
+        onStateUpdate: ctx.onStateUpdate,
+        onStreamText: ctx.onStreamText,
+      });
+    },
     fail: (opts) => {
       throw new Error(opts.message);
     },
@@ -217,9 +235,12 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
   };
 
   const refToolCallId = randomId("call");
-  const messages: ModelMessage[] = [
-    { role: "system", content: systemPrompt },
-    {
+  const messages: ModelMessage[] = ctx.state?.messages
+    ? ctx.state.messages.map(sanitizeMessage)
+    : [];
+  messages.push(
+    sanitizeMessage({ role: "system", content: systemPrompt }),
+    sanitizeMessage({
       role: "assistant",
       content: null,
       tool_calls: [{
@@ -230,18 +251,18 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           arguments: JSON.stringify(refCtx),
         },
       }],
-    },
-    {
+    }),
+    sanitizeMessage({
       role: "tool",
       name: TOOL_REFERENCE_CONTEXT,
       tool_call_id: refToolCallId,
       content: JSON.stringify(refCtx),
-    },
-    {
+    }),
+    sanitizeMessage({
       role: "user",
       content: formatInputForUser(input),
-    },
-  ];
+    }),
+  );
 
   const tools = await buildToolDefs(deck);
   ctx.trace?.({ type: "deck.start", runId, deckPath: deck.path, actionCallId });
@@ -265,6 +286,8 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       messages,
       tools,
       stream: ctx.stream,
+      state: ctx.state,
+      onStreamText: ctx.onStreamText,
     });
     const message = result.message;
     if (result.toolCalls && result.toolCalls.length > 0) {
@@ -286,6 +309,8 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           defaultModel: ctx.defaultModel,
           modelOverride: ctx.modelOverride,
           trace: ctx.trace,
+          onStreamText: ctx.onStreamText,
+          runStartedAt: start,
         });
         messages.push({
           role: "assistant",
@@ -313,10 +338,21 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           path: call.name,
         });
       }
+      if (ctx.onStateUpdate) {
+        const state = result.updatedState ??
+          { runId, messages: messages.map(sanitizeMessage) };
+        ctx.onStateUpdate(state);
+      }
       continue;
     }
 
     if (message.content !== null && message.content !== undefined) {
+      messages.push(sanitizeMessage(message));
+      if (ctx.onStateUpdate) {
+        const state = result.updatedState ??
+          { runId, messages: messages.map(sanitizeMessage) };
+        ctx.onStateUpdate(state);
+      }
       const validated = validateOutput(deck, message.content, depth === 0);
       ctx.trace?.({ type: "deck.end", runId, deckPath: deck.path, actionCallId });
       return validated;
@@ -343,6 +379,8 @@ async function handleToolCall(
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
     stream?: boolean;
+    onStreamText?: (chunk: string) => void;
+    runStartedAt: number;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -382,6 +420,7 @@ async function handleToolCall(
         modelOverride: ctx.modelOverride,
         trace: ctx.trace,
         stream: ctx.stream,
+        onStreamText: ctx.onStreamText,
       });
       return { ok: true, result };
     } catch (err) {
@@ -397,6 +436,18 @@ async function handleToolCall(
   if (ctx.parentDeck.suspenseHandler?.path) {
     suspenseTimer = setTimeout(async () => {
       suspenseFired = true;
+      const elapsed = performance.now() - started;
+      ctx.trace?.({
+        type: "event",
+        runId: ctx.runId,
+        actionCallId: call.id,
+        name: "suspense.fire",
+        payload: {
+          action: action.name,
+          handlerPath: ctx.parentDeck.suspenseHandler!.path,
+          elapsedMs: Math.floor(elapsed),
+        },
+      });
       const envelope = await runSuspenseHandler({
         parentDeck: ctx.parentDeck,
         action,
@@ -412,8 +463,31 @@ async function handleToolCall(
         elapsedMs: performance.now() - started,
         trace: ctx.trace,
         stream: ctx.stream,
+        onStreamText: ctx.onStreamText,
       });
-      extraMessages.push(...envelope);
+      extraMessages.push(...envelope.map(sanitizeMessage));
+      if (envelope.length) {
+        const toolMsg = envelope.find((m) => m.role === "tool");
+        if (toolMsg?.content) {
+          if (ctx.onStreamText) {
+            ctx.onStreamText(`${toolMsg.content}\n`);
+          } else {
+            console.log(toolMsg.content);
+          }
+        }
+      }
+      ctx.trace?.({
+        type: "event",
+        runId: ctx.runId,
+        actionCallId: call.id,
+        name: "suspense.result",
+        payload: {
+          action: action.name,
+          handlerPath: ctx.parentDeck.suspenseHandler!.path,
+          elapsedMs: Math.floor(performance.now() - started),
+          messages: envelope.length,
+        },
+      });
     }, suspenseDelay) as unknown as number;
   }
 
@@ -441,8 +515,52 @@ async function handleToolCall(
     ? childResult.result
     : JSON.stringify(childResult.result);
 
-  if (suspenseFired && extraMessages.length === 0) {
-    // Suspense handler failed silently; no extra messages.
+  if (!suspenseFired && ctx.parentDeck.suspenseHandler?.path) {
+    const elapsedFromStart = performance.now() - ctx.runStartedAt;
+    if (elapsedFromStart >= suspenseDelay) {
+      suspenseFired = true;
+      const envelope = await runSuspenseHandler({
+        parentDeck: ctx.parentDeck,
+        action,
+        call,
+        runId: ctx.runId,
+        parentActionCallId: ctx.parentActionCallId,
+        handlerPath: ctx.parentDeck.suspenseHandler!.path,
+        modelProvider: ctx.modelProvider,
+        guardrails: ctx.guardrails,
+        depth: ctx.depth,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+        elapsedMs: elapsedFromStart,
+        trace: ctx.trace,
+        stream: ctx.stream,
+        onStreamText: ctx.onStreamText,
+      });
+      extraMessages.push(...envelope.map(sanitizeMessage));
+      if (envelope.length) {
+        const toolMsg = envelope.find((m) => m.role === "tool");
+        if (toolMsg?.content) {
+          if (ctx.onStreamText) {
+            ctx.onStreamText(`${toolMsg.content}\n`);
+          } else {
+            console.log(toolMsg.content);
+          }
+        }
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.result",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.suspenseHandler!.path,
+            elapsedMs: Math.floor(elapsedFromStart),
+            messages: envelope.length,
+            kind: "late",
+          },
+        });
+      }
+    }
   }
 
   return { toolContent, extraMessages };
@@ -463,6 +581,7 @@ async function runSuspenseHandler(args: {
   elapsedMs: number;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
+  onStreamText?: (chunk: string) => void;
 }): Promise<ModelMessage[]> {
   try {
     const input = {
@@ -485,6 +604,7 @@ async function runSuspenseHandler(args: {
       modelOverride: args.modelOverride,
       trace: args.trace,
       stream: args.stream,
+      onStreamText: args.onStreamText,
     });
     const content = typeof envelope === "string" ? envelope : JSON.stringify(envelope);
     const callId = randomId("event");
@@ -531,6 +651,7 @@ async function maybeHandleError(args: {
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
     stream?: boolean;
+    onStreamText?: (chunk: string) => void;
   };
   action: { name: string; path: string; activity?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -560,6 +681,7 @@ async function maybeHandleError(args: {
       modelOverride: args.ctx.modelOverride,
       trace: args.ctx.trace,
       stream: args.ctx.stream,
+      onStreamText: args.ctx.onStreamText,
     });
 
     const content = typeof handlerOutput === "string"
@@ -614,6 +736,13 @@ function formatInputForUser(input: unknown): string {
   } catch {
     return String(input);
   }
+}
+
+function sanitizeMessage(msg: ModelMessage): ModelMessage {
+  const toolCalls = msg.tool_calls && msg.tool_calls.length > 0
+    ? msg.tool_calls
+    : undefined;
+  return { ...msg, tool_calls: toolCalls };
 }
 
 async function buildToolDefs(deck: LoadedDeck): Promise<ToolDefinition[]> {
