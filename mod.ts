@@ -9,4 +9,4 @@ export type {
   ModelProvider,
 } from "./src/types.ts";
 export { runDeck } from "./src/runtime.ts";
-export { createOpenAIProvider } from "./src/providers/openai.ts";
+export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
