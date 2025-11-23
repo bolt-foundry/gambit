@@ -28,18 +28,7 @@ export async function startRepl(opts: {
     closed = true;
   });
 
-  while (true) {
-    if (closed) break;
-    let line: string;
-    try {
-      line = await rl.question("> ");
-    } catch (err) {
-      // Gracefully exit on EOF/closed input rather than throwing.
-      if (err instanceof Error && err.message.includes("closed")) break;
-      throw err;
-    }
-    if (line.trim().toLowerCase() === "exit") break;
-
+  const runOnce = async (line: string) => {
     history.push({ role: "user", content: line });
     try {
       let streamed = false;
@@ -77,6 +66,25 @@ export async function startRepl(opts: {
         `Error: ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
+  };
+
+  if (!opts.userFirst) {
+    await runOnce("");
+  }
+
+  while (true) {
+    if (closed) break;
+    let line: string;
+    try {
+      line = await rl.question("> ");
+    } catch (err) {
+      // Gracefully exit on EOF/closed input rather than throwing.
+      if (err instanceof Error && err.message.includes("closed")) break;
+      throw err;
+    }
+    if (line.trim().toLowerCase() === "exit") break;
+
+    await runOnce(line);
   }
 
   rl.close();
