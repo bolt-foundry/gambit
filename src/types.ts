@@ -49,6 +49,7 @@ export type BaseDefinition = {
   outputSchema?: ZodTypeAny;
   actions?: readonly ActionDefinition[];
   embeds?: readonly string[];
+  guardrails?: Partial<Guardrails>;
 };
 
 export type DeckDefinition = BaseDefinition & {
@@ -63,6 +64,8 @@ export type DeckDefinition = BaseDefinition & {
 export type CardDefinition = BaseDefinition & {
   kind: "gambit.card";
   body?: string;
+  inputFragment?: ZodTypeAny;
+  outputFragment?: ZodTypeAny;
 };
 
 export type ReferenceContext = {
@@ -166,6 +169,7 @@ export type ModelProvider = {
 
 export type LoadedCard = CardDefinition & {
   path: string;
+  cards?: LoadedCard[];
 };
 
 export type LoadedDeck = DeckDefinition & {
@@ -173,9 +177,47 @@ export type LoadedDeck = DeckDefinition & {
   cards: LoadedCard[];
   actions: ActionDefinition[];
   executor?: DeckExecutor;
+  guardrails?: Partial<Guardrails>;
 };
 
 export type ToolCallResult = {
   toolContent: string;
   extraMessages?: ModelMessage[];
 };
+
+export type TraceEvent =
+  | { type: "run.start"; runId: string }
+  | { type: "run.end"; runId: string }
+  | {
+    type: "deck.start";
+    runId: string;
+    deckPath: string;
+    actionCallId: string;
+  }
+  | {
+    type: "deck.end";
+    runId: string;
+    deckPath: string;
+    actionCallId: string;
+  }
+  | {
+    type: "action.start";
+    runId: string;
+    actionCallId: string;
+    name: string;
+    path: string;
+  }
+  | {
+    type: "action.end";
+    runId: string;
+    actionCallId: string;
+    name: string;
+    path: string;
+  }
+  | {
+    type: "event";
+    runId: string;
+    actionCallId: string;
+    name: string;
+    payload: JSONValue;
+  };

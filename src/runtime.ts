@@ -34,6 +34,7 @@ type RunOptions = {
   runId?: string;
   defaultModel?: string;
   modelOverride?: string;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -48,6 +49,11 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   const runId = opts.runId ?? randomId("run");
 
   const deck = await loadDeck(opts.path);
+  const deckGuardrails = deck.guardrails ?? {};
+  const effectiveGuardrails: Guardrails = {
+    ...guardrails,
+    ...deckGuardrails,
+  };
   const isRoot = Boolean(opts.isRoot);
 
   ensureSchemaPresence(deck, isRoot);
@@ -56,7 +62,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   if (deck.modelParams?.model) {
     return await runLlmDeck({
       deck,
-      guardrails,
+      guardrails: effectiveGuardrails,
       depth,
       runId,
       parentActionCallId: opts.parentActionCallId,
@@ -64,6 +70,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       input: validatedInput,
       defaultModel: opts.defaultModel,
       modelOverride: opts.modelOverride,
+      trace: opts.trace,
     });
   }
 
@@ -75,7 +82,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
 
   return await runComputeDeck({
     deck,
-    guardrails,
+    guardrails: effectiveGuardrails,
     depth,
     runId,
     parentActionCallId: opts.parentActionCallId,
@@ -83,6 +90,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
     input: validatedInput,
     defaultModel: opts.defaultModel,
     modelOverride: opts.modelOverride,
+    trace: opts.trace,
   });
 }
 
@@ -135,6 +143,7 @@ type RuntimeCtxBase = {
   input: unknown;
   defaultModel?: string;
   modelOverride?: string;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -155,12 +164,13 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         modelProvider: ctx.modelProvider,
         isRoot: false,
         guardrails: ctx.guardrails,
-        depth: ctx.depth + 1,
-        parentActionCallId: actionCallId,
-        runId,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-      }),
+      depth: ctx.depth + 1,
+      parentActionCallId: actionCallId,
+      runId,
+      defaultModel: ctx.defaultModel,
+      modelOverride: ctx.modelOverride,
+      trace: ctx.trace,
+    }),
     fail: (opts) => {
       throw new Error(opts.message);
     },
@@ -218,6 +228,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
   ];
 
   const tools = await buildToolDefs(deck);
+  ctx.trace?.({ type: "deck.start", runId, deckPath: deck.path, actionCallId });
   let passes = 0;
   while (passes < guardrails.maxPasses) {
     passes++;
@@ -233,10 +244,17 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         );
       })();
 
-    const result = await modelProvider.chat({ model, messages, tools });
+      const result = await modelProvider.chat({ model, messages, tools });
     const message = result.message;
     if (result.toolCalls && result.toolCalls.length > 0) {
       for (const call of result.toolCalls) {
+        ctx.trace?.({
+          type: "action.start",
+          runId,
+          actionCallId: call.id,
+          name: call.name,
+          path: call.name,
+        });
         const toolResult = await handleToolCall(call, {
           parentDeck: deck,
           modelProvider,
@@ -245,6 +263,8 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           runId,
           parentActionCallId: actionCallId,
           defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          trace: ctx.trace,
         });
         messages.push({
           role: "assistant",
@@ -264,12 +284,20 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         if (toolResult.extraMessages?.length) {
           messages.push(...toolResult.extraMessages);
         }
+        ctx.trace?.({
+          type: "action.end",
+          runId,
+          actionCallId: call.id,
+          name: call.name,
+          path: call.name,
+        });
       }
       continue;
     }
 
     if (message.content !== null && message.content !== undefined) {
       const validated = validateOutput(deck, message.content, depth === 0);
+      ctx.trace?.({ type: "deck.end", runId, deckPath: deck.path, actionCallId });
       return validated;
     }
 
@@ -292,6 +320,7 @@ async function handleToolCall(
     modelProvider: ModelProvider;
     defaultModel?: string;
     modelOverride?: string;
+    trace?: (event: import("./types.ts").TraceEvent) => void;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -326,10 +355,11 @@ async function handleToolCall(
         guardrails: ctx.guardrails,
         depth: ctx.depth + 1,
         parentActionCallId: call.id,
-        runId: ctx.runId,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-      });
+      runId: ctx.runId,
+      defaultModel: ctx.defaultModel,
+      modelOverride: ctx.modelOverride,
+      trace: ctx.trace,
+    });
       return { ok: true, result };
     } catch (err) {
       return { ok: false as const, error: err };
@@ -357,6 +387,7 @@ async function handleToolCall(
         defaultModel: ctx.defaultModel,
         modelOverride: ctx.modelOverride,
         elapsedMs: performance.now() - started,
+        trace: ctx.trace,
       });
       extraMessages.push(...envelope);
     }, suspenseDelay) as unknown as number;
@@ -406,6 +437,7 @@ async function runSuspenseHandler(args: {
   defaultModel?: string;
   modelOverride?: string;
   elapsedMs: number;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
 }): Promise<ModelMessage[]> {
   try {
     const input = {
@@ -426,6 +458,7 @@ async function runSuspenseHandler(args: {
       runId: args.runId,
       defaultModel: args.defaultModel,
       modelOverride: args.modelOverride,
+      trace: args.trace,
     });
     const content = typeof envelope === "string"
       ? envelope
@@ -472,6 +505,7 @@ async function maybeHandleError(args: {
     modelProvider: ModelProvider;
     defaultModel?: string;
     modelOverride?: string;
+    trace?: (event: import("./types.ts").TraceEvent) => void;
   };
   action: { name: string; path: string; activity?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -499,6 +533,7 @@ async function maybeHandleError(args: {
       runId: args.ctx.runId,
       defaultModel: args.ctx.defaultModel,
       modelOverride: args.ctx.modelOverride,
+      trace: args.ctx.trace,
     });
 
     const content = typeof handlerOutput === "string"
