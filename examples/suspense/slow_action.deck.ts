@@ -4,7 +4,7 @@ import { z } from "zod";
 export default defineDeck({
   inputSchema: z.object({ waitMs: z.number().default(1500) }),
   outputSchema: z.string(),
-  activity: "demo_suspense",
+  label: "demo_suspense",
 });
 
 export async function run(ctx: { input: { waitMs: number } }) {

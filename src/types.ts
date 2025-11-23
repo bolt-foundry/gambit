@@ -24,28 +24,28 @@ export type Guardrails = {
   timeoutMs: number;
 };
 
-export type Activity = string;
+export type Label = string;
 
 export type ActionDefinition = {
   name: string;
   path: string;
   description?: string;
-  activity?: Activity;
+  label?: Label;
 };
 
 export type ErrorHandlerConfig = {
   path: string;
-  activity?: Activity;
+  label?: Label;
 };
 
 export type SuspenseHandlerConfig = {
   path: string;
   delayMs?: number;
-  activity?: Activity;
+  label?: Label;
 };
 
 export type BaseDefinition = {
-  activity?: Activity;
+  label?: Label;
   inputSchema?: ZodTypeAny;
   outputSchema?: ZodTypeAny;
   actions?: readonly ActionDefinition[];
@@ -80,7 +80,7 @@ export type ReferenceContext = {
   action: {
     name: string;
     path: string;
-    activity?: Activity;
+    label?: Label;
     description?: string;
   };
 };
@@ -93,7 +93,7 @@ export type ErrorEnvelope = {
   message: string;
   code?: string;
   details?: JSONValue;
-  activity?: Activity;
+  label?: Label;
   source: {
     deckPath: string;
     actionName: string;
@@ -108,7 +108,7 @@ export type SuspenseEnvelope = {
   actionCallId: string;
   parentActionCallId?: string;
   message: string;
-  activity?: Activity;
+  label?: Label;
   source: {
     deckPath: string;
     actionName: string;
@@ -125,7 +125,7 @@ export type ExecutionContext = {
   actionCallId: string;
   parentActionCallId?: string;
   depth: number;
-  activity?: Activity;
+  label?: Label;
   input: unknown;
   spawnAndWait: (opts: { path: string; input: unknown }) => Promise<unknown>;
   fail: (opts: { message: string; code?: string; details?: JSONValue }) => never;
