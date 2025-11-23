@@ -160,7 +160,7 @@ model.
 - Event kinds: `run.start`/`run.end`, `deck.start`/`deck.end` (per deck execution, with
   elapsed_ms), `action.start`/`action.end` (with outcome, elapsed_ms),
   `model.request`/`model.response` (truncated), `tool.call`/`tool.result` (actions only),
-  `gambit.error_event`, `gambit.suspense_event`, `gambit.reference_context`.
+  `gambit.error_event`, `gambit.suspense_event`, `gambit.get_reference_context`.
 - Common fields: `runId`, `actionCallId`, `parentActionCallId?`, `deckPath`, `actionName`,
   `activity`, `model?`, `elapsedMs?`, `ok`/`error` with `code`/`message`/`details?`.
 - Redaction: no transcripts or secrets; keep payloads small; include hashes or lengths as
@@ -223,15 +223,3 @@ model.
   - v0.3: add tests for embeds/nesting/merge semantics and new flags
     (REPL/tracing/overrides).
   - v0.4: add parity tests for Markdown authoring vs TS behaviors.
-
-## Open Questions / Decisions to Nail Down
-
-- Schemas (resolved stance): non-root must declare `inputSchema`/`outputSchema` (string
-  via `z.string()` allowed); root may omit. Compute-only decks still must declare; missing
-  ⇒ load fail.
-- Event naming/trace fields: finalize synthetic tool names for injected envelopes (e.g.,
-  `gambit_error_event` / `gambit_suspense_event`), and whether handler inputs/envelopes
-  include parent/child thread IDs or run IDs for tracing.
-- Default model resolution: if LLM deck has no `modelParams.model` and no CLI override,
-  fail fast. Compute decks without a model are fine. Any global default would be explicit
-  (not implicit).
