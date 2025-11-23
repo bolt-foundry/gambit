@@ -1,5 +1,9 @@
 import * as path from "@std/path";
-import { RESERVED_TOOL_PREFIX } from "./constants.ts";
+import {
+  MAX_TOOL_NAME_LENGTH,
+  RESERVED_TOOL_PREFIX,
+  TOOL_NAME_PATTERN,
+} from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { mergeZodObjects } from "./schema.ts";
 import { isMarkdownFile, loadMarkdownCard, loadMarkdownDeck } from "./markdown.ts";
@@ -18,11 +22,12 @@ function toFileUrl(p: string): string {
 
 function normalizeActions(
   actions: DeckDefinition["actions"] | CardDefinition["actions"],
+  basePath?: string,
 ): ActionDefinition[] {
   if (!actions) return [];
   return actions.map((a) => ({
     name: a.name,
-    path: a.path,
+    path: basePath ? path.resolve(path.dirname(basePath), a.path) : a.path,
     description: a.description,
     activity: a.activity,
   }));
@@ -32,6 +37,14 @@ function checkReserved(action: ActionDefinition) {
   if (action.name.startsWith(RESERVED_TOOL_PREFIX)) {
     throw new Error(
       `Action name ${action.name} is reserved (prefix ${RESERVED_TOOL_PREFIX})`,
+    );
+  }
+  if (
+    !TOOL_NAME_PATTERN.test(action.name) ||
+    action.name.length > MAX_TOOL_NAME_LENGTH
+  ) {
+    throw new Error(
+      `Action name ${action.name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
     );
   }
 }
@@ -62,7 +75,7 @@ async function loadCardInternal(
     embeddedCards.push(loaded);
   }
 
-  const actions = normalizeActions(card.actions);
+  const actions = normalizeActions(card.actions, resolved);
   actions.forEach(checkReserved);
   return { ...card, actions, path: resolved, cards: embeddedCards };
 }
@@ -109,7 +122,7 @@ export async function loadDeck(
       mergedActions[action.name] = action;
     }
   }
-  for (const action of normalizeActions(deck.actions)) {
+  for (const action of normalizeActions(deck.actions, resolved)) {
     checkReserved(action);
     mergedActions[action.name] = action;
   }
@@ -129,6 +142,20 @@ export async function loadDeck(
     ? mod.execute
     : undefined;
 
+  const errorHandler = deck.errorHandler
+    ? {
+      ...deck.errorHandler,
+      path: path.resolve(path.dirname(resolved), deck.errorHandler.path),
+    }
+    : undefined;
+
+  const suspenseHandler = deck.suspenseHandler
+    ? {
+      ...deck.suspenseHandler,
+      path: path.resolve(path.dirname(resolved), deck.suspenseHandler.path),
+    }
+    : undefined;
+
   return {
     ...deck,
     path: resolved,
@@ -137,6 +164,8 @@ export async function loadDeck(
     inputSchema,
     outputSchema,
     executor,
+    errorHandler,
+    suspenseHandler,
   };
 }
 
