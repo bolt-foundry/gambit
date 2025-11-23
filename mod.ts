@@ -10,3 +10,4 @@ export type {
 } from "./src/types.ts";
 export { runDeck } from "./src/runtime.ts";
 export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
+export { startWebSocketSimulator } from "./src/server.ts";

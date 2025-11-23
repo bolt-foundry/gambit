@@ -1,12 +1,13 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
+import { startWebSocketSimulator } from "./server.ts";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startRepl } from "./repl.ts";
 import { loadState, saveState } from "./state.ts";
 
 type Args = {
-  cmd: "run" | "repl";
+  cmd: "run" | "repl" | "serve";
   deckPath: string;
   input?: string;
   model?: string;
@@ -15,17 +16,18 @@ type Args = {
   stream?: boolean;
   statePath?: string;
   verbose?: boolean;
+  port?: number;
 };
 
 function parseArgs(argv: string[]): Args {
   if (argv.length === 0) {
     throw new Error(
-      "Usage: gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace file] [--state file] [--stream] [--verbose]\n       gambit repl <deck.(ts|md)> [--model <id>] [--model-force <id>] [--verbose]",
+      "Usage: gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace file] [--state file] [--stream] [--verbose]\n       gambit repl <deck.(ts|md)> [--model <id>] [--model-force <id>] [--verbose]\n       gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose]",
     );
   }
   const [cmd, deckPath, ...rest] = argv;
-  if (cmd !== "run" && cmd !== "repl") {
-    throw new Error("Only `run` and `repl` are supported");
+  if (cmd !== "run" && cmd !== "repl" && cmd !== "serve") {
+    throw new Error("Only `run`, `repl`, and `serve` are supported");
   }
   if (!deckPath) throw new Error("Missing deck path");
 
@@ -36,6 +38,7 @@ function parseArgs(argv: string[]): Args {
   let stream = false;
   let statePath: string | undefined;
   let verbose = false;
+  let port: number | undefined;
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i];
     if (token === "--input") {
@@ -52,6 +55,8 @@ function parseArgs(argv: string[]): Args {
       statePath = rest[++i];
     } else if (token === "--verbose") {
       verbose = true;
+    } else if (token === "--port") {
+      port = Number(rest[++i]);
     }
   }
 
@@ -65,6 +70,7 @@ function parseArgs(argv: string[]): Args {
     stream,
     statePath,
     verbose,
+    port,
   };
 }
 
@@ -105,6 +111,19 @@ async function main() {
         trace: tracer,
         verbose: args.verbose,
       });
+      return;
+    }
+
+    if (args.cmd === "serve") {
+      const server = startWebSocketSimulator({
+        deckPath: args.deckPath,
+        model: args.model,
+        modelForce: args.modelForce,
+        modelProvider: provider,
+        port: args.port ?? 8000,
+        verbose: args.verbose,
+      });
+      await server.finished;
       return;
     }
 
