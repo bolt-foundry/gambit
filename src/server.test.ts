@@ -47,10 +47,16 @@ Deno.test("websocket simulator streams responses", async () => {
   const port = (server.addr as Deno.NetAddr).port;
   const messages: Array<{ type?: string; chunk?: string; result?: unknown }> = [];
 
+  const homepage = await fetch(`http://127.0.0.1:${port}/`);
+  const html = await homepage.text();
+  if (!html.includes("Gambit WebSocket Simulator")) {
+    throw new Error("Simulator page missing expected content");
+  }
+
   const resultPromise = new Promise<Record<string, unknown>>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout")), 2000);
 
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
     ws.onmessage = (ev) => {
       const msg = JSON.parse(ev.data as string) as {
         type?: string;
