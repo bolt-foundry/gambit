@@ -2,9 +2,10 @@
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
 import { makeJsonlTracer } from "./trace.ts";
+import { startRepl } from "./repl.ts";
 
 type Args = {
-  cmd: "run";
+  cmd: "run" | "repl";
   deckPath: string;
   input?: string;
   model?: string;
@@ -16,11 +17,13 @@ type Args = {
 function parseArgs(argv: string[]): Args {
   if (argv.length === 0) {
     throw new Error(
-      "Usage: gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace file] [--stream]",
+      "Usage: gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace file] [--stream]\n       gambit repl <deck.(ts|md)> [--model <id>] [--model-force <id>]",
     );
   }
   const [cmd, deckPath, ...rest] = argv;
-  if (cmd !== "run") throw new Error("Only `run` is supported");
+  if (cmd !== "run" && cmd !== "repl") {
+    throw new Error("Only `run` and `repl` are supported");
+  }
   if (!deckPath) throw new Error("Missing deck path");
 
   let input: string | undefined;
@@ -66,6 +69,16 @@ async function main() {
       apiKey,
       baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
     });
+
+    if (args.cmd === "repl") {
+      await startRepl({
+        deckPath: args.deckPath,
+        model: args.model,
+        modelForce: args.modelForce,
+        modelProvider: provider,
+      });
+      return;
+    }
 
     const tracer = args.trace ? makeJsonlTracer(args.trace) : undefined;
 
