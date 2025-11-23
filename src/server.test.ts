@@ -28,13 +28,13 @@ Deno.test("websocket simulator streams responses", async () => {
   );
 
   const provider: ModelProvider = {
-    async chat(input) {
+    chat(input) {
       input.onStreamText?.("h");
       input.onStreamText?.("i");
-      return {
+      return Promise.resolve({
         message: { role: "assistant", content: "hi" },
         finishReason: "stop",
-      };
+      });
     },
   };
 
