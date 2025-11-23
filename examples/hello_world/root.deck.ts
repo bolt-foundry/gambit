@@ -14,7 +14,7 @@ export default defineDeck({
       name: "echo",
       path: "./echo.deck.ts",
       description: "Return the text back verbatim with a short prefix.",
-      activity: "echo_text",
+      label: "echo_text",
     },
   ],
 });
