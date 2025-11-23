@@ -36,6 +36,7 @@ type RunOptions = {
   modelOverride?: string;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   repl?: boolean;
+  stream?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -145,6 +146,7 @@ type RuntimeCtxBase = {
   defaultModel?: string;
   modelOverride?: string;
   trace?: (event: import("./types.ts").TraceEvent) => void;
+  stream?: boolean;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -245,7 +247,12 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         );
       })();
 
-    const result = await modelProvider.chat({ model, messages, tools });
+    const result = await modelProvider.chat({
+      model,
+      messages,
+      tools,
+      stream: ctx.stream,
+    });
     const message = result.message;
     if (result.toolCalls && result.toolCalls.length > 0) {
       for (const call of result.toolCalls) {

@@ -156,6 +156,7 @@ export type ModelProvider = {
     model: string;
     messages: ModelMessage[];
     tools?: ToolDefinition[];
+    stream?: boolean;
   }) => Promise<{
     message: ModelMessage;
     finishReason: "stop" | "tool_calls" | "length";
