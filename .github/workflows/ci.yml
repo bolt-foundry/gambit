@@ -1,0 +1,31 @@
+name: ci
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Lint
+        working-directory: packages/gambit
+        run: deno lint
+
+      - name: Format check
+        working-directory: packages/gambit
+        run: deno fmt --check
+
+      - name: Test
+        working-directory: packages/gambit
+        run: deno test -A
