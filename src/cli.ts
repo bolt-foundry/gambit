@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+import * as path from "@std/path";
 import { parseArgs } from "jsr:@std/cli@1.0.7/parse-args";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
@@ -9,7 +10,7 @@ import { loadState, saveState } from "./state.ts";
 
 type Args = {
   cmd: "run" | "repl" | "serve";
-  deckPath: string;
+  deckPath?: string;
   input?: string;
   model?: string;
   modelForce?: string;
@@ -18,12 +19,18 @@ type Args = {
   statePath?: string;
   verbose?: boolean;
   port?: number;
+  userFirst?: boolean;
   help?: boolean;
 };
 
+const DEFAULT_REPL_DECK = path.resolve(
+  path.dirname(path.fromFileUrl(import.meta.url)),
+  "decks/gambit-assistant.deck.md",
+);
+
 function parseCliArgs(argv: string[]): Args {
   const parsed = parseArgs(argv, {
-    boolean: ["stream", "verbose", "help"],
+    boolean: ["stream", "verbose", "help", "user-first"],
     string: ["input", "model", "model-force", "trace", "state", "port"],
     alias: {
       help: "h",
@@ -31,6 +38,7 @@ function parseCliArgs(argv: string[]): Args {
     default: {
       stream: false,
       verbose: false,
+      "user-first": false,
     },
   });
 
@@ -40,7 +48,7 @@ function parseCliArgs(argv: string[]): Args {
 
   return {
     cmd,
-    deckPath: deckPath ?? "",
+    deckPath,
     input: parsed.input as string | undefined,
     model: parsed.model as string | undefined,
     modelForce: parsed["model-force"] as string | undefined,
@@ -49,6 +57,7 @@ function parseCliArgs(argv: string[]): Args {
     statePath: parsed.state as string | undefined,
     verbose: Boolean(parsed.verbose),
     port: parsed.port ? Number(parsed.port) : undefined,
+    userFirst: Boolean(parsed["user-first"]),
     help: Boolean(parsed.help),
   };
 }
@@ -57,7 +66,7 @@ function printUsage() {
   console.log(
     `Usage:
   gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl <deck.(ts|md)> [--model <id>] [--model-force <id>] [--verbose]
+  gambit repl [<deck.(ts|md)>] [--model <id>] [--model-force <id>] [--verbose]
   gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
 
 Flags:
@@ -69,7 +78,9 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
+  --user-first            Send the user message first (default: assistant starts)
   -h, --help              Show this help
+  repl default deck       src/decks/gambit-assistant.deck.md
 `,
   );
 }
@@ -86,7 +97,7 @@ function parseInput(raw?: string): unknown {
 async function main() {
   try {
     const args = parseCliArgs(Deno.args);
-    if (args.help || !args.cmd || !args.deckPath) {
+    if (args.help || !args.cmd) {
       printUsage();
       Deno.exit(args.cmd ? 0 : 1);
     }
@@ -95,6 +106,26 @@ async function main() {
       printUsage();
       Deno.exit(1);
     }
+
+    const deckPath = args.deckPath ??
+      (args.cmd === "repl" ? DEFAULT_REPL_DECK : "");
+
+    if (!deckPath) {
+      printUsage();
+      Deno.exit(1);
+    }
+
+    if (!args.deckPath && args.cmd === "repl") {
+      try {
+        await Deno.stat(deckPath);
+      } catch {
+        console.error(
+          `Default REPL deck not found at ${deckPath}. Pass a deck path explicitly.`,
+        );
+        Deno.exit(1);
+      }
+    }
+
     const apiKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!apiKey) {
       throw new Error("OPENROUTER_API_KEY is required");
@@ -115,24 +146,26 @@ async function main() {
 
     if (args.cmd === "repl") {
       await startRepl({
-        deckPath: args.deckPath,
+        deckPath,
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,
         trace: tracer,
         verbose: args.verbose,
+        userFirst: args.userFirst,
       });
       return;
     }
 
     if (args.cmd === "serve") {
       const server = startWebSocketSimulator({
-        deckPath: args.deckPath,
+        deckPath,
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,
         port: args.port ?? 8000,
         verbose: args.verbose,
+        userFirst: args.userFirst,
       });
       await server.finished;
       return;
@@ -144,7 +177,7 @@ async function main() {
       : undefined;
 
     const result = await runDeck({
-      path: args.deckPath,
+      path: deckPath,
       input: parseInput(args.input),
       modelProvider: provider,
       isRoot: true,
@@ -154,6 +187,7 @@ async function main() {
       stream: args.stream,
       state,
       onStateUpdate,
+      userFirst: args.userFirst,
     });
 
     if (typeof result === "string") {
