@@ -141,3 +141,102 @@ Deno.test("deck.actions merge overrides card actions", async () => {
   // dummy provider returns "dummy" so root output will be validated as string
   assertEquals(typeof loaded, "string");
 });
+
+Deno.test("card schema fragments merge into deck schemas", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  await writeTempDeck(
+    dir,
+    "card.card.ts",
+    `
+    import { defineCard } from "${modHref}";
+    import { z } from "zod";
+    export default defineCard({
+      inputFragment: z.object({ extra: z.string() }),
+      outputFragment: z.object({ note: z.string() })
+    });
+    `,
+  );
+
+  const rootPath = await writeTempDeck(
+    dir,
+    "root.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ text: z.string() }),
+      outputSchema: z.object({ result: z.string() }),
+      actions: [],
+      embeds: ["./card.card.ts"],
+    });
+    export async function run(ctx: { input: { text: string, extra: string } }) {
+      return { result: ctx.input.text, note: ctx.input.extra };
+    }
+    `,
+  );
+
+  const result = await runDeck({
+    path: rootPath,
+    input: { text: "hi", extra: "more" },
+    modelProvider: dummyProvider,
+    isRoot: true,
+  });
+
+  assertEquals(typeof result, "object");
+});
+
+Deno.test("card embed cycles are rejected", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  await writeTempDeck(
+    dir,
+    "a.card.ts",
+    `
+    import { defineCard } from "${modHref}";
+    export default defineCard({
+      embeds: ["./b.card.ts"]
+    });
+    `,
+  );
+
+  await writeTempDeck(
+    dir,
+    "b.card.ts",
+    `
+    import { defineCard } from "${modHref}";
+    export default defineCard({
+      embeds: ["./a.card.ts"]
+    });
+    `,
+  );
+
+  const rootPath = await writeTempDeck(
+    dir,
+    "root.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      embeds: ["./a.card.ts"],
+      modelParams: { model: "test-model" },
+    });
+    `,
+  );
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: rootPath,
+        input: "hello",
+        modelProvider: dummyProvider,
+        isRoot: true,
+      }),
+    Error,
+    "cycle",
+  );
+});
