@@ -34,6 +34,17 @@ export function startWebSocketSimulator(opts: {
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
 
   const server = Deno.serve({ port, signal: opts.signal, onListen: () => {} }, (req) => {
+    const url = new URL(req.url);
+    if (url.pathname === "/") {
+      return new Response(simulatorHtml(opts.deckPath), {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+
+    if (url.pathname !== "/websocket") {
+      return new Response("Not found", { status: 404 });
+    }
+
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket endpoint", { status: 400 });
     }
@@ -130,7 +141,7 @@ export function startWebSocketSimulator(opts: {
 
   const listenPort = (server.addr as Deno.NetAddr).port;
   console.log(
-    `WebSocket simulator listening on ws://localhost:${listenPort}/ (deck=${opts.deckPath})`,
+    `WebSocket simulator listening on ws://localhost:${listenPort}/websocket (deck=${opts.deckPath})`,
   );
   return server;
 }
@@ -148,4 +159,62 @@ function parseIncoming(data: unknown, decoder: TextDecoder): IncomingMessage | n
     // ignore parse errors
   }
   return null;
+}
+
+function simulatorHtml(deckPath: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gambit WebSocket Simulator</title>
+  <style>
+    body { font-family: sans-serif; margin: 16px; max-width: 900px; }
+    textarea { width: 100%; height: 120px; font-family: monospace; }
+    pre { background: #111; color: #0f0; padding: 12px; height: 240px; overflow: auto; }
+    button { padding: 8px 12px; margin-top: 8px; }
+    code { background: #eee; padding: 2px 4px; }
+  </style>
+</head>
+<body>
+  <h1>Gambit WebSocket Simulator</h1>
+  <p>Deck: <code>${deckPath}</code></p>
+  <p>Connects to <code>/websocket</code> and sends <code>{ type: "run", input }</code>. Streams and results appear below.</p>
+  <textarea id="input" placeholder='Type input (string or JSON)'></textarea>
+  <div>
+    <label><input type="checkbox" id="asJson" /> Parse input as JSON</label>
+    <button id="send">Send</button>
+    <span id="status">connecting...</span>
+  </div>
+  <pre id="log"></pre>
+  <script>
+    const log = document.getElementById("log");
+    const status = document.getElementById("status");
+    const input = document.getElementById("input");
+    const asJson = document.getElementById("asJson");
+    const btn = document.getElementById("send");
+
+    function append(line) {
+      const now = new Date().toISOString();
+      log.textContent += "[" + now + "] " + line + "\\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => { status.textContent = "connected"; };
+    ws.onclose = () => { status.textContent = "closed"; };
+    ws.onerror = () => { status.textContent = "error"; };
+    ws.onmessage = (ev) => append(ev.data);
+
+    btn.onclick = () => {
+      let val = input.value;
+      if (asJson.checked) {
+        try { val = JSON.parse(val); } catch (err) { append("JSON parse error: " + err); return; }
+      }
+      ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: false }));
+    };
+  </script>
+</body>
+</html>`;
 }
