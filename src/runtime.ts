@@ -247,27 +247,30 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
   const messages: ModelMessage[] = ctx.state?.messages
     ? ctx.state.messages.map(sanitizeMessage)
     : [];
-  messages.push(
-    sanitizeMessage({ role: "system", content: systemPrompt }),
-    sanitizeMessage({
-      role: "assistant",
-      content: null,
-      tool_calls: [{
-        id: refToolCallId,
-        type: "function",
-        function: {
-          name: TOOL_REFERENCE_CONTEXT,
-          arguments: JSON.stringify(refCtx),
-        },
-      }],
-    }),
-    sanitizeMessage({
-      role: "tool",
-      name: TOOL_REFERENCE_CONTEXT,
-      tool_call_id: refToolCallId,
-      content: JSON.stringify(refCtx),
-    }),
-  );
+  const resumed = messages.length > 0;
+  if (!resumed) {
+    messages.push(
+      sanitizeMessage({ role: "system", content: systemPrompt }),
+      sanitizeMessage({
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: refToolCallId,
+          type: "function",
+          function: {
+            name: TOOL_REFERENCE_CONTEXT,
+            arguments: JSON.stringify(refCtx),
+          },
+        }],
+      }),
+      sanitizeMessage({
+        role: "tool",
+        name: TOOL_REFERENCE_CONTEXT,
+        tool_call_id: refToolCallId,
+        content: JSON.stringify(refCtx),
+      }),
+    );
+  }
 
   if (ctx.userFirst) {
     messages.push(
