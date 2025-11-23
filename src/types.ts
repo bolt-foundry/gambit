@@ -59,7 +59,8 @@ export type DeckDefinition = BaseDefinition & {
   errorHandler?: ErrorHandlerConfig;
   suspenseHandler?: SuspenseHandlerConfig;
   suspenseDelayMs?: number;
-  prompt?: string;
+  prompt?: string; // deprecated; prefer body
+  body?: string;
   run?: DeckExecutor;
   execute?: DeckExecutor;
 };
