@@ -15,8 +15,8 @@ import type {
   ModelMessage,
   ModelProvider,
   ReferenceContext,
-  ToolDefinition,
   ToolCallResult,
+  ToolDefinition,
 } from "./types.ts";
 
 function randomId(prefix: string) {
@@ -35,6 +35,7 @@ type RunOptions = {
   defaultModel?: string;
   modelOverride?: string;
   trace?: (event: import("./types.ts").TraceEvent) => void;
+  repl?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -164,13 +165,13 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         modelProvider: ctx.modelProvider,
         isRoot: false,
         guardrails: ctx.guardrails,
-      depth: ctx.depth + 1,
-      parentActionCallId: actionCallId,
-      runId,
-      defaultModel: ctx.defaultModel,
-      modelOverride: ctx.modelOverride,
-      trace: ctx.trace,
-    }),
+        depth: ctx.depth + 1,
+        parentActionCallId: actionCallId,
+        runId,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+        trace: ctx.trace,
+      }),
     fail: (opts) => {
       throw new Error(opts.message);
     },
@@ -244,7 +245,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         );
       })();
 
-      const result = await modelProvider.chat({ model, messages, tools });
+    const result = await modelProvider.chat({ model, messages, tools });
     const message = result.message;
     if (result.toolCalls && result.toolCalls.length > 0) {
       for (const call of result.toolCalls) {
@@ -355,11 +356,11 @@ async function handleToolCall(
         guardrails: ctx.guardrails,
         depth: ctx.depth + 1,
         parentActionCallId: call.id,
-      runId: ctx.runId,
-      defaultModel: ctx.defaultModel,
-      modelOverride: ctx.modelOverride,
-      trace: ctx.trace,
-    });
+        runId: ctx.runId,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+        trace: ctx.trace,
+      });
       return { ok: true, result };
     } catch (err) {
       return { ok: false as const, error: err };
@@ -460,9 +461,7 @@ async function runSuspenseHandler(args: {
       modelOverride: args.modelOverride,
       trace: args.trace,
     });
-    const content = typeof envelope === "string"
-      ? envelope
-      : JSON.stringify(envelope);
+    const content = typeof envelope === "string" ? envelope : JSON.stringify(envelope);
     const callId = randomId("event");
     return [
       {
