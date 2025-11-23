@@ -60,6 +60,8 @@ export type DeckDefinition = BaseDefinition & {
   suspenseHandler?: SuspenseHandlerConfig;
   suspenseDelayMs?: number;
   prompt?: string;
+  run?: DeckExecutor;
+  execute?: DeckExecutor;
 };
 
 export type CardDefinition = BaseDefinition & {
