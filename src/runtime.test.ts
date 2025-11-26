@@ -1,7 +1,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { runDeck } from "./runtime.ts";
-import type { ModelProvider } from "./types.ts";
+import type { ModelMessage, ModelProvider } from "./types.ts";
 
 const dummyProvider: ModelProvider = {
   chat() {
@@ -130,6 +130,55 @@ Deno.test("LLM deck streams via onStreamText", async () => {
   assertEquals(result, "ab");
   assertEquals(chunks.join(""), "ab");
   assertEquals(sawStreamFlag, true);
+});
+
+Deno.test("LLM deck defaults to assistant-first, userFirst opt-in", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "assistant-first.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let lastMessages: ModelMessage[] = [];
+  const provider: ModelProvider = {
+    chat(input) {
+      lastMessages = input.messages;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hello",
+    modelProvider: provider,
+    isRoot: true,
+  });
+  const hasUserDefault = lastMessages.some((m) => m.role === "user");
+  assertEquals(hasUserDefault, false);
+
+  await runDeck({
+    path: deckPath,
+    input: "hello",
+    modelProvider: provider,
+    isRoot: true,
+    userFirst: true,
+  });
+  const hasUserOptIn = lastMessages.some((m) => m.role === "user");
+  assertEquals(hasUserOptIn, true);
 });
 
 Deno.test("non-root missing schemas fails load", async () => {
