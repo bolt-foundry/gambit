@@ -72,7 +72,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
     opts.trace?.({ type: "run.start", runId });
   }
   try {
-    if (deck.modelParams?.model || deck.modelParams?.temperature !== undefined) {
+    if (
+      deck.modelParams?.model || deck.modelParams?.temperature !== undefined
+    ) {
       return await runLlmDeck({
         deck,
         guardrails: effectiveGuardrails,
@@ -231,7 +233,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     action: {
       name: path.basename(deck.path),
       path: deck.path,
-    label: deck.label,
+      label: deck.label,
       description: deck.actions?.map((a) => a.description).join(" ") || "",
     },
   };
@@ -356,7 +358,12 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         ctx.onStateUpdate(state);
       }
       const validated = validateOutput(deck, message.content, depth === 0);
-      ctx.trace?.({ type: "deck.end", runId, deckPath: deck.path, actionCallId });
+      ctx.trace?.({
+        type: "deck.end",
+        runId,
+        deckPath: deck.path,
+        actionCallId,
+      });
       return validated;
     }
 
@@ -589,7 +596,10 @@ async function runSuspenseHandler(args: {
       kind: "suspense",
       label: args.action.label ?? args.parentDeck.label,
       source: { deckPath: args.parentDeck.path, actionName: args.action.name },
-      trigger: { reason: "timeout" as const, elapsedMs: Math.floor(args.elapsedMs) },
+      trigger: {
+        reason: "timeout" as const,
+        elapsedMs: Math.floor(args.elapsedMs),
+      },
       childInput: args.call.args,
     };
     const envelope = await runDeck({
@@ -607,7 +617,9 @@ async function runSuspenseHandler(args: {
       stream: args.stream,
       onStreamText: args.onStreamText,
     });
-    const content = typeof envelope === "string" ? envelope : JSON.stringify(envelope);
+    const content = typeof envelope === "string"
+      ? envelope
+      : JSON.stringify(envelope);
     const callId = randomId("event");
     return [
       {
@@ -659,11 +671,16 @@ async function maybeHandleError(args: {
   const handlerPath = args.ctx.parentDeck.handlers?.onError?.path;
   if (!handlerPath) return undefined;
 
-  const message = args.err instanceof Error ? args.err.message : String(args.err);
+  const message = args.err instanceof Error
+    ? args.err.message
+    : String(args.err);
   const envelopeInput = {
     kind: "error",
     label: args.action.label ?? args.ctx.parentDeck.label,
-    source: { deckPath: args.ctx.parentDeck.path, actionName: args.action.name },
+    source: {
+      deckPath: args.ctx.parentDeck.path,
+      actionName: args.action.name,
+    },
     error: { message },
     childInput: args.call.args,
   };
