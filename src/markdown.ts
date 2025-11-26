@@ -47,7 +47,11 @@ function normalizeActions(actions: unknown, basePath: string): ActionDefinition[
         name,
         path: path.resolve(path.dirname(basePath), p),
         description: typeof rec.description === "string" ? rec.description : undefined,
-        activity: typeof rec.activity === "string" ? rec.activity : undefined,
+        label: typeof rec.label === "string"
+          ? rec.label
+          : typeof rec.activity === "string"
+          ? rec.activity
+          : undefined,
       };
     });
 }
@@ -177,7 +181,7 @@ export async function loadMarkdownDeck(
     actions,
     cards,
     embeds,
-    activity: deckMeta.activity,
+    label: deckMeta.label ?? (deckMeta as { activity?: string }).activity,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     inputSchema,
