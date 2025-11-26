@@ -94,6 +94,7 @@ export type PingEnvelope = {
     actionName: string;
   };
   elapsedMs: number;
+  status?: number;
   message?: string;
   payload?: JSONValue;
   meta?: Record<string, JSONValue>;
