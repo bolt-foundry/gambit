@@ -110,14 +110,14 @@ Deno.test("LLM deck streams via onStreamText", async () => {
   const chunks: string[] = [];
   let sawStreamFlag = false;
   const streamingProvider: ModelProvider = {
-    async chat(input) {
+    chat(input) {
       sawStreamFlag = Boolean(input.stream);
       input.onStreamText?.("a");
       input.onStreamText?.("b");
-      return {
+      return Promise.resolve({
         message: { role: "assistant", content: "ab" },
         finishReason: "stop",
-      };
+      });
     },
   };
 
