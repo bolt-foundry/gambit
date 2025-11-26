@@ -163,9 +163,6 @@ export async function loadDeck(
     ? deck.run
     : typeof deck.execute === "function"
     ? deck.execute
-    ? mod.run
-    : typeof mod.execute === "function"
-    ? mod.execute
     : undefined;
 
   const handlers = deck.handlers
