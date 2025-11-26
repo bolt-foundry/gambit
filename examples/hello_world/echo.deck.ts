@@ -10,7 +10,3 @@ export default defineDeck({
 export function run(ctx: { input: { text: string } }) {
   return `Echo: ${ctx.input.text}`;
 }
-
-export function run(ctx: { input: { text: string } }) {
-  return `Echo: ${ctx.input.text}`;
-}

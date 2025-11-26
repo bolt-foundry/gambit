@@ -136,7 +136,10 @@ export async function loadDeck(
     outputSchema = mergeZodObjects(outputSchema, card.outputFragment);
   }
 
-  const executor = typeof mod.run === "function"
+  const executor = typeof deck.run === "function"
+    ? deck.run
+    : typeof deck.execute === "function"
+    ? deck.execute
     ? mod.run
     : typeof mod.execute === "function"
     ? mod.execute
