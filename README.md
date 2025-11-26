@@ -51,7 +51,8 @@ open http://localhost:8000/
   child deck’s input schema.
 - **Handlers:** `handlers.onError` and `handlers.onPing` shape structured
   responses; synthetic orchestration tools use `gambit_init`, `gambit_ping`,
-  `gambit_complete`.
+  `gambit_complete`. `complete` envelopes use HTTP-style status codes (200 by
+  default; handled errors usually 500 unless overridden).
 - **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
