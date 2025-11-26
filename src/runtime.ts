@@ -327,13 +327,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           depth,
           runId,
           parentActionCallId: actionCallId,
-      defaultModel: ctx.defaultModel,
-      modelOverride: ctx.modelOverride,
-      trace: ctx.trace,
-      onStreamText: ctx.onStreamText,
-      runStartedAt: start,
-      userFirst: ctx.userFirst,
-    });
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          trace: ctx.trace,
+          onStreamText: ctx.onStreamText,
+          runStartedAt: start,
+          userFirst: ctx.userFirst,
+        });
         messages.push({
           role: "assistant",
           content: null,
@@ -696,7 +696,9 @@ async function runSuspenseHandler(args: {
     if (typeof handlerOutput === "string") {
       message = handlerOutput;
     } else if (handlerOutput && typeof handlerOutput === "object") {
-      if (typeof (handlerOutput as { message?: unknown }).message === "string") {
+      if (
+        typeof (handlerOutput as { message?: unknown }).message === "string"
+      ) {
         message = (handlerOutput as { message?: string }).message;
       }
       payload = (handlerOutput as { payload?: unknown }).payload ??
@@ -801,10 +803,9 @@ async function maybeHandleError(args: {
       userFirst: args.ctx.userFirst,
     });
 
-    const parsed =
-      typeof handlerOutput === "object" && handlerOutput !== null
-        ? handlerOutput as Record<string, unknown>
-        : undefined;
+    const parsed = typeof handlerOutput === "object" && handlerOutput !== null
+      ? handlerOutput as Record<string, unknown>
+      : undefined;
     const status = typeof parsed?.status === "number" ? parsed.status : 500;
     const code = typeof parsed?.code === "string" ? parsed.code : undefined;
     const messageOverride = typeof parsed?.message === "string"
