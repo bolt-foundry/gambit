@@ -1,3 +1,3 @@
 # Gambit Docs
 
-Coming soon.
+- [Hourglass prompting (Context Engineering)](./hourglass.md)
