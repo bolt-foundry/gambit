@@ -24,5 +24,8 @@ jobs:
       - name: Format check
         run: deno fmt --check
 
+      - name: Type check
+        run: deno check --all mod.ts
+
       - name: Test
         run: deno test -A
