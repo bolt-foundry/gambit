@@ -501,24 +501,40 @@ async function handleToolCall(
           elapsedMs: Math.floor(elapsed),
         },
       });
-      const envelope = await runSuspenseHandler({
-        parentDeck: ctx.parentDeck,
-        action,
-        call,
-        runId: ctx.runId,
-        parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
-        modelProvider: ctx.modelProvider,
-        guardrails: ctx.guardrails,
-        depth: ctx.depth,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-        elapsedMs: performance.now() - started,
-        trace: ctx.trace,
-        stream: ctx.stream,
-        onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
-      });
+      let envelope: ModelMessage[] = [];
+      try {
+        envelope = await runSuspenseHandler({
+          parentDeck: ctx.parentDeck,
+          action,
+          call,
+          runId: ctx.runId,
+          parentActionCallId: ctx.parentActionCallId,
+          handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+          modelProvider: ctx.modelProvider,
+          guardrails: ctx.guardrails,
+          depth: ctx.depth,
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          elapsedMs: performance.now() - started,
+          trace: ctx.trace,
+          stream: ctx.stream,
+          onStreamText: ctx.onStreamText,
+          userFirst: ctx.userFirst,
+        });
+      } catch (err) {
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.error",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        envelope = [];
+      }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
@@ -574,24 +590,40 @@ async function handleToolCall(
     const elapsedFromStart = performance.now() - ctx.runStartedAt;
     if (elapsedFromStart >= suspenseDelay) {
       suspenseFired = true;
-      const envelope = await runSuspenseHandler({
-        parentDeck: ctx.parentDeck,
-        action,
-        call,
-        runId: ctx.runId,
-        parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
-        modelProvider: ctx.modelProvider,
-        guardrails: ctx.guardrails,
-        depth: ctx.depth,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-        elapsedMs: elapsedFromStart,
-        trace: ctx.trace,
-        stream: ctx.stream,
-        onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
-      });
+      let envelope: ModelMessage[] = [];
+      try {
+        envelope = await runSuspenseHandler({
+          parentDeck: ctx.parentDeck,
+          action,
+          call,
+          runId: ctx.runId,
+          parentActionCallId: ctx.parentActionCallId,
+          handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+          modelProvider: ctx.modelProvider,
+          guardrails: ctx.guardrails,
+          depth: ctx.depth,
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          elapsedMs: elapsedFromStart,
+          trace: ctx.trace,
+          stream: ctx.stream,
+          onStreamText: ctx.onStreamText,
+          userFirst: ctx.userFirst,
+        });
+      } catch (err) {
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.error",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        envelope = [];
+      }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
