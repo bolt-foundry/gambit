@@ -42,9 +42,6 @@ Deno.test("compute deck returns validated output", async () => {
         return "ok:" + ctx.input;
       }
     });
-    export async function run(ctx: { input: string }) {
-      return "ok:" + ctx.input;
-    }
     `,
   );
 
@@ -87,6 +84,68 @@ Deno.test("compute deck can define run inline", async () => {
   });
 
   assertEquals(result, "inline:hi");
+});
+
+Deno.test("module-level run export is rejected", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "bad_run.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      label: "bad_run",
+    });
+    export function run(ctx: { input: string }) {
+      return "nope:" + ctx.input;
+    }
+    `,
+  );
+
+  await assertRejects(() =>
+    runDeck({
+      path: deckPath,
+      input: "hi",
+      modelProvider: dummyProvider,
+      isRoot: true,
+    }));
+});
+
+Deno.test("isRoot inferred when omitted", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      label: "child",
+      run(ctx: { input: string }) {
+        return "child:" + ctx.input;
+      }
+    });
+    `,
+  );
+
+  // If caller omits isRoot and depth/parentActionCallId, we infer root and allow
+  // the default assistant-first flow to seed the init tool.
+  const result = await runDeck({
+    path: childPath,
+    input: "hi",
+    modelProvider: dummyProvider,
+  });
+
+  assertEquals(result, "child:hi");
 });
 
 Deno.test("LLM deck streams via onStreamText", async () => {
@@ -253,10 +312,10 @@ Deno.test("deck.actions merge overrides card actions", async () => {
     export default defineDeck({
       inputSchema: z.object({ text: z.string() }),
       outputSchema: z.string(),
+      run(ctx: { input: { text: string } }) {
+        return ctx.input.text;
+      }
     });
-    export async function run(ctx: { input: { text: string } }) {
-      return ctx.input.text;
-    }
     `,
   );
 
@@ -299,10 +358,10 @@ Deno.test("card schema fragments merge into deck schemas", async () => {
       outputSchema: z.object({ result: z.string() }),
       actions: [],
       embeds: ["./card.card.ts"],
+      run(ctx: { input: { text: string, extra: string } }) {
+        return { result: ctx.input.text, note: ctx.input.extra };
+      }
     });
-    export async function run(ctx: { input: { text: string, extra: string } }) {
-      return { result: ctx.input.text, note: ctx.input.extra };
-    }
     `,
   );
 
@@ -368,4 +427,34 @@ Deno.test("card embed cycles are rejected", async () => {
     Error,
     "cycle",
   );
+});
+
+Deno.test("markdown deck runs", async () => {
+  // Use the markdown echo deck but disable the tool/action path by providing a
+  // stub model response directly for the root; validates markdown load + schemas.
+  const deckPath = path.resolve(
+    path.dirname(path.fromFileUrl(import.meta.url)),
+    "..",
+    "examples",
+    "markdown",
+    "echo.deck.md",
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "Echo: hi" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: { text: "hi" },
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(result, "Echo: hi");
 });
