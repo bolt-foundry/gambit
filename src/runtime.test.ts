@@ -428,3 +428,33 @@ Deno.test("card embed cycles are rejected", async () => {
     "cycle",
   );
 });
+
+Deno.test("markdown deck runs", async () => {
+  // Use the markdown echo deck but disable the tool/action path by providing a
+  // stub model response directly for the root; validates markdown load + schemas.
+  const deckPath = path.resolve(
+    path.dirname(path.fromFileUrl(import.meta.url)),
+    "..",
+    "examples",
+    "markdown",
+    "echo.deck.md",
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "Echo: hi" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: { text: "hi" },
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(result, "Echo: hi");
+});
