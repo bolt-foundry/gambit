@@ -370,6 +370,15 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       continue;
     }
 
+    if (result.finishReason === "tool_calls") {
+      throw new Error("Model requested tool_calls but provided none");
+    }
+
+    if (result.finishReason === "length" &&
+      (message.content === null || message.content === undefined)) {
+      throw new Error("Model stopped early (length) with no content");
+    }
+
     if (message.content !== null && message.content !== undefined) {
       messages.push(sanitizeMessage(message));
       if (ctx.onStateUpdate) {

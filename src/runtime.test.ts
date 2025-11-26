@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assertEquals, assertRejects, assert } from "@std/assert";
 import * as path from "@std/path";
 import { runDeck } from "./runtime.ts";
 import type { ModelMessage, ModelProvider } from "./types.ts";
@@ -114,6 +114,86 @@ Deno.test("module-level run export is rejected", async () => {
       modelProvider: dummyProvider,
       isRoot: true,
     }));
+});
+
+Deno.test("LLM deck fails fast when finishReason=tool_calls with no calls", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "llm.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: null },
+        finishReason: "tool_calls",
+      });
+    },
+  };
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+      }),
+    Error,
+    "tool_calls",
+  );
+});
+
+Deno.test("LLM deck fails fast when finishReason=length with no content", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "llm-length.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: null },
+        finishReason: "length",
+      });
+    },
+  };
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+      }),
+    Error,
+    "length",
+  );
 });
 
 Deno.test("isRoot inferred when omitted", async () => {
