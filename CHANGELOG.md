@@ -3,7 +3,7 @@
 ## Unreleased (v0.6)
 
 - Synthetic tools refreshed: `gambit_init`, `gambit_ping`, `gambit_complete` (function-style tools, underscore names).
-- Envelope simplification: init carries run/action IDs plus guardrails/model hints; ping carries elapsedMs, optional message/payload/meta; complete wraps payload/message/status/code/meta (default status 200 for success, 500 for handled errors unless overridden).
+- Envelope simplification: init carries run/action IDs plus guardrails/model hints; ping carries elapsedMs, HTTP-style status (102 keepalive, 103 when carrying info), optional message/payload/meta; complete wraps payload/message/status/code/meta (default status 200 for success, 500 for handled errors unless overridden).
 - Runtime behavior: child completions and handled errors emit `gambit_complete`; suspense handlers emit `gambit_ping`; roots stay conversational-only.
 - Docs/memos updated to reflect the minimal scope and naming.
 
