@@ -5,9 +5,8 @@ export default defineDeck({
   inputSchema: z.object({ waitMs: z.number().default(1500) }),
   outputSchema: z.string(),
   label: "demo_suspense",
+  async run(ctx: { input: { waitMs: number } }) {
+    await new Promise((resolve) => setTimeout(resolve, ctx.input.waitMs));
+    return `Done after ${ctx.input.waitMs}ms`;
+  },
 });
-
-export async function run(ctx: { input: { waitMs: number } }) {
-  await new Promise((resolve) => setTimeout(resolve, ctx.input.waitMs));
-  return `Done after ${ctx.input.waitMs}ms`;
-}
