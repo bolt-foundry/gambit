@@ -52,8 +52,8 @@ open http://localhost:8000/
 - **Handlers:** `handlers.onError` and `handlers.onPing` shape structured
   responses; synthetic orchestration tools use `gambit_init`, `gambit_ping`,
   `gambit_complete`. `ping` uses HTTP-style status (102 keepalive, 103 with
-  info); `complete` envelopes use HTTP-style status codes (200 by
-  default; handled errors usually 500 unless overridden).
+  info); `complete` envelopes use HTTP-style status codes (200 by default;
+  handled errors usually 500 unless overridden).
 - **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
