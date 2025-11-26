@@ -2,9 +2,9 @@ import * as path from "@std/path";
 import {
   DEFAULT_GUARDRAILS,
   DEFAULT_SUSPENSE_DELAY_MS,
-  TOOL_ERROR_EVENT,
-  TOOL_REFERENCE_CONTEXT,
-  TOOL_SUSPENSE_EVENT,
+  TOOL_COMPLETE,
+  TOOL_INIT,
+  TOOL_PING,
 } from "./constants.ts";
 import { loadDeck } from "./loader.ts";
 import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
@@ -241,6 +241,10 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       label: deck.label,
       description: deck.actions?.map((a) => a.description).join(" ") || "",
     },
+    guardrails: ctx.guardrails,
+    model: ctx.modelOverride ??
+      deck.modelParams?.model ??
+      ctx.defaultModel,
   };
 
   const refToolCallId = randomId("call");
@@ -258,14 +262,14 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           id: refToolCallId,
           type: "function",
           function: {
-            name: TOOL_REFERENCE_CONTEXT,
+            name: TOOL_INIT,
             arguments: JSON.stringify(refCtx),
           },
         }],
       }),
       sanitizeMessage({
         role: "tool",
-        name: TOOL_REFERENCE_CONTEXT,
+        name: TOOL_INIT,
         tool_call_id: refToolCallId,
         content: JSON.stringify(refCtx),
       }),
@@ -323,13 +327,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           depth,
           runId,
           parentActionCallId: actionCallId,
-      defaultModel: ctx.defaultModel,
-      modelOverride: ctx.modelOverride,
-      trace: ctx.trace,
-      onStreamText: ctx.onStreamText,
-      runStartedAt: start,
-      userFirst: ctx.userFirst,
-    });
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          trace: ctx.trace,
+          onStreamText: ctx.onStreamText,
+          runStartedAt: start,
+          userFirst: ctx.userFirst,
+        });
         messages.push({
           role: "assistant",
           content: null,
@@ -408,16 +412,41 @@ async function handleToolCall(
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
+  const source = {
+    deckPath: ctx.parentDeck.path,
+    actionName: action?.name ?? call.name,
+  };
   if (!action) {
     return {
       toolContent: JSON.stringify({
-        ok: false,
-        error: "unknown_action",
-        action: call.name,
+        runId: ctx.runId,
+        actionCallId: call.id,
+        parentActionCallId: ctx.parentActionCallId,
+        source,
+        status: 404,
+        message: "unknown action",
       }),
     };
   }
 
+  const baseComplete = (payload: {
+    status?: number;
+    payload?: unknown;
+    message?: string;
+    code?: string;
+    meta?: Record<string, unknown>;
+  }) =>
+    JSON.stringify({
+      runId: ctx.runId,
+      actionCallId: call.id,
+      parentActionCallId: ctx.parentActionCallId,
+      source,
+      status: payload.status,
+      payload: payload.payload,
+      message: payload.message,
+      code: payload.code,
+      meta: payload.meta,
+    });
   const extraMessages: ModelMessage[] = [];
   const started = performance.now();
 
@@ -472,24 +501,40 @@ async function handleToolCall(
           elapsedMs: Math.floor(elapsed),
         },
       });
-      const envelope = await runSuspenseHandler({
-        parentDeck: ctx.parentDeck,
-        action,
-        call,
-        runId: ctx.runId,
-        parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
-        modelProvider: ctx.modelProvider,
-        guardrails: ctx.guardrails,
-        depth: ctx.depth,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-        elapsedMs: performance.now() - started,
-        trace: ctx.trace,
-        stream: ctx.stream,
-        onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
-      });
+      let envelope: ModelMessage[] = [];
+      try {
+        envelope = await runSuspenseHandler({
+          parentDeck: ctx.parentDeck,
+          action,
+          call,
+          runId: ctx.runId,
+          parentActionCallId: ctx.parentActionCallId,
+          handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+          modelProvider: ctx.modelProvider,
+          guardrails: ctx.guardrails,
+          depth: ctx.depth,
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          elapsedMs: performance.now() - started,
+          trace: ctx.trace,
+          stream: ctx.stream,
+          onStreamText: ctx.onStreamText,
+          userFirst: ctx.userFirst,
+        });
+      } catch (err) {
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.error",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        envelope = [];
+      }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
@@ -536,32 +581,49 @@ async function handleToolCall(
     throw childResult.error;
   }
 
-  const toolContent = typeof childResult.result === "string"
-    ? childResult.result
-    : JSON.stringify(childResult.result);
+  const toolContent = baseComplete({
+    status: 200,
+    payload: childResult.result,
+  });
 
   if (!suspenseFired && ctx.parentDeck.handlers?.onSuspense?.path) {
     const elapsedFromStart = performance.now() - ctx.runStartedAt;
     if (elapsedFromStart >= suspenseDelay) {
       suspenseFired = true;
-      const envelope = await runSuspenseHandler({
-        parentDeck: ctx.parentDeck,
-        action,
-        call,
-        runId: ctx.runId,
-        parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
-        modelProvider: ctx.modelProvider,
-        guardrails: ctx.guardrails,
-        depth: ctx.depth,
-        defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-        elapsedMs: elapsedFromStart,
-        trace: ctx.trace,
-        stream: ctx.stream,
-        onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
-      });
+      let envelope: ModelMessage[] = [];
+      try {
+        envelope = await runSuspenseHandler({
+          parentDeck: ctx.parentDeck,
+          action,
+          call,
+          runId: ctx.runId,
+          parentActionCallId: ctx.parentActionCallId,
+          handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+          modelProvider: ctx.modelProvider,
+          guardrails: ctx.guardrails,
+          depth: ctx.depth,
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          elapsedMs: elapsedFromStart,
+          trace: ctx.trace,
+          stream: ctx.stream,
+          onStreamText: ctx.onStreamText,
+          userFirst: ctx.userFirst,
+        });
+      } catch (err) {
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.error",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        envelope = [];
+      }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
@@ -588,6 +650,28 @@ async function handleToolCall(
       }
     }
   }
+
+  const completeEventId = randomId("event");
+  extraMessages.push(
+    {
+      role: "assistant",
+      content: null,
+      tool_calls: [{
+        id: completeEventId,
+        type: "function",
+        function: {
+          name: TOOL_COMPLETE,
+          arguments: toolContent,
+        },
+      }],
+    },
+    {
+      role: "tool",
+      tool_call_id: completeEventId,
+      name: TOOL_COMPLETE,
+      content: toolContent,
+    },
+  );
 
   return { toolContent, extraMessages };
 }
@@ -621,7 +705,7 @@ async function runSuspenseHandler(args: {
       },
       childInput: args.call.args,
     };
-    const envelope = await runDeck({
+    const handlerOutput = await runDeck({
       path: args.handlerPath,
       input,
       modelProvider: args.modelProvider,
@@ -637,9 +721,40 @@ async function runSuspenseHandler(args: {
       onStreamText: args.onStreamText,
       userFirst: args.userFirst,
     });
-    const content = typeof envelope === "string"
-      ? envelope
-      : JSON.stringify(envelope);
+    const elapsedMs = Math.floor(args.elapsedMs);
+    let message: string | undefined;
+    let payload: unknown;
+    let meta: Record<string, unknown> | undefined;
+    if (typeof handlerOutput === "string") {
+      message = handlerOutput;
+    } else if (handlerOutput && typeof handlerOutput === "object") {
+      if (
+        typeof (handlerOutput as { message?: unknown }).message === "string"
+      ) {
+        message = (handlerOutput as { message?: string }).message;
+      }
+      payload = (handlerOutput as { payload?: unknown }).payload ??
+        handlerOutput;
+      if (
+        typeof (handlerOutput as { meta?: unknown }).meta === "object" &&
+        (handlerOutput as { meta?: unknown }).meta !== null
+      ) {
+        meta = (handlerOutput as { meta?: Record<string, unknown> }).meta;
+      }
+    }
+    const status = message || payload || meta ? 103 : 102;
+    const pingEnvelope = {
+      runId: args.runId,
+      actionCallId: args.call.id,
+      parentActionCallId: args.parentActionCallId,
+      source: { deckPath: args.parentDeck.path, actionName: args.action.name },
+      elapsedMs,
+      status,
+      message,
+      payload,
+      meta,
+    };
+    const content = JSON.stringify(pingEnvelope);
     const callId = randomId("event");
     return [
       {
@@ -649,19 +764,15 @@ async function runSuspenseHandler(args: {
           id: callId,
           type: "function",
           function: {
-            name: TOOL_SUSPENSE_EVENT,
-            arguments: JSON.stringify({
-              runId: args.runId,
-              actionCallId: args.call.id,
-              parentActionCallId: args.parentActionCallId,
-            }),
+            name: TOOL_PING,
+            arguments: content,
           },
         }],
       },
       {
         role: "tool",
         tool_call_id: callId,
-        name: TOOL_SUSPENSE_EVENT,
+        name: TOOL_PING,
         content,
       },
     ];
@@ -724,11 +835,35 @@ async function maybeHandleError(args: {
       userFirst: args.ctx.userFirst,
     });
 
-    const content = typeof handlerOutput === "string"
-      ? handlerOutput
-      : JSON.stringify(handlerOutput);
-    const callId = randomId("event");
+    const parsed = typeof handlerOutput === "object" && handlerOutput !== null
+      ? handlerOutput as Record<string, unknown>
+      : undefined;
+    const status = typeof parsed?.status === "number" ? parsed.status : 500;
+    const code = typeof parsed?.code === "string" ? parsed.code : undefined;
+    const messageOverride = typeof parsed?.message === "string"
+      ? parsed.message
+      : undefined;
+    const meta = (parsed?.meta && typeof parsed.meta === "object")
+      ? parsed.meta as Record<string, unknown>
+      : undefined;
+    const payload = parsed?.payload ?? handlerOutput;
 
+    const content = JSON.stringify({
+      runId: args.ctx.runId,
+      actionCallId: args.call.id,
+      parentActionCallId: args.ctx.parentActionCallId,
+      source: {
+        deckPath: args.ctx.parentDeck.path,
+        actionName: args.action.name,
+      },
+      status,
+      payload,
+      message: messageOverride ?? message,
+      code,
+      meta,
+    });
+
+    const callId = randomId("event");
     const extraMessages: ModelMessage[] = [
       {
         role: "assistant",
@@ -737,19 +872,15 @@ async function maybeHandleError(args: {
           id: callId,
           type: "function",
           function: {
-            name: TOOL_ERROR_EVENT,
-            arguments: JSON.stringify({
-              runId: args.ctx.runId,
-              actionCallId: args.call.id,
-              parentActionCallId: args.ctx.parentActionCallId,
-            }),
+            name: TOOL_COMPLETE,
+            arguments: content,
           },
         }],
       },
       {
         role: "tool",
         tool_call_id: callId,
-        name: TOOL_ERROR_EVENT,
+        name: TOOL_COMPLETE,
         content,
       },
     ];

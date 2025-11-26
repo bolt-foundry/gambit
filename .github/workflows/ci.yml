@@ -9,20 +9,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v1
-        with:
-          deno-version: v2.5.2
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
 
       - name: Lint
         run: deno lint
 
       - name: Format check
         run: deno fmt --check
+
+      - name: Type check
+        run: deno check --all mod.ts
 
       - name: Test
         run: deno test -A

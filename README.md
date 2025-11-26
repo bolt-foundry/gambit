@@ -49,8 +49,11 @@ open http://localhost:8000/
   decks; embedded cards can contribute actions to the parent deck.
 - **Actions:** Always delegate to another deck; tool definitions derive from the
   child deck’s input schema.
-- **Handlers:** `handlers.onError` and `handlers.onSuspense` allow formatting of
-  errors or long-running actions.
+- **Handlers:** `handlers.onError` and `handlers.onSuspense` shape structured
+  responses; synthetic orchestration tools use `gambit_init`, `gambit_ping`,
+  `gambit_complete`. `ping` uses HTTP-style status (102 keepalive, 103 with
+  info); `complete` envelopes use HTTP-style status codes (200 by default;
+  handled errors usually 500 unless overridden).
 - **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
@@ -64,6 +67,13 @@ open http://localhost:8000/
 - Tests: `deno test -A` (network-free; uses stub providers).
 - Env: `OPENROUTER_API_KEY` required for real runs; `OPENROUTER_BASE_URL`
   optional.
+
+## Docs
+
+- Changelog: [CHANGELOG.md](./CHANGELOG.md)
+- Docs index: [docs/README.md](./docs/README.md)
+- Memos: [docs/memos/README.md](./docs/memos/README.md)
+- Hourglass prompting: [docs/hourglass.md](./docs/hourglass.md)
 
 ## Status
 
