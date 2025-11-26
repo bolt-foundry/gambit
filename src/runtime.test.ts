@@ -86,6 +86,38 @@ Deno.test("compute deck can define run inline", async () => {
   assertEquals(result, "inline:hi");
 });
 
+Deno.test("isRoot inferred when omitted", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      label: "child",
+      run(ctx: { input: string }) {
+        return "child:" + ctx.input;
+      }
+    });
+    `,
+  );
+
+  // If caller omits isRoot and depth/parentActionCallId, we infer root and allow
+  // the default assistant-first flow to seed the init tool.
+  const result = await runDeck({
+    path: childPath,
+    input: "hi",
+    modelProvider: dummyProvider,
+  });
+
+  assertEquals(result, "child:hi");
+});
+
 Deno.test("LLM deck streams via onStreamText", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
