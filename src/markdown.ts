@@ -47,11 +47,7 @@ function normalizeActions(actions: unknown, basePath: string): ActionDefinition[
         name,
         path: path.resolve(path.dirname(basePath), p),
         description: typeof rec.description === "string" ? rec.description : undefined,
-        label: typeof rec.label === "string"
-          ? rec.label
-          : typeof rec.activity === "string"
-          ? rec.activity
-          : undefined,
+        label: typeof rec.label === "string" ? rec.label : undefined,
       };
     });
 }
@@ -160,17 +156,20 @@ export async function loadMarkdownDeck(
     cards.push(card);
   }
 
-  const errorHandler = deckMeta.errorHandler
+  const handlers = deckMeta.handlers
     ? {
-      ...deckMeta.errorHandler,
-      path: path.resolve(path.dirname(resolved), deckMeta.errorHandler.path),
-    }
-    : undefined;
-
-  const suspenseHandler = deckMeta.suspenseHandler
-    ? {
-      ...deckMeta.suspenseHandler,
-      path: path.resolve(path.dirname(resolved), deckMeta.suspenseHandler.path),
+      onError: deckMeta.handlers.onError
+        ? {
+          ...deckMeta.handlers.onError,
+          path: path.resolve(path.dirname(resolved), deckMeta.handlers.onError.path),
+        }
+        : undefined,
+      onPing: deckMeta.handlers.onPing
+        ? {
+          ...deckMeta.handlers.onPing,
+          path: path.resolve(path.dirname(resolved), deckMeta.handlers.onSuspense.path),
+        }
+        : undefined,
     }
     : undefined;
 
@@ -181,14 +180,12 @@ export async function loadMarkdownDeck(
     actions,
     cards,
     embeds,
-    label: deckMeta.label ?? (deckMeta as { activity?: string }).activity,
+    label: deckMeta.label,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     inputSchema,
     outputSchema,
-    errorHandler,
-    suspenseHandler,
-    suspenseDelayMs: deckMeta.suspenseDelayMs,
+    handlers,
   };
 }
 
