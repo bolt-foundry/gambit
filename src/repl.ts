@@ -130,7 +130,7 @@ function createLineReader() {
     reader.cancel().catch(() => {});
   };
 
-  const close = async () => {
+  const close = () => {
     cancel();
     try {
       reader.releaseLock();
