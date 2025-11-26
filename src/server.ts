@@ -10,6 +10,7 @@ type IncomingMessage =
     model?: string;
     modelForce?: string;
     trace?: boolean;
+    userFirst?: boolean;
   }
   | { type: "ping" };
 
@@ -29,6 +30,7 @@ export function startWebSocketSimulator(opts: {
   port?: number;
   verbose?: boolean;
   signal?: AbortSignal;
+  userFirst?: boolean;
 }): ReturnType<typeof Deno.serve> {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
@@ -103,6 +105,7 @@ export function startWebSocketSimulator(opts: {
         const tracer = forwardTrace || opts.verbose
           ? traceHandler(forwardTrace)
           : undefined;
+        const userFirst = msg.userFirst ?? opts.userFirst ?? false;
 
         try {
           const result = await runDeck({
@@ -114,6 +117,7 @@ export function startWebSocketSimulator(opts: {
             modelOverride: msg.modelForce ?? opts.modelForce,
             trace: tracer,
             stream,
+            userFirst,
             onStreamText: (chunk) =>
               safeSend({ type: "stream", chunk, runId: currentRunId }),
           });
