@@ -52,6 +52,8 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
     ...opts.guardrails,
   };
   const depth = opts.depth ?? 0;
+  const inferredRoot = opts.isRoot ??
+    (!opts.parentActionCallId && depth === 0);
   if (depth >= guardrails.maxDepth) {
     throw new Error(`Max depth ${guardrails.maxDepth} exceeded`);
   }
@@ -63,7 +65,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
     ...guardrails,
     ...deckGuardrails,
   };
-  const isRoot = Boolean(opts.isRoot);
+  const isRoot = Boolean(inferredRoot);
 
   ensureSchemaPresence(deck, isRoot);
 
@@ -97,7 +99,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
 
     if (!deck.executor) {
       throw new Error(
-        `Deck ${deck.path} has no model and no executor (run or execute export)`,
+        `Deck ${deck.path} has no model and no executor (add run or execute to the deck definition)`,
       );
     }
 
