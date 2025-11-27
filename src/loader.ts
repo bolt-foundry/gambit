@@ -29,8 +29,7 @@ function normalizeActions(
     name: a.name,
     path: basePath ? path.resolve(path.dirname(basePath), a.path) : a.path,
     description: a.description,
-    label: (a as { label?: string; activity?: string }).label ??
-      (a as { activity?: string }).activity,
+    label: (a as { label?: string }).label,
   }));
 }
 
@@ -68,7 +67,7 @@ async function loadCardInternal(
   if (!isCardDefinition(card)) {
     throw new Error(`Card at ${resolved} did not export a valid card definition`);
   }
-  const cardLabel = card.label ?? (card as { activity?: string }).activity;
+  const cardLabel = card.label;
 
   const embeds = card.embeds ?? [];
   const embeddedCards: LoadedCard[] = [];
@@ -79,7 +78,7 @@ async function loadCardInternal(
 
   const actions = normalizeActions(card.actions, resolved);
   actions.forEach(checkReserved);
-  const { label: _l, ...rest } = card as CardDefinition & { activity?: string };
+  const { label: _l, ...rest } = card as CardDefinition;
   return { ...rest, label: cardLabel, actions, path: resolved, cards: embeddedCards };
 }
 
@@ -110,7 +109,7 @@ export async function loadDeck(
     throw new Error(`Deck at ${resolved} did not export a valid deck definition`);
   }
 
-  const deckLabel = deck.label ?? (deck as { activity?: string }).activity;
+  const deckLabel = deck.label;
 
   const cardPaths = deck.embeds ?? [];
   const cards: LoadedCard[] = [];
@@ -150,27 +149,24 @@ export async function loadDeck(
     ? mod.execute
     : undefined;
 
-  const errorHandler = deck.errorHandler
+  const handlers = deck.handlers
     ? {
-      ...deck.errorHandler,
-      label: deck.errorHandler.label ??
-        (deck.errorHandler as { activity?: string }).activity,
-      path: path.resolve(path.dirname(resolved), deck.errorHandler.path),
+      onError: deck.handlers.onError
+        ? {
+          ...deck.handlers.onError,
+          path: path.resolve(path.dirname(resolved), deck.handlers.onError.path),
+        }
+        : undefined,
+      onPing: deck.handlers.onPing
+        ? {
+          ...deck.handlers.onPing,
+          path: path.resolve(path.dirname(resolved), deck.handlers.onSuspense.path),
+        }
+        : undefined,
     }
     : undefined;
 
-  const suspenseHandler = deck.suspenseHandler
-    ? {
-      ...deck.suspenseHandler,
-      label: deck.suspenseHandler.label ??
-        (deck.suspenseHandler as { activity?: string }).activity,
-      path: path.resolve(path.dirname(resolved), deck.suspenseHandler.path),
-    }
-    : undefined;
-
-  const { label: _l, activity: _a, ...rest } = deck as DeckDefinition & {
-    activity?: string;
-  };
+  const { label: _l, ...rest } = deck as DeckDefinition;
 
   return {
     ...rest,
@@ -181,8 +177,7 @@ export async function loadDeck(
     inputSchema,
     outputSchema,
     executor,
-    errorHandler,
-    suspenseHandler,
+    handlers,
   };
 }
 

@@ -399,8 +399,7 @@ async function handleToolCall(
   const extraMessages: ModelMessage[] = [];
   const started = performance.now();
 
-  const suspenseDelay = ctx.parentDeck.suspenseHandler?.delayMs ??
-    ctx.parentDeck.suspenseDelayMs ??
+  const suspenseDelay = ctx.parentDeck.handlers?.onPing?.delayMs ??
     DEFAULT_SUSPENSE_DELAY_MS;
 
   let suspenseTimer: number | undefined;
@@ -435,7 +434,7 @@ async function handleToolCall(
     }
   })();
 
-  if (ctx.parentDeck.suspenseHandler?.path) {
+  if (ctx.parentDeck.handlers?.onPing?.path) {
     suspenseTimer = setTimeout(async () => {
       suspenseFired = true;
       const elapsed = performance.now() - started;
@@ -446,7 +445,7 @@ async function handleToolCall(
         name: "suspense.fire",
         payload: {
           action: action.name,
-          handlerPath: ctx.parentDeck.suspenseHandler!.path,
+          handlerPath: ctx.parentDeck.handlers!.onPing!.path,
           elapsedMs: Math.floor(elapsed),
         },
       });
@@ -456,7 +455,7 @@ async function handleToolCall(
         call,
         runId: ctx.runId,
         parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.suspenseHandler!.path,
+        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
         modelProvider: ctx.modelProvider,
         guardrails: ctx.guardrails,
         depth: ctx.depth,
@@ -477,7 +476,7 @@ async function handleToolCall(
           name: "suspense.result",
           payload: {
             action: action.name,
-            handlerPath: ctx.parentDeck.suspenseHandler!.path,
+            handlerPath: ctx.parentDeck.handlers!.onPing!.path,
             elapsedMs: Math.floor(performance.now() - started),
             messages: envelope.length,
           },
@@ -517,7 +516,7 @@ async function handleToolCall(
     ? childResult.result
     : JSON.stringify(childResult.result);
 
-  if (!suspenseFired && ctx.parentDeck.suspenseHandler?.path) {
+  if (!suspenseFired && ctx.parentDeck.handlers?.onPing?.path) {
     const elapsedFromStart = performance.now() - ctx.runStartedAt;
     if (elapsedFromStart >= suspenseDelay) {
       suspenseFired = true;
@@ -527,7 +526,7 @@ async function handleToolCall(
         call,
         runId: ctx.runId,
         parentActionCallId: ctx.parentActionCallId,
-        handlerPath: ctx.parentDeck.suspenseHandler!.path,
+        handlerPath: ctx.parentDeck.handlers!.onSuspense!.path,
         modelProvider: ctx.modelProvider,
         guardrails: ctx.guardrails,
         depth: ctx.depth,
@@ -549,7 +548,7 @@ async function handleToolCall(
             name: "suspense.result",
             payload: {
               action: action.name,
-              handlerPath: ctx.parentDeck.suspenseHandler!.path,
+              handlerPath: ctx.parentDeck.handlers!.onPing!.path,
               elapsedMs: Math.floor(elapsedFromAction),
               messages: envelope.length,
               kind: "late",
@@ -657,7 +656,7 @@ async function maybeHandleError(args: {
   };
   action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
-  const handlerPath = args.ctx.parentDeck.errorHandler?.path;
+  const handlerPath = args.ctx.parentDeck.handlers?.onError?.path;
   if (!handlerPath) return undefined;
 
   const message = args.err instanceof Error ? args.err.message : String(args.err);
