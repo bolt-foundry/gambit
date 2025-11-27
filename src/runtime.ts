@@ -708,12 +708,14 @@ async function runSuspenseHandler(args: {
         meta = (handlerOutput as { meta?: Record<string, unknown> }).meta;
       }
     }
+    const status = message || payload || meta ? 103 : 102;
     const pingEnvelope = {
       runId: args.runId,
       actionCallId: args.call.id,
       parentActionCallId: args.parentActionCallId,
       source: { deckPath: args.parentDeck.path, actionName: args.action.name },
       elapsedMs,
+      status,
       message,
       payload,
       meta,
