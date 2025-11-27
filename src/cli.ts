@@ -104,11 +104,13 @@ async function main() {
       baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
     });
 
-    const tracerFns: Array<(event: import("./types.ts").TraceEvent) => void> = [];
+    const tracerFns: Array<(event: import("./types.ts").TraceEvent) => void> =
+      [];
     if (args.trace) tracerFns.push(makeJsonlTracer(args.trace));
     if (args.verbose) tracerFns.push(makeConsoleTracer());
     const tracer = tracerFns.length
-      ? (event: import("./types.ts").TraceEvent) => tracerFns.forEach((fn) => fn(event))
+      ? (event: import("./types.ts").TraceEvent) =>
+        tracerFns.forEach((fn) => fn(event))
       : undefined;
 
     if (args.cmd === "repl") {

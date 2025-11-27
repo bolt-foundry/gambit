@@ -32,7 +32,10 @@ async function maybeLoadSchema(
   return mod.default as ZodTypeAny;
 }
 
-function normalizeActions(actions: unknown, basePath: string): ActionDefinition[] {
+function normalizeActions(
+  actions: unknown,
+  basePath: string,
+): ActionDefinition[] {
   if (!Array.isArray(actions)) return [];
   return actions
     .filter((a) => a && typeof a === "object")
@@ -46,7 +49,9 @@ function normalizeActions(actions: unknown, basePath: string): ActionDefinition[
       return {
         name,
         path: path.resolve(path.dirname(basePath), p),
-        description: typeof rec.description === "string" ? rec.description : undefined,
+        description: typeof rec.description === "string"
+          ? rec.description
+          : undefined,
         label: typeof rec.label === "string" ? rec.label : undefined,
       };
     });
@@ -70,17 +75,25 @@ export async function loadMarkdownCard(
     ? path.resolve(path.dirname(parentPath), filePath)
     : path.resolve(filePath);
   const raw = await Deno.readTextFile(resolved);
-  const { attrs, body } = extract(raw) as { attrs: ParsedFrontmatter; body: string };
+  const { attrs, body } = extract(raw) as {
+    attrs: ParsedFrontmatter;
+    body: string;
+  };
   const candidate = attrs as unknown;
   if (isCardDefinition(candidate)) {
     // treat attrs as ts-shaped card
   }
-  const actions = normalizeActions((attrs as { actions?: unknown }).actions, resolved);
+  const actions = normalizeActions(
+    (attrs as { actions?: unknown }).actions,
+    resolved,
+  );
   actions.forEach((a) => {
     if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
-    if (!TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH) {
+    if (
+      !TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH
+    ) {
       throw new Error(
         `Action name ${a.name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
       );
@@ -119,7 +132,10 @@ export async function loadMarkdownDeck(
     ? path.resolve(path.dirname(parentPath), filePath)
     : path.resolve(filePath);
   const raw = await Deno.readTextFile(resolved);
-  const { attrs, body } = extract(raw) as { attrs: ParsedFrontmatter; body: string };
+  const { attrs, body } = extract(raw) as {
+    attrs: ParsedFrontmatter;
+    body: string;
+  };
   const deckAttrs = attrs as { deck?: DeckDefinition } & DeckDefinition;
   const deckMeta: Partial<DeckDefinition> =
     (deckAttrs.deck ?? deckAttrs) as DeckDefinition;
@@ -132,7 +148,9 @@ export async function loadMarkdownDeck(
     if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
-    if (!TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH) {
+    if (
+      !TOOL_NAME_PATTERN.test(a.name) || a.name.length > MAX_TOOL_NAME_LENGTH
+    ) {
       throw new Error(
         `Action name ${a.name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
       );
@@ -161,13 +179,19 @@ export async function loadMarkdownDeck(
       onError: deckMeta.handlers.onError
         ? {
           ...deckMeta.handlers.onError,
-          path: path.resolve(path.dirname(resolved), deckMeta.handlers.onError.path),
+          path: path.resolve(
+            path.dirname(resolved),
+            deckMeta.handlers.onError.path,
+          ),
         }
         : undefined,
       onPing: deckMeta.handlers.onPing
         ? {
           ...deckMeta.handlers.onPing,
-          path: path.resolve(path.dirname(resolved), deckMeta.handlers.onSuspense.path),
+          path: path.resolve(
+            path.dirname(resolved),
+            deckMeta.handlers.onPing.path,
+          ),
         }
         : undefined,
     }
