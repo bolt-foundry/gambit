@@ -81,40 +81,36 @@ export type ReferenceContext = {
     label?: Label;
     description?: string;
   };
+  guardrails?: Partial<Guardrails>;
+  model?: string;
 };
 
-export type ErrorEnvelope = {
-  kind: "error";
+export type PingEnvelope = {
   runId: string;
   actionCallId: string;
   parentActionCallId?: string;
-  message: string;
-  code?: string;
-  details?: JSONValue;
-  label?: Label;
   source: {
     deckPath: string;
     actionName: string;
   };
+  elapsedMs: number;
+  message?: string;
   payload?: JSONValue;
   meta?: Record<string, JSONValue>;
 };
 
-export type SuspenseEnvelope = {
-  kind: "suspense";
+export type CompleteEnvelope = {
   runId: string;
   actionCallId: string;
   parentActionCallId?: string;
-  message: string;
-  label?: Label;
   source: {
     deckPath: string;
     actionName: string;
   };
-  trigger: {
-    reason: "timeout";
-    elapsedMs: number;
-  };
+  status?: number;
+  payload?: JSONValue;
+  message?: string;
+  code?: string;
   meta?: Record<string, JSONValue>;
 };
 
