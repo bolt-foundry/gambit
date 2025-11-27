@@ -62,6 +62,9 @@ web_modules/
 # Output of 'npm pack'
 *.tgz
 
+# direnv/nix
+.direnv
+
 # Yarn Integrity file
 .yarn-integrity
 
