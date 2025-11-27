@@ -370,6 +370,17 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       continue;
     }
 
+    if (result.finishReason === "tool_calls") {
+      throw new Error("Model requested tool_calls but provided none");
+    }
+
+    if (
+      result.finishReason === "length" &&
+      (message.content === null || message.content === undefined)
+    ) {
+      throw new Error("Model stopped early (length) with no content");
+    }
+
     if (message.content !== null && message.content !== undefined) {
       messages.push(sanitizeMessage(message));
       if (ctx.onStateUpdate) {
@@ -589,8 +600,8 @@ async function handleToolCall(
   });
 
   if (!suspenseFired && ctx.parentDeck.handlers?.onPing?.path) {
-    const elapsedFromStart = performance.now() - ctx.runStartedAt;
-    if (elapsedFromStart >= suspenseDelay) {
+    const elapsedFromAction = performance.now() - started;
+    if (elapsedFromAction >= suspenseDelay) {
       suspenseFired = true;
       let envelope: ModelMessage[] = [];
       try {
