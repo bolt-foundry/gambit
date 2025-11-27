@@ -184,7 +184,7 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     parentActionCallId: ctx.parentActionCallId,
     depth: ctx.depth,
     input: ctx.input,
-    activity: deck.activity,
+    label: deck.label,
     spawnAndWait: async (opts) => {
       const childPath = path.isAbsolute(opts.path)
         ? opts.path
@@ -231,7 +231,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     action: {
       name: path.basename(deck.path),
       path: deck.path,
-      activity: deck.activity,
+    label: deck.label,
       description: deck.actions?.map((a) => a.description).join(" ") || "",
     },
   };
@@ -570,7 +570,7 @@ async function handleToolCall(
 
 async function runSuspenseHandler(args: {
   parentDeck: LoadedDeck;
-  action: { name: string; path: string; activity?: string; description?: string };
+  action: { name: string; path: string; label?: string; description?: string };
   call: { id: string; name: string; args: Record<string, unknown> };
   runId: string;
   parentActionCallId?: string;
@@ -588,7 +588,7 @@ async function runSuspenseHandler(args: {
   try {
     const input = {
       kind: "suspense",
-      activity: args.action.activity ?? args.parentDeck.activity,
+      label: args.action.label ?? args.parentDeck.label,
       source: { deckPath: args.parentDeck.path, actionName: args.action.name },
       trigger: { reason: "timeout" as const, elapsedMs: Math.floor(args.elapsedMs) },
       childInput: args.call.args,
@@ -655,7 +655,7 @@ async function maybeHandleError(args: {
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
   };
-  action: { name: string; path: string; activity?: string; description?: string };
+  action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
   const handlerPath = args.ctx.parentDeck.errorHandler?.path;
   if (!handlerPath) return undefined;
@@ -663,7 +663,7 @@ async function maybeHandleError(args: {
   const message = args.err instanceof Error ? args.err.message : String(args.err);
   const envelopeInput = {
     kind: "error",
-    activity: args.action.activity ?? args.ctx.parentDeck.activity,
+    label: args.action.label ?? args.ctx.parentDeck.label,
     source: { deckPath: args.ctx.parentDeck.path, actionName: args.action.name },
     error: { message },
     childInput: args.call.args,
