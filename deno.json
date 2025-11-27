@@ -5,6 +5,7 @@
     "lint": "deno lint",
     "test": "deno test --allow-all",
     "ci": "deno fmt --check && deno lint && deno test --allow-all",
+    "fix": "deno fmt && deno lint --fix && deno test --allow-all",
     "compile": "deno compile -A --output dist/gambit src/cli.ts"
   },
   "lint": {
