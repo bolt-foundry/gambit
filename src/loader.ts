@@ -29,7 +29,8 @@ function normalizeActions(
     name: a.name,
     path: basePath ? path.resolve(path.dirname(basePath), a.path) : a.path,
     description: a.description,
-    activity: a.activity,
+    label: (a as { label?: string; activity?: string }).label ??
+      (a as { activity?: string }).activity,
   }));
 }
 
@@ -67,6 +68,7 @@ async function loadCardInternal(
   if (!isCardDefinition(card)) {
     throw new Error(`Card at ${resolved} did not export a valid card definition`);
   }
+  const cardLabel = card.label ?? (card as { activity?: string }).activity;
 
   const embeds = card.embeds ?? [];
   const embeddedCards: LoadedCard[] = [];
@@ -77,7 +79,8 @@ async function loadCardInternal(
 
   const actions = normalizeActions(card.actions, resolved);
   actions.forEach(checkReserved);
-  return { ...card, actions, path: resolved, cards: embeddedCards };
+  const { label: _l, ...rest } = card as CardDefinition & { activity?: string };
+  return { ...rest, label: cardLabel, actions, path: resolved, cards: embeddedCards };
 }
 
 export async function loadCard(
@@ -106,6 +109,8 @@ export async function loadDeck(
   if (!isDeckDefinition(deck)) {
     throw new Error(`Deck at ${resolved} did not export a valid deck definition`);
   }
+
+  const deckLabel = deck.label ?? (deck as { activity?: string }).activity;
 
   const cardPaths = deck.embeds ?? [];
   const cards: LoadedCard[] = [];
@@ -148,6 +153,8 @@ export async function loadDeck(
   const errorHandler = deck.errorHandler
     ? {
       ...deck.errorHandler,
+      label: deck.errorHandler.label ??
+        (deck.errorHandler as { activity?: string }).activity,
       path: path.resolve(path.dirname(resolved), deck.errorHandler.path),
     }
     : undefined;
@@ -155,12 +162,19 @@ export async function loadDeck(
   const suspenseHandler = deck.suspenseHandler
     ? {
       ...deck.suspenseHandler,
+      label: deck.suspenseHandler.label ??
+        (deck.suspenseHandler as { activity?: string }).activity,
       path: path.resolve(path.dirname(resolved), deck.suspenseHandler.path),
     }
     : undefined;
 
+  const { label: _l, activity: _a, ...rest } = deck as DeckDefinition & {
+    activity?: string;
+  };
+
   return {
-    ...deck,
+    ...rest,
+    label: deckLabel,
     path: resolved,
     cards: allCards,
     actions,

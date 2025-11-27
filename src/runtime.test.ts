@@ -37,7 +37,10 @@ Deno.test("compute deck returns validated output", async () => {
     export default defineDeck({
       inputSchema: z.string(),
       outputSchema: z.string(),
-      activity: "compute_test",
+      label: "compute_test",
+      run(ctx: { input: string }) {
+        return "ok:" + ctx.input;
+      }
     });
     export async function run(ctx: { input: string }) {
       return "ok:" + ctx.input;
@@ -68,7 +71,7 @@ Deno.test("compute deck can define run inline", async () => {
     export default defineDeck({
       inputSchema: z.string(),
       outputSchema: z.string(),
-      activity: "inline_run",
+      label: "inline_run",
       run(ctx: { input: string }) {
         return "inline:" + ctx.input;
       }
