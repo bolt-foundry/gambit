@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,13 +23,13 @@ jobs:
         uses: DeterminateSystems/magic-nix-cache-action@v4
 
       - name: Lint
-        run: nix develop --command deno lint
+        run: deno lint
 
       - name: Format check
-        run: nix develop --command deno fmt --check
+        run: deno fmt --check
 
       - name: Type check
-        run: nix develop --command deno check --all mod.ts
+        run: deno check --all mod.ts
 
       - name: Test
-        run: nix develop --command deno test -A
+        run: deno test -A
