@@ -173,7 +173,7 @@ export async function loadMarkdownDeck(
   return {
     kind: "gambit.deck",
     path: resolved,
-    prompt: body.trim(),
+    body: body.trim(),
     actions,
     cards,
     embeds,
