@@ -47,14 +47,15 @@ jobs:
           deno-version: v2.5.2
 
       - name: Compile
-        working-directory: packages/gambit
-        run: deno compile -A --target ${{ matrix.target }} --output gambit${{ matrix.ext }} src/cli.ts
+        run: |
+          mkdir -p dist
+          deno compile -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: gambit-${{ matrix.target }}
-          path: packages/gambit/gambit${{ matrix.ext }}
+          path: dist/gambit${{ matrix.ext }}
           if-no-files-found: error
 
   release:
