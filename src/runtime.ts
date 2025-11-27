@@ -470,6 +470,18 @@ async function handleToolCall(
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
+        ctx.trace?.({
+          type: "event",
+          runId: ctx.runId,
+          actionCallId: call.id,
+          name: "suspense.result",
+          payload: {
+            action: action.name,
+            handlerPath: ctx.parentDeck.suspenseHandler!.path,
+            elapsedMs: Math.floor(performance.now() - started),
+            messages: envelope.length,
+          },
+        });
         if (toolMsg?.content) {
           if (ctx.onStreamText) {
             ctx.onStreamText(`${toolMsg.content}\n`);
@@ -478,18 +490,6 @@ async function handleToolCall(
           }
         }
       }
-      ctx.trace?.({
-        type: "event",
-        runId: ctx.runId,
-        actionCallId: call.id,
-        name: "suspense.result",
-        payload: {
-          action: action.name,
-          handlerPath: ctx.parentDeck.suspenseHandler!.path,
-          elapsedMs: Math.floor(performance.now() - started),
-          messages: envelope.length,
-        },
-      });
     }, suspenseDelay) as unknown as number;
   }
 
@@ -542,25 +542,25 @@ async function handleToolCall(
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
         if (toolMsg?.content) {
+          ctx.trace?.({
+            type: "event",
+            runId: ctx.runId,
+            actionCallId: call.id,
+            name: "suspense.result",
+            payload: {
+              action: action.name,
+              handlerPath: ctx.parentDeck.suspenseHandler!.path,
+              elapsedMs: Math.floor(elapsedFromAction),
+              messages: envelope.length,
+              kind: "late",
+            },
+          });
           if (ctx.onStreamText) {
             ctx.onStreamText(`${toolMsg.content}\n`);
           } else {
             console.log(toolMsg.content);
           }
         }
-        ctx.trace?.({
-          type: "event",
-          runId: ctx.runId,
-          actionCallId: call.id,
-          name: "suspense.result",
-          payload: {
-            action: action.name,
-            handlerPath: ctx.parentDeck.suspenseHandler!.path,
-            elapsedMs: Math.floor(elapsedFromStart),
-            messages: envelope.length,
-            kind: "late",
-          },
-        });
       }
     }
   }
