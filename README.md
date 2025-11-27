@@ -54,6 +54,8 @@ open http://localhost:8000/
 - **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
+- **Turn order:** The assistant speaks first by default (input is provided in
+  the reference context); use `--user-first` to send the user message first.
 
 ## Development
 

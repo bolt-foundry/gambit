@@ -43,6 +43,7 @@ type RunOptions = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
+  userFirst?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -90,6 +91,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         state: opts.state,
         onStateUpdate: opts.onStateUpdate,
         onStreamText: opts.onStreamText,
+        userFirst: opts.userFirst,
       });
     }
 
@@ -112,6 +114,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       trace: opts.trace,
       stream: opts.stream,
       onStreamText: opts.onStreamText,
+      userFirst: opts.userFirst,
     });
   } finally {
     if (shouldEmitRun) {
@@ -174,6 +177,7 @@ type RuntimeCtxBase = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
+  userFirst?: boolean;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -207,6 +211,7 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         state: ctx.state,
         onStateUpdate: ctx.onStateUpdate,
         onStreamText: ctx.onStreamText,
+        userFirst: ctx.userFirst,
       });
     },
     fail: (opts) => {
@@ -262,11 +267,16 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       tool_call_id: refToolCallId,
       content: JSON.stringify(refCtx),
     }),
-    sanitizeMessage({
-      role: "user",
-      content: formatInputForUser(input),
-    }),
   );
+
+  if (ctx.userFirst) {
+    messages.push(
+      sanitizeMessage({
+        role: "user",
+        content: formatInputForUser(input),
+      }),
+    );
+  }
 
   const tools = await buildToolDefs(deck);
   ctx.trace?.({ type: "deck.start", runId, deckPath: deck.path, actionCallId });
@@ -310,12 +320,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           depth,
           runId,
           parentActionCallId: actionCallId,
-          defaultModel: ctx.defaultModel,
-          modelOverride: ctx.modelOverride,
-          trace: ctx.trace,
-          onStreamText: ctx.onStreamText,
-          runStartedAt: start,
-        });
+      defaultModel: ctx.defaultModel,
+      modelOverride: ctx.modelOverride,
+      trace: ctx.trace,
+      onStreamText: ctx.onStreamText,
+      runStartedAt: start,
+      userFirst: ctx.userFirst,
+    });
         messages.push({
           role: "assistant",
           content: null,
@@ -390,6 +401,7 @@ async function handleToolCall(
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
     runStartedAt: number;
+    userFirst?: boolean;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -429,6 +441,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
+        userFirst: ctx.userFirst,
       });
       return { ok: true, result };
     } catch (err) {
@@ -472,6 +485,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
+        userFirst: ctx.userFirst,
       });
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
@@ -543,6 +557,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
+        userFirst: ctx.userFirst,
       });
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
@@ -590,6 +605,7 @@ async function runSuspenseHandler(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
+  userFirst?: boolean;
 }): Promise<ModelMessage[]> {
   try {
     const input = {
@@ -616,6 +632,7 @@ async function runSuspenseHandler(args: {
       trace: args.trace,
       stream: args.stream,
       onStreamText: args.onStreamText,
+      userFirst: args.userFirst,
     });
     const content = typeof envelope === "string"
       ? envelope
@@ -665,6 +682,7 @@ async function maybeHandleError(args: {
     trace?: (event: import("./types.ts").TraceEvent) => void;
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
+    userFirst?: boolean;
   };
   action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -700,6 +718,7 @@ async function maybeHandleError(args: {
       trace: args.ctx.trace,
       stream: args.ctx.stream,
       onStreamText: args.ctx.onStreamText,
+      userFirst: args.ctx.userFirst,
     });
 
     const content = typeof handlerOutput === "string"

@@ -10,6 +10,7 @@ export async function startRepl(opts: {
   modelProvider: import("./types.ts").ModelProvider;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   verbose?: boolean;
+  userFirst?: boolean;
 }) {
   const rl = createInterface({ input: stdin, output: stdout });
   const history: ModelMessage[] = [];
@@ -61,6 +62,7 @@ export async function startRepl(opts: {
           streamed = true;
           stdout.write(chunk);
         },
+        userFirst: opts.userFirst,
       });
       const formatted = formatResult(result);
       if (streamed) {
