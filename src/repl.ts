@@ -14,6 +14,7 @@ export async function startRepl(opts: {
 }) {
   const rl = createInterface({ input: stdin, output: stdout });
   const history: ModelMessage[] = [];
+  let state: import("./state.ts").SavedState | undefined;
 
   stdout.write("REPL started. Type 'exit' to quit.\n");
   // Gracefully handle Ctrl+C to exit without blowing up top-level await.
@@ -28,8 +29,9 @@ export async function startRepl(opts: {
     closed = true;
   });
 
-  const runOnce = async (line: string) => {
+  const runOnce = async (line: string, assistantFirst = false) => {
     history.push({ role: "user", content: line });
+    const userFirstFlag = assistantFirst ? false : true;
     try {
       let streamed = false;
       let prefixPrinted = false;
@@ -42,6 +44,10 @@ export async function startRepl(opts: {
         modelOverride: opts.modelForce,
         trace: opts.trace,
         stream: true,
+        state,
+        onStateUpdate: (s) => {
+          state = s;
+        },
         onStreamText: (chunk) => {
           if (!chunk) return;
           if (opts.verbose && !prefixPrinted) {
@@ -51,9 +57,9 @@ export async function startRepl(opts: {
           streamed = true;
           stdout.write(chunk);
         },
-        userFirst: opts.userFirst,
+        userFirst: userFirstFlag,
       });
-      const formatted = formatResult(result);
+    const formatted = formatResult(result);
       if (streamed) {
         if (!formatted.endsWith("\n")) stdout.write("\n");
       } else {
@@ -69,7 +75,7 @@ export async function startRepl(opts: {
   };
 
   if (!opts.userFirst) {
-    await runOnce("");
+    await runOnce("", true);
   }
 
   while (true) {
