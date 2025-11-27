@@ -724,7 +724,8 @@ async function maybeHandleError(args: {
 
 function buildSystemPrompt(deck: LoadedDeck): string {
   const parts: string[] = [];
-  if (deck.prompt) parts.push(deck.prompt.trim());
+  const prompt = deck.body ?? deck.prompt;
+  if (prompt) parts.push(prompt.trim());
   for (const card of deck.cards) {
     if (card.body) parts.push(card.body.trim());
   }

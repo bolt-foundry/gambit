@@ -2,7 +2,7 @@ import { defineDeck } from "../../mod.ts";
 import { z } from "zod";
 
 export default defineDeck({
-  prompt:
+  body:
     "You are a polite assistant. Call the slow_action to demonstrate suspense handling.",
   inputSchema: z.string().optional(),
   outputSchema: z.string(),
