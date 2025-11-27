@@ -13,8 +13,7 @@ export default defineDeck({
   inputSchema: InputSchema,
   outputSchema: z.string(),
   label: "demo_suspense",
+  run(ctx: { input: z.infer<typeof InputSchema> }) {
+    return `Still working after ${ctx.input.trigger.elapsedMs}ms...`;
+  },
 });
-
-export function run(ctx: { input: z.infer<typeof InputSchema> }) {
-  return `Still working after ${ctx.input.trigger.elapsedMs}ms...`;
-}
