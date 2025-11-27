@@ -55,6 +55,37 @@ Deno.test("compute deck returns validated output", async () => {
   assertEquals(result, "ok:hello");
 });
 
+Deno.test("compute deck can define run inline", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "inline.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      activity: "inline_run",
+      run(ctx: { input: string }) {
+        return "inline:" + ctx.input;
+      }
+    });
+    `,
+  );
+
+  const result = await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: dummyProvider,
+    isRoot: true,
+  });
+
+  assertEquals(result, "inline:hi");
+});
+
 Deno.test("LLM deck streams via onStreamText", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
