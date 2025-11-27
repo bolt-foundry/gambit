@@ -117,6 +117,185 @@ Deno.test("module-level run export is rejected", async () => {
   );
 });
 
+Deno.test("LLM deck fails fast when finishReason=tool_calls with no calls", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "llm.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: null },
+        finishReason: "tool_calls",
+      });
+    },
+  };
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+      }),
+    Error,
+    "tool_calls",
+  );
+});
+
+Deno.test("LLM deck fails fast when finishReason=length with no content", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "llm-length.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: null },
+        finishReason: "length",
+      });
+    },
+  };
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+      }),
+    Error,
+    "length",
+  );
+});
+
+Deno.test("late ping delay uses action start time", async () => {
+  const origNow = performance.now;
+  let now = 0;
+  // Simple controllable clock.
+  (performance as { now: () => number }).now = () => now;
+
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const handlerPath = await writeTempDeck(
+    dir,
+    "ping_handler.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.any(),
+      outputSchema: z.string(),
+      label: "ping_handler",
+      run() { return "ping"; }
+    });
+    `,
+  );
+
+  const childPath = await writeTempDeck(
+    dir,
+    "child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      label: "child",
+      run() { return "done"; }
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      handlers: { onPing: { path: "${handlerPath}", delayMs: 5 } },
+      actions: [{ name: "child", path: "${childPath}" }]
+    });
+    `,
+  );
+
+  const traces: import("./types.ts").TraceEvent[] = [];
+  let callCount = 0;
+  const provider: ModelProvider = {
+    chat() {
+      callCount++;
+      if (callCount === 1) {
+        // Simulate the run having started long ago (run start at now=0), but the
+        // action starts later at now=100.
+        now = 100;
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls",
+          toolCalls: [{ id: "t1", name: "child", args: {} }],
+        });
+      }
+      // Second pass returns final content.
+      return Promise.resolve({
+        message: { role: "assistant", content: "done" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  // Child completes immediately; advance slightly after action start.
+  now = 101;
+
+  await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  // No suspense.result trace should be emitted because action duration is < delay.
+  const hadPing = traces.some((t) =>
+    t.type === "event" && t.name === "suspense.result"
+  );
+  assertEquals(hadPing, false);
+
+  // restore clock
+  (performance as { now: () => number }).now = origNow;
+});
+
 Deno.test("isRoot inferred when omitted", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
