@@ -1,10 +1,16 @@
 import OpenAI from "@openai/openai";
-import type { JSONValue, ModelMessage, ModelProvider, ToolDefinition } from "../types.ts";
+import type {
+  JSONValue,
+  ModelMessage,
+  ModelProvider,
+  ToolDefinition,
+} from "../types.ts";
 
 function normalizeMessage(
   content: OpenAI.Chat.Completions.ChatCompletionMessage,
 ): ModelMessage {
-  const toolCalls = (content.tool_calls as ModelMessage["tool_calls"]) ?? undefined;
+  const toolCalls = (content.tool_calls as ModelMessage["tool_calls"]) ??
+    undefined;
   return {
     role: content.role as ModelMessage["role"],
     content: typeof content.content === "string"
@@ -59,7 +65,8 @@ export function createOpenRouterProvider(opts: {
           model: input.model,
           messages: input
             .messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-          tools: input.tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
+          tools: input
+            .tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
           tool_choice: "auto",
           stream: true,
         });
@@ -78,11 +85,14 @@ export function createOpenRouterProvider(opts: {
 
         for await (const chunk of stream) {
           chunkCount++;
-      const choice = chunk.choices[0];
-      const fr = choice.finish_reason;
-      if (fr === "stop" || fr === "tool_calls" || fr === "length" || fr === null) {
-        finishReason = fr ?? finishReason;
-      }
+          const choice = chunk.choices[0];
+          const fr = choice.finish_reason;
+          if (
+            fr === "stop" || fr === "tool_calls" || fr === "length" ||
+            fr === null
+          ) {
+            finishReason = fr ?? finishReason;
+          }
           const delta = choice.delta;
 
           if (typeof delta.content === "string") {
@@ -90,9 +100,10 @@ export function createOpenRouterProvider(opts: {
             input.onStreamText?.(delta.content);
             streamedChars += delta.content.length;
           } else if (Array.isArray(delta.content)) {
-            const chunkStr = (delta.content as Array<string | { text?: string }>)
-              .map((c) => (typeof c === "string" ? c : ""))
-              .join("");
+            const chunkStr =
+              (delta.content as Array<string | { text?: string }>)
+                .map((c) => (typeof c === "string" ? c : ""))
+                .join("");
             if (chunkStr) {
               contentParts.push(chunkStr);
               input.onStreamText?.(chunkStr);
@@ -156,7 +167,8 @@ export function createOpenRouterProvider(opts: {
         model: input.model,
         messages: input
           .messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        tools: input.tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
+        tools: input
+          .tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
         tool_choice: "auto",
         stream: false,
       });
@@ -172,8 +184,9 @@ export function createOpenRouterProvider(opts: {
 
       return {
         message: normalizedMessage,
-        finishReason: (choice.finish_reason as "stop" | "tool_calls" | "length" | null) ??
-          "stop",
+        finishReason:
+          (choice.finish_reason as "stop" | "tool_calls" | "length" | null) ??
+            "stop",
         toolCalls,
       };
     },

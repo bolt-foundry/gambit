@@ -53,7 +53,10 @@ export function mergeZodObjects(
   return z.object(mergedShape);
 }
 
-function asZodObject(schema: ZodTypeAny, label: string): ZodObject<ZodRawShape> {
+function asZodObject(
+  schema: ZodTypeAny,
+  label: string,
+): ZodObject<ZodRawShape> {
   if (schema instanceof z.ZodObject) return schema;
   throw new Error(`${label} must be a Zod object schema to merge fragments`);
 }

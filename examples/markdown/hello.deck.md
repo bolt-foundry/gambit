@@ -8,4 +8,5 @@ actions = [
 ]
 +++
 
-You are a concise assistant. Call `echo_md` to echo the user input and return the final answer.
+You are a concise assistant. Call `echo_md` to echo the user input and return
+the final answer.
