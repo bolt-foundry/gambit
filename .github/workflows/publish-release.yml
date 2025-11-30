@@ -1,4 +1,4 @@
-name: release-binaries
+name: publish-release
 
 on:
   push:
@@ -92,3 +92,50 @@ jobs:
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish_jsr:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Use the triggering commit so manual runs don't fail before the tag exists
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Run CI tasks
+        run: deno task ci
+
+      - name: Align version with tag
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          VERSION="${TAG#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Version could not be derived from tag" >&2
+            exit 1
+          fi
+          jq --arg v "$VERSION" '.version = $v' deno.json > deno.json.tmp
+          mv deno.json.tmp deno.json
+
+      - name: Publish (dry run)
+        run: deno publish --dry-run
+
+      - name: Publish to JSR
+        env:
+          DENO_AUTH_TOKEN: ${{ secrets.DENO_AUTH_TOKEN }}
+        run: deno publish
