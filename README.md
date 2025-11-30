@@ -4,6 +4,16 @@ Gambit is a toolkit for building multi-step LLM “decks” that mix model calls
 compute, and structured tool calls. It aims to make agent-style workflows
 predictable, testable, and easy to ship.
 
+## Quickstart
+
+- Full 15-minute path: `docs/quickstart.md`.
+- Fastest sanity check:
+  ```sh
+  export OPENROUTER_API_KEY=sk-or-...
+  ./bin/gambit run examples/hello_world/root.deck.ts --input '"hi"'
+  ```
+  Expect `Echo: hi`.
+
 ## Goals
 
 - **Composable decks:** Author actions as small, typed decks that call each
@@ -22,23 +32,6 @@ predictable, testable, and easy to ship.
   and tool call support; plug in alternatives.
 - **Testability:** Deterministic unit tests for orchestration without network;
   focus on validated inputs/outputs.
-
-## Quick start
-
-```sh
-# set your model provider key
-export OPENROUTER_API_KEY=...
-
-# run an example
-deno run -A src/cli.ts run examples/hello_world/root.deck.ts --input '"hi"'
-
-# REPL with streaming
-deno run -A src/cli.ts repl examples/suspense/root.deck.ts --verbose --stream
-
-# WebSocket simulator UI
-deno run -A src/cli.ts serve examples/suspense/root.deck.ts --port 8000
-open http://localhost:8000/
-```
 
 ## Key concepts
 
@@ -60,6 +53,28 @@ open http://localhost:8000/
 - **Turn order:** The assistant speaks first by default (input is provided in
   the reference context); use `--user-first` to send the user message first.
 
+## Repo tour
+
+- `src/`: runtime and CLI
+- `examples/`: runnable decks (LLM + compute patterns)
+- `docs/`: guides, memos, and quickstart
+- `bin/`: entrypoint wrappers for the CLI
+
+## Common commands
+
+- `deno task fmt` — format
+- `deno task lint` — lint
+- `deno task test --allow-all` — unit tests (network-free)
+- `deno task ci` — fmt --check + lint + tests
+- `./bin/gambit --help` — CLI help
+
+## Examples
+
+- Browse `docs/examples.md` for a short description + command per example.
+- Quick picks:
+  - Hello world echo: `./bin/gambit run examples/hello_world/root.deck.ts --input '"hi"'`
+  - Suspense/streaming demo: `./bin/gambit serve examples/suspense/root.deck.ts --port 8000`
+
 ## Development
 
 - Tasks: `deno task fmt`, `deno task lint`, `deno task test`,
@@ -70,10 +85,11 @@ open http://localhost:8000/
 
 ## Docs
 
-- Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Docs index: [docs/README.md](./docs/README.md)
-- Memos: [docs/memos/README.md](./docs/memos/README.md)
+- Quickstart: [docs/quickstart.md](./docs/quickstart.md)
+- Examples: [docs/examples.md](./docs/examples.md)
 - Hourglass prompting: [docs/hourglass.md](./docs/hourglass.md)
+- Memos: [docs/memos/README.md](./docs/memos/README.md)
+- Changelog: [CHANGELOG.md](./CHANGELOG.md)
 
 ## Status
 
