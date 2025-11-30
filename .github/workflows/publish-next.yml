@@ -1,0 +1,40 @@
+name: publish-next
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  publish_next:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Run CI tasks
+        run: deno task ci
+
+      - name: Compute prerelease version
+        id: version
+        run: |
+          BASE=$(jq -r '.version' deno.json)
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TS=$(date -u +%Y%m%d%H%M%S)
+          echo "value=${BASE}-next.${SHORT_SHA}.${TS}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish (dry run)
+        run: deno publish --dry-run --set-version ${{ steps.version.outputs.value }}
+
+      - name: Publish to JSR (next)
+        env:
+          DENO_AUTH_TOKEN: ${{ secrets.DENO_AUTH_TOKEN }}
+        run: deno publish --set-version ${{ steps.version.outputs.value }}
