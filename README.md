@@ -35,6 +35,9 @@ deno run -A src/cli.ts run examples/hello_world/root.deck.ts --input '"hi"'
 # REPL with streaming
 deno run -A src/cli.ts repl examples/suspense/root.deck.ts --verbose --stream
 
+# REPL with an initial user turn
+deno run -A src/cli.ts repl examples/suspense/root.deck.ts --input '"hi"' --stream
+
 # WebSocket simulator UI
 deno run -A src/cli.ts serve examples/suspense/root.deck.ts --port 8000
 open http://localhost:8000/

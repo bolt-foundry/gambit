@@ -13,6 +13,7 @@ export async function startRepl(opts: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   verbose?: boolean;
   userFirst?: boolean;
+  initialInput?: unknown;
 }) {
   const lineReader = createLineReader();
   let state: SavedState | undefined;
@@ -27,7 +28,7 @@ export async function startRepl(opts: {
 
   write("REPL started. Type 'exit' to quit.\n");
 
-  const runOnce = async (line: string, assistantFirst = false) => {
+  const runOnce = async (line: unknown, assistantFirst = false) => {
     const userFirstFlag = assistantFirst ? false : true;
     try {
       let streamed = false;
@@ -68,8 +69,14 @@ export async function startRepl(opts: {
     }
   };
 
-  if (!opts.userFirst) {
+  const skipAssistantLead = opts.userFirst || opts.initialInput !== undefined;
+
+  if (!skipAssistantLead) {
     await runOnce("", true);
+  }
+
+  if (opts.initialInput !== undefined) {
+    await runOnce(opts.initialInput);
   }
 
   while (!closed) {
