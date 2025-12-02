@@ -1,5 +1,9 @@
 {
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+  "name": "@bolt-foundry/gambit",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "exports": "./mod.ts",
   "tasks": {
     "fmt": "deno fmt",
     "lint": "deno lint",
