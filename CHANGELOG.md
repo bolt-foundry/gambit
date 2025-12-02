@@ -14,6 +14,7 @@
 - Docs/memos updated to reflect the minimal scope and naming.
 - IO/host: REPL accepts `--input` to seed the first user turn (now implies
   user-first automatically).
+- IO/host: `--verbose` tracing now logs tool call arguments and results.
 
 ## v0.0
 
