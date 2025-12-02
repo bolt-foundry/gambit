@@ -12,6 +12,8 @@
 - Runtime behavior: child completions and handled errors emit `gambit_complete`;
   suspense handlers emit `gambit_ping`; roots stay conversational-only.
 - Docs/memos updated to reflect the minimal scope and naming.
+- IO/host: REPL accepts `--input` to seed the first user turn (now implies
+  user-first automatically).
 
 ## v0.0
 

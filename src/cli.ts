@@ -76,12 +76,12 @@ function parseCliArgs(argv: string[]): Args {
 function printUsage() {
   console.log(
     `Usage:
-  gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl [<deck.(ts|md)>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
+  gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose] [--user-first]
+  gambit repl [<deck.(ts|md)>] [--input <json|string>] [--model <id>] [--model-force <id>] [--verbose] [--user-first]
+  gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--user-first]
 
 Flags:
-  --input <json|string>   Input payload (run only)
+  --input <json|string>   Input payload (run) or initial user turn (repl; implies user-first)
   --model <id>            Default model id
   --model-force <id>      Override model id
   --trace <file>          Write trace events to file (JSONL)
@@ -164,6 +164,9 @@ async function main() {
         trace: tracer,
         verbose: args.verbose,
         userFirst: args.userFirst,
+        initialInput: args.input !== undefined
+          ? parseInput(args.input)
+          : undefined,
       });
       return;
     }
