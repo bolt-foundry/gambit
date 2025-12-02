@@ -55,4 +55,4 @@ jobs:
           '
 
       - name: Publish package
-        run: deno publish
+        run: deno publish --allow-dirty
