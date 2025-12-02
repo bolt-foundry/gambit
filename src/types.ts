@@ -222,6 +222,20 @@ export type TraceEvent =
     path: string;
   }
   | {
+    type: "tool.call";
+    runId: string;
+    actionCallId: string;
+    name: string;
+    args: JSONValue;
+  }
+  | {
+    type: "tool.result";
+    runId: string;
+    actionCallId: string;
+    name: string;
+    result: JSONValue;
+  }
+  | {
     type: "event";
     runId: string;
     actionCallId: string;

@@ -322,6 +322,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           name: call.name,
           path: call.name,
         });
+        ctx.trace?.({
+          type: "tool.call",
+          runId,
+          actionCallId: call.id,
+          name: call.name,
+          args: call.args,
+        });
         const toolResult = await handleToolCall(call, {
           parentDeck: deck,
           modelProvider,
@@ -335,6 +342,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           onStreamText: ctx.onStreamText,
           runStartedAt: start,
           userFirst: ctx.userFirst,
+        });
+        ctx.trace?.({
+          type: "tool.result",
+          runId,
+          actionCallId: call.id,
+          name: call.name,
+          result: toolResult.toolContent,
         });
         messages.push({
           role: "assistant",

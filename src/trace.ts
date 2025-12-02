@@ -61,6 +61,20 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         );
         break;
       }
+      case "tool.call":
+        console.log(
+          `[trace] tool.call runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} args=${
+            JSON.stringify(event.args)
+          }`,
+        );
+        break;
+      case "tool.result":
+        console.log(
+          `[trace] tool.result runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} result=${
+            JSON.stringify(event.result)
+          }`,
+        );
+        break;
       case "event":
         console.log(
           `[trace] event runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} payload=${
