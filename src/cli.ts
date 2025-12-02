@@ -23,10 +23,21 @@ type Args = {
   help?: boolean;
 };
 
-const DEFAULT_REPL_DECK = path.resolve(
-  path.dirname(path.fromFileUrl(import.meta.url)),
-  "decks/gambit-assistant.deck.md",
+const DEFAULT_REPL_DECK_URL = new URL(
+  "./decks/gambit-assistant.deck.md",
+  import.meta.url,
 );
+
+function resolveDefaultReplDeckPath(): string | null {
+  if (DEFAULT_REPL_DECK_URL.protocol !== "file:") {
+    console.error(
+      "Default REPL deck is unavailable when running from a remote URL. " +
+        "Pass a deck path (e.g. examples/hello_world/root.deck.ts) or run from a local checkout.",
+    );
+    return null;
+  }
+  return path.fromFileUrl(DEFAULT_REPL_DECK_URL);
+}
 
 function parseCliArgs(argv: string[]): Args {
   const parsed = parseArgs(argv, {
@@ -108,7 +119,7 @@ async function main() {
     }
 
     const deckPath = args.deckPath ??
-      (args.cmd === "repl" ? DEFAULT_REPL_DECK : "");
+      (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
 
     if (!deckPath) {
       printUsage();
