@@ -32,6 +32,12 @@ export OPENROUTER_API_KEY=...
 # run an example (from repo checkout)
 deno run -A src/cli.ts run examples/hello_world/root.deck.ts --input '"hi"'
 
+# run the object action example (TypeScript deck)
+deno run -A src/cli.ts run examples/object_action/root.deck.ts --input '"Jordan"'
+
+# markdown variant that emits an inner-dialog note instead of a JSON object
+deno run -A src/cli.ts run examples/object_action/root.deck.md --input '"Jordan"'
+
 # REPL with streaming
 deno run -A src/cli.ts repl examples/suspense/root.deck.ts --verbose --stream
 
