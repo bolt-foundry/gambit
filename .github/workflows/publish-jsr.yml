@@ -1,0 +1,58 @@
+name: Publish
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Lint
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check
+
+      - name: Type check
+        run: deno check --all mod.ts
+
+      - name: Test
+        run: deno test -A
+
+      - name: Set publish version
+        run: |
+          GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
+          export VERSION="0.0.0-main-${GIT_SHORT_HASH}"
+          echo "Publishing version ${VERSION}"
+          deno eval '
+            const version = Deno.env.get("VERSION");
+            if (!version) {
+              throw new Error("VERSION env var missing");
+            }
+            const path = "deno.json";
+            const data = JSON.parse(await Deno.readTextFile(path));
+            data.version = version;
+            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
+          '
+
+      - name: Publish package
+        run: deno publish
