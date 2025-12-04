@@ -72,7 +72,13 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   const validatedInput = validateInput(deck, opts.input, isRoot);
   const shouldEmitRun = opts.depth === undefined || opts.depth === 0;
   if (shouldEmitRun) {
-    opts.trace?.({ type: "run.start", runId });
+    opts.trace?.({
+      type: "run.start",
+      runId,
+      deckPath: deck.path,
+      input: validatedInput as unknown as import("./types.ts").JSONValue,
+      userFirst: opts.userFirst,
+    });
   }
   try {
     if (
@@ -255,6 +261,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     : [];
   const resumed = messages.length > 0;
   if (!resumed) {
+    ctx.trace?.({
+      type: "tool.call",
+      runId,
+      actionCallId: refToolCallId,
+      name: GAMBIT_TOOL_INIT,
+      args: refCtx as unknown as import("./types.ts").JSONValue,
+    });
     messages.push(
       sanitizeMessage({ role: "system", content: systemPrompt }),
       sanitizeMessage({
@@ -276,6 +289,13 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         content: JSON.stringify(refCtx),
       }),
     );
+    ctx.trace?.({
+      type: "tool.result",
+      runId,
+      actionCallId: refToolCallId,
+      name: GAMBIT_TOOL_INIT,
+      result: refCtx as unknown as import("./types.ts").JSONValue,
+    });
   }
 
   if (ctx.userFirst) {
@@ -285,6 +305,20 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         content: formatInputForUser(input),
       }),
     );
+  }
+
+  if (!resumed) {
+    const initSnapshot = messages.map((m) => sanitizeMessage(m));
+    ctx.trace?.({
+      type: "event",
+      runId,
+      actionCallId,
+      name: "gambit_init",
+      payload: {
+        reference: refCtx,
+        messages: initSnapshot,
+      } as unknown as import("./types.ts").JSONValue,
+    });
   }
 
   const tools = await buildToolDefs(deck);

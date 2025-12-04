@@ -21,7 +21,17 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
     switch (event.type) {
       case "run.start":
         started.set(event.runId, now());
-        console.log(`[trace] run.start runId=${event.runId}`);
+        console.log(
+          `[trace] run.start runId=${event.runId}${
+            event.deckPath ? ` deck=${event.deckPath}` : ""
+          }${
+            event.userFirst !== undefined ? ` userFirst=${event.userFirst}` : ""
+          }${
+            event.input !== undefined
+              ? ` input=${JSON.stringify(event.input)}`
+              : ""
+          }`,
+        );
         break;
       case "run.end": {
         const start = started.get(event.runId);

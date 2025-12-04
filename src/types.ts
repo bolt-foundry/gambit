@@ -193,7 +193,13 @@ export type ToolCallResult = {
 };
 
 export type TraceEvent =
-  | { type: "run.start"; runId: string }
+  | {
+    type: "run.start";
+    runId: string;
+    deckPath?: string;
+    input?: JSONValue;
+    userFirst?: boolean;
+  }
   | { type: "run.end"; runId: string }
   | {
     type: "deck.start";
