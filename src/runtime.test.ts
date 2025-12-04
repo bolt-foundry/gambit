@@ -471,7 +471,10 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
   const initCall = traces.find((t) =>
     t.type === "tool.call" && t.name === "gambit_init"
   ) as Extract<TraceEvent, { type: "tool.call" }>;
-  assertEquals(initCall.args && (initCall.args as { input?: unknown }).input, input);
+  assertEquals(
+    initCall.args && (initCall.args as { input?: unknown }).input,
+    input,
+  );
 
   const initEvent = traces.find((t) =>
     t.type === "event" && t.name === "gambit_init"
