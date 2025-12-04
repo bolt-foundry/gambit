@@ -313,6 +313,15 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       onStreamText: ctx.onStreamText,
     });
     const message = result.message;
+    const computeState = (updated?: SavedState): SavedState => {
+      const base = updated ??
+        { runId, messages: messages.map(sanitizeMessage) };
+      const mergedMessages = base.messages && base.messages.length > 0
+        ? base.messages
+        : messages.map(sanitizeMessage);
+      return { ...base, runId, messages: mergedMessages };
+    };
+
     if (result.toolCalls && result.toolCalls.length > 0) {
       for (const call of result.toolCalls) {
         ctx.trace?.({
@@ -377,8 +386,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         });
       }
       if (ctx.onStateUpdate) {
-        const state = result.updatedState ??
-          { runId, messages: messages.map(sanitizeMessage) };
+        const state = computeState(result.updatedState);
         ctx.onStateUpdate(state);
       }
       continue;
@@ -398,8 +406,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     if (message.content !== null && message.content !== undefined) {
       messages.push(sanitizeMessage(message));
       if (ctx.onStateUpdate) {
-        const state = result.updatedState ??
-          { runId, messages: messages.map(sanitizeMessage) };
+        const state = computeState(result.updatedState);
         ctx.onStateUpdate(state);
       }
       const validated = validateOutput(deck, message.content, depth === 0);
