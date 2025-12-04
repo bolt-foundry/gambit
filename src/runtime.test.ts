@@ -2,7 +2,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { loadDeck } from "./loader.ts";
 import { runDeck } from "./runtime.ts";
-import type { ModelMessage, ModelProvider } from "./types.ts";
+import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
 
 const dummyProvider: ModelProvider = {
   chat() {
@@ -422,6 +422,65 @@ Deno.test("LLM deck defaults to assistant-first, userFirst opt-in", async () => 
   });
   const hasUserOptIn = lastMessages.some((m) => m.role === "user");
   assertEquals(hasUserOptIn, true);
+});
+
+Deno.test("run.start traces input and gambit_init payload", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "trace-init.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ question: z.string() }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const traces: TraceEvent[] = [];
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const input = { question: "hours?" };
+  await runDeck({
+    path: deckPath,
+    input,
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  const start = traces.find((t) => t.type === "run.start") as Extract<
+    TraceEvent,
+    { type: "run.start" }
+  >;
+  assertEquals(start.deckPath, deckPath);
+  assertEquals(start.input, input);
+
+  const initCall = traces.find((t) =>
+    t.type === "tool.call" && t.name === "gambit_init"
+  ) as Extract<TraceEvent, { type: "tool.call" }>;
+  assertEquals(initCall.args && (initCall.args as { input?: unknown }).input, input);
+
+  const initEvent = traces.find((t) =>
+    t.type === "event" && t.name === "gambit_init"
+  ) as Extract<TraceEvent, { type: "event" }>;
+  const payload = initEvent.payload as
+    | { reference?: { input?: unknown }; messages?: unknown[] }
+    | undefined;
+  assertEquals(payload?.reference?.input, input);
+  assertEquals(Array.isArray(payload?.messages), true);
 });
 
 Deno.test("non-root missing schemas fails load", async () => {
