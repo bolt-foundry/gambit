@@ -10,7 +10,8 @@
     "jsr:@std/toml@^1.0.3": "1.0.11",
     "jsr:@std/yaml@^1.0.5": "1.0.10",
     "npm:@openai/codex@0.63.0": "0.63.0",
-    "npm:@openai/codex@latest": "0.61.0",
+    "npm:@openai/codex@0.64.0": "0.64.0",
+    "npm:@openai/codex@latest": "0.64.0",
     "npm:@types/node@*": "24.2.0",
     "npm:openai@^4.78.1": "4.104.0_zod@3.25.76",
     "npm:zod-to-json-schema@^3.23.0": "3.25.0_zod@3.25.76",
@@ -56,12 +57,12 @@
     }
   },
   "npm": {
-    "@openai/codex@0.61.0": {
-      "integrity": "sha512-+pcwx8j49K6vNPOey3YURE2T9J4oc4fJj1Bj+X5SKemXA/SfzEUpakCJwwsMqXZ6mPxtNDm//V5q0JWczOSQ5w==",
-      "bin": true
-    },
     "@openai/codex@0.63.0": {
       "integrity": "sha512-PyE6WdF4tLLtrtFkj4RsCV6TD6W42G1lCyT5vIHQSZNxgfbXJdXYjwW3TepjoCraJGtXhxwjcPILksBUn34s1g==",
+      "bin": true
+    },
+    "@openai/codex@0.64.0": {
+      "integrity": "sha512-mO3CJiH9eoQRxRQrlBxht4SM5qYaqjToWxidEFDVa+et1ZdQpt7X3XbNIRdSohorU78E50u864MIwB32Hj3gRQ==",
       "bin": true
     },
     "@types/node-fetch@2.6.13": {

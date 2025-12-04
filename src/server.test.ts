@@ -93,3 +93,105 @@ Deno.test("websocket simulator streams responses", async () => {
   assertEquals(types.includes("ready"), true);
   assertEquals(types.includes("result"), true);
 });
+
+Deno.test("websocket simulator preserves state and user input", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "stateful.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const calls: Array<{
+    messages: import("./types.ts").ModelMessage[];
+    state?: import("./state.ts").SavedState;
+  }> = [];
+
+  const provider: ModelProvider = {
+    chat(input) {
+      calls.push({ messages: input.messages, state: input.state });
+      const lastUser = [...input.messages].reverse().find((m) =>
+        m.role === "user"
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: lastUser?.content ?? "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
+  const done = new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), 4000);
+    let sentFirst = false;
+    let sentSecond = false;
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data as string) as { type?: string };
+      if (msg.type === "ready" && !sentFirst) {
+        sentFirst = true;
+        ws.send(JSON.stringify({ type: "run", input: "hello", userFirst: true }));
+        return;
+      }
+      if (msg.type === "result" && sentFirst && !sentSecond) {
+        sentSecond = true;
+        ws.send(JSON.stringify({ type: "run", input: "again", userFirst: true }));
+        return;
+      }
+      if (msg.type === "result" && sentSecond) {
+        clearTimeout(timer);
+        ws.close();
+        resolve();
+      }
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("ws error"));
+    };
+  });
+
+  await done;
+  await server.shutdown();
+  await server.finished;
+
+  assertEquals(calls.length, 2);
+
+  const initMsg = calls[0].messages.find((m) =>
+    m.tool_calls?.some((t) => t.function.name === "gambit_init")
+  );
+  if (!initMsg || !initMsg.tool_calls?.length) {
+    throw new Error("missing gambit_init call");
+  }
+  const initArgs = JSON.parse(initMsg.tool_calls[0].function.arguments) as {
+    input?: unknown;
+    runId?: string;
+  };
+  assertEquals(initArgs.input, "hello");
+  const runId = initArgs.runId;
+  if (!runId) throw new Error("missing runId in gambit_init");
+
+  const secondStateRunId = calls[1].state?.runId;
+  assertEquals(secondStateRunId, runId);
+
+  const lastUser = [...calls[1].messages].reverse().find((m) =>
+    m.role === "user"
+  );
+  assertEquals(lastUser?.content, "again");
+});

@@ -1,5 +1,6 @@
 import { runDeck } from "./runtime.ts";
 import { makeConsoleTracer } from "./trace.ts";
+import type { SavedState } from "./state.ts";
 import type { ModelProvider, TraceEvent } from "./types.ts";
 
 type IncomingMessage =
@@ -58,6 +59,7 @@ export function startWebSocketSimulator(opts: {
 
       let running = false;
       let currentRunId: string | undefined;
+      let savedState: SavedState | undefined;
 
       const safeSend = (payload: OutgoingMessage) => {
         try {
@@ -105,7 +107,9 @@ export function startWebSocketSimulator(opts: {
         const tracer = forwardTrace || opts.verbose
           ? traceHandler(forwardTrace)
           : undefined;
-        const userFirst = msg.userFirst ?? opts.userFirst ?? false;
+        const userFirst = msg.userFirst ??
+          opts.userFirst ??
+          Boolean(savedState);
 
         try {
           const result = await runDeck({
@@ -117,6 +121,10 @@ export function startWebSocketSimulator(opts: {
             modelOverride: msg.modelForce ?? opts.modelForce,
             trace: tracer,
             stream,
+            state: savedState,
+            onStateUpdate: (state) => {
+              savedState = state;
+            },
             userFirst,
             onStreamText: (chunk) =>
               safeSend({ type: "stream", chunk, runId: currentRunId }),
