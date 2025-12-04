@@ -147,12 +147,16 @@ Deno.test("websocket simulator preserves state and user input", async () => {
       const msg = JSON.parse(ev.data as string) as { type?: string };
       if (msg.type === "ready" && !sentFirst) {
         sentFirst = true;
-        ws.send(JSON.stringify({ type: "run", input: "hello", userFirst: true }));
+        ws.send(
+          JSON.stringify({ type: "run", input: "hello", userFirst: true }),
+        );
         return;
       }
       if (msg.type === "result" && sentFirst && !sentSecond) {
         sentSecond = true;
-        ws.send(JSON.stringify({ type: "run", input: "again", userFirst: true }));
+        ws.send(
+          JSON.stringify({ type: "run", input: "again", userFirst: true }),
+        );
         return;
       }
       if (msg.type === "result" && sentSecond) {
