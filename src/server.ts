@@ -488,6 +488,13 @@ function simulatorHtml(deckPath: string): string {
           break;
         case "trace": {
           const ev = msg.event || {};
+          if (ev.type === "model.call") {
+            currentAssistant = null;
+            logAssistant = null;
+            suspenseBubble = null;
+            logSuspense = null;
+            streamMode = "assistant";
+          }
           const summary = summarizeTrace(ev);
           recordTraceParent(ev);
           const depth = traceDepth(ev);
