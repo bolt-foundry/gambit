@@ -7,6 +7,7 @@ import {
 } from "./constants.ts";
 import { isCardDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
+import { mergeZodObjects } from "./schema.ts";
 import type {
   ActionDefinition,
   DeckDefinition,
@@ -67,13 +68,30 @@ function extractEmbedsFromBody(body: string): string[] {
   return embeds;
 }
 
+function stripEmbedMarkers(body: string, embeds: string[]): string {
+  let cleaned = body;
+  for (const embed of embeds) {
+    const escaped = embed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)`, "g");
+    cleaned = cleaned.replace(pattern, "");
+  }
+  return cleaned;
+}
+
 export async function loadMarkdownCard(
   filePath: string,
   parentPath?: string,
+  stack: string[] = [],
 ): Promise<LoadedCard> {
   const resolved = parentPath
     ? path.resolve(path.dirname(parentPath), filePath)
     : path.resolve(filePath);
+  if (stack.includes(resolved)) {
+    throw new Error(
+      `Card/embed cycle detected: ${[...stack, resolved].join(" -> ")}`,
+    );
+  }
+  const nextStack = [...stack, resolved];
   const raw = await Deno.readTextFile(resolved);
   const { attrs, body } = extract(raw) as {
     attrs: ParsedFrontmatter;
@@ -82,6 +100,11 @@ export async function loadMarkdownCard(
   const candidate = attrs as unknown;
   if (isCardDefinition(candidate)) {
     // treat attrs as ts-shaped card
+  }
+  if ((candidate as { handlers?: unknown }).handlers) {
+    throw new Error(
+      `Card at ${resolved} cannot declare handlers (deck-only)`,
+    );
   }
   const actions = normalizeActions(
     (attrs as { actions?: unknown }).actions,
@@ -107,18 +130,26 @@ export async function loadMarkdownCard(
     (attrs as { outputSchema?: unknown }).outputSchema,
     resolved,
   );
-  const embeds = extractEmbedsFromBody(body).concat(
+  const inlineEmbeds = extractEmbedsFromBody(body);
+  const embeds = inlineEmbeds.concat(
     Array.isArray((attrs as { embeds?: unknown }).embeds)
       ? (attrs as { embeds?: string[] }).embeds ?? []
       : [],
   );
+  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
+  const embeddedCards: LoadedCard[] = [];
+  for (const embed of embeds) {
+    const card = await loadCard(embed, resolved, nextStack);
+    embeddedCards.push(card);
+  }
 
   return {
     kind: "gambit.card",
     path: resolved,
-    body: body.trim(),
+    body: cleanedBody.trim(),
     actions,
     embeds,
+    cards: embeddedCards,
     inputFragment,
     outputFragment,
   };
@@ -157,7 +188,8 @@ export async function loadMarkdownDeck(
     }
   });
 
-  const embeds = extractEmbedsFromBody(body).concat(deckMeta.embeds ?? []);
+  const inlineEmbeds = extractEmbedsFromBody(body);
+  const embeds = inlineEmbeds.concat(deckMeta.embeds ?? []);
 
   const inputSchema = await maybeLoadSchema(
     (deckMeta as { inputSchema?: unknown }).inputSchema,
@@ -170,8 +202,33 @@ export async function loadMarkdownDeck(
 
   const cards: LoadedCard[] = [];
   for (const embed of embeds) {
-    const card = await loadCard(embed, resolved);
+    const card = await loadCard(embed, resolved, [resolved]);
     cards.push(card);
+  }
+  const allCards = flattenCards(cards);
+  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
+
+  const mergedActions: Record<string, ActionDefinition> = {};
+  for (const card of allCards) {
+    for (const action of card.actions ?? []) {
+      mergedActions[action.name] = action;
+    }
+  }
+  for (const action of actions) {
+    mergedActions[action.name] = action;
+  }
+
+  let mergedInputSchema = inputSchema;
+  let mergedOutputSchema = outputSchema;
+  for (const card of allCards) {
+    mergedInputSchema = mergeZodObjects(
+      mergedInputSchema,
+      card.inputFragment,
+    );
+    mergedOutputSchema = mergeZodObjects(
+      mergedOutputSchema,
+      card.outputFragment,
+    );
   }
 
   const handlers = deckMeta.handlers
@@ -200,19 +257,29 @@ export async function loadMarkdownDeck(
   return {
     kind: "gambit.deck",
     path: resolved,
-    body: body.trim(),
-    actions,
-    cards,
+    body: cleanedBody.trim(),
+    actions: Object.values(mergedActions),
+    cards: allCards,
     embeds,
     label: deckMeta.label,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
-    inputSchema,
-    outputSchema,
+    inputSchema: mergedInputSchema,
+    outputSchema: mergedOutputSchema,
     handlers,
   };
 }
 
 export function isMarkdownFile(filePath: string): boolean {
   return filePath.endsWith(".md");
+}
+
+function flattenCards(cards: LoadedCard[]): LoadedCard[] {
+  const flat: LoadedCard[] = [];
+  for (const card of cards) {
+    flat.push(card);
+    const nested = (card as { cards?: LoadedCard[] }).cards ?? [];
+    if (nested.length) flat.push(...flattenCards(nested));
+  }
+  return flat;
 }

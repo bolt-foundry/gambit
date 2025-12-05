@@ -1,7 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
+import { loadDeck } from "./loader.ts";
 import { runDeck } from "./runtime.ts";
-import type { ModelMessage, ModelProvider } from "./types.ts";
+import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
 
 const dummyProvider: ModelProvider = {
   chat() {
@@ -423,6 +424,68 @@ Deno.test("LLM deck defaults to assistant-first, userFirst opt-in", async () => 
   assertEquals(hasUserOptIn, true);
 });
 
+Deno.test("run.start traces input and gambit_init payload", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "trace-init.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ question: z.string() }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const traces: TraceEvent[] = [];
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const input = { question: "hours?" };
+  await runDeck({
+    path: deckPath,
+    input,
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  const start = traces.find((t) => t.type === "run.start") as Extract<
+    TraceEvent,
+    { type: "run.start" }
+  >;
+  assertEquals(start.deckPath, deckPath);
+  assertEquals(start.input, input);
+
+  const initCall = traces.find((t) =>
+    t.type === "tool.call" && t.name === "gambit_init"
+  ) as Extract<TraceEvent, { type: "tool.call" }>;
+  assertEquals(
+    initCall.args && (initCall.args as { input?: unknown }).input,
+    input,
+  );
+
+  const initEvent = traces.find((t) =>
+    t.type === "event" && t.name === "gambit_init"
+  ) as Extract<TraceEvent, { type: "event" }>;
+  const payload = initEvent.payload as
+    | { reference?: { input?: unknown }; messages?: unknown[] }
+    | undefined;
+  assertEquals(payload?.reference?.input, input);
+  assertEquals(Array.isArray(payload?.messages), true);
+});
+
 Deno.test("non-root missing schemas fails load", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -606,6 +669,336 @@ Deno.test("card embed cycles are rejected", async () => {
       }),
     Error,
     "cycle",
+  );
+});
+
+Deno.test("markdown deck merges actions from embedded cards", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  await writeTempDeck(
+    dir,
+    "child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ message: z.string() }),
+      outputSchema: z.string(),
+      run(ctx: { input: { message: string } }) {
+        return ctx.input.message;
+      }
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "nested.card.md"),
+    `
++++
+actions = [{ name = "nested_action", path = "./child.deck.ts" }]
++++
+
+Nested card body.
+`.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "root.card.md"),
+    `
++++
+embeds = ["./nested.card.md"]
+actions = [{ name = "card_action", path = "./child.deck.ts" }]
++++
+
+Root card body.
+`.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+embeds = ["./root.card.md"]
+actions = [{ name = "deck_action", path = "./child.deck.ts" }]
++++
+
+Deck body.
+`.trim(),
+  );
+
+  const deck = await loadDeck(deckPath);
+  const actionNames = deck.actions.map((a) => a.name).sort();
+
+  assertEquals(actionNames, ["card_action", "deck_action", "nested_action"]);
+  assertEquals(deck.cards.length, 2);
+});
+
+Deno.test("markdown deck strips inline embed markers from system prompt", async () => {
+  const dir = await Deno.makeTempDir();
+
+  await Deno.writeTextFile(
+    path.join(dir, "persona.card.md"),
+    `
++++
++++
+
+Persona content.
+`.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+modelParams = { model = "dummy-model" }
++++
+
+Deck intro before embed.
+
+![Persona](./persona.card.md)
+
+Deck outro after embed.
+`.trim(),
+  );
+
+  const seen: ModelMessage[][] = [];
+  const provider: ModelProvider = {
+    chat({ messages }) {
+      seen.push(messages);
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  const last = seen.at(-1);
+  const system = last?.find((m) => m.role === "system");
+  if (!system || typeof system.content !== "string") {
+    throw new Error("missing system message");
+  }
+
+  const content = system.content;
+  assertEquals(content.includes("![Persona](./persona.card.md)"), false);
+  assertEquals(content.includes("Deck intro before embed."), true);
+  assertEquals(content.includes("Deck outro after embed."), true);
+  assertEquals(content.includes("Persona content."), true);
+});
+
+Deno.test("markdown card embed cycles are rejected", async () => {
+  const dir = await Deno.makeTempDir();
+
+  await Deno.writeTextFile(
+    path.join(dir, "a.card.md"),
+    `
++++
+embeds = ["./b.card.md"]
++++
+
+A card body.
+`.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "b.card.md"),
+    `
++++
+embeds = ["./a.card.md"]
++++
+
+B card body.
+`.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+modelParams = { model = "dummy-model" }
+embeds = ["./a.card.md"]
++++
+
+Deck with cyclic cards.
+`.trim(),
+  );
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: dummyProvider,
+        isRoot: true,
+      }),
+    Error,
+    "cycle",
+  );
+});
+
+Deno.test("markdown card schema fragments merge into deck schemas", async () => {
+  const dir = await Deno.makeTempDir();
+
+  await Deno.writeTextFile(
+    path.join(dir, "fragments.card.md"),
+    `
++++
+inputSchema = "./input_fragment.zod.ts"
+outputSchema = "./output_fragment.zod.ts"
++++
+
+Fragments card body.
+`.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "input_fragment.zod.ts"),
+    `
+    import { z } from "zod";
+    export default z.object({ extra: z.string() });
+    `.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "output_fragment.zod.ts"),
+    `
+    import { z } from "zod";
+    export default z.object({ note: z.number() });
+    `.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+inputSchema = "./base_input.zod.ts"
+outputSchema = "./base_output.zod.ts"
+embeds = ["./fragments.card.md"]
++++
+
+Deck body.
+`.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "base_input.zod.ts"),
+    `
+    import { z } from "zod";
+    export default z.object({ text: z.string() });
+    `.trim(),
+  );
+
+  await Deno.writeTextFile(
+    path.join(dir, "base_output.zod.ts"),
+    `
+    import { z } from "zod";
+    export default z.object({ result: z.string() });
+    `.trim(),
+  );
+
+  const deck = await loadDeck(deckPath);
+  const inputShape = (deck.inputSchema as unknown as {
+    shape: Record<string, unknown>;
+  }).shape;
+  const outputShape = (deck.outputSchema as unknown as {
+    shape: Record<string, unknown>;
+  }).shape;
+
+  assertEquals(Object.keys(inputShape).sort(), ["extra", "text"]);
+  assertEquals(Object.keys(outputShape).sort(), ["note", "result"]);
+});
+
+Deno.test("cards cannot declare handlers (ts card)", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  await writeTempDeck(
+    dir,
+    "bad_handlers.card.ts",
+    `
+    import { defineCard } from "${modHref}";
+    export default defineCard({
+      handlers: { onPing: { path: "./noop.deck.ts" } }
+    });
+    `,
+  );
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "root.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      embeds: ["./bad_handlers.card.ts"],
+      modelParams: { model: "dummy-model" }
+    });
+    `,
+  );
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: dummyProvider,
+        isRoot: true,
+      }),
+    Error,
+    "handlers",
+  );
+});
+
+Deno.test("cards cannot declare handlers (markdown card)", async () => {
+  const dir = await Deno.makeTempDir();
+
+  await Deno.writeTextFile(
+    path.join(dir, "bad.card.md"),
+    `
++++
+handlers = { onPing = { path = "./noop.deck.ts" } }
++++
+
+Body.
+`.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+modelParams = { model = "dummy-model" }
+embeds = ["./bad.card.md"]
++++
+
+Deck.
+`.trim(),
+  );
+
+  await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: dummyProvider,
+        isRoot: true,
+      }),
+    Error,
+    "handlers",
   );
 });
 

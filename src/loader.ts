@@ -67,6 +67,7 @@ async function loadCardInternal(
       `Card/embed cycle detected: ${[...stack, resolved].join(" -> ")}`,
     );
   }
+  const nextStack = [...stack, resolved];
 
   const mod = await import(toFileUrl(resolved));
   const card = mod.default;
@@ -75,15 +76,15 @@ async function loadCardInternal(
       `Card at ${resolved} did not export a valid card definition`,
     );
   }
+  if ((card as { handlers?: unknown }).handlers) {
+    throw new Error(`Card at ${resolved} cannot declare handlers (deck-only)`);
+  }
   const cardLabel = card.label;
 
   const embeds = card.embeds ?? [];
   const embeddedCards: LoadedCard[] = [];
   for (const embed of embeds) {
-    const loaded = await loadCardInternal(embed, resolved, [
-      ...stack,
-      resolved,
-    ]);
+    const loaded = await loadCard(embed, resolved, nextStack);
     embeddedCards.push(loaded);
   }
 
@@ -102,11 +103,12 @@ async function loadCardInternal(
 export async function loadCard(
   cardPath: string,
   parentPath?: string,
+  stack: string[] = [],
 ): Promise<LoadedCard> {
   if (isMarkdownFile(cardPath)) {
-    return await loadMarkdownCard(cardPath, parentPath);
+    return await loadMarkdownCard(cardPath, parentPath, stack);
   }
-  return await loadCardInternal(cardPath, parentPath, []);
+  return await loadCardInternal(cardPath, parentPath, stack);
 }
 
 export async function loadDeck(
@@ -133,7 +135,7 @@ export async function loadDeck(
   const cardPaths = deck.embeds ?? [];
   const cards: LoadedCard[] = [];
   for (const cardPath of cardPaths) {
-    const loaded = await loadCardInternal(cardPath, resolved, [resolved]);
+    const loaded = await loadCard(cardPath, resolved, [resolved]);
     cards.push(loaded);
   }
 

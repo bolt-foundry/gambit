@@ -71,6 +71,9 @@ deno run -A jsr:@bolt-foundry/gambit/cli repl examples/suspense/root.deck.ts
 - **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
+- **Simulator state:** The WebSocket simulator keeps per-socket conversation
+  state; follow-up sends reuse the same runId/message history (so `gambit_init`
+  only fires on the first turn) until you refresh the page.
 - **Turn order:** The assistant speaks first by default (input is provided in
   the reference context); use `--user-first` to send the user message first.
 

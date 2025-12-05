@@ -1,5 +1,6 @@
 import { runDeck } from "./runtime.ts";
 import { makeConsoleTracer } from "./trace.ts";
+import type { SavedState } from "./state.ts";
 import type { ModelProvider, TraceEvent } from "./types.ts";
 
 type IncomingMessage =
@@ -58,6 +59,7 @@ export function startWebSocketSimulator(opts: {
 
       let running = false;
       let currentRunId: string | undefined;
+      let savedState: SavedState | undefined;
 
       const safeSend = (payload: OutgoingMessage) => {
         try {
@@ -105,7 +107,19 @@ export function startWebSocketSimulator(opts: {
         const tracer = forwardTrace || opts.verbose
           ? traceHandler(forwardTrace)
           : undefined;
-        const userFirst = msg.userFirst ?? opts.userFirst ?? false;
+        // Default to user-first once we have prior state so follow-up turns are
+        // treated as user messages even if the flag wasn't provided.
+        const userFirst = msg.userFirst ??
+          (opts.userFirst || Boolean(savedState));
+        if (opts.verbose) {
+          console.log(
+            `[sim] starting run runId=${
+              savedState?.runId ?? "(new)"
+            } messages=${
+              savedState?.messages?.length ?? 0
+            } userFirst=${userFirst} stream=${stream}`,
+          );
+        }
 
         try {
           const result = await runDeck({
@@ -117,6 +131,10 @@ export function startWebSocketSimulator(opts: {
             modelOverride: msg.modelForce ?? opts.modelForce,
             trace: tracer,
             stream,
+            state: savedState,
+            onStateUpdate: (state) => {
+              savedState = state;
+            },
             userFirst,
             onStreamText: (chunk) =>
               safeSend({ type: "stream", chunk, runId: currentRunId }),
@@ -182,12 +200,29 @@ function simulatorHtml(deckPath: string): string {
   <title>Gambit WebSocket Simulator</title>
   <style>
     body { font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: linear-gradient(135deg, #eaf2ff, #f7f9ff); color: #0f172a; }
-    .shell { max-width: 960px; margin: 24px auto; padding: 16px; }
+    .shell { max-width: 1080px; margin: 24px auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
     .card { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); padding: 16px; }
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     header h1 { margin: 0; font-size: 20px; }
     header .meta { font-size: 12px; color: #475569; }
-    .transcript { background: #f5f7fb; border-radius: 14px; padding: 12px; height: 420px; overflow-y: auto; border: 1px solid #e2e8f0; }
+    .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
+    .panel-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; color: #1f2937; margin-bottom: 6px; }
+    .transcript { background: #f5f7fb; border-radius: 14px; padding: 12px; height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; }
+    .events { background: #f8fafc; border-radius: 14px; padding: 0; height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; }
+    .event-row { display: grid; grid-template-columns: 96px 1fr auto; align-items: start; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
+    .event-row:last-child { border-bottom: none; }
+    .event-type { font-weight: 700; text-transform: uppercase; font-size: 11px; color: #0f172a; }
+    .event-type.assistant { color: #2563eb; }
+    .event-type.user { color: #0ea5e9; }
+    .event-type.trace { color: #475569; }
+    .event-type.error { color: #b91c1c; }
+    .event-type.system { color: #8a6d3b; }
+    .event-type.suspense { color: #8a6d3b; }
+    .event-summary { white-space: pre-wrap; color: #0f172a; }
+    .event-actions { display: flex; gap: 8px; align-items: center; }
+    .event-details { grid-column: 1 / -1; background: #eef2ff; border-radius: 10px; padding: 8px 10px; font-family: monospace; white-space: pre-wrap; margin: 0; border: 1px solid #cbd5e1; }
+    .event-toggle { border: none; background: #e2e8f0; color: #334155; padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 12px; }
+    .event-toggle:hover { background: #cbd5e1; }
     .row { display: flex; margin: 6px 0; }
     .row.user { justify-content: flex-end; }
     .row.assistant, .row.trace, .row.system, .row.error { justify-content: flex-start; }
@@ -221,7 +256,20 @@ function simulatorHtml(deckPath: string): string {
         </div>
         <div id="status">connecting...</div>
       </header>
-      <div id="transcript" class="transcript"></div>
+      <div class="layout">
+        <div>
+          <div class="panel-title">
+            <span>Conversation</span>
+          </div>
+          <div id="transcript" class="transcript"></div>
+        </div>
+        <div>
+          <div class="panel-title">
+            <span>Traces & Tools</span>
+          </div>
+          <div id="events" class="events"></div>
+        </div>
+      </div>
       <form id="composer">
         <textarea id="input" placeholder='Type input as text, or toggle JSON below.'></textarea>
         <div class="controls">
@@ -233,6 +281,7 @@ function simulatorHtml(deckPath: string): string {
   </div>
   <script>
     const transcript = document.getElementById("transcript");
+    const events = document.getElementById("events");
     const status = document.getElementById("status");
     const input = document.getElementById("input");
     const asJson = document.getElementById("asJson");
@@ -241,15 +290,17 @@ function simulatorHtml(deckPath: string): string {
     let currentAssistant = null;
     let suspenseBubble = null;
     let streamMode = "assistant";
+    let logAssistant = null;
+    let logSuspense = null;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
 
-    function scrollBottom() {
-      transcript.scrollTop = transcript.scrollHeight;
+    function scrollBottom(el) {
+      el.scrollTop = el.scrollHeight;
     }
 
-    function addBubble(role, text, opts = {}) {
+    function addBubble(target, role, text, opts = {}) {
       const row = document.createElement("div");
       row.className = "row " + (opts.middle ? "meta" : role);
       const bubble = document.createElement("div");
@@ -271,9 +322,53 @@ function simulatorHtml(deckPath: string): string {
         });
       }
       row.appendChild(bubble);
-      transcript.appendChild(row);
-      scrollBottom();
+      target.appendChild(row);
+      scrollBottom(target);
       return bubble;
+    }
+
+    function addEvent(role, text, opts = {}) {
+      const row = document.createElement("div");
+      row.className = "event-row";
+
+      const type = document.createElement("div");
+      type.className = "event-type " + role;
+      type.textContent = role;
+
+      const summary = document.createElement("div");
+      summary.className = "event-summary";
+      summary.textContent = text;
+
+      row.appendChild(type);
+      row.appendChild(summary);
+
+      if (opts.details) {
+        const actions = document.createElement("div");
+        actions.className = "event-actions";
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "event-toggle";
+        toggle.textContent = "Details";
+        const details = document.createElement("pre");
+        details.className = "event-details";
+        details.textContent = opts.details;
+        details.hidden = true;
+        toggle.addEventListener("click", () => {
+          details.hidden = !details.hidden;
+          toggle.textContent = details.hidden ? "Details" : "Hide";
+        });
+        actions.appendChild(toggle);
+        row.appendChild(actions);
+        row.appendChild(details);
+      } else {
+        const spacer = document.createElement("div");
+        spacer.className = "event-actions";
+        row.appendChild(spacer);
+      }
+
+      events.appendChild(row);
+      scrollBottom(events);
+      return summary;
     }
 
     function formatPayload(p) {
@@ -285,7 +380,7 @@ function simulatorHtml(deckPath: string): string {
       switch (msg.type) {
         case "ready":
           status.textContent = "ready";
-          addBubble("system", "Server ready.");
+          addEvent("system", "Server ready.");
           break;
         case "pong":
           status.textContent = "pong";
@@ -294,30 +389,42 @@ function simulatorHtml(deckPath: string): string {
           const chunk = msg.chunk ?? "";
           const target = streamMode === "suspense" ? "suspense" : "assistant";
           if (target === "suspense") {
-            if (!suspenseBubble) suspenseBubble = addBubble("suspense", "");
+            if (!suspenseBubble) suspenseBubble = addBubble(transcript, "suspense", "");
             suspenseBubble.textContent += chunk;
+            if (!logSuspense) logSuspense = addEvent("suspense", "");
+            logSuspense.textContent += chunk;
           } else {
-            if (!currentAssistant) currentAssistant = addBubble("assistant", "");
+            if (!currentAssistant) currentAssistant = addBubble(transcript, "assistant", "");
             currentAssistant.textContent += chunk;
+            if (!logAssistant) logAssistant = addEvent("assistant", "");
+            logAssistant.textContent += chunk;
           }
-          scrollBottom();
+          scrollBottom(transcript);
+          scrollBottom(events);
           break;
         }
         case "result": {
           const content = formatPayload(msg.result);
           if (!currentAssistant) {
-            addBubble("assistant", content);
+            addBubble(transcript, "assistant", content);
           } else if (!currentAssistant.textContent.trim()) {
             currentAssistant.textContent = content;
+          }
+          if (!logAssistant) {
+            addEvent("assistant", content);
+          } else if (!logAssistant.textContent.trim()) {
+            logAssistant.textContent = content;
           }
           currentAssistant = null;
           suspenseBubble = null;
           streamMode = "assistant";
+          logAssistant = null;
+          logSuspense = null;
           status.textContent = "connected";
           break;
         }
         case "error":
-          addBubble("error", "Error: " + (msg.message ?? "unknown"));
+          addBubble(events, "error", "Error: " + (msg.message ?? "unknown"));
           currentAssistant = null;
           suspenseBubble = null;
           streamMode = "assistant";
@@ -327,7 +434,7 @@ function simulatorHtml(deckPath: string): string {
           const ev = msg.event || {};
           const label = ev.type || "trace";
           const summary = label.replace("action.", "action ").replace("deck.", "deck ");
-          addBubble("trace", "• " + summary, {
+          addEvent("trace", "• " + summary, {
             middle: true,
             collapsible: true,
             details: formatPayload(ev),
@@ -338,7 +445,7 @@ function simulatorHtml(deckPath: string): string {
           break;
         }
         default:
-          addBubble("system", JSON.stringify(msg));
+          addEvent("system", JSON.stringify(msg));
       }
     }
 
@@ -370,9 +477,12 @@ function simulatorHtml(deckPath: string): string {
         try { val = JSON.parse(val); } catch (err) { addBubble("error", "JSON parse error: " + err); return; }
       }
       const display = asJson.checked ? formatPayload(val) : String(val);
-      addBubble("user", display);
+      addBubble(transcript, "user", display);
+      addEvent("user", display);
       currentAssistant = null;
       suspenseBubble = null;
+      logAssistant = null;
+      logSuspense = null;
       streamMode = "assistant";
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
       status.textContent = "sent";
