@@ -206,12 +206,14 @@ export type TraceEvent =
     runId: string;
     deckPath: string;
     actionCallId: string;
+    parentActionCallId?: string;
   }
   | {
     type: "deck.end";
     runId: string;
     deckPath: string;
     actionCallId: string;
+    parentActionCallId?: string;
   }
   | {
     type: "action.start";
@@ -219,6 +221,7 @@ export type TraceEvent =
     actionCallId: string;
     name: string;
     path: string;
+    parentActionCallId?: string;
   }
   | {
     type: "action.end";
@@ -226,6 +229,7 @@ export type TraceEvent =
     actionCallId: string;
     name: string;
     path: string;
+    parentActionCallId?: string;
   }
   | {
     type: "tool.call";
@@ -233,6 +237,7 @@ export type TraceEvent =
     actionCallId: string;
     name: string;
     args: JSONValue;
+    parentActionCallId?: string;
   }
   | {
     type: "tool.result";
@@ -240,11 +245,35 @@ export type TraceEvent =
     actionCallId: string;
     name: string;
     result: JSONValue;
+    parentActionCallId?: string;
   }
   | {
-    type: "event";
+    type: "model.call";
     runId: string;
     actionCallId: string;
-    name: string;
-    payload: JSONValue;
+    deckPath: string;
+    model?: string;
+    stream?: boolean;
+    messageCount?: number;
+    toolCount?: number;
+    messages: ModelMessage[];
+    tools?: ToolDefinition[];
+    stateMessages?: number;
+    parentActionCallId?: string;
+  }
+  | {
+    type: "model.result";
+    runId: string;
+    actionCallId: string;
+    deckPath: string;
+    model?: string;
+    finishReason: "stop" | "tool_calls" | "length";
+    message: ModelMessage;
+    toolCalls?: Array<{
+      id: string;
+      name: string;
+      args: JSONValue;
+    }>;
+    stateMessages?: number;
+    parentActionCallId?: string;
   };
