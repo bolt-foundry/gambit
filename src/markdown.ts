@@ -68,6 +68,16 @@ function extractEmbedsFromBody(body: string): string[] {
   return embeds;
 }
 
+function stripEmbedMarkers(body: string, embeds: string[]): string {
+  let cleaned = body;
+  for (const embed of embeds) {
+    const escaped = embed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)`, "g");
+    cleaned = cleaned.replace(pattern, "");
+  }
+  return cleaned;
+}
+
 export async function loadMarkdownCard(
   filePath: string,
   parentPath?: string,
@@ -120,11 +130,13 @@ export async function loadMarkdownCard(
     (attrs as { outputSchema?: unknown }).outputSchema,
     resolved,
   );
-  const embeds = extractEmbedsFromBody(body).concat(
+  const inlineEmbeds = extractEmbedsFromBody(body);
+  const embeds = inlineEmbeds.concat(
     Array.isArray((attrs as { embeds?: unknown }).embeds)
       ? (attrs as { embeds?: string[] }).embeds ?? []
       : [],
   );
+  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
   const embeddedCards: LoadedCard[] = [];
   for (const embed of embeds) {
     const card = await loadCard(embed, resolved, nextStack);
@@ -134,7 +146,7 @@ export async function loadMarkdownCard(
   return {
     kind: "gambit.card",
     path: resolved,
-    body: body.trim(),
+    body: cleanedBody.trim(),
     actions,
     embeds,
     cards: embeddedCards,
@@ -176,7 +188,8 @@ export async function loadMarkdownDeck(
     }
   });
 
-  const embeds = extractEmbedsFromBody(body).concat(deckMeta.embeds ?? []);
+  const inlineEmbeds = extractEmbedsFromBody(body);
+  const embeds = inlineEmbeds.concat(deckMeta.embeds ?? []);
 
   const inputSchema = await maybeLoadSchema(
     (deckMeta as { inputSchema?: unknown }).inputSchema,
@@ -193,6 +206,7 @@ export async function loadMarkdownDeck(
     cards.push(card);
   }
   const allCards = flattenCards(cards);
+  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
 
   const mergedActions: Record<string, ActionDefinition> = {};
   for (const card of allCards) {
@@ -243,7 +257,7 @@ export async function loadMarkdownDeck(
   return {
     kind: "gambit.deck",
     path: resolved,
-    body: body.trim(),
+    body: cleanedBody.trim(),
     actions: Object.values(mergedActions),
     cards: allCards,
     embeds,
