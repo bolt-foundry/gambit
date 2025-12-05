@@ -1,6 +1,8 @@
 import type { CardDefinition, DeckDefinition } from "./types.ts";
 
-export function defineDeck(def: Omit<DeckDefinition, "kind">): DeckDefinition {
+export function defineDeck<I = unknown>(
+  def: Omit<DeckDefinition<I>, "kind">,
+): DeckDefinition<I> {
   return { kind: "gambit.deck", ...def };
 }
 

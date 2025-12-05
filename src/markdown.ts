@@ -1,6 +1,8 @@
 import { extract } from "@std/front-matter/any";
 import * as path from "@std/path";
 import {
+  GAMBIT_TOOL_INIT,
+  GAMBIT_TOOL_RESPOND,
   MAX_TOOL_NAME_LENGTH,
   RESERVED_TOOL_PREFIX,
   TOOL_NAME_PATTERN,
@@ -17,6 +19,16 @@ import type {
 import type { ZodTypeAny } from "zod";
 
 type ParsedFrontmatter = Record<string, unknown>;
+const RESPOND_MARKER = "gambit://respond";
+const INIT_MARKER = "gambit://init";
+
+const INIT_TEXT = `
+You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info. Do not call this tool yourself; use the provided context.
+`.trim();
+
+const RESPOND_TEXT = `
+When you are done, call the \`${GAMBIT_TOOL_RESPOND}\` tool with a JSON object that includes your \`payload\` (validated output) and optional \`status\`/ \`message\`/ \`code\`/ \`meta\`. Do not end with normal assistant text; always finish by calling \`${GAMBIT_TOOL_RESPOND}\`.
+`.trim();
 
 function toFileUrl(p: string): string {
   const abs = path.resolve(p);
@@ -58,24 +70,26 @@ function normalizeActions(
     });
 }
 
-function extractEmbedsFromBody(body: string): string[] {
+function replaceEmbedMarkers(
+  body: string,
+): { cleaned: string; embeds: string[]; respond: boolean; initHint: boolean } {
   const regex = /!\[[^\]]*\]\(([^)]+)\)/g;
   const embeds: string[] = [];
-  let match;
-  while ((match = regex.exec(body)) !== null) {
-    embeds.push(match[1]);
-  }
-  return embeds;
-}
-
-function stripEmbedMarkers(body: string, embeds: string[]): string {
-  let cleaned = body;
-  for (const embed of embeds) {
-    const escaped = embed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`!\\[[^\\]]*\\]\\(${escaped}\\)`, "g");
-    cleaned = cleaned.replace(pattern, "");
-  }
-  return cleaned;
+  let respond = false;
+  let initHint = false;
+  const cleaned = body.replace(regex, (_m, p1: string) => {
+    if (p1 === RESPOND_MARKER) {
+      respond = true;
+      return RESPOND_TEXT;
+    }
+    if (p1 === INIT_MARKER) {
+      initHint = true;
+      return INIT_TEXT;
+    }
+    embeds.push(p1);
+    return "";
+  });
+  return { cleaned, embeds, respond, initHint };
 }
 
 export async function loadMarkdownCard(
@@ -111,7 +125,11 @@ export async function loadMarkdownCard(
     resolved,
   );
   actions.forEach((a) => {
-    if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
+    if (
+      a.name.startsWith(RESERVED_TOOL_PREFIX) &&
+      a.name !== GAMBIT_TOOL_INIT &&
+      a.name !== GAMBIT_TOOL_RESPOND
+    ) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
     if (
@@ -130,13 +148,13 @@ export async function loadMarkdownCard(
     (attrs as { outputSchema?: unknown }).outputSchema,
     resolved,
   );
-  const inlineEmbeds = extractEmbedsFromBody(body);
-  const embeds = inlineEmbeds.concat(
+  const replaced = replaceEmbedMarkers(body);
+  const embeds = replaced.embeds.concat(
     Array.isArray((attrs as { embeds?: unknown }).embeds)
       ? (attrs as { embeds?: string[] }).embeds ?? []
       : [],
   );
-  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
+  const cleanedBody = replaced.cleaned;
   const embeddedCards: LoadedCard[] = [];
   for (const embed of embeds) {
     const card = await loadCard(embed, resolved, nextStack);
@@ -152,6 +170,7 @@ export async function loadMarkdownCard(
     cards: embeddedCards,
     inputFragment,
     outputFragment,
+    syntheticTools: replaced.respond ? { respond: true } : undefined,
   };
 }
 
@@ -176,7 +195,11 @@ export async function loadMarkdownDeck(
     resolved,
   );
   actions.forEach((a) => {
-    if (a.name.startsWith(RESERVED_TOOL_PREFIX)) {
+    if (
+      a.name.startsWith(RESERVED_TOOL_PREFIX) &&
+      a.name !== GAMBIT_TOOL_INIT &&
+      a.name !== GAMBIT_TOOL_RESPOND
+    ) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
     if (
@@ -188,8 +211,8 @@ export async function loadMarkdownDeck(
     }
   });
 
-  const inlineEmbeds = extractEmbedsFromBody(body);
-  const embeds = inlineEmbeds.concat(deckMeta.embeds ?? []);
+  const replaced = replaceEmbedMarkers(body);
+  const embeds = replaced.embeds.concat(deckMeta.embeds ?? []);
 
   const inputSchema = await maybeLoadSchema(
     (deckMeta as { inputSchema?: unknown }).inputSchema,
@@ -206,7 +229,7 @@ export async function loadMarkdownDeck(
     cards.push(card);
   }
   const allCards = flattenCards(cards);
-  const cleanedBody = stripEmbedMarkers(body, inlineEmbeds);
+  const cleanedBody = replaced.cleaned;
 
   const mergedActions: Record<string, ActionDefinition> = {};
   for (const card of allCards) {
@@ -242,12 +265,12 @@ export async function loadMarkdownDeck(
           ),
         }
         : undefined,
-      onPing: deckMeta.handlers.onPing
+      onInterval: deckMeta.handlers.onInterval
         ? {
-          ...deckMeta.handlers.onPing,
+          ...deckMeta.handlers.onInterval,
           path: path.resolve(
             path.dirname(resolved),
-            deckMeta.handlers.onPing.path,
+            deckMeta.handlers.onInterval.path,
           ),
         }
         : undefined,
@@ -267,6 +290,12 @@ export async function loadMarkdownDeck(
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
     handlers,
+    syntheticTools: {
+      ...deckMeta.syntheticTools,
+      respond: deckMeta.syntheticTools?.respond ||
+        replaced.respond ||
+        allCards.some((c) => c.syntheticTools?.respond),
+    },
   };
 }
 
