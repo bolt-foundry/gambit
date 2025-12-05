@@ -2,15 +2,13 @@
 
 ## Unreleased (v0.6)
 
-- Synthetic tools refreshed: `gambit_init`, `gambit_ping`, `gambit_complete`
+- Synthetic tools refreshed: `gambit_init`, `gambit_respond`, `gambit_complete`
   (function-style tools, underscore names).
 - Envelope simplification: init carries run/action IDs plus guardrails/model
-  hints; ping carries elapsedMs, HTTP-style status (102 keepalive, 103 when
-  carrying info), optional message/payload/meta; complete wraps
-  payload/message/status/code/meta (default status 200 for success, 500 for
-  handled errors unless overridden).
+  hints; respond wraps payload/message/status/code/meta (default status 200 for
+  success, 500 for handled errors unless overridden).
 - Runtime behavior: child completions and handled errors emit `gambit_complete`;
-  suspense handlers emit `gambit_ping`; roots stay conversational-only.
+  interval handlers surface mid-run updates; roots stay conversational-only.
 - Docs/memos updated to reflect the minimal scope and naming.
 - IO/host: REPL accepts `--input` to seed the first user turn (now implies
   user-first automatically).
@@ -26,9 +24,9 @@
   synthetic `gambit_init` tool; helpers `spawnAndWait`, `return`, `fail`; action
   names validated against reserved prefix/pattern/length; default guardrails
   depth=3/passes=3/timeout≈120s with per-deck overrides.
-- Handlers/events: optional `onError`/`onPing` decks emit synthetic events
-  (`gambit_complete` for handled errors, `gambit_ping` for suspense/keepalive)
-  with default suspense delay 800ms and traces for fire/result.
+- Handlers/events: optional `onError`/`onInterval` decks emit structured events
+  (`gambit_complete` for handled errors, interval-driven updates) with default
+  suspense delay 800ms and traces for fire/result.
 - IO/host: CLI supports `run`, `repl`, `serve` (WebSocket simulator UI); flags
   for streaming, user-first, trace to console/JSONL, state load/save, model
   overrides; `deno task compile` builds a binary; OpenRouter chat provider with

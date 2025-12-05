@@ -34,14 +34,15 @@ export type ActionDefinition = {
 };
 
 export type ErrorHandlerConfig = { path: string; label?: Label };
-export type PingHandlerConfig = {
+export type IntervalHandlerConfig = {
   path: string;
   delayMs?: number;
+  repeatMs?: number;
   label?: Label;
 };
 export type HandlersConfig = {
   onError?: ErrorHandlerConfig;
-  onPing?: PingHandlerConfig;
+  onInterval?: IntervalHandlerConfig;
 };
 
 export type BaseDefinition = {
@@ -51,16 +52,17 @@ export type BaseDefinition = {
   actions?: readonly ActionDefinition[];
   embeds?: readonly string[];
   guardrails?: Partial<Guardrails>;
+  syntheticTools?: { respond?: boolean };
 };
 
-export type DeckDefinition = BaseDefinition & {
+export type DeckDefinition<Input = unknown> = BaseDefinition & {
   kind: "gambit.deck";
   modelParams?: ModelParams;
   handlers?: HandlersConfig;
   prompt?: string; // deprecated; prefer body
   body?: string;
-  run?: DeckExecutor;
-  execute?: DeckExecutor;
+  run?: DeckExecutor<Input>;
+  execute?: DeckExecutor<Input>;
 };
 
 export type CardDefinition = BaseDefinition & {
@@ -85,21 +87,6 @@ export type ReferenceContext = {
   model?: string;
 };
 
-export type PingEnvelope = {
-  runId: string;
-  actionCallId: string;
-  parentActionCallId?: string;
-  source: {
-    deckPath: string;
-    actionName: string;
-  };
-  elapsedMs: number;
-  status?: number;
-  message?: string;
-  payload?: JSONValue;
-  meta?: Record<string, JSONValue>;
-};
-
 export type CompleteEnvelope = {
   runId: string;
   actionCallId: string;
@@ -115,13 +102,13 @@ export type CompleteEnvelope = {
   meta?: Record<string, JSONValue>;
 };
 
-export type ExecutionContext = {
+export type ExecutionContext<Input = unknown> = {
   runId: string;
   actionCallId: string;
   parentActionCallId?: string;
   depth: number;
   label?: Label;
-  input: unknown;
+  input: Input;
   spawnAndWait: (opts: { path: string; input: unknown }) => Promise<unknown>;
   fail: (
     opts: { message: string; code?: string; details?: JSONValue },
@@ -129,9 +116,11 @@ export type ExecutionContext = {
   return: (payload: unknown) => Promise<unknown>;
 };
 
-export type DeckExecutor = (
-  ctx: ExecutionContext,
-) => unknown | Promise<unknown>;
+export interface DeckExecutor<Input = unknown> {
+  // Method-style signature is bivariant in strictFunctionTypes, allowing decks
+  // to narrow ctx.input in their run signatures.
+  (ctx: ExecutionContext<Input>): unknown | Promise<unknown>;
+}
 
 export type ModelMessage = {
   role: "system" | "user" | "assistant" | "tool";

@@ -1,11 +1,11 @@
-import { defineDeck } from "../../mod.ts";
+import { defineDeck, type ExecutionContext } from "../../mod.ts";
 import { z } from "zod";
 
 export default defineDeck({
   inputSchema: z.object({ text: z.string() }),
   outputSchema: z.string(),
   label: "echo_text",
-  run(ctx: { input: { text: string } }) {
+  run(ctx: ExecutionContext<{ text: string }>) {
     return `Echo: ${ctx.input.text}`;
   },
 });

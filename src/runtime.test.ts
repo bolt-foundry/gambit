@@ -198,7 +198,50 @@ Deno.test("LLM deck fails fast when finishReason=length with no content", async 
   );
 });
 
-Deno.test("late ping delay uses action start time", async () => {
+Deno.test("LLM deck completes via gambit_respond", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "respond.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      syntheticTools: { respond: true },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: null },
+        finishReason: "tool_calls",
+        toolCalls: [{
+          id: "respond-1",
+          name: "gambit_respond",
+          args: { payload: "ok" },
+        }],
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(result, "ok");
+});
+
+Deno.test("interval handler uses action start time", async () => {
   const origNow = performance.now;
   let now = 0;
   // Simple controllable clock.
@@ -209,15 +252,15 @@ Deno.test("late ping delay uses action start time", async () => {
 
   const handlerPath = await writeTempDeck(
     dir,
-    "ping_handler.deck.ts",
+    "interval_handler.deck.ts",
     `
     import { defineDeck } from "${modHref}";
     import { z } from "zod";
     export default defineDeck({
       inputSchema: z.any(),
       outputSchema: z.string(),
-      label: "ping_handler",
-      run() { return "ping"; }
+      label: "interval_handler",
+      run() { return "waiting"; }
     });
     `,
   );
@@ -247,7 +290,7 @@ Deno.test("late ping delay uses action start time", async () => {
       inputSchema: z.string(),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
-      handlers: { onPing: { path: "${handlerPath}", delayMs: 5 } },
+      handlers: { onInterval: { path: "${handlerPath}", delayMs: 5 } },
       actions: [{ name: "child", path: "${childPath}" }]
     });
     `,
@@ -1002,7 +1045,7 @@ Deno.test("cards cannot declare handlers (ts card)", async () => {
     `
     import { defineCard } from "${modHref}";
     export default defineCard({
-      handlers: { onPing: { path: "./noop.deck.ts" } }
+      handlers: { onInterval: { path: "./noop.deck.ts" } }
     });
     `,
   );
@@ -1042,7 +1085,7 @@ Deno.test("cards cannot declare handlers (markdown card)", async () => {
     path.join(dir, "bad.card.md"),
     `
 +++
-handlers = { onPing = { path = "./noop.deck.ts" } }
+handlers = { onInterval = { path = "./noop.deck.ts" } }
 +++
 
 Body.
