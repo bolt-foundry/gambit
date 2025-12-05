@@ -604,7 +604,7 @@ async function handleToolCall(
           onStreamText: ctx.onStreamText,
           userFirst: ctx.userFirst,
         });
-      } catch (err) {
+      } catch (_err) {
         envelope = [];
       }
       extraMessages.push(...envelope.map(sanitizeMessage));
@@ -670,7 +670,7 @@ async function handleToolCall(
           onStreamText: ctx.onStreamText,
           userFirst: ctx.userFirst,
         });
-      } catch (err) {
+      } catch (_err) {
         envelope = [];
       }
       extraMessages.push(...envelope.map(sanitizeMessage));
