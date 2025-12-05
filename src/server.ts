@@ -292,6 +292,12 @@ function simulatorHtml(deckPath: string): string {
     let streamMode = "assistant";
     let logAssistant = null;
     let logSuspense = null;
+    let waitingForAssistant = false;
+    let waitStartedAt = 0;
+    let waitTicker = null;
+    let waitingForNextAssistant = false;
+    let nextAssistantWaitStartedAt = 0;
+    let nextAssistantTicker = null;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
@@ -380,6 +386,80 @@ function simulatorHtml(deckPath: string): string {
       try { return JSON.stringify(p, null, 2); } catch { return String(p); }
     }
 
+    function formatDuration(ms) {
+      return ms < 1000 ? String(Math.round(ms)) + "ms" : (ms / 1000).toFixed(2) + "s";
+    }
+
+    function updateWaitStatus() {
+      if (!waitingForAssistant) return;
+      const elapsed = performance.now() - waitStartedAt;
+      status.textContent = "waiting " + formatDuration(elapsed);
+    }
+
+    function startWaitTimer() {
+      waitStartedAt = performance.now();
+      waitingForAssistant = true;
+      if (waitTicker) clearInterval(waitTicker);
+      updateWaitStatus();
+      waitTicker = setInterval(updateWaitStatus, 250);
+    }
+
+    function stopWaitTimer(reason) {
+      if (!waitingForAssistant) return;
+      const elapsed = performance.now() - waitStartedAt;
+      waitingForAssistant = false;
+      if (waitTicker) {
+        clearInterval(waitTicker);
+        waitTicker = null;
+      }
+      status.textContent = "connected";
+      const label = reason ?? "assistant reply";
+      addEvent("system", label + " after " + formatDuration(elapsed));
+    }
+
+    function clearWaitTimer() {
+      waitingForAssistant = false;
+      if (waitTicker) {
+        clearInterval(waitTicker);
+        waitTicker = null;
+      }
+    }
+
+    function updateNextAssistantStatus() {
+      if (!waitingForNextAssistant) return;
+      const elapsed = performance.now() - nextAssistantWaitStartedAt;
+      status.textContent = "waiting next reply " + formatDuration(elapsed);
+    }
+
+    function startNextAssistantWait() {
+      nextAssistantWaitStartedAt = performance.now();
+      waitingForNextAssistant = true;
+      if (nextAssistantTicker) clearInterval(nextAssistantTicker);
+      updateNextAssistantStatus();
+      nextAssistantTicker = setInterval(updateNextAssistantStatus, 250);
+    }
+
+    function stopNextAssistantWait(reason) {
+      if (!waitingForNextAssistant) return;
+      const elapsed = performance.now() - nextAssistantWaitStartedAt;
+      waitingForNextAssistant = false;
+      if (nextAssistantTicker) {
+        clearInterval(nextAssistantTicker);
+        nextAssistantTicker = null;
+      }
+      if (!waitingForAssistant) status.textContent = "connected";
+      const label = reason ?? "next reply";
+      addEvent("system", label + " after " + formatDuration(elapsed));
+    }
+
+    function clearNextAssistantWait() {
+      waitingForNextAssistant = false;
+      if (nextAssistantTicker) {
+        clearInterval(nextAssistantTicker);
+        nextAssistantTicker = null;
+      }
+    }
+
     function summarizeTrace(ev) {
       if (!ev || typeof ev !== "object") return "trace";
       const name = typeof ev.name === "string" ? ev.name : undefined;
@@ -444,6 +524,8 @@ function simulatorHtml(deckPath: string): string {
         case "stream": {
           const chunk = msg.chunk ?? "";
           const target = streamMode === "suspense" ? "suspense" : "assistant";
+          if (waitingForAssistant) stopWaitTimer("first token");
+          if (waitingForNextAssistant) stopNextAssistantWait("next reply");
           if (target === "suspense") {
             if (!suspenseBubble) suspenseBubble = addBubble(transcript, "suspense", "");
             suspenseBubble.textContent += chunk;
@@ -460,6 +542,8 @@ function simulatorHtml(deckPath: string): string {
           break;
         }
         case "result": {
+          if (waitingForAssistant) stopWaitTimer("result");
+          if (waitingForNextAssistant) stopNextAssistantWait("next reply");
           const content = formatPayload(msg.result);
           if (!currentAssistant) {
             addBubble(transcript, "assistant", content);
@@ -480,6 +564,8 @@ function simulatorHtml(deckPath: string): string {
           break;
         }
         case "error":
+          if (waitingForAssistant) stopWaitTimer("error");
+          if (waitingForNextAssistant) stopNextAssistantWait("error");
           addBubble(events, "error", "Error: " + (msg.message ?? "unknown"));
           currentAssistant = null;
           suspenseBubble = null;
@@ -499,6 +585,9 @@ function simulatorHtml(deckPath: string): string {
           recordTraceParent(ev);
           const depth = traceDepth(ev);
           addEvent("trace", summary, { collapsible: true, details: formatPayload(ev), depth });
+          if (ev.type === "model.result" && ev.finishReason === "tool_calls") {
+            startNextAssistantWait();
+          }
           break;
         }
         default:
@@ -509,8 +598,8 @@ function simulatorHtml(deckPath: string): string {
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { status.textContent = "connected"; };
-      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; streamMode = "assistant"; };
-      ws.onerror = () => { status.textContent = "error"; };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; streamMode = "assistant"; clearWaitTimer(); clearNextAssistantWait(); };
+      ws.onerror = () => { status.textContent = "error"; clearWaitTimer(); clearNextAssistantWait(); };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -541,8 +630,9 @@ function simulatorHtml(deckPath: string): string {
       logAssistant = null;
       logSuspense = null;
       streamMode = "assistant";
+      clearNextAssistantWait();
       ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
-      status.textContent = "sent";
+      startWaitTimer();
       input.value = "";
     });
 
