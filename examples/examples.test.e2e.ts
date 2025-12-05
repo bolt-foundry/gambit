@@ -62,3 +62,43 @@ Deno.test({
     );
   },
 });
+
+Deno.test({
+  name: "[e2e] respond deck finishes via gambit_respond",
+  ignore: !provider,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const deckPath = path.resolve("examples/respond/respond.deck.ts");
+    const result = await runDeck({
+      path: deckPath,
+      input: "",
+      modelProvider: provider!,
+      isRoot: true,
+      defaultModel: model,
+    });
+
+    assert(typeof result === "string", "result should be a string");
+    assertStringIncludes(result, "ok");
+  },
+});
+
+Deno.test({
+  name: "[e2e] markdown respond deck finishes via gambit_respond",
+  ignore: !provider,
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const deckPath = path.resolve("examples/respond/respond.deck.md");
+    const result = await runDeck({
+      path: deckPath,
+      input: "hi",
+      modelProvider: provider!,
+      isRoot: true,
+      defaultModel: model,
+    });
+
+    assert(typeof result === "string", "result should be a string");
+    assertStringIncludes(result, "ok");
+  },
+});
