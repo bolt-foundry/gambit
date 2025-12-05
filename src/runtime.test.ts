@@ -735,6 +735,66 @@ Deck body.
   assertEquals(deck.cards.length, 2);
 });
 
+Deno.test("markdown deck strips inline embed markers from system prompt", async () => {
+  const dir = await Deno.makeTempDir();
+
+  await Deno.writeTextFile(
+    path.join(dir, "persona.card.md"),
+    `
++++
++++
+
+Persona content.
+`.trim(),
+  );
+
+  const deckPath = path.join(dir, "root.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `
++++
+modelParams = { model = "dummy-model" }
++++
+
+Deck intro before embed.
+
+![Persona](./persona.card.md)
+
+Deck outro after embed.
+`.trim(),
+  );
+
+  const seen: ModelMessage[][] = [];
+  const provider: ModelProvider = {
+    chat({ messages }) {
+      seen.push(messages);
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  const last = seen.at(-1);
+  const system = last?.find((m) => m.role === "system");
+  if (!system || typeof system.content !== "string") {
+    throw new Error("missing system message");
+  }
+
+  const content = system.content;
+  assertEquals(content.includes("![Persona](./persona.card.md)"), false);
+  assertEquals(content.includes("Deck intro before embed."), true);
+  assertEquals(content.includes("Deck outro after embed."), true);
+  assertEquals(content.includes("Persona content."), true);
+});
+
 Deno.test("markdown card embed cycles are rejected", async () => {
   const dir = await Deno.makeTempDir();
 
