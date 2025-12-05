@@ -8,7 +8,7 @@ export default defineDeck({
   outputSchema: z.string(),
   modelParams: { model: "openai/gpt-4o-mini" },
   handlers: {
-    onPing: {
+    onInterval: {
       path: "./suspense_handler.deck.ts",
       delayMs: 500,
       label: "demo_suspense",
