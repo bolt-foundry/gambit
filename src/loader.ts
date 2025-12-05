@@ -1,5 +1,7 @@
 import * as path from "@std/path";
 import {
+  GAMBIT_TOOL_INIT,
+  GAMBIT_TOOL_RESPOND,
   MAX_TOOL_NAME_LENGTH,
   RESERVED_TOOL_PREFIX,
   TOOL_NAME_PATTERN,
@@ -38,7 +40,11 @@ function normalizeActions(
 }
 
 function checkReserved(action: ActionDefinition) {
-  if (action.name.startsWith(RESERVED_TOOL_PREFIX)) {
+  if (
+    action.name.startsWith(RESERVED_TOOL_PREFIX) &&
+    action.name !== GAMBIT_TOOL_INIT &&
+    action.name !== GAMBIT_TOOL_RESPOND
+  ) {
     throw new Error(
       `Action name ${action.name} is reserved (prefix ${RESERVED_TOOL_PREFIX})`,
     );
@@ -178,12 +184,12 @@ export async function loadDeck(
           ),
         }
         : undefined,
-      onPing: deck.handlers.onPing
+      onInterval: deck.handlers.onInterval
         ? {
-          ...deck.handlers.onPing,
+          ...deck.handlers.onInterval,
           path: path.resolve(
             path.dirname(resolved),
-            deck.handlers.onPing.path,
+            deck.handlers.onInterval.path,
           ),
         }
         : undefined,
@@ -202,6 +208,7 @@ export async function loadDeck(
     outputSchema,
     executor,
     handlers,
+    syntheticTools: deck.syntheticTools,
   };
 }
 
