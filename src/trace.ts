@@ -85,11 +85,24 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
           }`,
         );
         break;
-      case "event":
+      case "model.call":
         console.log(
-          `[trace] event runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} payload=${
-            JSON.stringify(event.payload)
+          `[trace] model.call runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} model=${
+            event.model ?? "(default)"
+          } messages=${event.messageCount ?? event.messages.length} tools=${
+            event.toolCount ?? event.tools?.length ?? 0
+          } stream=${event.stream ?? false} stateMessages=${
+            event.stateMessages ?? 0
           }`,
+        );
+        break;
+      case "model.result":
+        console.log(
+          `[trace] model.result runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} model=${
+            event.model ?? "(default)"
+          } finish=${event.finishReason} toolCalls=${
+            event.toolCalls?.length ?? 0
+          } stateMessages=${event.stateMessages ?? 0}`,
         );
         break;
       default:

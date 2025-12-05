@@ -287,12 +287,6 @@ Deno.test("late ping delay uses action start time", async () => {
     trace: (ev) => traces.push(ev),
   });
 
-  // No suspense.result trace should be emitted because action duration is < delay.
-  const hadPing = traces.some((t) =>
-    t.type === "event" && t.name === "suspense.result"
-  );
-  assertEquals(hadPing, false);
-
   // restore clock
   (performance as { now: () => number }).now = origNow;
 });
@@ -471,19 +465,98 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
   const initCall = traces.find((t) =>
     t.type === "tool.call" && t.name === "gambit_init"
   ) as Extract<TraceEvent, { type: "tool.call" }>;
-  assertEquals(
-    initCall.args && (initCall.args as { input?: unknown }).input,
-    input,
+  assertEquals(initCall.args, {});
+
+  const initResult = traces.find((t) =>
+    t.type === "tool.result" && t.name === "gambit_init"
+  ) as Extract<TraceEvent, { type: "tool.result" }>;
+  const payload = initResult.result as
+    | { input?: unknown }
+    | undefined;
+  assertEquals(payload?.input, input);
+});
+
+Deno.test("trace includes parentActionCallId hierarchy", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "trace-child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
   );
 
-  const initEvent = traces.find((t) =>
-    t.type === "event" && t.name === "gambit_init"
-  ) as Extract<TraceEvent, { type: "event" }>;
-  const payload = initEvent.payload as
-    | { reference?: { input?: unknown }; messages?: unknown[] }
-    | undefined;
-  assertEquals(payload?.reference?.input, input);
-  assertEquals(Array.isArray(payload?.messages), true);
+  const parentPath = await writeTempDeck(
+    dir,
+    "trace-parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      actions: [{ name: "child", path: "${childPath}" }],
+    });
+    `,
+  );
+
+  const traces: TraceEvent[] = [];
+  let callCount = 0;
+  const provider: ModelProvider = {
+    chat() {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls",
+          toolCalls: [{ id: "call-child", name: "child", args: {} }],
+        });
+      }
+      if (callCount === 2) {
+        return Promise.resolve({
+          message: { role: "assistant", content: "child-done" },
+          finishReason: "stop",
+        });
+      }
+      return Promise.resolve({
+        message: { role: "assistant", content: "parent-done" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  assertEquals(result, "parent-done");
+
+  const parentDeck = traces.find((t) =>
+    t.type === "deck.start" && t.deckPath === parentPath
+  ) as Extract<TraceEvent, { type: "deck.start" }>;
+  const actionStart = traces.find((t) =>
+    t.type === "action.start" && t.name === "child"
+  ) as Extract<TraceEvent, { type: "action.start" }>;
+  const childDeck = traces.find((t) =>
+    t.type === "deck.start" && t.deckPath === childPath
+  ) as Extract<TraceEvent, { type: "deck.start" }>;
+
+  assertEquals(parentDeck.parentActionCallId, undefined);
+  assertEquals(actionStart.parentActionCallId, parentDeck.actionCallId);
+  assertEquals(childDeck.parentActionCallId, actionStart.actionCallId);
 });
 
 Deno.test("non-root missing schemas fails load", async () => {

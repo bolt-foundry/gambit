@@ -330,6 +330,10 @@ function simulatorHtml(deckPath: string): string {
     function addEvent(role, text, opts = {}) {
       const row = document.createElement("div");
       row.className = "event-row";
+      const depth = typeof opts.depth === "number" ? opts.depth : 0;
+      if (depth > 0) {
+        row.style.marginLeft = (depth * 16) + "px";
+      }
 
       const type = document.createElement("div");
       type.className = "event-type " + role;
@@ -374,6 +378,58 @@ function simulatorHtml(deckPath: string): string {
     function formatPayload(p) {
       if (typeof p === "string") return p;
       try { return JSON.stringify(p, null, 2); } catch { return String(p); }
+    }
+
+    function summarizeTrace(ev) {
+      if (!ev || typeof ev !== "object") return "trace";
+      const name = typeof ev.name === "string" ? ev.name : undefined;
+      switch (ev.type) {
+        case "model.call": {
+          const msgs = ev.messageCount ?? (ev.messages?.length ?? "?");
+          const tools = ev.toolCount ?? (ev.tools?.length ?? 0);
+          const stream = ev.stream ? "stream" : "no-stream";
+          return "model.call " + (ev.model ?? "(default)") +
+            " · msgs=" + msgs + " tools=" + tools + " · " + stream;
+        }
+        case "model.result": {
+          const toolCalls = ev.toolCalls?.length ?? 0;
+          const finish = ev.finishReason ?? "?";
+          return "model.result " + (ev.model ?? "(default)") +
+            " · finish=" + finish + " · toolCalls=" + toolCalls;
+        }
+        default: {
+          const label = String(ev.type || "trace");
+          const pretty = label.replace("action.", "action ").replace("deck.", "deck ");
+          return "• " + (name ? (pretty + " (" + name + ")") : pretty);
+        }
+      }
+    }
+
+    const traceParents = new Map();
+
+    function recordTraceParent(ev) {
+      const id = ev?.actionCallId;
+      if (!id) return;
+      if (!traceParents.has(id)) {
+        traceParents.set(id, ev.parentActionCallId ?? null);
+      }
+    }
+
+    function traceDepth(ev) {
+      const id = ev?.actionCallId;
+      if (!id) return 0;
+      let depth = 0;
+      let current = id;
+      const seen = new Set();
+      while (traceParents.has(current)) {
+        const parent = traceParents.get(current);
+        if (!parent) break;
+        depth++;
+        if (seen.has(parent)) break;
+        seen.add(parent);
+        current = parent;
+      }
+      return depth;
     }
 
     function handleMessage(msg) {
@@ -432,16 +488,10 @@ function simulatorHtml(deckPath: string): string {
           break;
         case "trace": {
           const ev = msg.event || {};
-          const label = ev.type || "trace";
-          const summary = label.replace("action.", "action ").replace("deck.", "deck ");
-          addEvent("trace", "• " + summary, {
-            middle: true,
-            collapsible: true,
-            details: formatPayload(ev),
-          });
-          if (ev.type === "event" && typeof ev.name === "string" && ev.name.startsWith("suspense.")) {
-            streamMode = "suspense";
-          }
+          const summary = summarizeTrace(ev);
+          recordTraceParent(ev);
+          const depth = traceDepth(ev);
+          addEvent("trace", summary, { collapsible: true, details: formatPayload(ev), depth });
           break;
         }
         default:

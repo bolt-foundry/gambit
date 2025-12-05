@@ -187,8 +187,20 @@ Deno.test("websocket simulator preserves state and user input", async () => {
     input?: unknown;
     runId?: string;
   };
-  assertEquals(initArgs.input, "hello");
-  const runId = initArgs.runId;
+  assertEquals(initArgs, {});
+
+  const initTool = calls[0].messages.find((m) =>
+    m.role === "tool" && m.name === "gambit_init"
+  );
+  if (!initTool || !initTool.content) {
+    throw new Error("missing gambit_init tool payload");
+  }
+  const initPayload = JSON.parse(initTool.content) as {
+    input?: unknown;
+    runId?: string;
+  };
+  assertEquals(initPayload.input, "hello");
+  const runId = initPayload.runId;
   if (!runId) throw new Error("missing runId in gambit_init");
 
   const secondStateRunId = calls[1].state?.runId;

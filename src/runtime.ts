@@ -266,7 +266,8 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       runId,
       actionCallId: refToolCallId,
       name: GAMBIT_TOOL_INIT,
-      args: refCtx as unknown as import("./types.ts").JSONValue,
+      args: {},
+      parentActionCallId: actionCallId,
     });
     messages.push(
       sanitizeMessage({ role: "system", content: systemPrompt }),
@@ -278,7 +279,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           type: "function",
           function: {
             name: GAMBIT_TOOL_INIT,
-            arguments: JSON.stringify(refCtx),
+            arguments: "{}",
           },
         }],
       }),
@@ -295,6 +296,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       actionCallId: refToolCallId,
       name: GAMBIT_TOOL_INIT,
       result: refCtx as unknown as import("./types.ts").JSONValue,
+      parentActionCallId: actionCallId,
     });
   }
 
@@ -307,22 +309,14 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     );
   }
 
-  if (!resumed) {
-    const initSnapshot = messages.map((m) => sanitizeMessage(m));
-    ctx.trace?.({
-      type: "event",
-      runId,
-      actionCallId,
-      name: "gambit_init",
-      payload: {
-        reference: refCtx,
-        messages: initSnapshot,
-      } as unknown as import("./types.ts").JSONValue,
-    });
-  }
-
   const tools = await buildToolDefs(deck);
-  ctx.trace?.({ type: "deck.start", runId, deckPath: deck.path, actionCallId });
+  ctx.trace?.({
+    type: "deck.start",
+    runId,
+    deckPath: deck.path,
+    actionCallId,
+    parentActionCallId: ctx.parentActionCallId,
+  });
   let passes = 0;
   while (passes < guardrails.maxPasses) {
     passes++;
@@ -338,6 +332,22 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         );
       })();
 
+    const stateMessages = ctx.state?.messages?.length;
+    ctx.trace?.({
+      type: "model.call",
+      runId,
+      actionCallId,
+      deckPath: deck.path,
+      model,
+      stream: ctx.stream,
+      messageCount: messages.length,
+      toolCount: tools.length,
+      messages: messages.map(sanitizeMessage),
+      tools,
+      stateMessages,
+      parentActionCallId: ctx.parentActionCallId,
+    });
+
     const result = await modelProvider.chat({
       model,
       messages,
@@ -347,6 +357,18 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       onStreamText: ctx.onStreamText,
     });
     const message = result.message;
+    ctx.trace?.({
+      type: "model.result",
+      runId,
+      actionCallId,
+      deckPath: deck.path,
+      model,
+      finishReason: result.finishReason,
+      message: sanitizeMessage(message),
+      toolCalls: result.toolCalls,
+      stateMessages: result.updatedState?.messages?.length,
+      parentActionCallId: ctx.parentActionCallId,
+    });
     const computeState = (updated?: SavedState): SavedState => {
       const base = updated ??
         { runId, messages: messages.map(sanitizeMessage) };
@@ -364,6 +386,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           actionCallId: call.id,
           name: call.name,
           path: call.name,
+          parentActionCallId: actionCallId,
         });
         ctx.trace?.({
           type: "tool.call",
@@ -371,6 +394,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           actionCallId: call.id,
           name: call.name,
           args: call.args,
+          parentActionCallId: actionCallId,
         });
         const toolResult = await handleToolCall(call, {
           parentDeck: deck,
@@ -392,6 +416,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           actionCallId: call.id,
           name: call.name,
           result: toolResult.toolContent,
+          parentActionCallId: actionCallId,
         });
         messages.push({
           role: "assistant",
@@ -417,6 +442,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           actionCallId: call.id,
           name: call.name,
           path: call.name,
+          parentActionCallId: actionCallId,
         });
       }
       if (ctx.onStateUpdate) {
@@ -449,6 +475,7 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         runId,
         deckPath: deck.path,
         actionCallId,
+        parentActionCallId: ctx.parentActionCallId,
       });
       return validated;
     }
@@ -557,18 +584,6 @@ async function handleToolCall(
   if (ctx.parentDeck.handlers?.onPing?.path) {
     suspenseTimer = setTimeout(async () => {
       suspenseFired = true;
-      const elapsed = performance.now() - started;
-      ctx.trace?.({
-        type: "event",
-        runId: ctx.runId,
-        actionCallId: call.id,
-        name: "suspense.fire",
-        payload: {
-          action: action.name,
-          handlerPath: ctx.parentDeck.handlers!.onPing!.path,
-          elapsedMs: Math.floor(elapsed),
-        },
-      });
       let envelope: ModelMessage[] = [];
       try {
         envelope = await runPingHandler({
@@ -590,34 +605,11 @@ async function handleToolCall(
           userFirst: ctx.userFirst,
         });
       } catch (err) {
-        ctx.trace?.({
-          type: "event",
-          runId: ctx.runId,
-          actionCallId: call.id,
-          name: "suspense.error",
-          payload: {
-            action: action.name,
-            handlerPath: ctx.parentDeck.handlers!.onPing!.path,
-            error: err instanceof Error ? err.message : String(err),
-          },
-        });
         envelope = [];
       }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
-        ctx.trace?.({
-          type: "event",
-          runId: ctx.runId,
-          actionCallId: call.id,
-          name: "suspense.result",
-          payload: {
-            action: action.name,
-            handlerPath: ctx.parentDeck.handlers!.onPing!.path,
-            elapsedMs: Math.floor(performance.now() - started),
-            messages: envelope.length,
-          },
-        });
         if (toolMsg?.content) {
           if (ctx.onStreamText) {
             ctx.onStreamText(`${toolMsg.content}\n`);
@@ -679,36 +671,12 @@ async function handleToolCall(
           userFirst: ctx.userFirst,
         });
       } catch (err) {
-        ctx.trace?.({
-          type: "event",
-          runId: ctx.runId,
-          actionCallId: call.id,
-          name: "suspense.error",
-          payload: {
-            action: action.name,
-            handlerPath: ctx.parentDeck.handlers!.onPing!.path,
-            error: err instanceof Error ? err.message : String(err),
-          },
-        });
         envelope = [];
       }
       extraMessages.push(...envelope.map(sanitizeMessage));
       if (envelope.length) {
         const toolMsg = envelope.find((m) => m.role === "tool");
         if (toolMsg?.content) {
-          ctx.trace?.({
-            type: "event",
-            runId: ctx.runId,
-            actionCallId: call.id,
-            name: "suspense.result",
-            payload: {
-              action: action.name,
-              handlerPath: ctx.parentDeck.handlers!.onPing!.path,
-              elapsedMs: Math.floor(elapsedFromAction),
-              messages: envelope.length,
-              kind: "late",
-            },
-          });
           if (ctx.onStreamText) {
             ctx.onStreamText(`${toolMsg.content}\n`);
           } else {
