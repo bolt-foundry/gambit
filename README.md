@@ -53,6 +53,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli repl path/to/root.deck.ts
 - `examples/hello_world.deck.md`: minimal assistant-first hello world; echoes provided `--input`.
 - `examples/agent_with_typescript/agent_with_typescript.deck.md`: Markdown deck that calls a TypeScript action to fetch the current timestamp.
 - `examples/agent_with_multi_actions/agent_with_multi_actions.deck.md`: Routing agent that can call multiple Markdown and TypeScript actions (time, random number, echo, summarize, translate).
+- `examples/handlers_md/handlers_md.deck.md`: Demonstrates `onError`/`onInterval` handlers with a flaky action (handlers authored in Markdown).
 
 ## Key concepts
 
