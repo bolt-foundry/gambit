@@ -731,6 +731,13 @@ async function handleToolCall(
     scheduleNextInterval();
   }
 
+  const stopIntervals = () => {
+    intervalStopped = true;
+    if (intervalTimer !== undefined) {
+      clearTimeout(intervalTimer);
+    }
+  };
+
   const childResult = await childPromise;
 
   if (!childResult.ok) {
@@ -744,10 +751,12 @@ async function handleToolCall(
       if (handled.extraMessages) {
         extraMessages.push(...handled.extraMessages);
       }
+      stopIntervals();
       const content = handled.toolContent;
       return { toolContent: content, extraMessages };
     }
 
+    stopIntervals();
     throw childResult.error;
   }
 
@@ -807,8 +816,7 @@ async function handleToolCall(
     },
   );
 
-  intervalStopped = true;
-  if (intervalTimer !== undefined) clearTimeout(intervalTimer);
+  stopIntervals();
 
   return { toolContent, extraMessages };
 }
