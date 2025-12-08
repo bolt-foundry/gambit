@@ -25,7 +25,9 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
           `[trace] run.start runId=${event.runId}${
             event.deckPath ? ` deck=${event.deckPath}` : ""
           }${
-            event.userFirst !== undefined ? ` userFirst=${event.userFirst}` : ""
+            event.initialUserMessage !== undefined
+              ? ` initialUserMessage=${JSON.stringify(event.initialUserMessage)}`
+              : ""
           }${
             event.input !== undefined
               ? ` input=${JSON.stringify(event.input)}`

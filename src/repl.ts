@@ -12,8 +12,9 @@ export async function startRepl(opts: {
   modelProvider: import("./types.ts").ModelProvider;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   verbose?: boolean;
-  userFirst?: boolean;
   initialInput?: unknown;
+  initialMessage?: unknown;
+  inputProvided?: boolean;
 }) {
   const lineReader = createLineReader();
   let state: SavedState | undefined;
@@ -28,14 +29,19 @@ export async function startRepl(opts: {
 
   write("REPL started. Type 'exit' to quit.\n");
 
-  const runOnce = async (line: unknown, assistantFirst = false) => {
-    const userFirstFlag = assistantFirst ? false : true;
+  const runOnce = async (
+    deckInput: unknown,
+    userMessage: unknown,
+    providedFlag: boolean,
+  ) => {
     try {
       let streamed = false;
       let prefixPrinted = false;
       const result = await runDeck({
         path: opts.deckPath,
-        input: line,
+        input: deckInput,
+        inputProvided: providedFlag,
+        initialUserMessage: userMessage,
         modelProvider: opts.modelProvider,
         isRoot: true,
         defaultModel: opts.model,
@@ -55,7 +61,6 @@ export async function startRepl(opts: {
           streamed = true;
           write(chunk);
         },
-        userFirst: userFirstFlag,
       });
       const formatted = formatResult(result);
       if (streamed) {
@@ -69,14 +74,19 @@ export async function startRepl(opts: {
     }
   };
 
-  const skipAssistantLead = opts.userFirst || opts.initialInput !== undefined;
+  const skipAssistantLead = opts.initialMessage !== undefined;
+  const initialInput = opts.initialInput;
 
   if (!skipAssistantLead) {
-    await runOnce("", true);
+    await runOnce(initialInput, undefined, Boolean(opts.inputProvided));
   }
 
-  if (opts.initialInput !== undefined) {
-    await runOnce(opts.initialInput);
+  if (opts.initialMessage !== undefined) {
+    await runOnce(
+      initialInput,
+      opts.initialMessage,
+      Boolean(opts.inputProvided),
+    );
   }
 
   while (!closed) {
@@ -84,7 +94,7 @@ export async function startRepl(opts: {
     const line = await lineReader.readLine();
     if (line === null) break;
     if (line.trim().toLowerCase() === "exit") break;
-    await runOnce(line);
+    await runOnce(undefined, line, false);
   }
 
   closed = true;

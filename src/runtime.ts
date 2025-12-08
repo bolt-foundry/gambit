@@ -14,7 +14,6 @@ import type {
   LoadedDeck,
   ModelMessage,
   ModelProvider,
-  ReferenceContext,
   ToolCallResult,
   ToolDefinition,
 } from "./types.ts";
@@ -29,6 +28,8 @@ function randomId(prefix: string) {
 type RunOptions = {
   path: string;
   input: unknown;
+  inputProvided?: boolean;
+  initialUserMessage?: unknown;
   modelProvider: ModelProvider;
   isRoot?: boolean;
   guardrails?: Partial<Guardrails>;
@@ -43,7 +44,6 @@ type RunOptions = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
-  userFirst?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -77,7 +77,8 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       runId,
       deckPath: deck.path,
       input: validatedInput as unknown as import("./types.ts").JSONValue,
-      userFirst: opts.userFirst,
+      initialUserMessage: opts.initialUserMessage as
+        unknown as import("./types.ts").JSONValue,
     });
   }
   try {
@@ -92,6 +93,8 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         parentActionCallId: opts.parentActionCallId,
         modelProvider: opts.modelProvider,
         input: validatedInput,
+        inputProvided: opts.inputProvided ?? true,
+        initialUserMessage: opts.initialUserMessage,
         defaultModel: opts.defaultModel,
         modelOverride: opts.modelOverride,
         trace: opts.trace,
@@ -99,7 +102,6 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         state: opts.state,
         onStateUpdate: opts.onStateUpdate,
         onStreamText: opts.onStreamText,
-        userFirst: opts.userFirst,
       });
     }
 
@@ -122,7 +124,6 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       trace: opts.trace,
       stream: opts.stream,
       onStreamText: opts.onStreamText,
-      userFirst: opts.userFirst,
     });
   } finally {
     if (shouldEmitRun) {
@@ -175,6 +176,7 @@ type RuntimeCtxBase = {
   guardrails: Guardrails;
   depth: number;
   runId: string;
+  inputProvided?: boolean;
   parentActionCallId?: string;
   modelProvider: ModelProvider;
   input: unknown;
@@ -185,7 +187,6 @@ type RuntimeCtxBase = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
-  userFirst?: boolean;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -213,15 +214,16 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         parentActionCallId: actionCallId,
         runId,
         defaultModel: ctx.defaultModel,
-        modelOverride: ctx.modelOverride,
-        trace: ctx.trace,
-        stream: ctx.stream,
-        state: ctx.state,
-        onStateUpdate: ctx.onStateUpdate,
-        onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
-      });
-    },
+      modelOverride: ctx.modelOverride,
+      trace: ctx.trace,
+      stream: ctx.stream,
+      state: ctx.state,
+      onStateUpdate: ctx.onStateUpdate,
+      onStreamText: ctx.onStreamText,
+      initialUserMessage: undefined,
+      inputProvided: true,
+    });
+  },
     fail: (opts) => {
       throw new Error(opts.message);
     },
@@ -232,80 +234,78 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
   return validateOutput(deck, raw, ctx.depth === 0);
 }
 
-async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
-  const { deck, guardrails, depth, modelProvider, input, runId } = ctx;
+async function runLlmDeck(ctx: RuntimeCtxBase & {
+  initialUserMessage?: unknown;
+}): Promise<unknown> {
+  const {
+    deck,
+    guardrails,
+    depth,
+    modelProvider,
+    input,
+    runId,
+    inputProvided,
+    initialUserMessage,
+  } = ctx;
   const actionCallId = randomId("action");
   const start = performance.now();
   const respondEnabled = Boolean(deck.syntheticTools?.respond);
 
   const systemPrompt = buildSystemPrompt(deck);
-  const refCtx: ReferenceContext = {
-    runId,
-    actionCallId,
-    parentActionCallId: ctx.parentActionCallId,
-    input,
-    action: {
-      name: path.basename(deck.path),
-      path: deck.path,
-      label: deck.label,
-      description: deck.actions?.map((a) => a.description).join(" ") || "",
-    },
-    guardrails: ctx.guardrails,
-    model: ctx.modelOverride ??
-      deck.modelParams?.model ??
-      ctx.defaultModel,
-  };
 
   const refToolCallId = randomId("call");
   const messages: ModelMessage[] = ctx.state?.messages
     ? ctx.state.messages.map(sanitizeMessage)
     : [];
   const resumed = messages.length > 0;
+  const sendInit = Boolean(inputProvided) && input !== undefined && !resumed;
   if (!resumed) {
-    ctx.trace?.({
-      type: "tool.call",
-      runId,
-      actionCallId: refToolCallId,
-      name: GAMBIT_TOOL_INIT,
-      args: {},
-      parentActionCallId: actionCallId,
-    });
-    messages.push(
-      sanitizeMessage({ role: "system", content: systemPrompt }),
-      sanitizeMessage({
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: refToolCallId,
-          type: "function",
-          function: {
-            name: GAMBIT_TOOL_INIT,
-            arguments: "{}",
-          },
-        }],
-      }),
-      sanitizeMessage({
-        role: "tool",
+    messages.push(sanitizeMessage({ role: "system", content: systemPrompt }));
+    if (sendInit) {
+      ctx.trace?.({
+        type: "tool.call",
+        runId,
+        actionCallId: refToolCallId,
         name: GAMBIT_TOOL_INIT,
-        tool_call_id: refToolCallId,
-        content: JSON.stringify(refCtx),
-      }),
-    );
-    ctx.trace?.({
-      type: "tool.result",
-      runId,
-      actionCallId: refToolCallId,
-      name: GAMBIT_TOOL_INIT,
-      result: refCtx as unknown as import("./types.ts").JSONValue,
-      parentActionCallId: actionCallId,
-    });
+        args: {},
+        parentActionCallId: actionCallId,
+      });
+      messages.push(
+        sanitizeMessage({
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: refToolCallId,
+            type: "function",
+            function: {
+              name: GAMBIT_TOOL_INIT,
+              arguments: "{}",
+            },
+          }],
+        }),
+        sanitizeMessage({
+          role: "tool",
+          name: GAMBIT_TOOL_INIT,
+          tool_call_id: refToolCallId,
+          content: JSON.stringify(input),
+        }),
+      );
+      ctx.trace?.({
+        type: "tool.result",
+        runId,
+        actionCallId: refToolCallId,
+        name: GAMBIT_TOOL_INIT,
+        result: input as unknown as import("./types.ts").JSONValue,
+        parentActionCallId: actionCallId,
+      });
+    }
   }
 
-  if (ctx.userFirst) {
+  if (initialUserMessage !== undefined) {
     messages.push(
       sanitizeMessage({
         role: "user",
-        content: formatInputForUser(input),
+        content: formatInputForUser(initialUserMessage),
       }),
     );
   }
@@ -484,12 +484,12 @@ async function runLlmDeck(ctx: RuntimeCtxBase): Promise<unknown> {
           runId,
           parentActionCallId: actionCallId,
           defaultModel: ctx.defaultModel,
-          modelOverride: ctx.modelOverride,
-          trace: ctx.trace,
-          onStreamText: ctx.onStreamText,
-          runStartedAt: start,
-          userFirst: ctx.userFirst,
-        });
+        modelOverride: ctx.modelOverride,
+        trace: ctx.trace,
+        onStreamText: ctx.onStreamText,
+        runStartedAt: start,
+        inputProvided: true,
+      });
         ctx.trace?.({
           type: "tool.result",
           runId,
@@ -603,7 +603,7 @@ async function handleToolCall(
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
     runStartedAt: number;
-    userFirst?: boolean;
+    inputProvided?: boolean;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -667,7 +667,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
-        userFirst: ctx.userFirst,
+        initialUserMessage: undefined,
       });
       return { ok: true, result };
     } catch (err) {
@@ -700,7 +700,7 @@ async function handleToolCall(
           trace: ctx.trace,
           stream: ctx.stream,
           onStreamText: ctx.onStreamText,
-          userFirst: ctx.userFirst,
+          initialUserMessage: undefined,
         });
         if (envelope.length) {
           extraMessages.push(...envelope.map(sanitizeMessage));
@@ -755,7 +755,7 @@ async function handleToolCall(
           trace: ctx.trace,
           stream: ctx.stream,
           onStreamText: ctx.onStreamText,
-          userFirst: ctx.userFirst,
+          initialUserMessage: undefined,
         });
         if (envelope.length) {
           extraMessages.push(...envelope.map(sanitizeMessage));
@@ -830,7 +830,7 @@ async function runIntervalHandler(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-  userFirst?: boolean;
+  initialUserMessage?: unknown;
 }): Promise<ModelMessage[]> {
   try {
     const input = {
@@ -857,7 +857,8 @@ async function runIntervalHandler(args: {
       trace: args.trace,
       stream: args.stream,
       onStreamText: args.onStreamText,
-      userFirst: args.userFirst,
+      initialUserMessage: args.initialUserMessage,
+      inputProvided: true,
     });
     const elapsedMs = Math.floor(args.elapsedMs);
     let message: string | undefined;
@@ -902,7 +903,6 @@ async function maybeHandleError(args: {
     trace?: (event: import("./types.ts").TraceEvent) => void;
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
-    userFirst?: boolean;
   };
   action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -938,7 +938,8 @@ async function maybeHandleError(args: {
       trace: args.ctx.trace,
       stream: args.ctx.stream,
       onStreamText: args.ctx.onStreamText,
-      userFirst: args.ctx.userFirst,
+      initialUserMessage: undefined,
+      inputProvided: true,
     });
 
     const parsed = typeof handlerOutput === "object" && handlerOutput !== null

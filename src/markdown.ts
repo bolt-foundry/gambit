@@ -23,7 +23,7 @@ const RESPOND_MARKER = "gambit://respond";
 const INIT_MARKER = "gambit://init";
 
 const INIT_TEXT = `
-You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info. Do not call this tool yourself; use the provided context.
+You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info.
 `.trim();
 
 const RESPOND_TEXT = `
