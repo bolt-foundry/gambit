@@ -48,6 +48,11 @@ gambit run path/to/root.deck.ts --input '"hi"'
 deno run -A jsr:@bolt-foundry/gambit/cli repl path/to/root.deck.ts
 ```
 
+## Examples
+
+- `examples/hello_world.deck.md`: minimal assistant-first hello world; echoes provided `--input`.
+- `examples/agent_with_typescript/agent_with_typescript.deck.md`: Markdown deck that calls a TypeScript action to fetch the current timestamp.
+
 ## Key concepts
 
 - **Decks:** Units that declare `inputSchema`/`outputSchema`, optional
