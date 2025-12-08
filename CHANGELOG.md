@@ -31,6 +31,5 @@
   for streaming, user-first, trace to console/JSONL, state load/save, model
   overrides; `deno task compile` builds a binary; OpenRouter chat provider with
   streaming/tool calls.
-- Examples/tests/docs: `examples/hello_world`, `examples/suspense` (handler),
-  Markdown decks; runtime + server tests for schemas/embeds/streaming/handlers;
-  tasks for fmt/lint/test/ci; root README with quick start.
+- Runtime + server tests for schemas/embeds/streaming/handlers; tasks for
+  fmt/lint/test/ci; root README with quick start.

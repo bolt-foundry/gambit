@@ -32,7 +32,7 @@ function resolveDefaultReplDeckPath(): string | null {
   if (DEFAULT_REPL_DECK_URL.protocol !== "file:") {
     console.error(
       "Default REPL deck is unavailable when running from a remote URL. " +
-        "Pass a deck path (e.g. examples/hello_world/root.deck.ts) or run from a local checkout.",
+        "Pass a deck path (e.g. src/decks/gambit-assistant.deck.md) or run from a local checkout.",
     );
     return null;
   }
