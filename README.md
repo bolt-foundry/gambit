@@ -29,23 +29,23 @@ predictable, testable, and easy to ship.
 # set your model provider key
 export OPENROUTER_API_KEY=...
 
-# run an example (from repo checkout)
-deno run -A src/cli.ts run examples/hello_world/root.deck.ts --input '"hi"'
+# run a deck from this repo
+deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"'
 
 # REPL with streaming
-deno run -A src/cli.ts repl examples/suspense/root.deck.ts --verbose --stream
+deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --verbose --stream
 
 # REPL with an initial user turn
-deno run -A src/cli.ts repl examples/suspense/root.deck.ts --input '"hi"' --stream
+deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --input '"hi"' --stream
 
 # WebSocket simulator UI
-deno run -A src/cli.ts serve examples/suspense/root.deck.ts --port 8000
+deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
 open http://localhost:8000/
 
 # install/run from JSR package
 deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
-gambit run examples/hello_world/root.deck.ts --input '"hi"'
-deno run -A jsr:@bolt-foundry/gambit/cli repl examples/suspense/root.deck.ts
+gambit run path/to/root.deck.ts --input '"hi"'
+deno run -A jsr:@bolt-foundry/gambit/cli repl path/to/root.deck.ts
 ```
 
 ## Key concepts
@@ -89,7 +89,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli repl examples/suspense/root.deck.ts
 
 - Active development pre-1.0; APIs are likely to change (notably handler/label
   naming and CLI flags). Streaming, suspense, and error handling are exercised
-  in examples and tests.
+  in tests.
 
 ## License
 

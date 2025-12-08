@@ -17,8 +17,7 @@
   },
   "lint": {
     "include": [
-      "src",
-      "examples"
+      "src"
     ],
     "rules": {
       "tags": [
