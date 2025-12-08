@@ -460,7 +460,7 @@ Deno.test("LLM deck streams via onStreamText", async () => {
   assertEquals(sawStreamFlag, true);
 });
 
-Deno.test("LLM deck defaults to assistant-first, userFirst opt-in", async () => {
+Deno.test("LLM deck defaults to assistant-first and sends a user message when provided", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -503,10 +503,12 @@ Deno.test("LLM deck defaults to assistant-first, userFirst opt-in", async () => 
     input: "hello",
     modelProvider: provider,
     isRoot: true,
-    userFirst: true,
+    initialUserMessage: "first turn",
   });
   const hasUserOptIn = lastMessages.some((m) => m.role === "user");
   assertEquals(hasUserOptIn, true);
+  const lastUser = [...lastMessages].reverse().find((m) => m.role === "user");
+  assertEquals(lastUser?.content, "first turn");
 });
 
 Deno.test("run.start traces input and gambit_init payload", async () => {
@@ -561,10 +563,47 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
   const initResult = traces.find((t) =>
     t.type === "tool.result" && t.name === "gambit_init"
   ) as Extract<TraceEvent, { type: "tool.result" }>;
-  const payload = initResult.result as
-    | { input?: unknown }
-    | undefined;
-  assertEquals(payload?.input, input);
+  const payload = initResult.result as unknown;
+  assertEquals(payload, input);
+});
+
+Deno.test("gambit_init does not run when input is not provided", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "no-init.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    export default defineDeck({
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let sawInit = false;
+  const provider: ModelProvider = {
+    chat(input) {
+      sawInit = input.messages.some((m) =>
+        m.tool_calls?.some((t) => t.function.name === "gambit_init")
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: undefined,
+    inputProvided: false,
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(sawInit, false);
 });
 
 Deno.test("trace includes parentActionCallId hierarchy", async () => {
