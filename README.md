@@ -36,7 +36,7 @@ deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"'
 deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --verbose --stream
 
 # REPL with an initial user turn
-deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --input '"hi"' --stream
+deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --message '"hi"' --stream
 
 # WebSocket simulator UI
 deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
@@ -65,10 +65,11 @@ deno run -A jsr:@bolt-foundry/gambit/cli repl path/to/root.deck.ts
   from the provider; suspense updates arrive as separate bubbles in the
   simulator UI.
 - **Simulator state:** The WebSocket simulator keeps per-socket conversation
-  state; follow-up sends reuse the same runId/message history (so `gambit_init`
-  only fires on the first turn) until you refresh the page.
+  state; follow-up sends reuse the same runId/message history. `gambit_init`
+  only fires on the first turn when deck input (`--input`) is provided.
 - **Turn order:** The assistant speaks first by default (input is provided in
-  the reference context); use `--user-first` to send the user message first.
+  the reference context); pass `--message` to send a first user turn before the
+  assistant speaks.
 
 ## Development
 

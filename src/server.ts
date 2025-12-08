@@ -7,11 +7,11 @@ type IncomingMessage =
   | {
     type: "run";
     input?: unknown;
+    message?: unknown;
     stream?: boolean;
     model?: string;
     modelForce?: string;
     trace?: boolean;
-    userFirst?: boolean;
   }
   | { type: "ping" };
 
@@ -31,7 +31,6 @@ export function startWebSocketSimulator(opts: {
   port?: number;
   verbose?: boolean;
   signal?: AbortSignal;
-  userFirst?: boolean;
 }): ReturnType<typeof Deno.serve> {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
@@ -107,24 +106,23 @@ export function startWebSocketSimulator(opts: {
         const tracer = forwardTrace || opts.verbose
           ? traceHandler(forwardTrace)
           : undefined;
-        // Default to user-first once we have prior state so follow-up turns are
-        // treated as user messages even if the flag wasn't provided.
-        const userFirst = msg.userFirst ??
-          (opts.userFirst || Boolean(savedState));
+        const initialUserMessage = msg.message ??
+          (savedState ? msg.input : undefined);
         if (opts.verbose) {
           console.log(
             `[sim] starting run runId=${
               savedState?.runId ?? "(new)"
             } messages=${
               savedState?.messages?.length ?? 0
-            } userFirst=${userFirst} stream=${stream}`,
+            } stream=${stream}`,
           );
         }
 
         try {
           const result = await runDeck({
             path: opts.deckPath,
-            input: msg.input ?? "",
+            input: msg.input,
+            inputProvided: msg.input !== undefined,
             modelProvider: opts.modelProvider,
             isRoot: true,
             defaultModel: msg.model ?? opts.model,
@@ -135,7 +133,7 @@ export function startWebSocketSimulator(opts: {
             onStateUpdate: (state) => {
               savedState = state;
             },
-            userFirst,
+            initialUserMessage,
             onStreamText: (chunk) =>
               safeSend({ type: "stream", chunk, runId: currentRunId }),
           });
@@ -271,9 +269,9 @@ function simulatorHtml(deckPath: string): string {
         </div>
       </div>
       <form id="composer">
-        <textarea id="input" placeholder='Type input as text, or toggle JSON below.'></textarea>
+        <textarea id="input" placeholder='Type a user message, or toggle init input below.'></textarea>
         <div class="controls">
-          <label><input type="checkbox" id="asJson" /> JSON</label>
+          <label><input type="checkbox" id="asJson" /> init input</label>
           <button type="submit" id="send">Send</button>
         </div>
       </form>
@@ -298,6 +296,7 @@ function simulatorHtml(deckPath: string): string {
     let waitingForNextAssistant = false;
     let nextAssistantWaitStartedAt = 0;
     let nextAssistantTicker = null;
+    let firstSend = true;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
@@ -622,7 +621,25 @@ function simulatorHtml(deckPath: string): string {
       if (asJson.checked) {
         try { val = JSON.parse(val); } catch (err) { addBubble("error", "JSON parse error: " + err); return; }
       }
+      const isFirst = firstSend;
+
+      if (isFirst && !asJson.checked && String(val).trim() === "") {
+        // Assistant-first kickoff with no user turn or deck input.
+        currentAssistant = null;
+        suspenseBubble = null;
+        logAssistant = null;
+        logSuspense = null;
+        streamMode = "assistant";
+        clearNextAssistantWait();
+        ws.send(JSON.stringify({ type: "run", stream: true, trace: true }));
+        firstSend = false;
+        startWaitTimer();
+        input.value = "";
+        return;
+      }
+
       const display = asJson.checked ? formatPayload(val) : String(val);
+      const sendAsInput = asJson.checked;
       addBubble(transcript, "user", display);
       addEvent("user", display);
       currentAssistant = null;
@@ -631,7 +648,11 @@ function simulatorHtml(deckPath: string): string {
       logSuspense = null;
       streamMode = "assistant";
       clearNextAssistantWait();
-      ws.send(JSON.stringify({ type: "run", input: val, stream: true, trace: true }));
+      const payload = sendAsInput
+        ? { type: "run", input: val, stream: true, trace: true }
+        : { type: "run", message: val, stream: true, trace: true };
+      ws.send(JSON.stringify(payload));
+      firstSend = false;
       startWaitTimer();
       input.value = "";
     });
