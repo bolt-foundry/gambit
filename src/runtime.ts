@@ -649,9 +649,14 @@ async function handleToolCall(
 
   const intervalCfg = ctx.parentDeck.handlers?.onInterval;
   const suspenseDelay = intervalCfg?.delayMs ?? DEFAULT_SUSPENSE_DELAY_MS;
+  const suspenseRepeat = intervalCfg?.repeatMs;
 
   let intervalTimer: number | undefined;
   let intervalFired = false;
+  let intervalStopped = false;
+  let nextIntervalAt = intervalCfg?.path
+    ? performance.now() + suspenseDelay
+    : 0;
 
   const childPromise = (async () => {
     try {
@@ -675,42 +680,57 @@ async function handleToolCall(
     } catch (err) {
       return { ok: false as const, error: err };
     } finally {
-      if (intervalTimer !== undefined) {
-        clearTimeout(intervalTimer);
-      }
+      // Keep interval timers alive until the caller explicitly stops them
     }
   })();
 
-  if (intervalCfg?.path) {
-    intervalTimer = setTimeout(async () => {
-      intervalFired = true;
-      const elapsed = performance.now() - started;
-      try {
-        const envelope = await runIntervalHandler({
-          parentDeck: ctx.parentDeck,
-          action,
-          call,
-          runId: ctx.runId,
-          parentActionCallId: ctx.parentActionCallId,
-          handlerPath: intervalCfg.path,
-          modelProvider: ctx.modelProvider,
-          guardrails: ctx.guardrails,
-          depth: ctx.depth,
-          defaultModel: ctx.defaultModel,
-          modelOverride: ctx.modelOverride,
-          elapsedMs: elapsed,
-          trace: ctx.trace,
-          stream: ctx.stream,
-          onStreamText: ctx.onStreamText,
-          initialUserMessage: undefined,
-        });
-        if (envelope.length) {
-          extraMessages.push(...envelope.map(sanitizeMessage));
-        }
-      } catch {
-        // ignore handler errors
+  const triggerInterval = async (elapsed: number) => {
+    if (intervalStopped) return;
+    intervalFired = true;
+    try {
+      const envelope = await runIntervalHandler({
+        parentDeck: ctx.parentDeck,
+        action,
+        call,
+        runId: ctx.runId,
+        parentActionCallId: ctx.parentActionCallId,
+        handlerPath: intervalCfg!.path,
+        modelProvider: ctx.modelProvider,
+        guardrails: ctx.guardrails,
+        depth: ctx.depth,
+        defaultModel: ctx.defaultModel,
+        modelOverride: ctx.modelOverride,
+        elapsedMs: elapsed,
+        trace: ctx.trace,
+        stream: ctx.stream,
+        onStreamText: ctx.onStreamText,
+        initialUserMessage: undefined,
+      });
+      if (envelope.length) {
+        extraMessages.push(...envelope.map(sanitizeMessage));
       }
-    }, suspenseDelay) as unknown as number;
+    } catch {
+      // ignore handler errors
+    }
+  };
+
+  const scheduleNextInterval = () => {
+    if (!intervalCfg?.path || intervalStopped) return;
+    const now = performance.now();
+    const delay = Math.max(0, nextIntervalAt - now);
+    intervalTimer = setTimeout(async () => {
+      if (intervalStopped) return;
+      const elapsed = performance.now() - started;
+      await triggerInterval(elapsed);
+      if (suspenseRepeat && suspenseRepeat > 0) {
+        nextIntervalAt += suspenseRepeat;
+        scheduleNextInterval();
+      }
+    }, delay) as unknown as number;
+  };
+
+  if (intervalCfg?.path) {
+    scheduleNextInterval();
   }
 
   const childResult = await childPromise;
@@ -736,10 +756,9 @@ async function handleToolCall(
   const normalized = normalizeChildResult(childResult.result);
   const toolContent = baseComplete(normalized);
 
-  if (!intervalFired && intervalCfg?.path) {
+  if (intervalCfg?.path) {
     const elapsedFromAction = performance.now() - started;
-    if (elapsedFromAction >= suspenseDelay) {
-      intervalFired = true;
+    if (!intervalFired && elapsedFromAction >= suspenseDelay) {
       try {
         const envelope = await runIntervalHandler({
           parentDeck: ctx.parentDeck,
@@ -789,6 +808,9 @@ async function handleToolCall(
       content: toolContent,
     },
   );
+
+  intervalStopped = true;
+  if (intervalTimer !== undefined) clearTimeout(intervalTimer);
 
   return { toolContent, extraMessages };
 }
@@ -996,7 +1018,49 @@ async function maybeHandleError(args: {
 
     return { toolContent: content, extraMessages };
   } catch {
-    return undefined;
+    // Fallback when the handler itself fails: still return a structured error envelope
+    // so the assistant can continue gracefully.
+    const status = 500;
+    const messageOverride = `Handled error: ${message}`;
+    const code = "HANDLER_FALLBACK";
+    const content = JSON.stringify({
+      runId: args.ctx.runId,
+      actionCallId: args.call.id,
+      parentActionCallId: args.ctx.parentActionCallId,
+      source: {
+        deckPath: args.ctx.parentDeck.path,
+        actionName: args.action.name,
+      },
+      status,
+      payload: envelopeInput,
+      message: messageOverride,
+      code,
+      meta: { handlerFailed: true },
+    });
+
+    const callId = randomId("event");
+    const extraMessages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: callId,
+          type: "function",
+          function: {
+            name: GAMBIT_TOOL_COMPLETE,
+            arguments: content,
+          },
+        }],
+      },
+      {
+        role: "tool",
+        tool_call_id: callId,
+        name: GAMBIT_TOOL_COMPLETE,
+        content,
+      },
+    ];
+
+    return { toolContent: content, extraMessages };
   }
 }
 

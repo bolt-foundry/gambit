@@ -214,6 +214,7 @@ function simulatorHtml(deckPath: string): string {
     .event-type.error { color: #b91c1c; }
     .event-type.system { color: #8a6d3b; }
     .event-type.suspense { color: #8a6d3b; }
+    .event-type.handler { color: #0f766e; }
     .event-summary { white-space: pre-wrap; color: #0f172a; }
     .event-actions { display: flex; gap: 8px; align-items: center; }
     .event-details { grid-column: 1 / -1; background: #eef2ff; border-radius: 10px; padding: 8px 10px; font-family: monospace; white-space: pre-wrap; margin: 0; border: 1px solid #cbd5e1; }
@@ -482,6 +483,21 @@ function simulatorHtml(deckPath: string): string {
       }
     }
 
+    function traceRole(ev) {
+      if (!ev || typeof ev !== "object") return "trace";
+      const name = typeof ev.name === "string" ? ev.name : undefined;
+      const deckPath = typeof ev.deckPath === "string" ? ev.deckPath : undefined;
+      const isHandlerDeck = deckPath && deckPath.includes("/handlers/");
+      if (
+        isHandlerDeck ||
+        name === "gambit_respond" ||
+        name === "gambit_complete"
+      ) {
+        return "handler";
+      }
+      return "trace";
+    }
+
     const traceParents = new Map();
 
     function recordTraceParent(ev) {
@@ -581,7 +597,8 @@ function simulatorHtml(deckPath: string): string {
           const summary = summarizeTrace(ev);
           recordTraceParent(ev);
           const depth = traceDepth(ev);
-          addEvent("trace", summary, { collapsible: true, details: formatPayload(ev), depth });
+          const role = traceRole(ev);
+          addEvent(role, summary, { collapsible: true, details: formatPayload(ev), depth });
           if (ev.type === "model.result" && ev.finishReason === "tool_calls") {
             startNextAssistantWait();
           }
