@@ -214,7 +214,7 @@ function simulatorHtml(deckPath: string): string {
     .event-type.trace { color: #475569; }
     .event-type.error { color: #b91c1c; }
     .event-type.system { color: #8a6d3b; }
-    .event-type.suspense { color: #8a6d3b; }
+    .event-type.status { color: #8a6d3b; }
     .event-type.handler { color: #0f766e; }
     .event-summary { white-space: pre-wrap; color: #0f172a; }
     .event-actions { display: flex; gap: 8px; align-items: center; }
@@ -223,13 +223,14 @@ function simulatorHtml(deckPath: string): string {
     .event-toggle:hover { background: #cbd5e1; }
     .row { display: flex; margin: 6px 0; }
     .row.user { justify-content: flex-end; }
-    .row.assistant, .row.trace, .row.system, .row.error { justify-content: flex-start; }
+    .row.assistant, .row.trace, .row.system, .row.error, .row.handler, .row.status { justify-content: flex-start; }
     .row.meta { justify-content: center; }
     .bubble { max-width: 70%; padding: 10px 12px; border-radius: 16px; line-height: 1.4; white-space: pre-wrap; position: relative; }
     .bubble.user { background: #0b93f6; color: white; border-bottom-right-radius: 4px; }
     .bubble.assistant { background: #e5e5ea; color: #111; border-bottom-left-radius: 4px; }
     .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
-    .bubble.suspense { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
+    .bubble.status { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
+    .bubble.handler { background: #d1fae5; color: #065f46; border-bottom-left-radius: 4px; }
     .bubble.trace, .bubble.meta { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
     .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
     .bubble.collapsible { cursor: pointer; }
@@ -286,10 +287,10 @@ function simulatorHtml(deckPath: string): string {
     const composer = document.getElementById("composer");
     const btn = document.getElementById("send");
     let currentAssistant = null;
-    let suspenseBubble = null;
-    let streamMode = "assistant";
+    let statusBubble = null;
+    let streamMode = "assistant"; // assistant | status | handler
     let logAssistant = null;
-    let logSuspense = null;
+    let logStatus = null;
     let waitingForAssistant = false;
     let waitStartedAt = 0;
     let waitTicker = null;
@@ -537,14 +538,16 @@ function simulatorHtml(deckPath: string): string {
           break;
         case "stream": {
           const chunk = msg.chunk ?? "";
-          const target = streamMode === "suspense" ? "suspense" : "assistant";
+          const target = streamMode === "status" || streamMode === "handler"
+            ? "status"
+            : "assistant";
           if (waitingForAssistant) stopWaitTimer("first token");
           if (waitingForNextAssistant) stopNextAssistantWait("next reply");
-          if (target === "suspense") {
-            if (!suspenseBubble) suspenseBubble = addBubble(transcript, "suspense", "");
-            suspenseBubble.textContent += chunk;
-            if (!logSuspense) logSuspense = addEvent("suspense", "");
-            logSuspense.textContent += chunk;
+          if (target === "status") {
+            if (!statusBubble) statusBubble = addBubble(transcript, "status", "");
+            statusBubble.textContent += chunk;
+            if (!logStatus) logStatus = addEvent("status", "");
+            logStatus.textContent += chunk;
           } else {
             if (!currentAssistant) currentAssistant = addBubble(transcript, "assistant", "");
             currentAssistant.textContent += chunk;
@@ -570,10 +573,10 @@ function simulatorHtml(deckPath: string): string {
             logAssistant.textContent = content;
           }
           currentAssistant = null;
-          suspenseBubble = null;
+          statusBubble = null;
           streamMode = "assistant";
           logAssistant = null;
-          logSuspense = null;
+          logStatus = null;
           status.textContent = "connected";
           break;
         }
@@ -582,7 +585,8 @@ function simulatorHtml(deckPath: string): string {
           if (waitingForNextAssistant) stopNextAssistantWait("error");
           addBubble(events, "error", "Error: " + (msg.message ?? "unknown"));
           currentAssistant = null;
-          suspenseBubble = null;
+          statusBubble = null;
+          logStatus = null;
           streamMode = "assistant";
           status.textContent = "error";
           break;
@@ -591,14 +595,24 @@ function simulatorHtml(deckPath: string): string {
           if (ev.type === "model.call") {
             currentAssistant = null;
             logAssistant = null;
-            suspenseBubble = null;
-            logSuspense = null;
+            statusBubble = null;
+            logStatus = null;
             streamMode = "assistant";
           }
           const summary = summarizeTrace(ev);
           recordTraceParent(ev);
           const depth = traceDepth(ev);
           const role = traceRole(ev);
+          if (role === "handler" && ev.type === "deck.start") {
+            streamMode = "status";
+            statusBubble = null;
+            logStatus = null;
+          } else if (role === "handler" && ev.type === "deck.end") {
+            streamMode = "assistant";
+            statusBubble = null;
+          } else if (ev.type === "deck.start" || ev.type === "deck.end") {
+            streamMode = "assistant";
+          }
           addEvent(role, summary, { collapsible: true, details: formatPayload(ev), depth });
           if (ev.type === "model.result" && ev.finishReason === "tool_calls") {
             startNextAssistantWait();
@@ -613,7 +627,7 @@ function simulatorHtml(deckPath: string): string {
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { status.textContent = "connected"; };
-      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; suspenseBubble = null; streamMode = "assistant"; clearWaitTimer(); clearNextAssistantWait(); };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; statusBubble = null; logStatus = null; streamMode = "assistant"; clearWaitTimer(); clearNextAssistantWait(); };
       ws.onerror = () => { status.textContent = "error"; clearWaitTimer(); clearNextAssistantWait(); };
       ws.onmessage = (ev) => {
         try {
@@ -642,9 +656,9 @@ function simulatorHtml(deckPath: string): string {
       if (isFirst && !asJson.checked && String(val).trim() === "") {
         // Assistant-first kickoff with no user turn or deck input.
         currentAssistant = null;
-        suspenseBubble = null;
+        statusBubble = null;
         logAssistant = null;
-        logSuspense = null;
+        logStatus = null;
         streamMode = "assistant";
         clearNextAssistantWait();
         ws.send(JSON.stringify({ type: "run", stream: true, trace: true }));
@@ -659,9 +673,9 @@ function simulatorHtml(deckPath: string): string {
       addBubble(transcript, "user", display);
       addEvent("user", display);
       currentAssistant = null;
-      suspenseBubble = null;
+      statusBubble = null;
       logAssistant = null;
-      logSuspense = null;
+      logStatus = null;
       streamMode = "assistant";
       clearNextAssistantWait();
       const payload = sendAsInput

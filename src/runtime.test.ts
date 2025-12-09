@@ -289,7 +289,7 @@ Deno.test("LLM deck gambit_respond propagates status and message", async () => {
   });
 });
 
-Deno.test("interval handler uses action start time", async () => {
+Deno.test("busy handler uses action start time", async () => {
   const origNow = performance.now;
   let now = 0;
   // Simple controllable clock.
@@ -300,7 +300,7 @@ Deno.test("interval handler uses action start time", async () => {
 
   const handlerPath = await writeTempDeck(
     dir,
-    "interval_handler.deck.ts",
+    "busy_handler.deck.ts",
     `
     import { defineDeck } from "${modHref}";
     import { z } from "zod";
@@ -338,7 +338,7 @@ Deno.test("interval handler uses action start time", async () => {
       inputSchema: z.string(),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
-      handlers: { onInterval: { path: "${handlerPath}", delayMs: 5 } },
+      handlers: { onBusy: { path: "${handlerPath}", delayMs: 5 } },
       actions: [{ name: "child", path: "${childPath}" }]
     });
     `,
@@ -380,6 +380,153 @@ Deno.test("interval handler uses action start time", async () => {
 
   // restore clock
   (performance as { now: () => number }).now = origNow;
+});
+
+Deno.test("onInterval alias still triggers busy handler", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const handlerPath = await writeTempDeck(
+    dir,
+    "alias_busy.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        kind: z.union([z.literal("busy"), z.literal("suspense")]),
+        trigger: z.object({ elapsedMs: z.number(), reason: z.string() })
+      }),
+      outputSchema: z.string(),
+      label: "alias_busy",
+      run() { return "alias busy fired"; }
+    });
+    `,
+  );
+
+  const childPath = await writeTempDeck(
+    dir,
+    "work.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      label: "work",
+      run() { return "done"; }
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      handlers: { onInterval: { path: "${handlerPath}", delayMs: 0 } },
+      actions: [{ name: "work", path: "${childPath}" }]
+    });
+    `,
+  );
+
+  let callCount = 0;
+  const stream: string[] = [];
+  const provider: ModelProvider = {
+    chat() {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls",
+          toolCalls: [{ id: "t1", name: "work", args: {} }],
+        });
+      }
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    onStreamText: (chunk) => stream.push(chunk),
+  });
+
+  assertEquals(result, "ok");
+  assert(stream.some((c) => c.includes("alias busy fired")));
+});
+
+Deno.test("idle handler fires after inactivity", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const handlerPath = await writeTempDeck(
+    dir,
+    "idle_handler.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        kind: z.literal("idle"),
+        trigger: z.object({ elapsedMs: z.number(), reason: z.string() })
+      }),
+      outputSchema: z.string(),
+      label: "idle_handler",
+      run(ctx) { return "idle ping " + Math.round(ctx.input.trigger.elapsedMs); }
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent_idle.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      handlers: { onIdle: { path: "${handlerPath}", delayMs: 5 } }
+    });
+    `,
+  );
+
+  const stream: string[] = [];
+  const provider: ModelProvider = {
+    chat() {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            message: { role: "assistant", content: "done" },
+            finishReason: "stop",
+          });
+        }, 25);
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    onStreamText: (chunk) => stream.push(chunk),
+  });
+
+  assertEquals(result, "done");
+  assert(stream.some((c) => c.includes("idle ping")));
 });
 
 Deno.test("isRoot inferred when omitted", async () => {
@@ -1352,7 +1499,7 @@ Deno.test("cards cannot declare handlers (ts card)", async () => {
     `
     import { defineCard } from "${modHref}";
     export default defineCard({
-      handlers: { onInterval: { path: "./noop.deck.ts" } }
+      handlers: { onBusy: { path: "./noop.deck.ts" } }
     });
     `,
   );
@@ -1392,7 +1539,7 @@ Deno.test("cards cannot declare handlers (markdown card)", async () => {
     path.join(dir, "bad.card.md"),
     `
 +++
-handlers = { onInterval = { path = "./noop.deck.ts" } }
+handlers = { onBusy = { path = "./noop.deck.ts" } }
 +++
 
 Body.
