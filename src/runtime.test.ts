@@ -511,6 +511,125 @@ Deno.test("LLM deck defaults to assistant-first and sends a user message when pr
   assertEquals(lastUser?.content, "first turn");
 });
 
+Deno.test("onError handler result surfaces via gambit_complete when an action fails", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  // child action that always throws
+  const childPath = await writeTempDeck(
+    dir,
+    "failing_action.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      label: "failing_action",
+      inputSchema: z.object({}),
+      outputSchema: z.object({}),
+      run() {
+        throw new Error("boom");
+      }
+    });
+    `,
+  );
+
+  // onError handler that returns a friendly payload
+  const handlerPath = await writeTempDeck(
+    dir,
+    "on_error_handler.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      label: "handler",
+      inputSchema: z.object({
+        kind: z.literal("error"),
+        source: z.object({ deckPath: z.string(), actionName: z.string() }),
+        error: z.object({ message: z.string() }),
+      }),
+      outputSchema: z.object({
+        message: z.string().optional(),
+        code: z.string().optional(),
+        status: z.number().optional(),
+        payload: z.any().optional(),
+        meta: z.record(z.any()).optional(),
+      }),
+      run(ctx) {
+        return {
+          message: "Recovered gracefully",
+          code: "HANDLED",
+          status: 200,
+          payload: { notice: "fallback" },
+          meta: { fromHandler: true },
+        };
+      }
+    });
+    `,
+  );
+
+  // parent LLM deck
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      label: "parent",
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      actions: [{ name: "failing_action", path: "${childPath}" }],
+      handlers: { onError: { path: "${handlerPath}" } },
+    });
+    `,
+  );
+
+  // provider that first issues a tool call to failing_action, then finishes
+  let calls = 0;
+  const provider: ModelProvider = {
+    chat() {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls" as const,
+          toolCalls: [{
+            id: "call-1",
+            name: "failing_action",
+            args: {},
+          }],
+        });
+      }
+      return Promise.resolve({
+        message: { role: "assistant", content: "done" },
+        finishReason: "stop" as const,
+      });
+    },
+  };
+
+  const traceEvents: TraceEvent[] = [];
+  await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traceEvents.push(ev),
+    inputProvided: true,
+  });
+
+  const toolResult = traceEvents.find((ev) =>
+    ev.type === "tool.result" && ev.name === "failing_action"
+  ) as Extract<TraceEvent, { type: "tool.result" }> | undefined;
+  if (!toolResult) {
+    throw new Error("missing tool.result for failing_action");
+  }
+  const parsed = JSON.parse(String(toolResult.result));
+  assertEquals(parsed.status, 200);
+  assertEquals(parsed.code, "HANDLED");
+  assertEquals(parsed.payload.notice, "fallback");
+});
+
 Deno.test("run.start traces input and gambit_init payload", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
