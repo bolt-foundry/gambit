@@ -11,4 +11,5 @@ export const GAMBIT_TOOL_INIT = "gambit_init";
 export const GAMBIT_TOOL_RESPOND = "gambit_respond";
 export const GAMBIT_TOOL_COMPLETE = "gambit_complete";
 
-export const DEFAULT_SUSPENSE_DELAY_MS = 800;
+// Default delay for busy/idle handler triggers.
+export const DEFAULT_STATUS_DELAY_MS = 800;

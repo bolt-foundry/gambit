@@ -266,6 +266,38 @@ export async function loadMarkdownDeck(
     );
   }
 
+  const normalizeHandler = <
+    T extends { path: string; repeatMs?: number; intervalMs?: number },
+  >(
+    cfg: T | undefined,
+    kind: "onBusy" | "onIdle" | "onInterval",
+  ) => {
+    if (!cfg) return undefined;
+    const repeatMs = cfg.repeatMs ?? cfg.intervalMs;
+    if (cfg.intervalMs !== undefined && cfg.repeatMs === undefined) {
+      console.warn(
+        `[gambit] handlers.${kind}.intervalMs is deprecated; use repeatMs (${resolved})`,
+      );
+    }
+    return {
+      ...cfg,
+      repeatMs,
+      path: path.resolve(path.dirname(resolved), cfg.path),
+    };
+  };
+
+  const intervalAlias = deckMeta.handlers?.onInterval;
+  const onBusy = normalizeHandler(
+    deckMeta.handlers?.onBusy ?? intervalAlias,
+    intervalAlias ? "onInterval" : "onBusy",
+  );
+  if (!deckMeta.handlers?.onBusy && intervalAlias) {
+    console.warn(
+      `[gambit] handlers.onInterval is deprecated; use handlers.onBusy (${resolved})`,
+    );
+  }
+  const onIdle = normalizeHandler(deckMeta.handlers?.onIdle, "onIdle");
+
   const handlers = deckMeta.handlers
     ? {
       onError: deckMeta.handlers.onError
@@ -277,15 +309,8 @@ export async function loadMarkdownDeck(
           ),
         }
         : undefined,
-      onInterval: deckMeta.handlers.onInterval
-        ? {
-          ...deckMeta.handlers.onInterval,
-          path: path.resolve(
-            path.dirname(resolved),
-            deckMeta.handlers.onInterval.path,
-          ),
-        }
-        : undefined,
+      onBusy,
+      onIdle,
     }
     : undefined;
 

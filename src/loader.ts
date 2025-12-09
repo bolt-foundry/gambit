@@ -173,6 +173,38 @@ export async function loadDeck(
     ? deck.execute
     : undefined;
 
+  const normalizeHandler = <
+    T extends { path: string; repeatMs?: number; intervalMs?: number },
+  >(
+    cfg: T | undefined,
+    kind: "onBusy" | "onIdle" | "onInterval",
+  ) => {
+    if (!cfg) return undefined;
+    const repeatMs = cfg.repeatMs ?? cfg.intervalMs;
+    if (cfg.intervalMs !== undefined && cfg.repeatMs === undefined) {
+      console.warn(
+        `[gambit] handlers.${kind}.intervalMs is deprecated; use repeatMs (${resolved})`,
+      );
+    }
+    return {
+      ...cfg,
+      repeatMs,
+      path: path.resolve(path.dirname(resolved), cfg.path),
+    };
+  };
+
+  const intervalAlias = deck.handlers?.onInterval;
+  const onBusy = normalizeHandler(
+    deck.handlers?.onBusy ?? intervalAlias,
+    intervalAlias ? "onInterval" : "onBusy",
+  );
+  if (!deck.handlers?.onBusy && intervalAlias) {
+    console.warn(
+      `[gambit] handlers.onInterval is deprecated; use handlers.onBusy (${resolved})`,
+    );
+  }
+  const onIdle = normalizeHandler(deck.handlers?.onIdle, "onIdle");
+
   const handlers = deck.handlers
     ? {
       onError: deck.handlers.onError
@@ -184,15 +216,8 @@ export async function loadDeck(
           ),
         }
         : undefined,
-      onInterval: deck.handlers.onInterval
-        ? {
-          ...deck.handlers.onInterval,
-          path: path.resolve(
-            path.dirname(resolved),
-            deck.handlers.onInterval.path,
-          ),
-        }
-        : undefined,
+      onBusy,
+      onIdle,
     }
     : undefined;
 

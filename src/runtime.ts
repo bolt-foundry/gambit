@@ -1,7 +1,7 @@
 import * as path from "@std/path";
 import {
   DEFAULT_GUARDRAILS,
-  DEFAULT_SUSPENSE_DELAY_MS,
+  DEFAULT_STATUS_DELAY_MS,
   GAMBIT_TOOL_COMPLETE,
   GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
@@ -24,6 +24,13 @@ function randomId(prefix: string) {
   // Keep IDs short enough for OpenAI/OpenRouter tool_call id limits (~40 chars).
   return `${prefix}-${suffix}`;
 }
+
+type IdleController = {
+  touch: () => void;
+  pause: () => void;
+  resume: () => void;
+  stop: () => void;
+};
 
 type RunOptions = {
   path: string;
@@ -321,6 +328,25 @@ async function runLlmDeck(
     : [];
   const resumed = messages.length > 0;
   const sendInit = Boolean(inputProvided) && input !== undefined && !resumed;
+  const idleController = createIdleController({
+    cfg: deck.handlers?.onIdle,
+    deck,
+    guardrails,
+    depth,
+    runId,
+    parentActionCallId: ctx.parentActionCallId,
+    modelProvider,
+    defaultModel: ctx.defaultModel,
+    modelOverride: ctx.modelOverride,
+    trace: ctx.trace,
+    stream: ctx.stream,
+    onStreamText: ctx.onStreamText,
+    pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
+  });
+  const wrappedOnStreamText = (chunk: string) => {
+    idleController.touch();
+    ctx.onStreamText?.(chunk);
+  };
   if (!resumed) {
     messages.push(sanitizeMessage({ role: "system", content: systemPrompt }));
     if (sendInit) {
@@ -371,6 +397,7 @@ async function runLlmDeck(
       }),
     );
   }
+  idleController.touch();
 
   const tools = await buildToolDefs(deck);
   ctx.trace?.({
@@ -381,106 +408,159 @@ async function runLlmDeck(
     parentActionCallId: ctx.parentActionCallId,
   });
   let passes = 0;
-  while (passes < guardrails.maxPasses) {
-    passes++;
-    if (performance.now() - start > guardrails.timeoutMs) {
-      throw new Error("Timeout exceeded");
-    }
-    const model = ctx.modelOverride ??
-      deck.modelParams?.model ??
-      ctx.defaultModel ??
-      (() => {
-        throw new Error(
-          `No model configured for deck ${deck.path} and no --model provided`,
-        );
-      })();
-
-    const stateMessages = ctx.state?.messages?.length;
-    ctx.trace?.({
-      type: "model.call",
-      runId,
-      actionCallId,
-      deckPath: deck.path,
-      model,
-      stream: ctx.stream,
-      messageCount: messages.length,
-      toolCount: tools.length,
-      messages: messages.map(sanitizeMessage),
-      tools,
-      stateMessages,
-      parentActionCallId: ctx.parentActionCallId,
-    });
-
-    const result = await modelProvider.chat({
-      model,
-      messages,
-      tools,
-      stream: ctx.stream,
-      state: ctx.state,
-      onStreamText: ctx.onStreamText,
-    });
-    const message = result.message;
-    ctx.trace?.({
-      type: "model.result",
-      runId,
-      actionCallId,
-      deckPath: deck.path,
-      model,
-      finishReason: result.finishReason,
-      message: sanitizeMessage(message),
-      toolCalls: result.toolCalls,
-      stateMessages: result.updatedState?.messages?.length,
-      parentActionCallId: ctx.parentActionCallId,
-    });
-    const computeState = (updated?: SavedState): SavedState => {
-      const base = updated ??
-        { runId, messages: messages.map(sanitizeMessage) };
-      const mergedMessages = base.messages && base.messages.length > 0
-        ? base.messages
-        : messages.map(sanitizeMessage);
-      return { ...base, runId, messages: mergedMessages };
-    };
-
-    if (result.toolCalls && result.toolCalls.length > 0) {
-      let responded = false;
-      let respondValue: unknown;
-      const appendedMessages: ModelMessage[] = [];
-
-      for (const call of result.toolCalls) {
-        if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {
-          const status = typeof call.args?.status === "number"
-            ? call.args.status
-            : undefined;
-          const message = typeof call.args?.message === "string"
-            ? call.args.message
-            : undefined;
-          const code = typeof call.args?.code === "string"
-            ? call.args.code
-            : undefined;
-          const meta = (call.args?.meta &&
-              typeof call.args.meta === "object" &&
-              call.args.meta !== null)
-            ? call.args.meta as Record<string, unknown>
-            : undefined;
-          const rawPayload = call.args?.payload ?? call.args;
-          const validatedPayload = validateOutput(
-            deck,
-            rawPayload,
-            depth === 0,
+  try {
+    while (passes < guardrails.maxPasses) {
+      passes++;
+      if (performance.now() - start > guardrails.timeoutMs) {
+        throw new Error("Timeout exceeded");
+      }
+      const model = ctx.modelOverride ??
+        deck.modelParams?.model ??
+        ctx.defaultModel ??
+        (() => {
+          throw new Error(
+            `No model configured for deck ${deck.path} and no --model provided`,
           );
-          const respondEnvelope: {
-            payload: unknown;
-            status?: number;
-            message?: string;
-            code?: string;
-            meta?: Record<string, unknown>;
-          } = {
-            payload: validatedPayload,
-          };
-          if (status !== undefined) respondEnvelope.status = status;
-          if (message !== undefined) respondEnvelope.message = message;
-          if (code !== undefined) respondEnvelope.code = code;
-          if (meta !== undefined) respondEnvelope.meta = meta;
+        })();
+
+      const stateMessages = ctx.state?.messages?.length;
+      ctx.trace?.({
+        type: "model.call",
+        runId,
+        actionCallId,
+        deckPath: deck.path,
+        model,
+        stream: ctx.stream,
+        messageCount: messages.length,
+        toolCount: tools.length,
+        messages: messages.map(sanitizeMessage),
+        tools,
+        stateMessages,
+        parentActionCallId: ctx.parentActionCallId,
+      });
+
+      const result = await modelProvider.chat({
+        model,
+        messages,
+        tools,
+        stream: ctx.stream,
+        state: ctx.state,
+        onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
+          ? wrappedOnStreamText
+          : undefined,
+      });
+      idleController.touch();
+      const message = result.message;
+      ctx.trace?.({
+        type: "model.result",
+        runId,
+        actionCallId,
+        deckPath: deck.path,
+        model,
+        finishReason: result.finishReason,
+        message: sanitizeMessage(message),
+        toolCalls: result.toolCalls,
+        stateMessages: result.updatedState?.messages?.length,
+        parentActionCallId: ctx.parentActionCallId,
+      });
+      const computeState = (updated?: SavedState): SavedState => {
+        const base = updated ??
+          { runId, messages: messages.map(sanitizeMessage) };
+        const mergedMessages = base.messages && base.messages.length > 0
+          ? base.messages
+          : messages.map(sanitizeMessage);
+        return { ...base, runId, messages: mergedMessages };
+      };
+
+      if (result.toolCalls && result.toolCalls.length > 0) {
+        let responded = false;
+        let respondValue: unknown;
+        const appendedMessages: ModelMessage[] = [];
+
+        for (const call of result.toolCalls) {
+          if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {
+            const status = typeof call.args?.status === "number"
+              ? call.args.status
+              : undefined;
+            const message = typeof call.args?.message === "string"
+              ? call.args.message
+              : undefined;
+            const code = typeof call.args?.code === "string"
+              ? call.args.code
+              : undefined;
+            const meta = (call.args?.meta &&
+                typeof call.args.meta === "object" &&
+                call.args.meta !== null)
+              ? call.args.meta as Record<string, unknown>
+              : undefined;
+            const rawPayload = call.args?.payload ?? call.args;
+            const validatedPayload = validateOutput(
+              deck,
+              rawPayload,
+              depth === 0,
+            );
+            const respondEnvelope: {
+              payload: unknown;
+              status?: number;
+              message?: string;
+              code?: string;
+              meta?: Record<string, unknown>;
+            } = {
+              payload: validatedPayload,
+            };
+            if (status !== undefined) respondEnvelope.status = status;
+            if (message !== undefined) respondEnvelope.message = message;
+            if (code !== undefined) respondEnvelope.code = code;
+            if (meta !== undefined) respondEnvelope.meta = meta;
+            ctx.trace?.({
+              type: "tool.call",
+              runId,
+              actionCallId: call.id,
+              name: call.name,
+              args: call.args,
+              parentActionCallId: actionCallId,
+            });
+            const toolContent = JSON.stringify(call.args ?? {});
+            appendedMessages.push({
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: call.id,
+                type: "function",
+                function: {
+                  name: call.name,
+                  arguments: JSON.stringify(call.args ?? {}),
+                },
+              }],
+            });
+            appendedMessages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: call.name,
+              content: toolContent,
+            });
+            respondValue = respondEnvelope;
+            responded = true;
+            ctx.trace?.({
+              type: "tool.result",
+              runId,
+              actionCallId: call.id,
+              name: call.name,
+              result:
+                respondEnvelope as unknown as import("./types.ts").JSONValue,
+              parentActionCallId: actionCallId,
+            });
+            continue;
+          }
+
+          ctx.trace?.({
+            type: "action.start",
+            runId,
+            actionCallId: call.id,
+            name: call.name,
+            path: call.name,
+            parentActionCallId: actionCallId,
+          });
           ctx.trace?.({
             type: "tool.call",
             runId,
@@ -489,7 +569,31 @@ async function runLlmDeck(
             args: call.args,
             parentActionCallId: actionCallId,
           });
-          const toolContent = JSON.stringify(call.args ?? {});
+          const toolResult = await handleToolCall(call, {
+            parentDeck: deck,
+            modelProvider,
+            guardrails,
+            depth,
+            runId,
+            parentActionCallId: actionCallId,
+            defaultModel: ctx.defaultModel,
+            modelOverride: ctx.modelOverride,
+            trace: ctx.trace,
+            onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
+              ? wrappedOnStreamText
+              : undefined,
+            runStartedAt: start,
+            inputProvided: true,
+            idle: idleController,
+          });
+          ctx.trace?.({
+            type: "tool.result",
+            runId,
+            actionCallId: call.id,
+            name: call.name,
+            result: toolResult.toolContent,
+            parentActionCallId: actionCallId,
+          });
           appendedMessages.push({
             role: "assistant",
             content: null,
@@ -498,7 +602,7 @@ async function runLlmDeck(
               type: "function",
               function: {
                 name: call.name,
-                arguments: JSON.stringify(call.args ?? {}),
+                arguments: JSON.stringify(call.args),
               },
             }],
           });
@@ -506,145 +610,82 @@ async function runLlmDeck(
             role: "tool",
             tool_call_id: call.id,
             name: call.name,
-            content: toolContent,
+            content: toolResult.toolContent,
           });
-          respondValue = respondEnvelope;
-          responded = true;
+          if (toolResult.extraMessages?.length) {
+            appendedMessages.push(...toolResult.extraMessages);
+          }
           ctx.trace?.({
-            type: "tool.result",
+            type: "action.end",
             runId,
             actionCallId: call.id,
             name: call.name,
-            result:
-              respondEnvelope as unknown as import("./types.ts").JSONValue,
+            path: call.name,
             parentActionCallId: actionCallId,
           });
-          continue;
         }
 
-        ctx.trace?.({
-          type: "action.start",
-          runId,
-          actionCallId: call.id,
-          name: call.name,
-          path: call.name,
-          parentActionCallId: actionCallId,
-        });
-        ctx.trace?.({
-          type: "tool.call",
-          runId,
-          actionCallId: call.id,
-          name: call.name,
-          args: call.args,
-          parentActionCallId: actionCallId,
-        });
-        const toolResult = await handleToolCall(call, {
-          parentDeck: deck,
-          modelProvider,
-          guardrails,
-          depth,
-          runId,
-          parentActionCallId: actionCallId,
-          defaultModel: ctx.defaultModel,
-          modelOverride: ctx.modelOverride,
-          trace: ctx.trace,
-          onStreamText: ctx.onStreamText,
-          runStartedAt: start,
-          inputProvided: true,
-        });
-        ctx.trace?.({
-          type: "tool.result",
-          runId,
-          actionCallId: call.id,
-          name: call.name,
-          result: toolResult.toolContent,
-          parentActionCallId: actionCallId,
-        });
-        appendedMessages.push({
-          role: "assistant",
-          content: null,
-          tool_calls: [{
-            id: call.id,
-            type: "function",
-            function: { name: call.name, arguments: JSON.stringify(call.args) },
-          }],
-        });
-        appendedMessages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.name,
-          content: toolResult.toolContent,
-        });
-        if (toolResult.extraMessages?.length) {
-          appendedMessages.push(...toolResult.extraMessages);
+        if (appendedMessages.length) {
+          messages.push(...appendedMessages.map(sanitizeMessage));
+          idleController.touch();
         }
-        ctx.trace?.({
-          type: "action.end",
-          runId,
-          actionCallId: call.id,
-          name: call.name,
-          path: call.name,
-          parentActionCallId: actionCallId,
-        });
+        if (ctx.onStateUpdate) {
+          const state = computeState(result.updatedState);
+          ctx.onStateUpdate(state);
+        }
+        if (responded) {
+          ctx.trace?.({
+            type: "deck.end",
+            runId,
+            deckPath: deck.path,
+            actionCallId,
+            parentActionCallId: ctx.parentActionCallId,
+          });
+          return respondValue;
+        }
+        continue;
       }
 
-      if (appendedMessages.length) {
-        messages.push(...appendedMessages.map(sanitizeMessage));
+      if (result.finishReason === "tool_calls") {
+        throw new Error("Model requested tool_calls but provided none");
       }
-      if (ctx.onStateUpdate) {
-        const state = computeState(result.updatedState);
-        ctx.onStateUpdate(state);
-      }
-      if (responded) {
-        ctx.trace?.({
-          type: "deck.end",
-          runId,
-          deckPath: deck.path,
-          actionCallId,
-          parentActionCallId: ctx.parentActionCallId,
-        });
-        return respondValue;
-      }
-      continue;
-    }
 
-    if (result.finishReason === "tool_calls") {
-      throw new Error("Model requested tool_calls but provided none");
-    }
-
-    if (
-      result.finishReason === "length" &&
-      (message.content === null || message.content === undefined)
-    ) {
-      throw new Error("Model stopped early (length) with no content");
-    }
-
-    if (message.content !== null && message.content !== undefined) {
-      messages.push(sanitizeMessage(message));
-      if (ctx.onStateUpdate) {
-        const state = computeState(result.updatedState);
-        ctx.onStateUpdate(state);
+      if (
+        result.finishReason === "length" &&
+        (message.content === null || message.content === undefined)
+      ) {
+        throw new Error("Model stopped early (length) with no content");
       }
-      if (!respondEnabled) {
-        const validated = validateOutput(deck, message.content, depth === 0);
-        ctx.trace?.({
-          type: "deck.end",
-          runId,
-          deckPath: deck.path,
-          actionCallId,
-          parentActionCallId: ctx.parentActionCallId,
-        });
-        return validated;
+
+      if (message.content !== null && message.content !== undefined) {
+        messages.push(sanitizeMessage(message));
+        if (ctx.onStateUpdate) {
+          const state = computeState(result.updatedState);
+          ctx.onStateUpdate(state);
+        }
+        if (!respondEnabled) {
+          const validated = validateOutput(deck, message.content, depth === 0);
+          ctx.trace?.({
+            type: "deck.end",
+            runId,
+            deckPath: deck.path,
+            actionCallId,
+            parentActionCallId: ctx.parentActionCallId,
+          });
+          return validated;
+        }
+      }
+
+      if (respondEnabled && result.finishReason === "stop") {
+        throw new Error("Deck requires gambit_respond to finish");
+      }
+
+      if (passes >= guardrails.maxPasses) {
+        throw new Error("Max passes exceeded without completing");
       }
     }
-
-    if (respondEnabled && result.finishReason === "stop") {
-      throw new Error("Deck requires gambit_respond to finish");
-    }
-
-    if (passes >= guardrails.maxPasses) {
-      throw new Error("Max passes exceeded without completing");
-    }
+  } finally {
+    idleController.stop();
   }
 
   throw new Error("Model did not complete within guardrails");
@@ -666,6 +707,7 @@ async function handleToolCall(
     onStreamText?: (chunk: string) => void;
     runStartedAt: number;
     inputProvided?: boolean;
+    idle?: IdleController;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
@@ -707,16 +749,17 @@ async function handleToolCall(
   const extraMessages: ModelMessage[] = [];
   const started = performance.now();
 
-  const intervalCfg = ctx.parentDeck.handlers?.onInterval;
-  const suspenseDelay = intervalCfg?.delayMs ?? DEFAULT_SUSPENSE_DELAY_MS;
-  const suspenseRepeat = intervalCfg?.repeatMs;
+  const busyCfg = ctx.parentDeck.handlers?.onBusy ??
+    ctx.parentDeck.handlers?.onInterval;
+  const busyDelay = busyCfg?.delayMs ?? DEFAULT_STATUS_DELAY_MS;
+  const busyRepeat = busyCfg?.repeatMs;
 
-  let intervalTimer: number | undefined;
-  let intervalFired = false;
-  let intervalStopped = false;
-  let nextIntervalAt = intervalCfg?.path
-    ? performance.now() + suspenseDelay
-    : 0;
+  let busyTimer: number | undefined;
+  let busyFired = false;
+  let busyStopped = false;
+  let nextBusyAt = busyCfg?.path ? performance.now() + busyDelay : 0;
+
+  ctx.idle?.pause();
 
   const childPromise = (async () => {
     try {
@@ -740,21 +783,21 @@ async function handleToolCall(
     } catch (err) {
       return { ok: false as const, error: err };
     } finally {
-      // Keep interval timers alive until the caller explicitly stops them
+      // Keep busy timers alive until the caller explicitly stops them
     }
   })();
 
-  const triggerInterval = async (elapsed: number) => {
-    if (intervalStopped) return;
-    intervalFired = true;
+  const triggerBusy = async (elapsed: number) => {
+    if (busyStopped) return;
+    busyFired = true;
     try {
-      const envelope = await runIntervalHandler({
+      const envelope = await runBusyHandler({
         parentDeck: ctx.parentDeck,
         action,
         call,
         runId: ctx.runId,
         parentActionCallId: ctx.parentActionCallId,
-        handlerPath: intervalCfg!.path,
+        handlerPath: busyCfg!.path,
         modelProvider: ctx.modelProvider,
         guardrails: ctx.guardrails,
         depth: ctx.depth,
@@ -769,38 +812,40 @@ async function handleToolCall(
       if (envelope.length) {
         extraMessages.push(...envelope.map(sanitizeMessage));
       }
+      ctx.idle?.touch();
     } catch {
       // ignore handler errors
     }
   };
 
-  const scheduleNextInterval = () => {
-    if (!intervalCfg?.path || intervalStopped) return;
+  const scheduleNextBusy = () => {
+    if (!busyCfg?.path || busyStopped) return;
     const now = performance.now();
-    const delay = Math.max(0, nextIntervalAt - now);
-    intervalTimer = setTimeout(async () => {
-      if (intervalStopped) return;
+    const delay = Math.max(0, nextBusyAt - now);
+    busyTimer = setTimeout(async () => {
+      if (busyStopped) return;
       const elapsed = performance.now() - started;
-      await triggerInterval(elapsed);
-      if (suspenseRepeat && suspenseRepeat > 0) {
-        nextIntervalAt += suspenseRepeat;
-        scheduleNextInterval();
+      await triggerBusy(elapsed);
+      if (busyRepeat && busyRepeat > 0) {
+        nextBusyAt += busyRepeat;
+        scheduleNextBusy();
       }
     }, delay) as unknown as number;
   };
 
-  if (intervalCfg?.path) {
-    scheduleNextInterval();
+  if (busyCfg?.path) {
+    scheduleNextBusy();
   }
 
-  const stopIntervals = () => {
-    intervalStopped = true;
-    if (intervalTimer !== undefined) {
-      clearTimeout(intervalTimer);
+  const stopBusy = () => {
+    busyStopped = true;
+    if (busyTimer !== undefined) {
+      clearTimeout(busyTimer);
     }
   };
 
   const childResult = await childPromise;
+  ctx.idle?.resume();
 
   if (!childResult.ok) {
     const handled = await maybeHandleError({
@@ -813,29 +858,30 @@ async function handleToolCall(
       if (handled.extraMessages) {
         extraMessages.push(...handled.extraMessages);
       }
-      stopIntervals();
+      stopBusy();
+      ctx.idle?.touch();
       const content = handled.toolContent;
       return { toolContent: content, extraMessages };
     }
 
-    stopIntervals();
+    stopBusy();
     throw childResult.error;
   }
 
   const normalized = normalizeChildResult(childResult.result);
   const toolContent = baseComplete(normalized);
 
-  if (intervalCfg?.path) {
+  if (busyCfg?.path) {
     const elapsedFromAction = performance.now() - started;
-    if (!intervalFired && elapsedFromAction >= suspenseDelay) {
+    if (!busyFired && elapsedFromAction >= busyDelay) {
       try {
-        const envelope = await runIntervalHandler({
+        const envelope = await runBusyHandler({
           parentDeck: ctx.parentDeck,
           action,
           call,
           runId: ctx.runId,
           parentActionCallId: ctx.parentActionCallId,
-          handlerPath: intervalCfg.path,
+          handlerPath: busyCfg.path,
           modelProvider: ctx.modelProvider,
           guardrails: ctx.guardrails,
           depth: ctx.depth,
@@ -850,6 +896,7 @@ async function handleToolCall(
         if (envelope.length) {
           extraMessages.push(...envelope.map(sanitizeMessage));
         }
+        ctx.idle?.touch();
       } catch {
         // ignore handler errors
       }
@@ -878,7 +925,8 @@ async function handleToolCall(
     },
   );
 
-  stopIntervals();
+  stopBusy();
+  ctx.idle?.touch();
 
   return { toolContent, extraMessages };
 }
@@ -906,7 +954,7 @@ function normalizeChildResult(
   return { payload: result };
 }
 
-async function runIntervalHandler(args: {
+async function runBusyHandler(args: {
   parentDeck: LoadedDeck;
   action: { name: string; path: string; label?: string; description?: string };
   call: { id: string; name: string; args: Record<string, unknown> };
@@ -926,7 +974,7 @@ async function runIntervalHandler(args: {
 }): Promise<ModelMessage[]> {
   try {
     const input = {
-      kind: "suspense",
+      kind: "busy",
       label: args.action.label ?? args.parentDeck.label,
       source: { deckPath: args.parentDeck.path, actionName: args.action.name },
       trigger: {
@@ -974,6 +1022,170 @@ async function runIntervalHandler(args: {
     return [{
       role: "assistant",
       content: `${message} (elapsed ${elapsedMs}ms)`,
+    }];
+  } catch {
+    return [];
+  }
+}
+
+function createIdleController(args: {
+  cfg?: import("./types.ts").IdleHandlerConfig;
+  deck: LoadedDeck;
+  guardrails: Guardrails;
+  depth: number;
+  runId: string;
+  parentActionCallId?: string;
+  modelProvider: ModelProvider;
+  defaultModel?: string;
+  modelOverride?: string;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
+  stream?: boolean;
+  onStreamText?: (chunk: string) => void;
+  pushMessages: (msgs: ModelMessage[]) => void;
+}): IdleController {
+  if (!args.cfg?.path) {
+    return {
+      touch: () => {},
+      pause: () => {},
+      resume: () => {},
+      stop: () => {},
+    };
+  }
+
+  const delayMs = args.cfg.delayMs ?? DEFAULT_STATUS_DELAY_MS;
+  const repeatMs = args.cfg.repeatMs;
+  let timer: number | undefined;
+  let paused = false;
+  let stopped = false;
+  let lastTouched = performance.now();
+
+  const clear = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+
+  const schedule = () => {
+    if (stopped || paused) return;
+    clear();
+    const now = performance.now();
+    const remaining = Math.max(0, delayMs - (now - lastTouched));
+    timer = setTimeout(async () => {
+      if (stopped || paused) return;
+      const elapsed = performance.now() - lastTouched;
+      try {
+        const envelope = await runIdleHandler({
+          deck: args.deck,
+          handlerPath: args.cfg!.path,
+          runId: args.runId,
+          parentActionCallId: args.parentActionCallId,
+          modelProvider: args.modelProvider,
+          guardrails: args.guardrails,
+          depth: args.depth,
+          defaultModel: args.defaultModel,
+          modelOverride: args.modelOverride,
+          elapsedMs: elapsed,
+          trace: args.trace,
+          stream: args.stream,
+          onStreamText: args.onStreamText,
+        });
+        if (envelope.length) args.pushMessages(envelope.map(sanitizeMessage));
+      } catch {
+        // ignore idle handler errors
+      }
+      if (repeatMs && repeatMs > 0) {
+        lastTouched = performance.now();
+        schedule();
+      }
+    }, remaining) as unknown as number;
+  };
+
+  const touch = () => {
+    if (stopped) return;
+    lastTouched = performance.now();
+    schedule();
+  };
+  const pause = () => {
+    paused = true;
+    clear();
+  };
+  const resume = () => {
+    if (stopped) return;
+    if (!paused) return;
+    paused = false;
+    schedule();
+  };
+  const stop = () => {
+    stopped = true;
+    clear();
+  };
+
+  return { touch, pause, resume, stop };
+}
+
+async function runIdleHandler(args: {
+  deck: LoadedDeck;
+  handlerPath: string;
+  runId: string;
+  parentActionCallId?: string;
+  modelProvider: ModelProvider;
+  guardrails: Guardrails;
+  depth: number;
+  defaultModel?: string;
+  modelOverride?: string;
+  elapsedMs: number;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
+  stream?: boolean;
+  onStreamText?: (chunk: string) => void;
+}): Promise<ModelMessage[]> {
+  try {
+    const input = {
+      kind: "idle",
+      label: args.deck.label,
+      source: { deckPath: args.deck.path },
+      trigger: {
+        reason: "idle_timeout" as const,
+        elapsedMs: Math.floor(args.elapsedMs),
+      },
+    };
+    const handlerOutput = await runDeck({
+      path: args.handlerPath,
+      input,
+      modelProvider: args.modelProvider,
+      isRoot: false,
+      guardrails: args.guardrails,
+      depth: args.depth + 1,
+      parentActionCallId: args.parentActionCallId,
+      runId: args.runId,
+      defaultModel: args.defaultModel,
+      modelOverride: args.modelOverride,
+      trace: args.trace,
+      stream: args.stream,
+      onStreamText: args.onStreamText,
+      initialUserMessage: undefined,
+      inputProvided: true,
+    });
+    const elapsedMs = Math.floor(args.elapsedMs);
+    let message: string | undefined;
+    if (typeof handlerOutput === "string") {
+      message = handlerOutput;
+    } else if (handlerOutput && typeof handlerOutput === "object") {
+      if (
+        typeof (handlerOutput as { message?: unknown }).message === "string"
+      ) {
+        message = (handlerOutput as { message?: string }).message;
+      } else {
+        message = JSON.stringify(handlerOutput);
+      }
+    }
+    if (!message) return [];
+    if (args.onStreamText) {
+      args.onStreamText(`${message}\n`);
+    } else {
+      console.log(message);
+    }
+    return [{
+      role: "assistant",
+      content: `${message} (idle for ${elapsedMs}ms)`,
     }];
   } catch {
     return [];

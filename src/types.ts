@@ -34,14 +34,28 @@ export type ActionDefinition = {
 };
 
 export type ErrorHandlerConfig = { path: string; label?: Label };
-export type IntervalHandlerConfig = {
+export type BusyHandlerConfig = {
   path: string;
   delayMs?: number;
   repeatMs?: number;
   label?: Label;
+  // Deprecated alias; if provided, mapped to repeatMs.
+  intervalMs?: number;
 };
+export type IdleHandlerConfig = {
+  path: string;
+  delayMs?: number;
+  repeatMs?: number;
+  label?: Label;
+  // Deprecated alias; if provided, mapped to repeatMs.
+  intervalMs?: number;
+};
+// onInterval kept for backward compatibility; prefer onBusy.
+export type IntervalHandlerConfig = BusyHandlerConfig;
 export type HandlersConfig = {
   onError?: ErrorHandlerConfig;
+  onBusy?: BusyHandlerConfig;
+  onIdle?: IdleHandlerConfig;
   onInterval?: IntervalHandlerConfig;
 };
 
