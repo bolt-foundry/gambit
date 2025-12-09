@@ -123,6 +123,7 @@ export function startWebSocketSimulator(opts: {
             inputProvided: msg.input !== undefined,
             modelProvider: opts.modelProvider,
             isRoot: true,
+            allowRootStringInput: true,
             defaultModel: msg.model ?? opts.model,
             modelOverride: msg.modelForce ?? opts.modelForce,
             trace: tracer,

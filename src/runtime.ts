@@ -44,6 +44,7 @@ type RunOptions = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
+  allowRootStringInput?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -69,7 +70,19 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
 
   ensureSchemaPresence(deck, isRoot);
 
-  const validatedInput = validateInput(deck, opts.input, isRoot);
+  const resolvedInput = resolveInput({
+    deck,
+    input: opts.input,
+    state: opts.state,
+    isRoot,
+    initialUserMessage: opts.initialUserMessage,
+  });
+  const validatedInput = validateInput(
+    deck,
+    resolvedInput,
+    isRoot,
+    opts.allowRootStringInput ?? false,
+  );
   const shouldEmitRun = opts.depth === undefined || opts.depth === 0;
   if (shouldEmitRun) {
     opts.trace?.({
@@ -144,8 +157,55 @@ function ensureSchemaPresence(deck: LoadedDeck, isRoot: boolean) {
   }
 }
 
-function validateInput(deck: LoadedDeck, input: unknown, isRoot: boolean) {
+function resolveInput(args: {
+  deck: LoadedDeck;
+  input: unknown;
+  state?: SavedState;
+  isRoot: boolean;
+  initialUserMessage?: unknown;
+}) {
+  if (args.input !== undefined) return args.input;
+  if (!args.isRoot) return args.input;
+
+  const persisted = extractInitInput(args.state);
+  if (persisted !== undefined) return persisted;
+
+  if (args.initialUserMessage !== undefined) return "";
+
+  return args.input;
+}
+
+function extractInitInput(state?: SavedState): unknown {
+  if (!state?.messages) return undefined;
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const msg = state.messages[i];
+    if (msg.role === "tool" && msg.name === GAMBIT_TOOL_INIT) {
+      const content = msg.content;
+      if (typeof content !== "string") return undefined;
+      try {
+        return JSON.parse(content);
+      } catch {
+        return content;
+      }
+    }
+  }
+  return undefined;
+}
+
+function validateInput(
+  deck: LoadedDeck,
+  input: unknown,
+  isRoot: boolean,
+  allowRootStringInput: boolean,
+) {
   if (deck.inputSchema) {
+    if (isRoot && typeof input === "string" && allowRootStringInput) {
+      try {
+        return validateWithSchema(deck.inputSchema as never, input);
+      } catch {
+        return input;
+      }
+    }
     return validateWithSchema(deck.inputSchema as never, input);
   }
   if (isRoot) {

@@ -47,6 +47,7 @@ export async function startRepl(opts: {
         initialUserMessage: userMessage,
         modelProvider: opts.modelProvider,
         isRoot: true,
+        allowRootStringInput: true,
         defaultModel: opts.model,
         modelOverride: opts.modelForce,
         trace: opts.trace,

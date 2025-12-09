@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { loadDeck } from "./loader.ts";
 import { runDeck } from "./runtime.ts";
@@ -509,6 +509,107 @@ Deno.test("LLM deck defaults to assistant-first and sends a user message when pr
   assertEquals(hasUserOptIn, true);
   const lastUser = [...lastMessages].reverse().find((m) => m.role === "user");
   assertEquals(lastUser?.content, "first turn");
+});
+
+Deno.test("LLM deck defaults input to empty string for message-only runs", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "message_only.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let lastMessages: ModelMessage[] = [];
+  const provider: ModelProvider = {
+    chat(input) {
+      lastMessages = input.messages;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: undefined,
+    modelProvider: provider,
+    isRoot: true,
+    initialUserMessage: "hello",
+    inputProvided: false,
+  });
+
+  const hasInit = lastMessages.some((m) =>
+    m.role === "tool" && m.name === "gambit_init"
+  );
+  assertEquals(hasInit, false);
+  const lastUser = [...lastMessages].reverse().find((m) => m.role === "user");
+  assertEquals(lastUser?.content, "hello");
+});
+
+Deno.test("LLM deck reuses saved input when follow-up messages arrive without input", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "reuse_state.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ topic: z.string() }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let savedState: import("./state.ts").SavedState | undefined;
+  let callCount = 0;
+  const provider: ModelProvider = {
+    chat() {
+      callCount++;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: { topic: "first" },
+    modelProvider: provider,
+    isRoot: true,
+    onStateUpdate: (s) => {
+      savedState = s;
+    },
+  });
+
+  assert(savedState);
+
+  await runDeck({
+    path: deckPath,
+    modelProvider: provider,
+    isRoot: true,
+    state: savedState,
+    initialUserMessage: "follow up",
+    inputProvided: false,
+    input: undefined,
+  });
+
+  assertEquals(callCount, 2);
 });
 
 Deno.test("onError handler result surfaces via gambit_complete when an action fails", async () => {
