@@ -1,104 +1,173 @@
-# Gambit
+# Gambit (draft README)
 
-Gambit is a toolkit for building multi-step LLM “decks” that mix model calls,
-compute, and structured tool calls. It aims to make agent-style workflows
-predictable, testable, and easy to ship.
+Gambit helps developers build the most accurate LLM apps by making it simple to
+provide exactly the right amount of context at the right time.
 
-## Goals
+## Status quo
 
-- **Composable decks:** Author actions as small, typed decks that call each
-  other; keep logic local and explicit.
-- **First-class types:** Zod schemas for inputs/outputs at every non-root deck;
-  validations enforced at runtime.
-- **Symmetric compute + LLM:** Compute decks run plain code; LLM decks run chat
-  completions with optional tools and streaming.
-- **Guardrails by default:** Depth/pass/time limits, structured errors, suspense
-  handlers, and reference context injection.
-- **Transparent runtime:** Verbose tracing, optional streaming, and REPL to
-  debug interactions.
-- **CLI + serve:** Run decks via `gambit run`, explore in a REPL, or serve a
-  WebSocket simulator UI.
-- **Provider abstraction:** OpenRouter/OpenAI-style chat provider with streaming
-  and tool call support; plug in alternatives.
-- **Testability:** Deterministic unit tests for orchestration without network;
-  focus on validated inputs/outputs.
+- Most teams wire one long prompt to several tools and hope the model routes
+  correctly.
+- Context often arrives as a single giant fetch or RAG blob, so costs climb and
+  hallucinations slip in.
+- Input/outputs are rarely typed, which makes orchestration brittle and hard to
+  test offline.
+- Debugging leans on provider logs instead of local traces, so reproducing
+  failures is slow.
 
-## Quick start
+## Our vision
+
+- Treat each step as a small deck with explicit inputs/outputs and guardrails;
+  model calls are just one kind of action.
+- Mix LLM and compute tasks interchangeably and effortlessly inside the same
+  deck tree.
+- Feed models only what they need per step; inject references and cards instead
+  of dumping every document.
+- Keep orchestration logic local and testable; run decks offline with predictable
+  traces.
+- Ship with built-in observability (streaming, REPL, simulator) so debugging
+  feels like regular software, not guesswork.
+
+## 5-minute quickstart
+
+Requirements: Deno 2.2+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL` if
+you proxy OpenRouter-style APIs).
+
+Run the CLI directly from JSR (no install):
 
 ```sh
-# set your model provider key
 export OPENROUTER_API_KEY=...
-
-# run a deck from this repo
-deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"'
-
-# REPL with streaming
-deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --verbose --stream
-
-# REPL with an initial user turn
-deno run -A src/cli.ts repl src/decks/gambit-assistant.deck.md --message '"hi"' --stream
-
-# WebSocket simulator UI
-deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
-open http://localhost:8000/
-
-# install/run from JSR package
-deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
-gambit run path/to/root.deck.ts --input '"hi"'
-deno run -A jsr:@bolt-foundry/gambit/cli repl path/to/root.deck.ts
+deno run -A jsr:@bolt-foundry/gambit/cli --help
 ```
 
-## Examples
+Run a packaged example without cloning:
 
-- `examples/hello_world.deck.md`: minimal assistant-first hello world; echoes provided `--input`.
-- `examples/agent_with_typescript/agent_with_typescript.deck.md`: Markdown deck that calls a TypeScript action to fetch the current timestamp.
-- `examples/agent_with_multi_actions/agent_with_multi_actions.deck.md`: Routing agent that can call multiple Markdown and TypeScript actions (time, random number, echo, summarize, translate).
-- `examples/handlers_md/handlers_md.deck.md`: Demonstrates `onError`/`onInterval` handlers with a flaky action (handlers authored in Markdown).
+```sh
+export OPENROUTER_API_KEY=...
+deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'
+```
 
-## Key concepts
+Run the built-in assistant (from a clone of this repo):
 
-- **Decks:** Units that declare `inputSchema`/`outputSchema`, optional
-  `modelParams`, and a set of `actions` (child decks). LLM decks return model
-  output; compute decks return code output.
-- **Cards:** Reusable prompt fragments and actions that can be embedded into
-  decks; embedded cards can contribute actions to the parent deck.
-- **Actions:** Always delegate to another deck; tool definitions derive from the
-  child deck’s input schema.
-- **Handlers:** `handlers.onError` and `handlers.onInterval` shape structured
-  responses; synthetic orchestration tools use `gambit_init`, `gambit_respond`,
-  `gambit_complete`. `respond` wraps payload/message/status/code/meta (status
-  defaults to 200; handled errors usually 500 unless overridden).
-- **Streaming:** Pass `--stream` (or use the REPL/simulator) to stream tokens
-  from the provider; suspense updates arrive as separate bubbles in the
-  simulator UI.
-- **Simulator state:** The WebSocket simulator keeps per-socket conversation
-  state; follow-up sends reuse the same runId/message history. `gambit_init`
-  only fires on the first turn when deck input (`--input`) is provided.
-- **Turn order:** The assistant speaks first by default (input is provided in
-  the reference context); pass `--message` to send a first user turn before the
-  assistant speaks.
+```sh
+export OPENROUTER_API_KEY=...
+deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream
+```
 
-## Development
+Talk to it in a REPL (default deck is `src/decks/gambit-assistant.deck.md`):
 
-- Tasks: `deno task fmt`, `deno task lint`, `deno task test`,
-  `deno task compile` (builds `dist/gambit`).
-- Tests: `deno test -A` (network-free; uses stub providers).
-- Env: `OPENROUTER_API_KEY` required for real runs; `OPENROUTER_BASE_URL`
-  optional.
+```sh
+deno run -A src/cli.ts repl --message '"hello"' --stream --verbose
+```
 
-## Docs
+Open the simulator UI:
 
-- Changelog: [CHANGELOG.md](./CHANGELOG.md)
-- Docs index: [docs/README.md](./docs/README.md)
-- Memos: [docs/memos/README.md](./docs/memos/README.md)
-- Hourglass prompting: [docs/hourglass.md](./docs/hourglass.md)
+```sh
+deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
+open http://localhost:8000/
+```
 
-## Status
+Install the CLI once (uses the published JSR package):
 
-- Active development pre-1.0; APIs are likely to change (notably handler/label
-  naming and CLI flags). Streaming, suspense, and error handling are exercised
-  in tests.
+```sh
+deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
+gambit run path/to/root.deck.ts --input '"hi"'
+```
 
-## License
+If you run from a remote URL (e.g., `jsr:@bolt-foundry/gambit/cli`), pass an
+explicit deck path; the default REPL deck only exists in a local checkout.
 
-Apache-2.0
+## Author your first deck
+
+Minimal Markdown deck (model-powered):
+
+```md
++++
+label = "hello_world"
+
+[modelParams]
+model = "openai/gpt-4o-mini"
+temperature = 0
++++
+
+You are a concise assistant. Greet the user and echo the input.
+```
+
+Run it:
+
+```sh
+deno run -A src/cli.ts run ./hello_world.deck.md --input '"Gambit"' --stream
+```
+
+Compute deck in TypeScript (no model call):
+
+```ts
+// echo.deck.ts
+import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { z } from "zod";
+
+export default defineDeck({
+  label: "echo",
+  inputSchema: z.object({ text: z.string() }),
+  outputSchema: z.object({ text: z.string(), length: z.number() }),
+  run(ctx) {
+    return { text: ctx.input.text, length: ctx.input.text.length };
+  },
+});
+```
+
+Run it:
+
+```sh
+deno run -A src/cli.ts run ./echo.deck.ts --input '{"text":"ping"}'
+```
+
+Deck with a child action (calls a TypeScript tool):
+
+```md
++++
+label = "agent_with_time"
+modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
+actions = [
+  { name = "get_time", path = "./get_time.deck.ts", description = "Return the current ISO timestamp." },
+]
++++
+
+A tiny agent that calls get_time, then replies with the timestamp and the input.
+```
+
+And the child action:
+
+```ts
+// get_time.deck.ts
+import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { z } from "zod";
+
+export default defineDeck({
+  label: "get_time",
+  inputSchema: z.object({}), // no args
+  outputSchema: z.object({ iso: z.string() }),
+  run() {
+    return { iso: new Date().toISOString() };
+  },
+});
+```
+
+## Repo highlights
+
+- CLI entry: `src/cli.ts`; runtime: `src/runtime.ts`; definitions: `mod.ts`.
+- Examples: `examples/hello_world.deck.md`,
+  `examples/agent_with_multi_actions/`.
+- Simulator assets: `src/server.ts`.
+- Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
+  compile binary: `deno task compile`.
+- Docs index: `docs/README.md`; prompting notes: `docs/hourglass.md`; changelog:
+  `CHANGELOG.md`.
+
+## Next steps
+
+- Swap `modelParams.model` or pass `--model`/`--model-force` to test other
+  providers.
+- Add `actions` to a deck and call child decks; use `spawnAndWait` inside
+  compute decks.
+- Use `--stream` and `--verbose` while iterating; pass `--trace <file>` to
+  capture JSONL traces.
