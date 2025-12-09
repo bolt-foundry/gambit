@@ -8,9 +8,13 @@ temperature = 0
 [handlers.onError]
 path = "./handlers/on_error.deck.md"
 
-[handlers.onInterval]
-path = "./handlers/on_interval.deck.md"
+[handlers.onBusy]
+path = "./handlers/on_busy.deck.md"
 repeatMs = 500
+
+[handlers.onIdle]
+path = "./handlers/on_idle.deck.md"
+delayMs = 1200
 +++
 
 Call exactly one tool call.

@@ -6,7 +6,7 @@ const sourceSchema = z.object({
 });
 
 export default z.object({
-  kind: z.literal("suspense"),
+  kind: z.union([z.literal("busy"), z.literal("suspense")]),
   label: z.string().optional(),
   source: sourceSchema,
   trigger: z.object({

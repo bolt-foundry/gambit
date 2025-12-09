@@ -8,10 +8,14 @@ temperature = 0
 [handlers.onError]
 path = "./handlers/on_error.ts"
 
-[handlers.onInterval]
-path = "./handlers/on_interval.ts"
+[handlers.onBusy]
+path = "./handlers/on_busy.ts"
 delayMs = 500
 repeatMs = 500
+
+[handlers.onIdle]
+path = "./handlers/on_idle.ts"
+delayMs = 1200
 +++
 
 You demonstrate TypeScript-authored handlers:
