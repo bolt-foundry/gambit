@@ -1,26 +1,20 @@
 import { defineDeck } from "../../../mod.ts";
 import { z } from "zod";
 
-const sourceSchema = z.object({
-  deckPath: z.string(),
-  actionName: z.string(),
-});
-
 export default defineDeck({
-  label: "on_interval_handler_ts",
+  label: "on_idle_handler_ts",
   inputSchema: z.object({
-    kind: z.literal("suspense"),
+    kind: z.literal("idle"),
     label: z.string().optional(),
-    source: sourceSchema,
+    source: z.object({ deckPath: z.string() }),
     trigger: z.object({
-      reason: z.literal("timeout"),
+      reason: z.literal("idle_timeout"),
       elapsedMs: z.number(),
     }),
-    childInput: z.record(z.unknown()).optional(),
   }),
   outputSchema: z.string().min(1),
   run(ctx) {
     const elapsed = Math.round(ctx.input.trigger.elapsedMs);
-    return `Still working (TS) after ${elapsed}ms...`;
+    return `Idle ping after ${elapsed}ms.`;
   },
 });
