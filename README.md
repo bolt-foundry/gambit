@@ -160,8 +160,32 @@ export default defineDeck({
 - Simulator assets: `src/server.ts`.
 - Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
   compile binary: `deno task compile`.
-- Docs index: `docs/README.md`; prompting notes: `docs/hourglass.md`; changelog:
-  `CHANGELOG.md`.
+- Docs index: `docs/README.md`; authoring guide: `docs/authoring.md`; prompting
+  notes: `docs/hourglass.md`; changelog: `CHANGELOG.md`.
+
+## Docs
+
+- Authoring decks/cards: `docs/authoring.md`
+- Runtime/guardrails: `docs/runtime.md`
+- CLI, REPL, simulator: `docs/cli.md`
+- Examples guide: `docs/examples.md`
+
+## Handlers (error/busy/idle)
+
+- Decks may declare `handlers` with `onError`, `onBusy`, and `onIdle`.
+  `onInterval` is still accepted but deprecated (alias for `onBusy`).
+- Busy handler input:
+  `{kind:"busy", source:{deckPath, actionName}, trigger:{reason:"timeout", elapsedMs}, childInput}`
+  plus `delayMs`/`repeatMs` knobs.
+- Idle handler input:
+  `{kind:"idle", source:{deckPath}, trigger:{reason:"idle_timeout", elapsedMs}}`
+  with `delayMs` (and optional `repeatMs` if provided).
+- Error handler input: `{kind:"error", source, error:{message}, childInput}` and
+  should return an envelope `{message?, code?, status?, meta?, payload?}`.
+- Example implementations live under `examples/handlers_ts` and
+  `examples/handlers_md`.
+- Simulator UI streams handler output in a “status” lane (busy/idle) separate
+  from assistant turns.
 
 ## Handlers (error/busy/idle)
 
