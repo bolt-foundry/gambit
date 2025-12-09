@@ -160,8 +160,15 @@ export default defineDeck({
 - Simulator assets: `src/server.ts`.
 - Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
   compile binary: `deno task compile`.
-- Docs index: `docs/README.md`; prompting notes: `docs/hourglass.md`; changelog:
-  `CHANGELOG.md`.
+- Docs index: `docs/README.md`; authoring guide: `docs/authoring.md`; prompting
+  notes: `docs/hourglass.md`; changelog: `CHANGELOG.md`.
+
+## Docs
+
+- Authoring decks/cards: `docs/authoring.md`
+- Runtime/guardrails: `docs/runtime.md`
+- CLI, REPL, simulator: `docs/cli.md`
+- Examples guide: `docs/examples.md`
 
 ## Handlers (error/busy/idle)
 
