@@ -107,10 +107,16 @@ export async function loadMarkdownCard(
   }
   const nextStack = [...stack, resolved];
   const raw = await Deno.readTextFile(resolved);
-  const { attrs, body } = extract(raw) as {
-    attrs: ParsedFrontmatter;
-    body: string;
-  };
+  let attrs: ParsedFrontmatter;
+  let body: string;
+  try {
+    const parsed = extract(raw) as { attrs: ParsedFrontmatter; body: string };
+    attrs = parsed.attrs;
+    body = parsed.body;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse front matter in ${resolved}: ${message}`);
+  }
   const candidate = attrs as unknown;
   if (isCardDefinition(candidate)) {
     // treat attrs as ts-shaped card
@@ -182,10 +188,16 @@ export async function loadMarkdownDeck(
     ? path.resolve(path.dirname(parentPath), filePath)
     : path.resolve(filePath);
   const raw = await Deno.readTextFile(resolved);
-  const { attrs, body } = extract(raw) as {
-    attrs: ParsedFrontmatter;
-    body: string;
-  };
+  let attrs: ParsedFrontmatter;
+  let body: string;
+  try {
+    const parsed = extract(raw) as { attrs: ParsedFrontmatter; body: string };
+    attrs = parsed.attrs;
+    body = parsed.body;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse front matter in ${resolved}: ${message}`);
+  }
   const deckAttrs = attrs as { deck?: DeckDefinition } & DeckDefinition;
   const deckMeta: Partial<DeckDefinition> =
     (deckAttrs.deck ?? deckAttrs) as DeckDefinition;
