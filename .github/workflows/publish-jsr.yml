@@ -38,11 +38,12 @@ jobs:
       - name: Test
         run: deno test -A
 
-      - name: Set publish version
+      - name: Set canary version
         run: |
+          TS=$(date +%s)
           GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
-          export VERSION="0.0.0-main-${GIT_SHORT_HASH}"
-          echo "Publishing version ${VERSION}"
+          export VERSION="0.0.0-${TS}-${GIT_SHORT_HASH}"
+          echo "Publishing canary version ${VERSION}"
           deno eval '
             const version = Deno.env.get("VERSION");
             if (!version) {
