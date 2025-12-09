@@ -11,6 +11,7 @@ import { loadState, saveState } from "./state.ts";
 type Args = {
   cmd: "run" | "repl" | "serve";
   deckPath?: string;
+  example?: string;
   input?: string;
   message?: string;
   inputProvided: boolean;
@@ -40,10 +41,35 @@ function resolveDefaultReplDeckPath(): string | null {
   return path.fromFileUrl(DEFAULT_REPL_DECK_URL);
 }
 
+function resolveExamplePath(example: string): string {
+  const examplesUrl = new URL("../examples/", import.meta.url);
+  if (examplesUrl.protocol !== "file:") {
+    throw new Error(
+      "--example is unavailable when running from a remote URL; pass a deck path instead.",
+    );
+  }
+  const baseDir = path.fromFileUrl(examplesUrl);
+  const candidate = path.resolve(baseDir, example);
+  const rel = path.relative(baseDir, candidate);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`Example path must stay within examples/: ${example}`);
+  }
+  return candidate;
+}
+
 function parseCliArgs(argv: string[]): Args {
   const parsed = parseArgs(argv, {
     boolean: ["stream", "verbose", "help"],
-    string: ["input", "message", "model", "model-force", "trace", "state", "port"],
+    string: [
+      "example",
+      "input",
+      "message",
+      "model",
+      "model-force",
+      "trace",
+      "state",
+      "port",
+    ],
     alias: {
       help: "h",
     },
@@ -60,6 +86,7 @@ function parseCliArgs(argv: string[]): Args {
   return {
     cmd,
     deckPath,
+    example: parsed.example as string | undefined,
     input: parsed.input as string | undefined,
     inputProvided: parsed.input !== undefined,
     message: parsed.message as string | undefined,
@@ -77,9 +104,9 @@ function parseCliArgs(argv: string[]): Args {
 function printUsage() {
   console.log(
     `Usage:
-  gambit run <deck.(ts|md)> [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl [<deck.(ts|md)>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
+  gambit run [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
+  gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
+  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
 
 Flags:
   --input <json|string>   Deck input (when provided, sent via gambit_init)
@@ -91,6 +118,7 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
+  --example <path>        Path relative to examples/ (e.g. hello_world.deck.md)
   -h, --help              Show this help
   repl default deck       src/decks/gambit-assistant.deck.md
 `,
@@ -128,15 +156,31 @@ async function main() {
       Deno.exit(1);
     }
 
-    const deckPath = args.deckPath ??
-      (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
+    if (args.example && args.deckPath) {
+      console.error("Provide either a deck path or --example, not both.");
+      Deno.exit(1);
+    }
+
+    const deckPath = args.example
+      ? resolveExamplePath(args.example)
+      : args.deckPath ??
+        (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
 
     if (!deckPath) {
       printUsage();
       Deno.exit(1);
     }
 
-    if (!args.deckPath && args.cmd === "repl") {
+    if (args.example) {
+      try {
+        await Deno.stat(deckPath);
+      } catch (err) {
+        console.error(
+          `Example not found at ${deckPath}: ${(err as Error).message}`,
+        );
+        Deno.exit(1);
+      }
+    } else if (!args.deckPath && args.cmd === "repl") {
       try {
         await Deno.stat(deckPath);
       } catch {
