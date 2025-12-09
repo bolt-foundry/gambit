@@ -1,9 +1,27 @@
 import type { CardDefinition, DeckDefinition } from "./types.ts";
+import type { z } from "zod";
 
-export function defineDeck<I = unknown>(
-  def: Omit<DeckDefinition<I>, "kind">,
-): DeckDefinition<I> {
-  return { kind: "gambit.deck", ...def };
+export function defineDeck<
+  InputSchema extends z.ZodTypeAny,
+  OutputSchema extends z.ZodTypeAny | undefined = undefined,
+>(
+  def:
+    & Omit<
+      DeckDefinition<z.infer<InputSchema>>,
+      "kind" | "inputSchema" | "outputSchema"
+    >
+    & {
+      inputSchema: InputSchema;
+      outputSchema?: OutputSchema;
+    },
+): DeckDefinition<z.infer<InputSchema>>;
+export function defineDeck(
+  def: Omit<DeckDefinition, "kind">,
+): DeckDefinition;
+export function defineDeck(
+  def: Omit<DeckDefinition, "kind">,
+): DeckDefinition {
+  return { kind: "gambit.deck", ...def } as DeckDefinition;
 }
 
 export function defineCard(def: Omit<CardDefinition, "kind">): CardDefinition {
