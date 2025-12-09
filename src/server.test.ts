@@ -148,14 +148,22 @@ Deno.test("websocket simulator preserves state and user input", async () => {
       if (msg.type === "ready" && !sentFirst) {
         sentFirst = true;
         ws.send(
-          JSON.stringify({ type: "run", input: "hello", userFirst: true }),
+          JSON.stringify({
+            type: "run",
+            input: "hello",
+            message: "hello",
+          }),
         );
         return;
       }
       if (msg.type === "result" && sentFirst && !sentSecond) {
         sentSecond = true;
         ws.send(
-          JSON.stringify({ type: "run", input: "again", userFirst: true }),
+          JSON.stringify({
+            type: "run",
+            input: "again",
+            message: "again",
+          }),
         );
         return;
       }
@@ -195,16 +203,11 @@ Deno.test("websocket simulator preserves state and user input", async () => {
   if (!initTool || !initTool.content) {
     throw new Error("missing gambit_init tool payload");
   }
-  const initPayload = JSON.parse(initTool.content) as {
-    input?: unknown;
-    runId?: string;
-  };
-  assertEquals(initPayload.input, "hello");
-  const runId = initPayload.runId;
-  if (!runId) throw new Error("missing runId in gambit_init");
+  const initPayload = JSON.parse(initTool.content) as unknown;
+  assertEquals(initPayload, "hello");
 
   const secondStateRunId = calls[1].state?.runId;
-  assertEquals(secondStateRunId, runId);
+  if (!secondStateRunId) throw new Error("missing runId in saved state");
 
   const lastUser = [...calls[1].messages].reverse().find((m) =>
     m.role === "user"
@@ -212,11 +215,11 @@ Deno.test("websocket simulator preserves state and user input", async () => {
   assertEquals(lastUser?.content, "again");
 });
 
-Deno.test("websocket simulator defaults to user-first after state exists", async () => {
+Deno.test("websocket simulator treats follow-up input as a user message when state exists", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
-  const deckPath = path.join(dir, "default-user-first.deck.ts");
+  const deckPath = path.join(dir, "state-follow-up.deck.ts");
   await Deno.writeTextFile(
     deckPath,
     `
@@ -353,12 +356,20 @@ Deno.test("websocket simulator falls back when provider state lacks messages", a
       const msg = JSON.parse(ev.data as string) as { type?: string };
       if (msg.type === "ready" && !sentFirst) {
         sentFirst = true;
-        ws.send(JSON.stringify({ type: "run", input: "one", userFirst: true }));
+        ws.send(JSON.stringify({
+          type: "run",
+          input: "one",
+          message: "one",
+        }));
         return;
       }
       if (msg.type === "result" && sentFirst && !sentSecond) {
         sentSecond = true;
-        ws.send(JSON.stringify({ type: "run", input: "two", userFirst: true }));
+        ws.send(JSON.stringify({
+          type: "run",
+          input: "two",
+          message: "two",
+        }));
         return;
       }
       if (msg.type === "result" && sentSecond) {

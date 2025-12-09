@@ -72,21 +72,6 @@ export type CardDefinition = BaseDefinition & {
   outputFragment?: ZodTypeAny;
 };
 
-export type ReferenceContext = {
-  runId: string;
-  actionCallId: string;
-  parentActionCallId?: string;
-  input: unknown;
-  action: {
-    name: string;
-    path: string;
-    label?: Label;
-    description?: string;
-  };
-  guardrails?: Partial<Guardrails>;
-  model?: string;
-};
-
 export type CompleteEnvelope = {
   runId: string;
   actionCallId: string;
@@ -187,7 +172,7 @@ export type TraceEvent =
     runId: string;
     deckPath?: string;
     input?: JSONValue;
-    userFirst?: boolean;
+    initialUserMessage?: JSONValue;
   }
   | { type: "run.end"; runId: string }
   | {

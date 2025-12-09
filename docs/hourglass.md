@@ -51,7 +51,7 @@ Deck body outline:
 
 - Keep the behavior “pinch” short and specific; move narrative/tone into persona
   cards.
-- Declare turn order explicitly (assistant-first vs. user-first).
+- Declare turn order explicitly (assistant-first vs. user-seeded message).
 - Use numbered steps and bullets; avoid long prose in the middle section.
 - When adding tools/actions, restate when to call each and what to return after
   tools.

@@ -12,6 +12,8 @@ type Args = {
   cmd: "run" | "repl" | "serve";
   deckPath?: string;
   input?: string;
+  message?: string;
+  inputProvided: boolean;
   model?: string;
   modelForce?: string;
   trace?: string;
@@ -19,7 +21,6 @@ type Args = {
   statePath?: string;
   verbose?: boolean;
   port?: number;
-  userFirst?: boolean;
   help?: boolean;
 };
 
@@ -41,15 +42,14 @@ function resolveDefaultReplDeckPath(): string | null {
 
 function parseCliArgs(argv: string[]): Args {
   const parsed = parseArgs(argv, {
-    boolean: ["stream", "verbose", "help", "user-first"],
-    string: ["input", "model", "model-force", "trace", "state", "port"],
+    boolean: ["stream", "verbose", "help"],
+    string: ["input", "message", "model", "model-force", "trace", "state", "port"],
     alias: {
       help: "h",
     },
     default: {
       stream: false,
       verbose: false,
-      "user-first": false,
     },
   });
 
@@ -61,6 +61,8 @@ function parseCliArgs(argv: string[]): Args {
     cmd,
     deckPath,
     input: parsed.input as string | undefined,
+    inputProvided: parsed.input !== undefined,
+    message: parsed.message as string | undefined,
     model: parsed.model as string | undefined,
     modelForce: parsed["model-force"] as string | undefined,
     trace: parsed.trace as string | undefined,
@@ -68,7 +70,6 @@ function parseCliArgs(argv: string[]): Args {
     statePath: parsed.state as string | undefined,
     verbose: Boolean(parsed.verbose),
     port: parsed.port ? Number(parsed.port) : undefined,
-    userFirst: Boolean(parsed["user-first"]),
     help: Boolean(parsed.help),
   };
 }
@@ -76,12 +77,13 @@ function parseCliArgs(argv: string[]): Args {
 function printUsage() {
   console.log(
     `Usage:
-  gambit run <deck.(ts|md)> [--input <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose] [--user-first]
-  gambit repl [<deck.(ts|md)>] [--input <json|string>] [--model <id>] [--model-force <id>] [--verbose] [--user-first]
-  gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--user-first]
+  gambit run <deck.(ts|md)> [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
+  gambit repl [<deck.(ts|md)>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
+  gambit serve <deck.(ts|md)> [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
 
 Flags:
-  --input <json|string>   Input payload (run) or initial user turn (repl; implies user-first)
+  --input <json|string>   Deck input (when provided, sent via gambit_init)
+  --message <json|string> Initial user message (sent before assistant speaks)
   --model <id>            Default model id
   --model-force <id>      Override model id
   --trace <file>          Write trace events to file (JSONL)
@@ -89,7 +91,6 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
-  --user-first            Send the user message first (default: assistant starts)
   -h, --help              Show this help
   repl default deck       src/decks/gambit-assistant.deck.md
 `,
@@ -97,7 +98,16 @@ Flags:
 }
 
 function parseInput(raw?: string): unknown {
-  if (raw === undefined) return "";
+  if (raw === undefined) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function parseMessage(raw?: string): unknown {
+  if (raw === undefined) return undefined;
   try {
     return JSON.parse(raw);
   } catch {
@@ -163,10 +173,11 @@ async function main() {
         modelProvider: provider,
         trace: tracer,
         verbose: args.verbose,
-        userFirst: args.userFirst,
         initialInput: args.input !== undefined
           ? parseInput(args.input)
           : undefined,
+        inputProvided: args.inputProvided,
+        initialMessage: parseMessage(args.message),
       });
       return;
     }
@@ -179,7 +190,6 @@ async function main() {
         modelProvider: provider,
         port: args.port ?? 8000,
         verbose: args.verbose,
-        userFirst: args.userFirst,
       });
       await server.finished;
       return;
@@ -193,6 +203,8 @@ async function main() {
     const result = await runDeck({
       path: deckPath,
       input: parseInput(args.input),
+      inputProvided: args.inputProvided,
+      initialUserMessage: parseMessage(args.message),
       modelProvider: provider,
       isRoot: true,
       defaultModel: args.model,
@@ -201,7 +213,6 @@ async function main() {
       stream: args.stream,
       state,
       onStateUpdate,
-      userFirst: args.userFirst,
     });
 
     if (typeof result === "string") {
