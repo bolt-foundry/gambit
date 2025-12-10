@@ -109,6 +109,15 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
           } stateMessages=${event.stateMessages ?? 0}`,
         );
         break;
+      case "log": {
+        const meta = event.meta !== undefined
+          ? ` meta=${JSON.stringify(event.meta)}`
+          : "";
+        console.log(
+          `[log] level=${event.level ?? "info"} runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} msg=${event.message}${meta}`,
+        );
+        break;
+      }
       default:
         console.log("[trace]", event);
     }
