@@ -7,6 +7,7 @@ Per-example docs:
 - [agent_with_multi_actions](./examples/agent_with_multi_actions.md)
 - [handlers_md](./examples/handlers_md.md)
 - [handlers_ts](./examples/handlers_ts.md)
+- [internal_monolog](./examples/internal_monolog.md)
 
 Notes:
 
