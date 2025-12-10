@@ -87,6 +87,47 @@ Deno.test("compute deck can define run inline", async () => {
   assertEquals(result, "inline:hi");
 });
 
+Deno.test("compute deck can emit ctx.log trace events", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "log.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      label: "log_example",
+      run(ctx) {
+        ctx.log({ message: "child log", level: "debug", meta: { step: 1 } });
+        return "ok";
+      }
+    });
+    `,
+  );
+
+  const traces: TraceEvent[] = [];
+  const result = await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: dummyProvider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  assertEquals(result, "ok");
+  const logEvent = traces.find((t): t is Extract<TraceEvent, { type: "log" }> =>
+    t.type === "log"
+  );
+  assert(logEvent, "expected log event");
+  assertEquals(logEvent.message, "child log");
+  assertEquals(logEvent.level, "debug");
+  assertEquals(logEvent.deckPath, deckPath);
+});
+
 Deno.test("module-level run export is rejected", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

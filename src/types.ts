@@ -9,6 +9,14 @@ export type JSONValue =
   | { [k: string]: JSONValue }
   | JSONValue[];
 
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
+export type LogEntry = {
+  message: string;
+  level?: LogLevel;
+  meta?: JSONValue;
+};
+
 export type ModelParams = {
   model?: string;
   temperature?: number;
@@ -108,6 +116,7 @@ export type ExecutionContext<Input = unknown> = {
   depth: number;
   label?: Label;
   input: Input;
+  log: (entry: LogEntry | string) => void;
   spawnAndWait: (opts: { path: string; input: unknown }) => Promise<unknown>;
   fail: (
     opts: { message: string; code?: string; details?: JSONValue },
@@ -264,4 +273,14 @@ export type TraceEvent =
     }>;
     stateMessages?: number;
     parentActionCallId?: string;
+  }
+  | {
+    type: "log";
+    runId: string;
+    deckPath: string;
+    actionCallId: string;
+    parentActionCallId?: string;
+    level?: LogLevel;
+    message: string;
+    meta?: JSONValue;
   };

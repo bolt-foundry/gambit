@@ -106,6 +106,19 @@ export default defineDeck({
   events; use `--state state.json` with `run` to persist conversation state
   between turns.
 
+### Compute deck logging
+
+- In TypeScript decks, `ctx.log(entry | string)` emits a structured trace event
+  (shown with `--verbose`, `--trace`, or in the simulator). Example:
+  ```ts
+  run(ctx) {
+    ctx.log({ level: "debug", message: "starting fetch", meta: { attempt: 1 } });
+    // ...
+    return result;
+  }
+  ```
+  Levels: `debug | info | warn | error` (defaults to `info`).
+
 ## Guardrails and defaults
 
 - Defaults: `maxDepth=3`, `maxPasses=3`, `timeout≈120s`; override per deck via
