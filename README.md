@@ -29,26 +29,41 @@ context, tight schemas, and local observability.
 
 ## Quickstart (≈5 minutes)
 
-Requirements: Deno 2.2+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL` if
-you proxy OpenRouter-style APIs).
+Recommended: use the prebuilt binary from GitHub Releases. Set
+`OPENROUTER_API_KEY` (and `OPENROUTER_BASE_URL` if you proxy).
 
-- Run from JSR (no install):\
-  `deno run -A jsr:@bolt-foundry/gambit/cli --help`
-- Run an example without cloning:\
-  `deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'`
-- From a clone, built-in assistant:\
-  `deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream`
-- REPL:\
-  `deno run -A src/cli.ts repl --message '"hello"' --stream --verbose`
-- Simulator UI:\
-  `deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000`
-  then open http://localhost:8000/
-- Install once:\
-  `deno install -A -n gambit jsr:@bolt-foundry/gambit/cli`
+1. Download the latest asset for your platform from
+   https://github.com/bolt-foundry/gambit/releases/latest (names:
+   `gambit-<version>-<target>/gambit`).
+2. Make it executable and put it on your PATH:
+   ```sh
+   chmod +x gambit
+   mv gambit /usr/local/bin/   # or any PATH dir
+   ```
+3. Run:
+   ```sh
+   gambit --help
+   gambit run --example hello_world.deck.md --input '"hi"'
+   gambit repl --message '"hello"' --stream --verbose
+   gambit serve src/decks/gambit-assistant.deck.md --port 8000
+   # then open http://localhost:8000/
+   ```
 
-Note: when running from a remote URL (e.g., `jsr:@bolt-foundry/gambit/cli`),
-pass an explicit deck path; the default REPL deck only exists in a local
-checkout.
+Prefer Deno/JSR instead?
+
+```sh
+# No-install:
+deno run -A jsr:@bolt-foundry/gambit/cli --help
+
+# From a clone:
+deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream
+
+# Install via Deno:
+deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
+```
+
+Note: when running from a remote URL, pass an explicit deck path; the default
+REPL deck only exists in a local checkout.
 
 ## Author your first deck
 
