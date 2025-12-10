@@ -12,9 +12,11 @@ export type JSONValue =
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogEntry = {
-  message: string;
+  title?: string;
+  message?: string;
+  body?: unknown;
   level?: LogLevel;
-  meta?: JSONValue;
+  meta?: unknown;
 };
 
 export type ModelParams = {
@@ -281,6 +283,8 @@ export type TraceEvent =
     actionCallId: string;
     parentActionCallId?: string;
     level?: LogLevel;
+    title?: string;
     message: string;
-    meta?: JSONValue;
+    body?: unknown;
+    meta?: unknown;
   };

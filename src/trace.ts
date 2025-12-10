@@ -113,10 +113,12 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         const meta = event.meta !== undefined
           ? ` meta=${JSON.stringify(event.meta)}`
           : "";
+        const title = event.title ? ` title="${event.title}"` : "";
+        const msg = event.message ? ` msg="${event.message}"` : "";
         console.log(
           `[log] level=${
             event.level ?? "info"
-          } runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} msg=${event.message}${meta}`,
+          } runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}${title}${msg}${meta}`,
         );
         break;
       }
