@@ -42,7 +42,7 @@ jobs:
         run: |
           TS=$(date +%s)
           GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
-          export VERSION="0.0.0-${TS}-${GIT_SHORT_HASH}"
+          export VERSION="0.0.0-${TS}+${GIT_SHORT_HASH}"
           echo "Publishing canary version ${VERSION}"
           deno eval '
             const version = Deno.env.get("VERSION");
