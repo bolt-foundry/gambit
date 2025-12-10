@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider } from "./types.ts";
@@ -297,6 +297,91 @@ Deno.test("websocket simulator treats follow-up input as a user message when sta
     m.role === "user"
   );
   assertEquals(secondLastUser?.content, "follow-up");
+});
+
+Deno.test("websocket simulator emits state updates for download", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "state-download.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat(input) {
+      const updatedState = {
+        runId: input.state?.runId ?? "state-run",
+        messages: input.messages,
+        meta: { note: "saved" },
+      };
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+        updatedState,
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
+
+  const done = new Promise<import("./state.ts").SavedState>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 4000);
+      let captured: import("./state.ts").SavedState | undefined;
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data as string) as {
+          type?: string;
+          state?: unknown;
+        };
+        if (msg.type === "ready") {
+          ws.send(JSON.stringify({ type: "run", input: "save-me" }));
+          return;
+        }
+        if (msg.type === "state") {
+          captured = msg.state as import("./state.ts").SavedState;
+          return;
+        }
+        if (msg.type === "result") {
+          clearTimeout(timer);
+          ws.close();
+          if (captured) {
+            resolve(captured);
+          } else {
+            reject(new Error("missing state message"));
+          }
+        }
+      };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("ws error"));
+      };
+    },
+  );
+
+  const state = await done;
+  await server.shutdown();
+  await server.finished;
+
+  assert(state.messages.length > 0);
+  assertEquals(state.meta?.note, "saved");
+  assert(Boolean(state.runId));
 });
 
 Deno.test("websocket simulator falls back when provider state lacks messages", async () => {
