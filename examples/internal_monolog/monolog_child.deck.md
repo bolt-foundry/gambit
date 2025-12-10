@@ -1,11 +1,13 @@
 +++
 label = "monolog_child"
-modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
+modelParams = { model = "openai/gpt-4o", temperature = 0 }
 guardrails = { maxPasses = 200 }
 syntheticTools = { respond = true }
 actions = [
   { name = "lookup_fact", path = "./lookup_fact.deck.ts", description = "Return a short factoid to help answer the question." },
 ]
+inputSchema = "./schemas/child_input.zod.ts"
+outputSchema = "./schemas/child_output.zod.ts"
 +++
 
 You are an internal helper. Work in explicit phases and never skip or reorder
@@ -26,6 +28,7 @@ them:
    Keep it short. Limit to two probe/reflect loops before responding.
 
 Rules:
+
 - Always prefix content with the phase tag, e.g., "(phase=plan) thinking: ...".
 - Monolog phases `(phase=plan)` and `(phase=reflect)` must NOT include tool
   calls.
