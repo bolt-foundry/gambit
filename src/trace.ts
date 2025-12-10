@@ -122,6 +122,14 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         );
         break;
       }
+      case "monolog": {
+        console.log(
+          `[monolog] runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} content=${
+            JSON.stringify(event.content)
+          }`,
+        );
+        break;
+      }
       default:
         console.log("[trace]", event);
     }

@@ -1139,6 +1139,84 @@ Deno.test("trace includes parentActionCallId hierarchy", async () => {
   assertEquals(childDeck.parentActionCallId, actionStart.actionCallId);
 });
 
+Deno.test("non-root assistant text emits monolog trace", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "monolog-child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "monolog-parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      actions: [{ name: "child", path: "${childPath}" }],
+    });
+    `,
+  );
+
+  let callCount = 0;
+  const provider: ModelProvider = {
+    chat() {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls" as const,
+          toolCalls: [{ id: "call-child", name: "child", args: {} }],
+        });
+      }
+      if (callCount === 2) {
+        return Promise.resolve({
+          message: { role: "assistant", content: "child-internal" },
+          finishReason: "stop" as const,
+        });
+      }
+      return Promise.resolve({
+        message: { role: "assistant", content: "parent-done" },
+        finishReason: "stop" as const,
+      });
+    },
+  };
+
+  const traces: TraceEvent[] = [];
+  const result = await runDeck({
+    path: parentPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+    inputProvided: true,
+  });
+
+  assertEquals(result, "parent-done");
+
+  const monolog = traces.find((
+    t,
+  ): t is Extract<TraceEvent, { type: "monolog" }> => t.type === "monolog");
+  assert(monolog, "expected monolog trace");
+  assertEquals(monolog.deckPath, childPath);
+  assertEquals(monolog.parentActionCallId, "call-child");
+  assertEquals(monolog.content, "child-internal");
+});
+
 Deno.test("non-root missing schemas fails load", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

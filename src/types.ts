@@ -287,4 +287,12 @@ export type TraceEvent =
     message: string;
     body?: unknown;
     meta?: unknown;
+  }
+  | {
+    type: "monolog";
+    runId: string;
+    deckPath: string;
+    actionCallId: string;
+    parentActionCallId?: string;
+    content: JSONValue;
   };

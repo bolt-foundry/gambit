@@ -373,6 +373,7 @@ async function runLlmDeck(
     pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
   });
   const wrappedOnStreamText = (chunk: string) => {
+    if (!chunk) return;
     idleController.touch();
     ctx.onStreamText?.(chunk);
   };
@@ -691,6 +692,20 @@ async function runLlmDeck(
         if (ctx.onStateUpdate) {
           const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
+        }
+        if (
+          ctx.parentActionCallId !== undefined &&
+          (!result.toolCalls || result.toolCalls.length === 0)
+        ) {
+          ctx.trace?.({
+            type: "monolog",
+            runId,
+            deckPath: deck.path,
+            actionCallId,
+            parentActionCallId: ctx.parentActionCallId,
+            content: message
+              .content as unknown as import("./types.ts").JSONValue,
+          });
         }
         if (!respondEnabled) {
           const validated = validateOutput(deck, message.content, depth === 0);
