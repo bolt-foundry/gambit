@@ -125,7 +125,49 @@ Deno.test("compute deck can emit ctx.log trace events", async () => {
   assert(logEvent, "expected log event");
   assertEquals(logEvent.message, "child log");
   assertEquals(logEvent.level, "debug");
+  assertEquals(logEvent.title, "child log");
+  assertEquals(logEvent.body, "child log");
   assertEquals(logEvent.deckPath, deckPath);
+});
+
+Deno.test("compute deck log supports title/body", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "log_body.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      label: "log_body",
+      run(ctx) {
+        ctx.log({ title: "summary", message: "details", body: { ok: true } });
+        return "ok";
+      }
+    });
+    `,
+  );
+
+  const traces: TraceEvent[] = [];
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: dummyProvider,
+    isRoot: true,
+    trace: (ev) => traces.push(ev),
+  });
+
+  const logEvent = traces.find((t): t is Extract<TraceEvent, { type: "log" }> =>
+    t.type === "log"
+  );
+  assert(logEvent, "expected log event");
+  assertEquals(logEvent.title, "summary");
+  assertEquals(logEvent.message, "details");
+  assertEquals(logEvent.body, { ok: true });
 });
 
 Deno.test("module-level run export is rejected", async () => {

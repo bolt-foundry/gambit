@@ -464,6 +464,10 @@ function simulatorHtml(deckPath: string): string {
       if (!ev || typeof ev !== "object") return "trace";
       const name = typeof ev.name === "string" ? ev.name : undefined;
       switch (ev.type) {
+        case "log": {
+          const summary = ev.title ?? ev.message ?? "";
+          return "log - " + summary;
+        }
         case "model.call": {
           const msgs = ev.messageCount ?? (ev.messages?.length ?? "?");
           const tools = ev.toolCount ?? (ev.tools?.length ?? 0);
