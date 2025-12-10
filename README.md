@@ -1,7 +1,7 @@
-# Gambit (draft README)
+# Gambit
 
-Gambit helps developers build the most accurate LLM apps by making it simple to
-provide exactly the right amount of context at the right time.
+Gambit helps developers build accurate LLM apps by giving every step the right
+context, tight schemas, and local observability.
 
 ## Status quo
 
@@ -27,54 +27,28 @@ provide exactly the right amount of context at the right time.
 - Ship with built-in observability (streaming, REPL, simulator) so debugging
   feels like regular software, not guesswork.
 
-## 5-minute quickstart
+## Quickstart (≈5 minutes)
 
 Requirements: Deno 2.2+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL` if
 you proxy OpenRouter-style APIs).
 
-Run the CLI directly from JSR (no install):
+- Run from JSR (no install):\
+  `deno run -A jsr:@bolt-foundry/gambit/cli --help`
+- Run an example without cloning:\
+  `deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'`
+- From a clone, built-in assistant:\
+  `deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream`
+- REPL:\
+  `deno run -A src/cli.ts repl --message '"hello"' --stream --verbose`
+- Simulator UI:\
+  `deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000`
+  then open http://localhost:8000/
+- Install once:\
+  `deno install -A -n gambit jsr:@bolt-foundry/gambit/cli`
 
-```sh
-export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli --help
-```
-
-Run a packaged example without cloning:
-
-```sh
-export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'
-```
-
-Run the built-in assistant (from a clone of this repo):
-
-```sh
-export OPENROUTER_API_KEY=...
-deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream
-```
-
-Talk to it in a REPL (default deck is `src/decks/gambit-assistant.deck.md`):
-
-```sh
-deno run -A src/cli.ts repl --message '"hello"' --stream --verbose
-```
-
-Open the simulator UI:
-
-```sh
-deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
-open http://localhost:8000/
-```
-
-Install the CLI once (uses the published JSR package):
-
-```sh
-deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
-gambit run path/to/root.deck.ts --input '"hi"'
-```
-
-If you run from a remote URL (e.g., `jsr:@bolt-foundry/gambit/cli`), pass an
-explicit deck path; the default REPL deck only exists in a local checkout.
+Note: when running from a remote URL (e.g., `jsr:@bolt-foundry/gambit/cli`),
+pass an explicit deck path; the default REPL deck only exists in a local
+checkout.
 
 ## Author your first deck
 
@@ -160,38 +134,27 @@ export default defineDeck({
 - Simulator assets: `src/server.ts`.
 - Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
   compile binary: `deno task compile`.
-- Docs index: `docs/README.md`; authoring guide: `docs/authoring.md`; prompting
-  notes: `docs/hourglass.md`; changelog: `CHANGELOG.md`.
+## Docs and examples
 
-## Docs
-
-- Authoring decks/cards: `docs/authoring.md`
+- Docs index: `docs/README.md`
+- Authoring: `docs/authoring.md`
 - Runtime/guardrails: `docs/runtime.md`
-- CLI, REPL, simulator: `docs/cli.md`
-- Examples guide: `docs/examples.md`
+- CLI/REPL/simulator: `docs/cli.md`
+- Examples overview: `docs/examples.md` (per example: `docs/examples/*.md`)
+- Prompting patterns: `docs/hourglass.md`
+- Handlers: `docs/handlers.md`
+- Changelog: `CHANGELOG.md`
 
 ## Handlers (error/busy/idle)
 
-- Decks may declare `handlers` with `onError`, `onBusy`, and `onIdle`.
-  `onInterval` is still accepted but deprecated (alias for `onBusy`).
-- Busy handler input:
-  `{kind:"busy", source:{deckPath, actionName}, trigger:{reason:"timeout", elapsedMs}, childInput}`
-  plus `delayMs`/`repeatMs` knobs.
-- Idle handler input:
-  `{kind:"idle", source:{deckPath}, trigger:{reason:"idle_timeout", elapsedMs}}`
-  with `delayMs` (and optional `repeatMs` if provided).
-- Error handler input: `{kind:"error", source, error:{message}, childInput}` and
-  should return an envelope `{message?, code?, status?, meta?, payload?}`.
-- Example implementations live under `examples/handlers_ts` and
-  `examples/handlers_md`.
-- Simulator UI streams handler output in a “status” lane (busy/idle) separate
-  from assistant turns.
+- Declare `handlers.onError`, `handlers.onBusy`, `handlers.onIdle` in a deck
+  (alias: `onInterval` for busy). See `docs/handlers.md` for inputs/outputs.
+- Examples live under `examples/handlers_ts` and `examples/handlers_md`.
 
 ## Next steps
 
-- Swap `modelParams.model` or pass `--model`/`--model-force` to test other
-  providers.
-- Add `actions` to a deck and call child decks; use `spawnAndWait` inside
-  compute decks.
+- Swap `modelParams.model` or pass `--model`/`--model-force` to test providers.
+- Add `actions` to a deck and call child decks; use `spawnAndWait` in compute
+  decks.
 - Use `--stream` and `--verbose` while iterating; pass `--trace <file>` to
   capture JSONL traces.

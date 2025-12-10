@@ -1,0 +1,193 @@
+name: create-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name (e.g. v0.6.0). Required when dispatching manually."
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Lint
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check
+
+      - name: Type check
+        run: deno check --all mod.ts
+
+      - name: Test
+        run: deno test -A
+
+  publish_jsr:
+    needs: check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Determine version from tag
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${{ inputs.tag }}"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "Tag is required (vX.Y.Z)" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "Using version ${VERSION}"
+          echo "value=${VERSION}" >> "$GITHUB_OUTPUT"
+          export VERSION
+          deno eval '
+            const version = Deno.env.get("VERSION");
+            if (!version) throw new Error("VERSION env var missing");
+            const path = "deno.json";
+            const data = JSON.parse(await Deno.readTextFile(path));
+            data.version = version;
+            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
+          '
+
+      - name: Publish to JSR
+        env:
+          JSR_TOKEN: ${{ secrets.JSR_TOKEN }}
+        run: deno publish
+
+  build_binaries:
+    needs: [check, publish_jsr]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Configure Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Set version
+        env:
+          VERSION: ${{ needs.publish_jsr.outputs.version }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "VERSION missing from publish job" >&2
+            exit 1
+          fi
+          deno eval '
+            const version = Deno.env.get("VERSION");
+            if (!version) throw new Error("VERSION env var missing");
+            const path = "deno.json";
+            const data = JSON.parse(await Deno.readTextFile(path));
+            data.version = version;
+            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
+          '
+
+      - name: Compile
+        run: |
+          mkdir -p dist
+          deno compile -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gambit-${{ needs.publish_jsr.outputs.version }}-${{ matrix.target }}
+          path: dist/gambit${{ matrix.ext }}
+          if-no-files-found: error
+
+  release:
+    needs: [build_binaries, publish_jsr]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create checksums
+        run: |
+          cd dist
+          find . -type f -maxdepth 2 -exec sh -c 'sha256sum "$1" >> SHA256SUMS' _ {} \;
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            dist/**/gambit*
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
