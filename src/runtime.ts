@@ -721,7 +721,7 @@ async function runLlmDeck(
       }
 
       if (respondEnabled && result.finishReason === "stop") {
-        throw new Error("Deck requires gambit_respond to finish");
+        continue;
       }
 
       if (passes >= guardrails.maxPasses) {
