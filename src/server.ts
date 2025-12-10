@@ -212,6 +212,7 @@ function simulatorHtml(deckPath: string): string {
     .event-type.assistant { color: #2563eb; }
     .event-type.user { color: #0ea5e9; }
     .event-type.trace { color: #475569; }
+    .event-type.monolog { color: #475569; }
     .event-type.error { color: #b91c1c; }
     .event-type.system { color: #8a6d3b; }
     .event-type.status { color: #8a6d3b; }
@@ -231,7 +232,7 @@ function simulatorHtml(deckPath: string): string {
     .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
     .bubble.status { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
     .bubble.handler { background: #d1fae5; color: #065f46; border-bottom-left-radius: 4px; }
-    .bubble.trace, .bubble.meta { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
+    .bubble.trace, .bubble.meta, .bubble.monolog { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
     .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
     .bubble.collapsible { cursor: pointer; }
     .bubble .details { display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 12px; white-space: pre-wrap; }
@@ -481,6 +482,14 @@ function simulatorHtml(deckPath: string): string {
           return "model.result " + (ev.model ?? "(default)") +
             " · finish=" + finish + " · toolCalls=" + toolCalls;
         }
+        case "monolog": {
+          const text = (() => {
+            if (typeof ev.content === "string") return ev.content;
+            try { return JSON.stringify(ev.content); } catch { return String(ev.content); }
+          })();
+          const snippet = text.length > 120 ? text.slice(0, 117) + "..." : text;
+          return "monolog · " + snippet;
+        }
         default: {
           const label = String(ev.type || "trace");
           const pretty = label.replace("action.", "action ").replace("deck.", "deck ");
@@ -491,6 +500,7 @@ function simulatorHtml(deckPath: string): string {
 
     function traceRole(ev) {
       if (!ev || typeof ev !== "object") return "trace";
+      if (ev.type === "monolog") return "monolog";
       const name = typeof ev.name === "string" ? ev.name : undefined;
       const deckPath = typeof ev.deckPath === "string" ? ev.deckPath : undefined;
       const isHandlerDeck = deckPath && deckPath.includes("/handlers/");
