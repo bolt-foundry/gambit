@@ -21,6 +21,7 @@ type OutgoingMessage =
   | { type: "stream"; chunk: string; runId?: string }
   | { type: "result"; result: unknown; runId?: string; streamed: boolean }
   | { type: "trace"; event: TraceEvent }
+  | { type: "state"; state: SavedState }
   | { type: "error"; message: string; runId?: string };
 
 export function startWebSocketSimulator(opts: {
@@ -131,6 +132,7 @@ export function startWebSocketSimulator(opts: {
             state: savedState,
             onStateUpdate: (state) => {
               savedState = state;
+              safeSend({ type: "state", state });
             },
             initialUserMessage,
             onStreamText: (chunk) =>
@@ -202,6 +204,7 @@ function simulatorHtml(deckPath: string): string {
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     header h1 { margin: 0; font-size: 20px; }
     header .meta { font-size: 12px; color: #475569; }
+    .header-actions { display: inline-flex; align-items: center; gap: 8px; }
     .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
     .panel-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; color: #1f2937; margin-bottom: 6px; }
     .transcript { background: #f5f7fb; border-radius: 14px; padding: 12px; height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; }
@@ -243,6 +246,8 @@ function simulatorHtml(deckPath: string): string {
     .controls { display: flex; align-items: center; gap: 8px; }
     button { padding: 10px 14px; border: none; border-radius: 10px; background: #0b93f6; color: white; cursor: pointer; font-weight: 600; }
     button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .ghost-btn { background: white; color: #0f172a; border: 1px solid #cbd5e1; }
+    .ghost-btn:hover:not(:disabled) { background: #f8fafc; }
     label { font-size: 13px; color: #475569; display: inline-flex; align-items: center; gap: 4px; }
   </style>
 </head>
@@ -254,7 +259,10 @@ function simulatorHtml(deckPath: string): string {
           <h1>Gambit WebSocket Simulator</h1>
           <div class="meta">Deck: <code>${deckPath}</code> · Socket: <code>/websocket</code></div>
         </div>
-        <div id="status">connecting...</div>
+        <div class="header-actions">
+          <button type="button" id="downloadState" class="ghost-btn" disabled>Download state</button>
+          <div id="status">connecting...</div>
+        </div>
       </header>
       <div class="layout">
         <div>
@@ -283,6 +291,7 @@ function simulatorHtml(deckPath: string): string {
     const transcript = document.getElementById("transcript");
     const events = document.getElementById("events");
     const status = document.getElementById("status");
+    const downloadBtn = document.getElementById("downloadState");
     const input = document.getElementById("input");
     const asJson = document.getElementById("asJson");
     const composer = document.getElementById("composer");
@@ -299,6 +308,7 @@ function simulatorHtml(deckPath: string): string {
     let nextAssistantWaitStartedAt = 0;
     let nextAssistantTicker = null;
     let firstSend = true;
+    let latestState = null;
 
     const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
     let ws = null;
@@ -306,6 +316,35 @@ function simulatorHtml(deckPath: string): string {
     function scrollBottom(el) {
       el.scrollTop = el.scrollHeight;
     }
+
+    function updateDownloadState(state) {
+      latestState = state && typeof state === "object"
+        ? JSON.parse(JSON.stringify(state))
+        : null;
+      downloadBtn.disabled = !latestState;
+      if (!latestState) {
+        downloadBtn.textContent = "Download state";
+        return;
+      }
+      const runId = typeof latestState.runId === "string"
+        ? latestState.runId
+        : "session";
+      const short = runId.length > 8 ? runId.slice(0, 8) + "..." : runId;
+      downloadBtn.textContent = "Download state (" + short + ")";
+    }
+
+    downloadBtn.addEventListener("click", () => {
+      if (!latestState) return;
+      const json = JSON.stringify(latestState, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const runId = String(latestState.runId || "session").replace(/[^a-zA-Z0-9._-]/g, "_");
+      a.href = url;
+      a.download = "gambit_state_" + runId + ".json";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    });
 
     function addBubble(target, role, text, opts = {}) {
       const row = document.createElement("div");
@@ -546,6 +585,7 @@ function simulatorHtml(deckPath: string): string {
         case "ready":
           status.textContent = "ready";
           addEvent("system", "Server ready.");
+          updateDownloadState(null);
           break;
         case "pong":
           status.textContent = "pong";
@@ -604,6 +644,10 @@ function simulatorHtml(deckPath: string): string {
           streamMode = "assistant";
           status.textContent = "error";
           break;
+        case "state": {
+          updateDownloadState(msg.state);
+          break;
+        }
         case "trace": {
           const ev = msg.event || {};
           if (ev.type === "model.call") {
@@ -641,8 +685,8 @@ function simulatorHtml(deckPath: string): string {
     function connect() {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => { status.textContent = "connected"; };
-      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; statusBubble = null; logStatus = null; streamMode = "assistant"; clearWaitTimer(); clearNextAssistantWait(); };
-      ws.onerror = () => { status.textContent = "error"; clearWaitTimer(); clearNextAssistantWait(); };
+      ws.onclose = () => { status.textContent = "closed"; currentAssistant = null; statusBubble = null; logStatus = null; streamMode = "assistant"; clearWaitTimer(); clearNextAssistantWait(); updateDownloadState(null); };
+      ws.onerror = () => { status.textContent = "error"; clearWaitTimer(); clearNextAssistantWait(); updateDownloadState(null); };
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
