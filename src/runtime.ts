@@ -267,6 +267,21 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
     depth: ctx.depth,
     input: ctx.input,
     label: deck.label,
+    log: (entry) => {
+      if (!ctx.trace) return;
+      const payload = typeof entry === "string" ? { message: entry } : entry;
+      if (!payload || typeof payload.message !== "string") return;
+      ctx.trace({
+        type: "log",
+        runId,
+        deckPath: deck.path,
+        actionCallId,
+        parentActionCallId: ctx.parentActionCallId,
+        level: payload.level ?? "info",
+        message: payload.message,
+        meta: payload.meta as unknown as import("./types.ts").JSONValue,
+      });
+    },
     spawnAndWait: async (opts) => {
       const childPath = path.isAbsolute(opts.path)
         ? opts.path
