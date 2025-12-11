@@ -22,6 +22,7 @@ type Args = {
   statePath?: string;
   verbose?: boolean;
   port?: number;
+  watch?: boolean;
   help?: boolean;
 };
 
@@ -57,9 +58,18 @@ function resolveExamplePath(example: string): string {
   return candidate;
 }
 
+function parsePortValue(value: unknown, label = "port"): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0 || n > 65535) {
+    throw new Error(`Invalid ${label}: ${value}`);
+  }
+  return n;
+}
+
 function parseCliArgs(argv: string[]): Args {
   const parsed = parseArgs(argv, {
-    boolean: ["stream", "verbose", "help"],
+    boolean: ["stream", "verbose", "help", "watch"],
     string: [
       "example",
       "input",
@@ -96,7 +106,8 @@ function parseCliArgs(argv: string[]): Args {
     stream: Boolean(parsed.stream),
     statePath: parsed.state as string | undefined,
     verbose: Boolean(parsed.verbose),
-    port: parsed.port ? Number(parsed.port) : undefined,
+    port: parsePortValue(parsed.port),
+    watch: Boolean(parsed.watch),
     help: Boolean(parsed.help),
   };
 }
@@ -106,7 +117,7 @@ function printUsage() {
     `Usage:
   gambit run [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
   gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose]
+  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch]
 
 Flags:
   --input <json|string>   Deck input (when provided, sent via gambit_init)
@@ -118,6 +129,7 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
+  --watch                 Restart server on file changes (serve)
   --example <path>        Path relative to examples/ (e.g. hello_world.deck.md)
   -h, --help              Show this help
   repl default deck       src/decks/gambit-assistant.deck.md
@@ -227,15 +239,85 @@ async function main() {
     }
 
     if (args.cmd === "serve") {
-      const server = startWebSocketSimulator({
-        deckPath,
-        model: args.model,
-        modelForce: args.modelForce,
-        modelProvider: provider,
-        port: args.port ?? 8000,
-        verbose: args.verbose,
+      const envPort = parsePortValue(Deno.env.get("PORT"), "PORT");
+      const port = args.port ?? envPort ?? 8000;
+      const startServer = () =>
+        startWebSocketSimulator({
+          deckPath,
+          model: args.model,
+          modelForce: args.modelForce,
+          modelProvider: provider,
+          port,
+          verbose: args.verbose,
+        });
+
+      if (!args.watch) {
+        const server = startServer();
+        await server.finished;
+        return;
+      }
+
+      const watchTargets = Array.from(
+        new Set([
+          path.dirname(deckPath),
+          path.resolve("src"),
+        ]),
+      ).filter((p) => {
+        try {
+          Deno.statSync(p);
+          return true;
+        } catch {
+          return false;
+        }
       });
-      await server.finished;
+
+      if (!watchTargets.length) {
+        throw new Error("No watchable paths found for --watch");
+      }
+
+      console.log(
+        `[serve] watching for changes in ${
+          watchTargets.join(", ")
+        }; port=${port}`,
+      );
+
+      let server = startServer();
+      const watcher = Deno.watchFs(watchTargets, { recursive: true });
+      const shouldIgnore = (p: string) =>
+        p.includes(".git") ||
+        p.endsWith("~") ||
+        p.includes(".swp") ||
+        p.includes(".tmp");
+
+      const restart = async (reason: string) => {
+        try {
+          await server.shutdown();
+        } catch {
+          // ignore
+        }
+        await server.finished.catch(() => {});
+        console.log(`[serve] restarting (${reason})...`);
+        server = startServer();
+      };
+
+      try {
+        for await (const event of watcher) {
+          const changed = event.paths.find((p) => !shouldIgnore(p));
+          if (!changed) continue;
+          await restart(`${event.kind}: ${path.basename(changed)}`);
+        }
+      } finally {
+        try {
+          watcher.close();
+        } catch {
+          // ignore
+        }
+        try {
+          await server.shutdown();
+        } catch {
+          // ignore
+        }
+      }
       return;
     }
 
