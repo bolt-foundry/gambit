@@ -29,6 +29,8 @@ How to run decks locally, iterate quickly, and observe runs.
   conversation; skips `gambit_init` on resume.
 - `--trace <file>` writes JSONL trace events; `--verbose` prints trace to
   console. Combine with `--stream` to watch live output while capturing traces.
+- `--port <n>` overrides simulator port (default 8000); `PORT` env is honored
+  when `--port` is not provided.
 
 ## Simulator UI notes
 
@@ -37,3 +39,14 @@ How to run decks locally, iterate quickly, and observe runs.
 - Incoming `stream` messages render incrementally; handler messages appear in
   the status lane.
 - Every WebSocket message echoes `runId` so you can correlate with traces.
+- Deck `inputSchema` is exposed at `/schema` and included in the `ready`
+  WebSocket message; the simulator renders a schema-driven form with defaults
+  (falling back to examples/description) plus a raw JSON tab for init input,
+  stacked beneath the user message box. One “Send” submits init first, then the
+  user message in the same run. A reconnect button reopens the socket without
+  reloading.
+- `--watch` on `serve` restarts the simulator when files change (`PORT` env or
+  `--port` controls the bind port; default 8000).
+- Custom trace formatting is supported via an optional `window.gambitFormatTrace`
+  hook in the page; return a string or `{role?, summary?, details?, depth?}` to
+  override the entry that appears in the Traces & Tools pane.

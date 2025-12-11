@@ -94,6 +94,89 @@ Deno.test("websocket simulator streams responses", async () => {
   assertEquals(types.includes("result"), true);
 });
 
+Deno.test("websocket simulator exposes schema and defaults", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "schema.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        name: z.string().default("Simbie"),
+        mode: z.enum(["a", "b"]).describe("mode selector"),
+        age: z.number().optional(),
+      }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const schemaRes = await fetch(`http://127.0.0.1:${port}/schema`);
+  const schemaBody = await schemaRes.json() as {
+    schema?: { kind?: string; fields?: Record<string, { kind?: string }> };
+    defaults?: { name?: string };
+  };
+
+  assert(schemaBody.schema);
+  assertEquals(schemaBody.schema?.kind, "object");
+  assertEquals(schemaBody.defaults?.name, "Simbie");
+
+  const readyMsg = await new Promise<Record<string, unknown>>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout")), 2000);
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data as string) as Record<string, unknown>;
+        if (msg.type === "ready") {
+          clearTimeout(timer);
+          ws.close();
+          resolve(msg);
+        }
+      };
+      ws.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("ws error"));
+      };
+    },
+  );
+
+  await server.shutdown();
+  await server.finished;
+
+  assertEquals(readyMsg.type, "ready");
+  const schema = readyMsg.schema as {
+    kind?: string;
+    fields?: Record<string, { kind?: string }>;
+  };
+  assert(schema);
+  assertEquals(schema.kind, "object");
+  assertEquals(schema.fields?.name?.kind, "string");
+  const defaults = readyMsg.defaults as { name?: string };
+  assertEquals(defaults?.name, "Simbie");
+});
+
 Deno.test("websocket simulator preserves state and user input", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
