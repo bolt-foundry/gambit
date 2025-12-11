@@ -157,7 +157,9 @@ export default defineDeck({
 - CLI entry: `src/cli.ts`; runtime: `src/runtime.ts`; definitions: `mod.ts`.
 - Examples: `examples/hello_world.deck.md`,
   `examples/agent_with_multi_actions/`.
-- Simulator assets: `src/server.ts`.
+- Simulator assets: `src/server.ts` (built-in UI now renders schema-driven init
+  forms beneath the user message box with a raw JSON tab, reconnect button, and
+  a trace-formatting hook).
 - Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
   compile binary: `deno task compile`.
 - Docs index: `docs/README.md`; authoring guide: `docs/authoring.md`; prompting

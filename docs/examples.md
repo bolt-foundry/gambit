@@ -8,6 +8,7 @@ Per-example docs:
 - [handlers_md](./examples/handlers_md.md)
 - [handlers_ts](./examples/handlers_ts.md)
 - [internal_monolog](./examples/internal_monolog.md)
+- [schema_form](./examples/schema_form.md)
 
 Notes:
 
