@@ -17,7 +17,7 @@ How Gambit runs decks and keeps them safe/observable.
 
 ## Synthetic tools and envelopes
 
-- `gambit_init`: sent once when `--input` is provided; payload is the raw input.
+- `gambit_init`: sent once when `--init` is provided; payload is the raw input.
   Useful for assistant-first flows so the model can read input without a user
   turn.
 - `gambit_respond`: enable with `syntheticTools.respond=true` (or
@@ -32,7 +32,7 @@ How Gambit runs decks and keeps them safe/observable.
 
 - State files (`--state`) persist model messages; subsequent runs resume the
   same conversation. When resuming, `gambit_init` is skipped.
-- `--message` sends a first user turn before the assistant responds; `--input`
+- `--message` sends a first user turn before the assistant responds; `--init`
   only seeds `gambit_init`.
 - Root decks can opt into string passthrough with `allowRootStringInput`
   (REPL/server use this so free-form text works).

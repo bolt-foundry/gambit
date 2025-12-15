@@ -75,7 +75,7 @@ export default defineDeck({
 
 ## Synthetic tools and handlers
 
-- `gambit_init`: injected automatically when `--input` is provided; carries the
+- `gambit_init`: injected automatically when `--init` is provided; carries the
   raw input as the first tool result.
 - `gambit_respond`: enable by setting `syntheticTools.respond = true` (or
   `![...](gambit://respond)` in Markdown). Required for LLM decks that should
@@ -98,7 +98,7 @@ export default defineDeck({
 ## Running and debugging
 
 - Run once:
-  `deno run -A src/cli.ts run path/to/deck --input '"hi"' --message '"hello"' --stream`.
+  `deno run -A src/cli.ts run path/to/deck --init '"hi"' --message '"hello"' --stream`.
 - REPL: `deno run -A src/cli.ts repl path/to/deck --model openai/gpt-4o-mini`.
 - Simulator UI: `deno run -A src/cli.ts serve path/to/deck --port 8000` then
   open http://localhost:8000/.

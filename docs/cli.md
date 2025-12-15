@@ -5,7 +5,7 @@ How to run decks locally, iterate quickly, and observe runs.
 ## Commands
 
 - Run once:
-  `deno run -A src/cli.ts run <deck> [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
+  `deno run -A src/cli.ts run <deck> [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.
@@ -13,11 +13,11 @@ How to run decks locally, iterate quickly, and observe runs.
   http://localhost:8000/. WebSocket server streams turns, traces, and status
   updates.
 - Examples without cloning:
-  `deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'`.
+  `deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --init '"hi"'`.
 
 ## Inputs and models
 
-- `--input`: seeds `gambit_init` with raw payload (assistant-first). Omit to let
+- `--init`: seeds `gambit_init` with raw payload (assistant-first). Omit to let
   the assistant open.
 - `--message`: sends a first user turn before the assistant replies.
 - `--model`: default model; `--model-force`: override even if deck has

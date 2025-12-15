@@ -12,9 +12,9 @@ export async function startRepl(opts: {
   modelProvider: import("./types.ts").ModelProvider;
   trace?: (event: import("./types.ts").TraceEvent) => void;
   verbose?: boolean;
-  initialInput?: unknown;
+  initialInit?: unknown;
   initialMessage?: unknown;
-  inputProvided?: boolean;
+  initProvided?: boolean;
 }) {
   const lineReader = createLineReader();
   let state: SavedState | undefined;
@@ -79,17 +79,17 @@ export async function startRepl(opts: {
   };
 
   const skipAssistantLead = opts.initialMessage !== undefined;
-  const initialInput = opts.initialInput;
+  const initialInit = opts.initialInit;
 
   if (!skipAssistantLead) {
-    await runOnce(initialInput, undefined, Boolean(opts.inputProvided));
+    await runOnce(initialInit, undefined, Boolean(opts.initProvided));
   }
 
   if (opts.initialMessage !== undefined) {
     await runOnce(
-      initialInput,
+      initialInit,
       opts.initialMessage,
-      Boolean(opts.inputProvided),
+      Boolean(opts.initProvided),
     );
   }
 

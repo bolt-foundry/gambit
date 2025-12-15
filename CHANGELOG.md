@@ -10,9 +10,9 @@
 - Runtime behavior: child completions and handled errors emit `gambit_complete`;
   interval handlers surface mid-run updates; roots stay conversational-only.
 - Docs/memos updated to reflect the minimal scope and naming.
-- IO/host: `--message` sends a first user turn; `--input` seeds `gambit_init`
+- IO/host: `--message` sends a first user turn; `--init` seeds `gambit_init`
   without changing turn order; REPL/serve/cli flags updated accordingly.
-- IO/host: `gambit_init` now only fires when `--input` is provided and its
+- IO/host: `gambit_init` now only fires when `--init` is provided and its
   payload is just the raw input (no run/action metadata).
 - IO/host: `--verbose` tracing now logs tool call arguments and results.
 

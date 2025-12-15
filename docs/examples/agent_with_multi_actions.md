@@ -29,17 +29,17 @@ Why it’s structured this way
 How to run
 
 - Translate:
-  `deno run -A src/cli.ts run examples/agent_with_multi_actions/agent_with_multi_actions.deck.md --input '"translate bonjour to English"' --stream`
-- Summarize: `--input '"summarize: long text here"'`
-- Math: `--input '{"a":4,"b":5,"op":"multiply"}'` (tool fills in defaults if
+  `deno run -A src/cli.ts run examples/agent_with_multi_actions/agent_with_multi_actions.deck.md --init '"translate bonjour to English"' --stream`
+- Summarize: `--init '"summarize: long text here"'`
+- Math: `--init '{"a":4,"b":5,"op":"multiply"}'` (tool fills in defaults if
   missing).
 
 Try this input
 
-- `--input '"translate hola to French"'` → calls `translate_text`, returns
+- `--init '"translate hola to French"'` → calls `translate_text`, returns
   translated text only
-- `--input '"summarize: The quick brown fox jumps over the lazy dog."'` → calls
+- `--init '"summarize: The quick brown fox jumps over the lazy dog."'` → calls
   `summarize_text`, returns one-sentence summary
-- `--input '{"a":3,"b":7,"op":"add"}'` → calls `basic_math`, returns
+- `--init '{"a":3,"b":7,"op":"add"}'` → calls `basic_math`, returns
   `{ "result": 10, "op": "add" }`
-- `--input '"echo this back"'` → calls `echo_input`, returns echoed text
+- `--init '"echo this back"'` → calls `echo_input`, returns echoed text

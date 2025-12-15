@@ -12,9 +12,9 @@ type Args = {
   cmd: "run" | "repl" | "serve";
   deckPath?: string;
   example?: string;
-  input?: string;
+  init?: string;
   message?: string;
-  inputProvided: boolean;
+  initProvided: boolean;
   model?: string;
   modelForce?: string;
   trace?: string;
@@ -72,7 +72,7 @@ function parseCliArgs(argv: string[]): Args {
     boolean: ["stream", "verbose", "help", "watch"],
     string: [
       "example",
-      "input",
+      "init",
       "message",
       "model",
       "model-force",
@@ -89,6 +89,10 @@ function parseCliArgs(argv: string[]): Args {
     },
   });
 
+  if ((parsed as { input?: unknown }).input !== undefined) {
+    throw new Error("`--input` has been removed; use `--init` instead.");
+  }
+
   const [cmdRaw, deckPathRaw] = parsed._;
   const cmd = cmdRaw as Args["cmd"];
   const deckPath = deckPathRaw as string | undefined;
@@ -97,8 +101,8 @@ function parseCliArgs(argv: string[]): Args {
     cmd,
     deckPath,
     example: parsed.example as string | undefined,
-    input: parsed.input as string | undefined,
-    inputProvided: parsed.input !== undefined,
+    init: parsed.init as string | undefined,
+    initProvided: parsed.init !== undefined,
     message: parsed.message as string | undefined,
     model: parsed.model as string | undefined,
     modelForce: parsed["model-force"] as string | undefined,
@@ -115,12 +119,12 @@ function parseCliArgs(argv: string[]): Args {
 function printUsage() {
   console.log(
     `Usage:
-  gambit run [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--input <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
+  gambit run [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
+  gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
   gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch]
 
 Flags:
-  --input <json|string>   Deck input (when provided, sent via gambit_init)
+  --init <json|string>    Init payload (when provided, sent via gambit_init)
   --message <json|string> Initial user message (sent before assistant speaks)
   --model <id>            Default model id
   --model-force <id>      Override model id
@@ -137,7 +141,7 @@ Flags:
   );
 }
 
-function parseInput(raw?: string): unknown {
+function parseInit(raw?: string): unknown {
   if (raw === undefined) return undefined;
   try {
     return JSON.parse(raw);
@@ -229,10 +233,8 @@ async function main() {
         modelProvider: provider,
         trace: tracer,
         verbose: args.verbose,
-        initialInput: args.input !== undefined
-          ? parseInput(args.input)
-          : undefined,
-        inputProvided: args.inputProvided,
+        initialInit: args.init !== undefined ? parseInit(args.init) : undefined,
+        initProvided: args.initProvided,
         initialMessage: parseMessage(args.message),
       });
       return;
@@ -328,8 +330,8 @@ async function main() {
 
     const result = await runDeck({
       path: deckPath,
-      input: parseInput(args.input),
-      inputProvided: args.inputProvided,
+      input: parseInit(args.init),
+      inputProvided: args.initProvided,
       initialUserMessage: parseMessage(args.message),
       modelProvider: provider,
       isRoot: true,

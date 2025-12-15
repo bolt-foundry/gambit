@@ -27,12 +27,12 @@ Why it’s structured this way
 How to run
 
 - Trigger busy/idle:
-  `deno run -A src/cli.ts run examples/handlers_md/handlers_md.deck.md --input '{"text":"wait","delayMs":3000}' --stream`
-- Trigger error handling: `--input '{"text":"fail me","fail":true}'`
+  `deno run -A src/cli.ts run examples/handlers_md/handlers_md.deck.md --init '{"text":"wait","delayMs":3000}' --stream`
+- Trigger error handling: `--init '{"text":"fail me","fail":true}'`
 
 Try this input
 
-- `--input '{"text":"please wait","delayMs":2500}'` → calls `slow_action`, busy
+- `--init '{"text":"please wait","delayMs":2500}'` → calls `slow_action`, busy
   handler streams updates, idle may fire if no activity, final echo after delay
-- `--input '{"text":"fail on purpose","fail":true}'` → calls `flaky_action`,
+- `--init '{"text":"fail on purpose","fail":true}'` → calls `flaky_action`,
   triggers onError handler response envelope with status/code/meta/payload

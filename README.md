@@ -43,14 +43,14 @@ Run a packaged example without cloning:
 
 ```sh
 export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --input '"hi"'
+deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --init '"hi"'
 ```
 
 Run the built-in assistant (from a clone of this repo):
 
 ```sh
 export OPENROUTER_API_KEY=...
-deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --input '"hi"' --stream
+deno run -A src/cli.ts run src/decks/gambit-assistant.deck.md --init '"hi"' --stream
 ```
 
 Talk to it in a REPL (default deck is `src/decks/gambit-assistant.deck.md`):
@@ -70,7 +70,7 @@ Install the CLI once (uses the published JSR package):
 
 ```sh
 deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
-gambit run path/to/root.deck.ts --input '"hi"'
+gambit run path/to/root.deck.ts --init '"hi"'
 ```
 
 If you run from a remote URL (e.g., `jsr:@bolt-foundry/gambit/cli`), pass an
@@ -95,7 +95,7 @@ You are a concise assistant. Greet the user and echo the input.
 Run it:
 
 ```sh
-deno run -A src/cli.ts run ./hello_world.deck.md --input '"Gambit"' --stream
+deno run -A src/cli.ts run ./hello_world.deck.md --init '"Gambit"' --stream
 ```
 
 Compute deck in TypeScript (no model call):
@@ -118,7 +118,7 @@ export default defineDeck({
 Run it:
 
 ```sh
-deno run -A src/cli.ts run ./echo.deck.ts --input '{"text":"ping"}'
+deno run -A src/cli.ts run ./echo.deck.ts --init '{"text":"ping"}'
 ```
 
 Deck with a child action (calls a TypeScript tool):
