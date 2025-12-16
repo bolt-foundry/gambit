@@ -19,6 +19,8 @@ import type {
 } from "./types.ts";
 import type { SavedState } from "./state.ts";
 
+const logger = console;
+
 function randomId(prefix: string) {
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   // Keep IDs short enough for OpenAI/OpenRouter tool_call id limits (~40 chars).
@@ -352,7 +354,7 @@ async function runLlmDeck(
   const systemPrompt = buildSystemPrompt(deck);
 
   const refToolCallId = randomId("call");
-  const messages: ModelMessage[] = ctx.state?.messages
+  const messages: Array<ModelMessage> = ctx.state?.messages
     ? ctx.state.messages.map(sanitizeMessage)
     : [];
   const resumed = messages.length > 0;
@@ -505,7 +507,7 @@ async function runLlmDeck(
       if (result.toolCalls && result.toolCalls.length > 0) {
         let responded = false;
         let respondValue: unknown;
-        const appendedMessages: ModelMessage[] = [];
+        const appendedMessages: Array<ModelMessage> = [];
 
         for (const call of result.toolCalls) {
           if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {
@@ -790,7 +792,7 @@ async function handleToolCall(
       code: payload.code,
       meta: payload.meta,
     });
-  const extraMessages: ModelMessage[] = [];
+  const extraMessages: Array<ModelMessage> = [];
   const started = performance.now();
 
   const busyCfg = ctx.parentDeck.handlers?.onBusy ??
@@ -1015,7 +1017,7 @@ async function runBusyHandler(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   initialUserMessage?: unknown;
-}): Promise<ModelMessage[]> {
+}): Promise<Array<ModelMessage>> {
   try {
     const input = {
       kind: "busy",
@@ -1061,7 +1063,7 @@ async function runBusyHandler(args: {
     if (args.onStreamText) {
       args.onStreamText(`${message}\n`);
     } else {
-      console.log(message);
+      logger.log(message);
     }
     return [{
       role: "assistant",
@@ -1085,7 +1087,7 @@ function createIdleController(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-  pushMessages: (msgs: ModelMessage[]) => void;
+  pushMessages: (msgs: Array<ModelMessage>) => void;
 }): IdleController {
   if (!args.cfg?.path) {
     return {
@@ -1180,7 +1182,7 @@ async function runIdleHandler(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-}): Promise<ModelMessage[]> {
+}): Promise<Array<ModelMessage>> {
   try {
     const input = {
       kind: "idle",
@@ -1225,7 +1227,7 @@ async function runIdleHandler(args: {
     if (args.onStreamText) {
       args.onStreamText(`${message}\n`);
     } else {
-      console.log(message);
+      logger.log(message);
     }
     return [{
       role: "assistant",
@@ -1319,7 +1321,7 @@ async function maybeHandleError(args: {
     });
 
     const callId = randomId("event");
-    const extraMessages: ModelMessage[] = [
+    const extraMessages: Array<ModelMessage> = [
       {
         role: "assistant",
         content: null,
@@ -1363,7 +1365,7 @@ async function maybeHandleError(args: {
     });
 
     const callId = randomId("event");
-    const extraMessages: ModelMessage[] = [
+    const extraMessages: Array<ModelMessage> = [
       {
         role: "assistant",
         content: null,
@@ -1389,7 +1391,7 @@ async function maybeHandleError(args: {
 }
 
 function buildSystemPrompt(deck: LoadedDeck): string {
-  const parts: string[] = [];
+  const parts: Array<string> = [];
   const prompt = deck.body ?? deck.prompt;
   if (prompt) parts.push(prompt.trim());
   for (const card of deck.cards) {
@@ -1414,8 +1416,8 @@ function sanitizeMessage(msg: ModelMessage): ModelMessage {
   return { ...msg, tool_calls: toolCalls };
 }
 
-async function buildToolDefs(deck: LoadedDeck): Promise<ToolDefinition[]> {
-  const defs: ToolDefinition[] = [];
+async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {
+  const defs: Array<ToolDefinition> = [];
   if (deck.syntheticTools?.respond) {
     defs.push({
       type: "function",

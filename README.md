@@ -1,5 +1,9 @@
 # Gambit (draft README)
 
+This package is developed in Bolt Foundry’s monorepo and mirrored into
+`github.com/bolt-foundry/gambit`. For now, that repo is a strict mirror (please
+do not land direct changes there).
+
 Gambit helps developers build the most accurate LLM apps by making it simple to
 provide exactly the right amount of context at the right time.
 

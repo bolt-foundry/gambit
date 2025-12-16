@@ -109,7 +109,7 @@ Deno.test("compute deck can emit ctx.log trace events", async () => {
     `,
   );
 
-  const traces: TraceEvent[] = [];
+  const traces: Array<TraceEvent> = [];
   const result = await runDeck({
     path: deckPath,
     input: "hi",
@@ -152,7 +152,7 @@ Deno.test("compute deck log supports title/body", async () => {
     `,
   );
 
-  const traces: TraceEvent[] = [];
+  const traces: Array<TraceEvent> = [];
   await runDeck({
     path: deckPath,
     input: "hi",
@@ -427,7 +427,7 @@ Deno.test("busy handler uses action start time", async () => {
     `,
   );
 
-  const traces: import("./types.ts").TraceEvent[] = [];
+  const traces: Array<import("./types.ts").TraceEvent> = [];
   let callCount = 0;
   const provider: ModelProvider = {
     chat() {
@@ -519,7 +519,7 @@ Deno.test("onInterval alias still triggers busy handler", async () => {
   );
 
   let callCount = 0;
-  const stream: string[] = [];
+  const stream: Array<string> = [];
   const provider: ModelProvider = {
     chat() {
       callCount++;
@@ -586,7 +586,7 @@ Deno.test("idle handler fires after inactivity", async () => {
     `,
   );
 
-  const stream: string[] = [];
+  const stream: Array<string> = [];
   const provider: ModelProvider = {
     chat() {
       return new Promise((resolve) => {
@@ -662,7 +662,7 @@ Deno.test("LLM deck streams via onStreamText", async () => {
     `,
   );
 
-  const chunks: string[] = [];
+  const chunks: Array<string> = [];
   let sawStreamFlag = false;
   const streamingProvider: ModelProvider = {
     chat(input) {
@@ -708,7 +708,7 @@ Deno.test("LLM deck defaults to assistant-first and sends a user message when pr
     `,
   );
 
-  let lastMessages: ModelMessage[] = [];
+  let lastMessages: Array<ModelMessage> = [];
   const provider: ModelProvider = {
     chat(input) {
       lastMessages = input.messages;
@@ -759,7 +759,7 @@ Deno.test("LLM deck defaults input to empty string for message-only runs", async
     `,
   );
 
-  let lastMessages: ModelMessage[] = [];
+  let lastMessages: Array<ModelMessage> = [];
   const provider: ModelProvider = {
     chat(input) {
       lastMessages = input.messages;
@@ -939,7 +939,7 @@ Deno.test("onError handler result surfaces via gambit_complete when an action fa
     },
   };
 
-  const traceEvents: TraceEvent[] = [];
+  const traceEvents: Array<TraceEvent> = [];
   await runDeck({
     path: parentPath,
     input: "hi",
@@ -979,7 +979,7 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
     `,
   );
 
-  const traces: TraceEvent[] = [];
+  const traces: Array<TraceEvent> = [];
   const provider: ModelProvider = {
     chat() {
       return Promise.resolve({
@@ -1089,7 +1089,7 @@ Deno.test("trace includes parentActionCallId hierarchy", async () => {
     `,
   );
 
-  const traces: TraceEvent[] = [];
+  const traces: Array<TraceEvent> = [];
   let callCount = 0;
   const provider: ModelProvider = {
     chat() {
@@ -1196,7 +1196,7 @@ Deno.test("non-root assistant text emits monolog trace", async () => {
     },
   };
 
-  const traces: TraceEvent[] = [];
+  const traces: Array<TraceEvent> = [];
   const result = await runDeck({
     path: parentPath,
     input: "hi",
@@ -1495,7 +1495,7 @@ Deck outro after embed.
 `.trim(),
   );
 
-  const seen: ModelMessage[][] = [];
+  const seen: Array<Array<ModelMessage>> = [];
   const provider: ModelProvider = {
     chat({ messages }) {
       seen.push(messages);

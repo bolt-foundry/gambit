@@ -7,7 +7,7 @@ export type JSONValue =
   | boolean
   | null
   | { [k: string]: JSONValue }
-  | JSONValue[];
+  | Array<JSONValue>;
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -73,8 +73,8 @@ export type BaseDefinition = {
   label?: Label;
   inputSchema?: ZodTypeAny;
   outputSchema?: ZodTypeAny;
-  actions?: readonly ActionDefinition[];
-  embeds?: readonly string[];
+  actions?: ReadonlyArray<ActionDefinition>;
+  embeds?: ReadonlyArray<string>;
   guardrails?: Partial<Guardrails>;
   syntheticTools?: { respond?: boolean };
 };
@@ -156,8 +156,8 @@ export type ToolDefinition = {
 export type ModelProvider = {
   chat: (input: {
     model: string;
-    messages: ModelMessage[];
-    tools?: ToolDefinition[];
+    messages: Array<ModelMessage>;
+    tools?: Array<ToolDefinition>;
     stream?: boolean;
     state?: SavedState;
     onStreamText?: (chunk: string) => void;
@@ -175,20 +175,20 @@ export type ModelProvider = {
 
 export type LoadedCard = CardDefinition & {
   path: string;
-  cards?: LoadedCard[];
+  cards?: Array<LoadedCard>;
 };
 
 export type LoadedDeck = DeckDefinition & {
   path: string;
-  cards: LoadedCard[];
-  actions: ActionDefinition[];
+  cards: Array<LoadedCard>;
+  actions: Array<ActionDefinition>;
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
 };
 
 export type ToolCallResult = {
   toolContent: string;
-  extraMessages?: ModelMessage[];
+  extraMessages?: Array<ModelMessage>;
 };
 
 export type TraceEvent =
@@ -255,8 +255,8 @@ export type TraceEvent =
     stream?: boolean;
     messageCount?: number;
     toolCount?: number;
-    messages: ModelMessage[];
-    tools?: ToolDefinition[];
+    messages: Array<ModelMessage>;
+    tools?: Array<ToolDefinition>;
     stateMessages?: number;
     parentActionCallId?: string;
   }

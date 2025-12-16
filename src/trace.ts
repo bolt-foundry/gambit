@@ -1,6 +1,8 @@
 import * as path from "@std/path";
 import type { TraceEvent } from "./types.ts";
 
+const logger = console;
+
 export function makeJsonlTracer(filePath: string): (event: TraceEvent) => void {
   const resolved = path.resolve(filePath);
   const dir = path.dirname(resolved);
@@ -21,7 +23,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
     switch (event.type) {
       case "run.start":
         started.set(event.runId, now());
-        console.log(
+        logger.log(
           `[trace] run.start runId=${event.runId}${
             event.deckPath ? ` deck=${event.deckPath}` : ""
           }${
@@ -40,19 +42,19 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
       case "run.end": {
         const start = started.get(event.runId);
         started.delete(event.runId);
-        console.log(`[trace] run.end runId=${event.runId}${fmtMs(start)}`);
+        logger.log(`[trace] run.end runId=${event.runId}${fmtMs(start)}`);
         break;
       }
       case "deck.start":
         started.set(event.actionCallId, now());
-        console.log(
+        logger.log(
           `[trace] deck.start runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}`,
         );
         break;
       case "deck.end": {
         const start = started.get(event.actionCallId);
         started.delete(event.actionCallId);
-        console.log(
+        logger.log(
           `[trace] deck.end runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}${
             fmtMs(start)
           }`,
@@ -61,14 +63,14 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
       }
       case "action.start":
         started.set(event.actionCallId, now());
-        console.log(
+        logger.log(
           `[trace] action.start runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} path=${event.path}`,
         );
         break;
       case "action.end": {
         const start = started.get(event.actionCallId);
         started.delete(event.actionCallId);
-        console.log(
+        logger.log(
           `[trace] action.end runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} path=${event.path}${
             fmtMs(start)
           }`,
@@ -76,21 +78,21 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         break;
       }
       case "tool.call":
-        console.log(
+        logger.log(
           `[trace] tool.call runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} args=${
             JSON.stringify(event.args)
           }`,
         );
         break;
       case "tool.result":
-        console.log(
+        logger.log(
           `[trace] tool.result runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} result=${
             JSON.stringify(event.result)
           }`,
         );
         break;
       case "model.call":
-        console.log(
+        logger.log(
           `[trace] model.call runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} model=${
             event.model ?? "(default)"
           } messages=${event.messageCount ?? event.messages.length} tools=${
@@ -101,7 +103,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         );
         break;
       case "model.result":
-        console.log(
+        logger.log(
           `[trace] model.result runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} model=${
             event.model ?? "(default)"
           } finish=${event.finishReason} toolCalls=${
@@ -115,7 +117,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
           : "";
         const title = event.title ? ` title="${event.title}"` : "";
         const msg = event.message ? ` msg="${event.message}"` : "";
-        console.log(
+        logger.log(
           `[log] level=${
             event.level ?? "info"
           } runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}${title}${msg}${meta}`,
@@ -123,7 +125,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         break;
       }
       case "monolog": {
-        console.log(
+        logger.log(
           `[monolog] runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} content=${
             JSON.stringify(event.content)
           }`,
@@ -131,7 +133,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         break;
       }
       default:
-        console.log("[trace]", event);
+        logger.log("[trace]", event);
     }
   };
 }
