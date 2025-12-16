@@ -14,7 +14,8 @@
     "ci": "deno fmt --check && deno lint && deno test --allow-all",
     "fix": "deno fmt && deno lint --fix && deno test --allow-all",
     "compile": "deno compile -A --output dist/gambit src/cli.ts",
-    "precommit": "deno fmt && deno lint && deno check && deno test -A"
+    "precommit": "deno fmt && deno lint && deno check && deno test -A",
+    "bundle:sim": "sh -c 'deno bundle simulator-ui/src/main.tsx > simulator-ui/dist/bundle.js'"
   },
   "lint": {
     "include": [
@@ -30,6 +31,10 @@
   "fmt": {
     "lineWidth": 80
   },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
   "imports": {
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
     "@std/path": "jsr:@std/path@^1.0.6",
@@ -38,6 +43,8 @@
     "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
-    "@openai/openai": "npm:openai@^4.78.1"
+    "@openai/openai": "npm:openai@^4.78.1",
+    "react": "npm:react@18.3.1",
+    "react-dom": "npm:react-dom@18.3.1"
   }
 }

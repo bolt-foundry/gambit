@@ -1,10 +1,39 @@
 import * as path from "@std/path";
-import type { ModelMessage } from "./types.ts";
+import type { ModelMessage, TraceEvent } from "./types.ts";
 
 export type SavedState = {
   runId: string;
   messages: Array<ModelMessage>;
   meta?: Record<string, unknown>;
+  messageRefs?: Array<MessageRef>;
+  feedback?: Array<FeedbackEntry>;
+  traces?: Array<TraceEvent>;
+  notes?: SessionNotes;
+  conversationScore?: SessionRating;
+};
+
+export type MessageRef = {
+  id: string;
+  role: ModelMessage["role"];
+};
+
+export type FeedbackEntry = {
+  id: string;
+  runId: string;
+  messageRefId: string;
+  score: number;
+  reason?: string;
+  createdAt: string;
+};
+
+export type SessionNotes = {
+  text?: string;
+  updatedAt?: string;
+};
+
+export type SessionRating = {
+  score: number;
+  updatedAt?: string;
 };
 
 export function loadState(filePath: string): SavedState | undefined {

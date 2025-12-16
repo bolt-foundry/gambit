@@ -17,7 +17,7 @@ import type {
   ToolCallResult,
   ToolDefinition,
 } from "./types.ts";
-import type { SavedState } from "./state.ts";
+import type { MessageRef, SavedState } from "./state.ts";
 
 const logger = console;
 
@@ -499,9 +499,22 @@ async function runLlmDeck(
         const base = updated ??
           { runId, messages: messages.map(sanitizeMessage) };
         const mergedMessages = base.messages && base.messages.length > 0
-          ? base.messages
+          ? base.messages.map(sanitizeMessage)
           : messages.map(sanitizeMessage);
-        return { ...base, runId, messages: mergedMessages };
+        const priorRefs = updated?.messageRefs ?? ctx.state?.messageRefs ?? [];
+        const messageRefs: Array<MessageRef> = mergedMessages.map((m, idx) =>
+          priorRefs[idx] ?? { id: randomId("msg"), role: m.role }
+        );
+        const feedback = updated?.feedback ?? ctx.state?.feedback;
+        const traces = updated?.traces ?? ctx.state?.traces;
+        return {
+          ...base,
+          runId,
+          messages: mergedMessages,
+          messageRefs,
+          feedback,
+          traces,
+        };
       };
 
       if (result.toolCalls && result.toolCalls.length > 0) {
