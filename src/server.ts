@@ -1,3 +1,4 @@
+import * as path from "@std/path";
 import { runDeck } from "./runtime.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { loadDeck } from "./loader.ts";
@@ -6,6 +7,14 @@ import type { ModelProvider, TraceEvent } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
 const logger = console;
+const moduleDir = path.dirname(path.fromFileUrl(import.meta.url));
+const simulatorBundlePath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "dist",
+  "bundle.js",
+);
 
 type IncomingMessage =
   | {
@@ -17,6 +26,25 @@ type IncomingMessage =
     modelForce?: string;
     trace?: boolean;
     resetState?: boolean;
+  }
+  | {
+    type: "feedback";
+    messageRefId: string;
+    score: number;
+    reason?: string;
+    runId?: string;
+  }
+  | {
+    type: "notes";
+    text?: string;
+  }
+  | {
+    type: "conversationScore";
+    score: number;
+  }
+  | {
+    type: "loadSession";
+    sessionId: string;
   }
   | { type: "ping" };
 
@@ -44,6 +72,13 @@ type SchemaDescription = {
   error?: string;
 };
 
+type SessionMeta = {
+  id: string;
+  deck?: string;
+  deckSlug?: string;
+  createdAt?: string;
+};
+
 type OutgoingMessage =
   | {
     type: "ready";
@@ -57,8 +92,22 @@ type OutgoingMessage =
   | { type: "stream"; chunk: string; runId?: string }
   | { type: "result"; result: unknown; runId?: string; streamed: boolean }
   | { type: "trace"; event: TraceEvent }
-  | { type: "state"; state: SavedState }
+  | {
+    type: "state";
+    state: SavedState;
+    newMessages?: Array<{
+      index: number;
+      role: string;
+      messageRefId?: string;
+      content?: unknown;
+    }>;
+  }
   | { type: "error"; message: string; runId?: string };
+
+function randomId(prefix: string): string {
+  const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
+  return `${prefix}-${suffix}`;
+}
 
 function resolveDefaultValue(raw: unknown): unknown {
   if (typeof raw === "function") {
@@ -260,13 +309,132 @@ export function startWebSocketSimulator(opts: {
   port?: number;
   verbose?: boolean;
   signal?: AbortSignal;
+  sessionDir?: string;
 }): ReturnType<typeof Deno.serve> {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = opts.deckPath;
+  const sessionsRoot = (() => {
+    const base = opts.sessionDir
+      ? path.resolve(opts.sessionDir)
+      : path.resolve(Deno.cwd(), ".gambit", "sessions");
+    try {
+      Deno.mkdirSync(base, { recursive: true });
+    } catch (err) {
+      logger.warn(
+        `[sim] unable to ensure sessions directory ${base}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+    return base;
+  })();
+  const ensureDir = (dir: string) => {
+    try {
+      Deno.mkdirSync(dir, { recursive: true });
+    } catch {
+      // ignore
+    }
+  };
+  const deckSlugFromPath = (p: string) => {
+    const baseName = path.basename(p || "deck");
+    const withoutExt = baseName.replace(/\.[^.]+$/, "");
+    const slug = withoutExt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
+      /^-+|-+$/g,
+      "",
+    );
+    return slug || "session";
+  };
+  let deckSlug = deckSlugFromPath(resolvedDeckPath);
+  const enrichStateWithSession = (state: SavedState): {
+    state: SavedState;
+    dir?: string;
+  } => {
+    const meta = { ...(state.meta ?? {}) };
+    const now = new Date();
+    if (typeof meta.sessionId !== "string") {
+      const stamp = now.toISOString().replace(/[:.]/g, "-");
+      meta.sessionId = `${deckSlug}-${stamp}`;
+      meta.sessionCreatedAt = now.toISOString();
+    }
+    if (typeof meta.deck !== "string") {
+      meta.deck = resolvedDeckPath;
+    }
+    if (typeof meta.deckSlug !== "string") {
+      meta.deckSlug = deckSlug;
+    }
+    if (typeof meta.sessionDir !== "string") {
+      meta.sessionDir = path.join(sessionsRoot, String(meta.sessionId));
+    }
+    const dir = typeof meta.sessionDir === "string"
+      ? meta.sessionDir
+      : undefined;
+    return { state: { ...state, meta }, dir };
+  };
+  const persistSessionState = (state: SavedState): SavedState => {
+    const { state: enriched, dir } = enrichStateWithSession(state);
+    if (dir) {
+      try {
+        ensureDir(dir);
+        const filePath = path.join(dir, "state.json");
+        Deno.writeTextFileSync(filePath, JSON.stringify(enriched, null, 2));
+      } catch (err) {
+        logger.warn(
+          `[sim] failed to persist session state: ${
+            err instanceof Error ? err.message : err
+          }`,
+        );
+      }
+    }
+    return enriched;
+  };
+  const readSessionState = (sessionId: string): SavedState | undefined => {
+    const dir = path.join(sessionsRoot, sessionId);
+    const filePath = path.join(dir, "state.json");
+    try {
+      const text = Deno.readTextFileSync(filePath);
+      const parsed = JSON.parse(text) as SavedState;
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  };
+
+  const listSessions = (): Array<SessionMeta> => {
+    try {
+      const entries: Array<SessionMeta> = [];
+      for (const entry of Deno.readDirSync(sessionsRoot)) {
+        if (!entry.isDirectory) continue;
+        const state = readSessionState(entry.name);
+        if (!state) continue;
+        const createdAt = typeof state.meta?.sessionCreatedAt === "string"
+          ? state.meta.sessionCreatedAt
+          : undefined;
+        entries.push({
+          id: entry.name,
+          deck: state.meta?.deck as string | undefined,
+          deckSlug: state.meta?.deckSlug as string | undefined,
+          createdAt,
+        });
+      }
+      entries.sort((a, b) => {
+        const aKey = a.createdAt ?? a.id;
+        const bKey = b.createdAt ?? b.id;
+        return bKey.localeCompare(aKey);
+      });
+      return entries;
+    } catch {
+      return [];
+    }
+  };
+
   const schemaPromise: Promise<SchemaDescription> = loadDeck(opts.deckPath)
     .then((deck) => {
       resolvedDeckPath = deck.path;
+      deckSlug = deckSlugFromPath(resolvedDeckPath);
       return describeZodSchema(deck.inputSchema);
     })
     .catch((err) => {
@@ -279,8 +447,11 @@ export function startWebSocketSimulator(opts: {
     { port, signal: opts.signal, onListen: () => {} },
     async (req) => {
       const url = new URL(req.url);
-      if (url.pathname === "/") {
-        return new Response(simulatorHtml(opts.deckPath), {
+      if (url.pathname === "/" || url.pathname.startsWith("/sessions/")) {
+        const body = hasReactBundle()
+          ? simulatorReactHtml(opts.deckPath)
+          : simulatorHtml(opts.deckPath);
+        return new Response(body, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       }
@@ -298,6 +469,36 @@ export function startWebSocketSimulator(opts: {
         );
       }
 
+      if (url.pathname === "/ui/bundle.js") {
+        if (!hasReactBundle()) {
+          return new Response("Bundle missing. Run deno task bundle:sim.", {
+            status: 404,
+          });
+        }
+        try {
+          const data = await Deno.readFile(simulatorBundlePath);
+          return new Response(data, {
+            headers: {
+              "content-type": "application/javascript; charset=utf-8",
+            },
+          });
+        } catch (err) {
+          return new Response(
+            `Failed to read bundle: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            { status: 500 },
+          );
+        }
+      }
+
+      if (url.pathname === "/sessions") {
+        const sessions = listSessions();
+        return new Response(JSON.stringify({ sessions }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }
+
       if (url.pathname !== "/websocket") {
         return new Response("Not found", { status: 404 });
       }
@@ -312,6 +513,8 @@ export function startWebSocketSimulator(opts: {
       let running = false;
       let currentRunId: string | undefined;
       let savedState: SavedState | undefined;
+      let capturedTraces: Array<TraceEvent> = [];
+      let lastMessageCount = 0;
 
       const safeSend = (payload: OutgoingMessage) => {
         try {
@@ -325,6 +528,7 @@ export function startWebSocketSimulator(opts: {
 
       const traceHandler = (forward: boolean) => (event: TraceEvent) => {
         if (event.type === "run.start") currentRunId = event.runId;
+        capturedTraces.push(event);
         consoleTracer?.(event);
         if (forward) safeSend({ type: "trace", event });
       };
@@ -352,6 +556,139 @@ export function startWebSocketSimulator(opts: {
           return;
         }
 
+        if (msg.type === "feedback") {
+          if (!msg.messageRefId || typeof msg.messageRefId !== "string") {
+            safeSend({ type: "error", message: "Missing messageRefId" });
+            return;
+          }
+          if (typeof msg.score !== "number" || Number.isNaN(msg.score)) {
+            safeSend({ type: "error", message: "Invalid score" });
+            return;
+          }
+          const clamped = Math.max(-3, Math.min(3, Math.round(msg.score)));
+          const reason = typeof msg.reason === "string"
+            ? msg.reason
+            : undefined;
+          const runId = typeof msg.runId === "string"
+            ? msg.runId
+            : (savedState?.runId ?? currentRunId ?? "session");
+          if (!savedState) {
+            safeSend({
+              type: "error",
+              message: "No run state to attach feedback",
+            });
+            return;
+          }
+          const existing = savedState.feedback ?? [];
+          const idx = existing.findIndex((f) =>
+            f.messageRefId === msg.messageRefId
+          );
+          const now = new Date().toISOString();
+          const entry = idx >= 0
+            ? {
+              ...existing[idx],
+              score: clamped,
+              reason,
+              runId: existing[idx].runId ?? runId,
+            }
+            : {
+              id: randomId("fb"),
+              runId,
+              messageRefId: msg.messageRefId,
+              score: clamped,
+              reason,
+              createdAt: now,
+            };
+          const feedback = idx >= 0
+            ? existing.map((f, i) => i === idx ? entry : f)
+            : [...existing, entry];
+          const enriched = persistSessionState({
+            ...savedState,
+            feedback,
+            traces: capturedTraces,
+          });
+          savedState = enriched;
+          safeSend({ type: "state", state: savedState });
+          return;
+        }
+
+        if (msg.type === "notes") {
+          const text = typeof msg.text === "string" ? msg.text : "";
+          const now = new Date().toISOString();
+          if (!savedState) {
+            savedState = {
+              runId: randomId("run"),
+              messages: [],
+              messageRefs: [],
+              feedback: [],
+              traces: [],
+            };
+          }
+          const enriched = persistSessionState({
+            ...savedState,
+            notes: { text, updatedAt: now },
+            traces: capturedTraces,
+          });
+          savedState = enriched;
+          safeSend({ type: "state", state: savedState });
+          return;
+        }
+
+        if (msg.type === "conversationScore") {
+          if (typeof msg.score !== "number" || Number.isNaN(msg.score)) {
+            safeSend({ type: "error", message: "Invalid score" });
+            return;
+          }
+          const clamped = Math.max(-3, Math.min(3, Math.round(msg.score)));
+          const now = new Date().toISOString();
+          if (!savedState) {
+            savedState = {
+              runId: randomId("run"),
+              messages: [],
+              messageRefs: [],
+              feedback: [],
+              traces: [],
+            };
+          }
+          const enriched = persistSessionState({
+            ...savedState,
+            conversationScore: { score: clamped, updatedAt: now },
+            traces: capturedTraces,
+          });
+          savedState = enriched;
+          safeSend({ type: "state", state: savedState });
+          return;
+        }
+
+        if (msg.type === "loadSession") {
+          if (!msg.sessionId || typeof msg.sessionId !== "string") {
+            safeSend({ type: "error", message: "Missing sessionId" });
+            return;
+          }
+          const sessionState = readSessionState(msg.sessionId);
+          if (!sessionState) {
+            safeSend({ type: "error", message: "Session not found" });
+            return;
+          }
+          savedState = sessionState;
+          capturedTraces = sessionState.traces
+            ? (() => {
+              try {
+                return structuredClone(sessionState.traces);
+              } catch {
+                try {
+                  return JSON.parse(JSON.stringify(sessionState.traces));
+                } catch {
+                  return [...sessionState.traces];
+                }
+              }
+            })()
+            : [];
+          lastMessageCount = sessionState.messages?.length ?? 0;
+          safeSend({ type: "state", state: savedState });
+          return;
+        }
+
         if (msg.type === "ping") {
           safeSend({ type: "pong" });
           return;
@@ -359,6 +696,8 @@ export function startWebSocketSimulator(opts: {
 
         if (msg.resetState) {
           savedState = undefined;
+          capturedTraces = [];
+          lastMessageCount = 0;
         }
 
         if (running) {
@@ -368,12 +707,24 @@ export function startWebSocketSimulator(opts: {
 
         running = true;
         currentRunId = undefined;
+        lastMessageCount = savedState?.messages?.length ?? 0;
+        capturedTraces = savedState?.traces
+          ? (() => {
+            try {
+              return structuredClone(savedState.traces);
+            } catch {
+              try {
+                return JSON.parse(JSON.stringify(savedState.traces));
+              } catch {
+                return [...savedState.traces];
+              }
+            }
+          })()
+          : [];
 
         const stream = msg.stream ?? true;
         const forwardTrace = Boolean(msg.trace);
-        const tracer = forwardTrace || opts.verbose
-          ? traceHandler(forwardTrace)
-          : undefined;
+        const tracer = traceHandler(forwardTrace);
         const initialUserMessage = msg.message ??
           (savedState ? msg.input : undefined);
         if (opts.verbose) {
@@ -398,8 +749,30 @@ export function startWebSocketSimulator(opts: {
             stream,
             state: savedState,
             onStateUpdate: (state) => {
-              savedState = state;
-              safeSend({ type: "state", state });
+              const previousCount = savedState?.messages?.length ??
+                lastMessageCount;
+              const existingNotes = savedState?.notes;
+              const existingScore = savedState?.conversationScore;
+              const enrichedState = persistSessionState({
+                ...state,
+                notes: state.notes ?? existingNotes,
+                conversationScore: state.conversationScore ?? existingScore,
+                traces: capturedTraces,
+              });
+              savedState = enrichedState;
+              const newMessages =
+                (savedState.messageRefs && savedState.messages)
+                  ? savedState.messageRefs
+                    .map((ref, idx) => ({
+                      index: idx,
+                      role: savedState?.messages?.[idx]?.role ?? "",
+                      messageRefId: ref.id,
+                      content: savedState?.messages?.[idx]?.content,
+                    }))
+                    .slice(previousCount)
+                  : undefined;
+              lastMessageCount = savedState.messages?.length ?? previousCount;
+              safeSend({ type: "state", state: savedState, newMessages });
             },
             initialUserMessage,
             onStreamText: (chunk) =>
@@ -448,7 +821,11 @@ function parseIncoming(
       : decoder.decode(data as ArrayBuffer);
     const parsed = JSON.parse(raw) as { type?: unknown };
     if (parsed && typeof parsed === "object") {
-      if (parsed.type === "run" || parsed.type === "ping") {
+      if (
+        parsed.type === "run" || parsed.type === "ping" ||
+        parsed.type === "feedback" || parsed.type === "loadSession" ||
+        parsed.type === "notes" || parsed.type === "conversationScore"
+      ) {
         return parsed as IncomingMessage;
       }
     }
@@ -456,6 +833,39 @@ function parseIncoming(
     // ignore parse errors
   }
   return null;
+}
+
+function hasReactBundle(): boolean {
+  try {
+    const stat = Deno.statSync(simulatorBundlePath);
+    return stat.isFile;
+  } catch {
+    return false;
+  }
+}
+
+function simulatorReactHtml(deckPath: string): string {
+  const deckLabel = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gambit Simulator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { margin: 0; background: #f3f5f9; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <span style="display:none">Gambit WebSocket Simulator</span>
+  <script>
+    window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(deckLabel)};
+  </script>
+  <script type="module" src="/ui/bundle.js"></script>
+</body>
+</html>`;
 }
 
 function simulatorHtml(deckPath: string): string {
@@ -506,6 +916,16 @@ function simulatorHtml(deckPath: string): string {
     .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
     .bubble.collapsible { cursor: pointer; }
     .bubble .details { display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 12px; white-space: pre-wrap; }
+    .bubble .feedback { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; opacity: 0.3; transition: opacity 120ms ease-in-out; }
+    .bubble:hover .feedback, .bubble .feedback.force-visible { opacity: 1; }
+    .feedback-scores { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .feedback-scores button { padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; color: #0f172a; font-size: 12px; cursor: pointer; }
+    .feedback-scores button:hover { background: #e2e8f0; }
+    .feedback-scores button.active { background: #0b93f6; border-color: #0b93f6; color: white; }
+    .feedback-reason { width: 100%; min-height: 54px; font-size: 12px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 8px; resize: vertical; display: none; box-sizing: border-box; }
+    .feedback-reason.visible { display: block; }
+    .feedback-status { font-size: 11px; color: #94a3b8; }
+    .feedback.saving .feedback-status { color: #0b93f6; }
     .bubble.open .details { display: block; }
     .bubble .chevron { position: absolute; right: 10px; top: 10px; font-size: 12px; color: #94a3b8; }
     form.composer { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
@@ -533,6 +953,14 @@ function simulatorHtml(deckPath: string): string {
     .inline-actions { display: inline-flex; align-items: center; gap: 10px; }
     .input-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .reset-note { color: #b45309; font-size: 12px; }
+    .sessions-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .sessions-modal[hidden] { display: none; }
+    .sessions-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.5); }
+    .sessions-modal-content { position: relative; background: white; border-radius: 16px; padding: 20px; width: min(520px, 90%); max-height: 80vh; overflow: auto; box-shadow: 0 15px 40px rgba(15, 23, 42, 0.2); display: flex; flex-direction: column; gap: 12px; }
+    .sessions-modal-header { display: flex; justify-content: space-between; align-items: center; }
+    .sessions-list { display: flex; flex-direction: column; gap: 8px; }
+    .sessions-item { text-align: left; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; color: #0f172a; padding: 10px; cursor: pointer; }
+    .sessions-item:hover { background: #e2e8f0; }
   </style>
 </head>
 <body>
@@ -544,7 +972,7 @@ function simulatorHtml(deckPath: string): string {
           <div class="meta">Deck: <code>${deckPath}</code> · Socket: <code>/websocket</code></div>
         </div>
         <div class="header-actions">
-          <button type="button" id="downloadState" class="ghost-btn" disabled>Download state</button>
+          <button type="button" id="sessionsBtn" class="ghost-btn">Sessions</button>
           <button type="button" id="reconnect" class="ghost-btn">Reconnect</button>
           <div id="status">connecting...</div>
         </div>
@@ -596,13 +1024,29 @@ function simulatorHtml(deckPath: string): string {
         </div>
       </form>
     </div>
+    <div class="sessions-modal" id="sessionsModal" hidden>
+      <div class="sessions-modal-backdrop" id="sessionsBackdrop"></div>
+      <div class="sessions-modal-content">
+        <div class="sessions-modal-header">
+          <h2>Saved sessions</h2>
+          <button type="button" id="sessionsClose" class="ghost-btn">Close</button>
+        </div>
+        <div id="sessionsStatus" class="hint"></div>
+        <div id="sessionsList" class="sessions-list"></div>
+      </div>
+    </div>
   </div>
   <script>
     (function() {
       const transcript = document.getElementById("transcript");
       const events = document.getElementById("events");
       const status = document.getElementById("status");
-      const downloadBtn = document.getElementById("downloadState");
+      const sessionsBtn = document.getElementById("sessionsBtn");
+      const sessionsModal = document.getElementById("sessionsModal");
+      const sessionsList = document.getElementById("sessionsList");
+      const sessionsStatus = document.getElementById("sessionsStatus");
+      const sessionsClose = document.getElementById("sessionsClose");
+      const sessionsBackdrop = document.getElementById("sessionsBackdrop");
       const reconnectBtn = document.getElementById("reconnect");
       const composer = document.getElementById("composer");
       const btn = document.getElementById("send");
@@ -630,6 +1074,9 @@ function simulatorHtml(deckPath: string): string {
       let nextAssistantWaitStartedAt = 0;
       let nextAssistantTicker = null;
       let latestState = null;
+      const pendingByRole = new Map();
+      const pendingFeedbackSaves = new Map();
+      const feedbackByRef = new Map();
       let schemaShape = null;
       let formState = undefined;
       let formTouched = false;
@@ -645,37 +1092,96 @@ function simulatorHtml(deckPath: string): string {
         el.scrollTop = el.scrollHeight;
       }
 
-      function updateDownloadState(state) {
+      function escapeSelector(value) {
+        if (window.CSS && typeof window.CSS.escape === "function") {
+          return window.CSS.escape(value);
+        }
+        return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+      }
+
+      function trackBubble(role, bubble, target) {
+        if (target !== transcript) return;
+        const queue = pendingByRole.get(role) ?? [];
+        queue.push(bubble);
+        pendingByRole.set(role, queue);
+      }
+
+      function setLatestState(state) {
         latestState = state && typeof state === "object"
           ? JSON.parse(JSON.stringify(state))
           : null;
-        downloadBtn.disabled = !latestState;
         resetStateRow.hidden = !latestState;
         if (!latestState) {
-          downloadBtn.textContent = "Download state";
           resetState.checked = false;
-        } else {
-          const runId = typeof latestState.runId === "string"
-            ? latestState.runId
-            : "session";
-          const short = runId.length > 8 ? runId.slice(0, 8) + "..." : runId;
-          downloadBtn.textContent = "Download state (" + short + ")";
         }
         updateModeHint();
       }
 
-      downloadBtn.addEventListener("click", () => {
-        if (!latestState) return;
-        const json = JSON.stringify(latestState, null, 2);
-        const blob = new Blob([json], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        const runId = String(latestState.runId || "session").replace(/[^a-zA-Z0-9._-]/g, "_");
-        a.href = url;
-        a.download = "gambit_state_" + runId + ".json";
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 500);
+      function closeSessionsModal() {
+        if (!sessionsModal) return;
+        sessionsModal.hidden = true;
+      }
+
+      function formatSessionLabel(session) {
+        const deck = session.deckSlug || session.deck || "session";
+        if (session.createdAt) {
+          const date = new Date(session.createdAt);
+          if (!Number.isNaN(date.getTime())) {
+            return date.toLocaleString() + " · " + deck;
+          }
+        }
+        return session.id + " · " + deck;
+      }
+
+      async function loadSessionsList() {
+        if (!sessionsList || !sessionsStatus) return;
+        sessionsStatus.textContent = "Loading sessions...";
+        sessionsList.innerHTML = "";
+        try {
+          const res = await fetch("/sessions");
+          if (!res.ok) throw new Error(res.status + " " + res.statusText);
+          const body = await res.json();
+          const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+          if (!sessions.length) {
+            sessionsStatus.textContent = "No saved sessions yet.";
+            return;
+          }
+          sessionsStatus.textContent = "";
+          sessions.forEach((session) => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "sessions-item";
+            item.textContent = formatSessionLabel(session);
+            item.addEventListener("click", () => {
+              if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addEvent("error", "Socket not connected; reconnect first.");
+                return;
+              }
+              ws.send(JSON.stringify({
+                type: "loadSession",
+                sessionId: session.id,
+              }));
+              closeSessionsModal();
+            });
+            sessionsList.appendChild(item);
+          });
+        } catch (err) {
+          sessionsStatus.textContent = "Failed to load sessions.";
+          console.error(err);
+        }
+      }
+
+      function openSessionsModal() {
+        if (!sessionsModal) return;
+        sessionsModal.hidden = false;
+        loadSessionsList();
+      }
+
+      sessionsBtn?.addEventListener("click", () => {
+        openSessionsModal();
       });
+      sessionsClose?.addEventListener("click", () => closeSessionsModal());
+      sessionsBackdrop?.addEventListener("click", () => closeSessionsModal());
 
       function addBubble(target, role, text, opts = {}) {
         const row = document.createElement("div");
@@ -701,6 +1207,7 @@ function simulatorHtml(deckPath: string): string {
         row.appendChild(bubble);
         target.appendChild(row);
         scrollBottom(target);
+        trackBubble(role, bubble, target);
         return bubble;
       }
 
@@ -750,6 +1257,194 @@ function simulatorHtml(deckPath: string): string {
         events.appendChild(row);
         scrollBottom(events);
         return summary;
+      }
+
+      function refreshFeedbackMap(state) {
+        feedbackByRef.clear();
+        if (state?.feedback && Array.isArray(state.feedback)) {
+          state.feedback.forEach((f) => {
+            if (f && typeof f === "object" && typeof f.messageRefId === "string") {
+              feedbackByRef.set(f.messageRefId, f);
+            }
+          });
+        }
+        syncAllFeedbackPanels();
+      }
+
+      function syncAllFeedbackPanels() {
+        document.querySelectorAll(".feedback").forEach((panel) => {
+          const refId = panel?.dataset?.messageRefId;
+          if (!refId) return;
+          syncFeedbackPanel(panel, refId);
+        });
+      }
+
+      function sendFeedback(messageRefId, score, reason) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        clearPendingFeedbackSave(messageRefId);
+        markFeedbackSaving(messageRefId);
+        ws.send(JSON.stringify({
+          type: "feedback",
+          messageRefId,
+          score,
+          reason,
+          runId: latestState?.runId,
+        }));
+      }
+
+      function nextPendingBubble(role) {
+        const queue = pendingByRole.get(role) ?? [];
+        while (queue.length) {
+          const candidate = queue.shift();
+          if (candidate && !candidate.dataset.messageRefId) {
+            pendingByRole.set(role, queue);
+            return candidate;
+          }
+        }
+        pendingByRole.set(role, queue);
+        return null;
+      }
+
+      function syncFeedbackPanel(panel, messageRefId) {
+        panel.dataset.messageRefId = messageRefId;
+        const current = feedbackByRef.get(messageRefId);
+        const currentScore = typeof current?.score === "number" ? current.score : null;
+        const reasonEl = panel.querySelector(".feedback-reason");
+        const buttons = Array.from(
+          panel.querySelectorAll(".feedback-scores button"),
+        );
+        buttons.forEach((btn) => {
+          const val = Number(btn.dataset.value);
+          const active = currentScore !== null && val === currentScore;
+          btn.classList.toggle("active", active);
+          if (active) panel.dataset.score = String(val);
+        });
+        if (reasonEl) {
+          reasonEl.value = current?.reason ?? reasonEl.value ?? "";
+        }
+        const shouldShowReason = currentScore !== null ||
+          (reasonEl && reasonEl.value && reasonEl.value.trim().length > 0);
+        if (reasonEl) {
+          reasonEl.classList.toggle("visible", shouldShowReason);
+          if (shouldShowReason) panel.classList.add("force-visible");
+        }
+        const statusEl = panel.querySelector(".feedback-status");
+        if (statusEl) {
+          if (currentScore !== null || (current && current.reason)) {
+            statusEl.textContent = "Saved";
+          } else {
+            statusEl.textContent = "Not scored yet";
+          }
+        }
+        panel.classList.remove("saving");
+      }
+
+      function attachFeedbackControls(bubble, messageRefId, role) {
+        if (!messageRefId || role === "user") return;
+        let panel = bubble.querySelector(".feedback");
+        if (!panel) {
+          panel = document.createElement("div");
+          panel.className = "feedback";
+          const scores = document.createElement("div");
+          scores.className = "feedback-scores";
+          for (let i = -3; i <= 3; i++) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = String(i);
+            btn.dataset.value = String(i);
+            btn.addEventListener("click", () => {
+              const reasonEl = panel.querySelector(".feedback-reason");
+              const reason = reasonEl ? reasonEl.value : "";
+              panel.dataset.score = String(i);
+              scores.querySelectorAll("button").forEach((b) =>
+                b.classList.toggle("active", b === btn)
+              );
+              if (reasonEl) {
+                reasonEl.classList.add("visible");
+                panel.classList.add("force-visible");
+              }
+              sendFeedback(messageRefId, i, reason);
+            });
+            scores.appendChild(btn);
+          }
+          const reason = document.createElement("textarea");
+          reason.className = "feedback-reason";
+          reason.placeholder = "Why did you pick this score?";
+          reason.addEventListener("input", () => {
+            panel.classList.remove("saving");
+            const statusEl = panel.querySelector(".feedback-status");
+            if (statusEl) statusEl.textContent = "Unsaved changes...";
+            const refId = panel.dataset.messageRefId;
+            if (refId) {
+              scheduleFeedbackSave(refId, panel);
+            }
+          });
+          reason.addEventListener("change", () => {
+            const fallbackScore = feedbackByRef.get(messageRefId)?.score;
+            const score = Number(
+              panel.dataset.score ??
+                (typeof fallbackScore === "number" ? fallbackScore : NaN),
+            );
+            if (Number.isNaN(score)) return;
+            sendFeedback(messageRefId, score, reason.value);
+          });
+          panel.appendChild(scores);
+          panel.appendChild(reason);
+          const status = document.createElement("div");
+          status.className = "feedback-status";
+          status.textContent = "Not scored yet";
+          panel.appendChild(status);
+          bubble.appendChild(panel);
+        }
+        syncFeedbackPanel(panel, messageRefId);
+      }
+
+      function markFeedbackSaving(messageRefId) {
+        const panel = document.querySelector(
+          '.feedback[data-message-ref-id="' +
+            escapeSelector(messageRefId) + '"]',
+        );
+        if (panel) {
+          panel.classList.add("saving");
+          const status = panel.querySelector(".feedback-status");
+          if (status) status.textContent = "Saving...";
+        }
+      }
+
+      function clearPendingFeedbackSave(messageRefId) {
+        const timer = pendingFeedbackSaves.get(messageRefId);
+        if (timer) {
+          clearTimeout(timer);
+          pendingFeedbackSaves.delete(messageRefId);
+        }
+      }
+
+      function scheduleFeedbackSave(messageRefId, panel) {
+        clearPendingFeedbackSave(messageRefId);
+        const timer = setTimeout(() => {
+          pendingFeedbackSaves.delete(messageRefId);
+          const reasonEl = panel.querySelector(".feedback-reason");
+          if (!reasonEl) return;
+          const fallbackScore = feedbackByRef.get(messageRefId)?.score;
+          const score = Number(
+            panel.dataset.score ??
+              (typeof fallbackScore === "number" ? fallbackScore : NaN),
+          );
+          if (Number.isNaN(score)) return;
+          sendFeedback(messageRefId, score, reasonEl.value);
+        }, 600);
+        pendingFeedbackSaves.set(messageRefId, timer);
+      }
+
+      function bindMessages(newMessages) {
+        if (!Array.isArray(newMessages)) return;
+        newMessages.forEach((m) => {
+          const role = m?.role || "assistant";
+          const bubble = nextPendingBubble(role);
+          if (!bubble) return;
+          bubble.dataset.messageRefId = m.messageRefId || "";
+          attachFeedbackControls(bubble, m.messageRefId, role);
+        });
       }
 
       function formatPayload(p) {
@@ -1192,7 +1887,7 @@ function simulatorHtml(deckPath: string): string {
           case "ready": {
             status.textContent = "ready";
             addEvent("system", "Server ready.");
-            updateDownloadState(null);
+            setLatestState(null);
             applySchemaPayload(msg);
             break;
           }
@@ -1254,7 +1949,9 @@ function simulatorHtml(deckPath: string): string {
             status.textContent = "error";
             break;
           case "state": {
-            updateDownloadState(msg.state);
+            setLatestState(msg.state);
+            refreshFeedbackMap(msg.state);
+            bindMessages(msg.newMessages || []);
             break;
           }
           case "trace": {
@@ -1313,13 +2010,13 @@ function simulatorHtml(deckPath: string): string {
           streamMode = "assistant";
           clearWaitTimer();
           clearNextAssistantWait();
-          updateDownloadState(null);
+          setLatestState(null);
         };
         ws.onerror = () => {
           status.textContent = "error";
           clearWaitTimer();
           clearNextAssistantWait();
-          updateDownloadState(null);
+          setLatestState(null);
         };
         ws.onmessage = (ev) => {
           try {
@@ -1426,7 +2123,7 @@ function simulatorHtml(deckPath: string): string {
         clearNextAssistantWait();
         ws.send(JSON.stringify(payload));
         if (shouldResetState) {
-          updateDownloadState(null);
+          setLatestState(null);
         }
         messageInput.value = "";
         startWaitTimer();
