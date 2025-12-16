@@ -21,6 +21,8 @@ import type {
   LoadedDeck,
 } from "./types.ts";
 
+const logger = console;
+
 function toFileUrl(p: string): string {
   const abs = path.resolve(p);
   return path.toFileUrl(abs).href;
@@ -29,7 +31,7 @@ function toFileUrl(p: string): string {
 function normalizeActions(
   actions: DeckDefinition["actions"] | CardDefinition["actions"],
   basePath?: string,
-): ActionDefinition[] {
+): Array<ActionDefinition> {
   if (!actions) return [];
   return actions.map((a) => ({
     name: a.name,
@@ -62,7 +64,7 @@ function checkReserved(action: ActionDefinition) {
 async function loadCardInternal(
   cardPath: string,
   parentPath?: string,
-  stack: string[] = [],
+  stack: Array<string> = [],
 ): Promise<LoadedCard> {
   const resolved = parentPath
     ? path.resolve(path.dirname(parentPath), cardPath)
@@ -88,7 +90,7 @@ async function loadCardInternal(
   const cardLabel = card.label;
 
   const embeds = card.embeds ?? [];
-  const embeddedCards: LoadedCard[] = [];
+  const embeddedCards: Array<LoadedCard> = [];
   for (const embed of embeds) {
     const loaded = await loadCard(embed, resolved, nextStack);
     embeddedCards.push(loaded);
@@ -109,7 +111,7 @@ async function loadCardInternal(
 export async function loadCard(
   cardPath: string,
   parentPath?: string,
-  stack: string[] = [],
+  stack: Array<string> = [],
 ): Promise<LoadedCard> {
   if (isMarkdownFile(cardPath)) {
     return await loadMarkdownCard(cardPath, parentPath, stack);
@@ -139,7 +141,7 @@ export async function loadDeck(
   const deckLabel = deck.label;
 
   const cardPaths = deck.embeds ?? [];
-  const cards: LoadedCard[] = [];
+  const cards: Array<LoadedCard> = [];
   for (const cardPath of cardPaths) {
     const loaded = await loadCard(cardPath, resolved, [resolved]);
     cards.push(loaded);
@@ -182,7 +184,7 @@ export async function loadDeck(
     if (!cfg) return undefined;
     const repeatMs = cfg.repeatMs ?? cfg.intervalMs;
     if (cfg.intervalMs !== undefined && cfg.repeatMs === undefined) {
-      console.warn(
+      logger.warn(
         `[gambit] handlers.${kind}.intervalMs is deprecated; use repeatMs (${resolved})`,
       );
     }
@@ -199,7 +201,7 @@ export async function loadDeck(
     intervalAlias ? "onInterval" : "onBusy",
   );
   if (!deck.handlers?.onBusy && intervalAlias) {
-    console.warn(
+    logger.warn(
       `[gambit] handlers.onInterval is deprecated; use handlers.onBusy (${resolved})`,
     );
   }
@@ -237,11 +239,11 @@ export async function loadDeck(
   };
 }
 
-function flattenCards(cards: LoadedCard[]): LoadedCard[] {
-  const flat: LoadedCard[] = [];
+function flattenCards(cards: Array<LoadedCard>): Array<LoadedCard> {
+  const flat: Array<LoadedCard> = [];
   for (const card of cards) {
     flat.push(card);
-    const nested = (card as { cards?: LoadedCard[] }).cards ?? [];
+    const nested = (card as { cards?: Array<LoadedCard> }).cards ?? [];
     if (nested.length) flat.push(...flattenCards(nested));
   }
   return flat;

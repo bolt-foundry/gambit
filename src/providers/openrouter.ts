@@ -6,6 +6,8 @@ import type {
   ToolDefinition,
 } from "../types.ts";
 
+const logger = console;
+
 function normalizeMessage(
   content: OpenAI.Chat.Completions.ChatCompletionMessage,
 ): ModelMessage {
@@ -46,15 +48,15 @@ export function createOpenRouterProvider(opts: {
   return {
     async chat(input: {
       model: string;
-      messages: ModelMessage[];
-      tools?: ToolDefinition[];
+      messages: Array<ModelMessage>;
+      tools?: Array<ToolDefinition>;
       stream?: boolean;
       state?: import("../state.ts").SavedState;
       onStreamText?: (chunk: string) => void;
     }) {
       if (input.stream) {
         if (debugStream) {
-          console.log(
+          logger.log(
             `[stream-debug] requesting stream model=${input.model} messages=${input.messages.length} tools=${
               input.tools?.length ?? 0
             }`,
@@ -64,15 +66,19 @@ export function createOpenRouterProvider(opts: {
         const stream = await client.chat.completions.create({
           model: input.model,
           messages: input
-            .messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+            .messages as Array<
+              OpenAI.Chat.Completions.ChatCompletionMessageParam
+            >,
           tools: input
-            .tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
+            .tools as unknown as Array<
+              OpenAI.Chat.Completions.ChatCompletionTool
+            >,
           tool_choice: "auto",
           stream: true,
         });
 
         let finishReason: "stop" | "tool_calls" | "length" | null = null;
-        const contentParts: string[] = [];
+        const contentParts: Array<string> = [];
         const toolCallMap = new Map<
           number,
           {
@@ -128,7 +134,7 @@ export function createOpenRouterProvider(opts: {
         }
 
         if (debugStream) {
-          console.log(
+          logger.log(
             `[stream-debug] completed stream chunks=${chunkCount} streamedChars=${streamedChars} finishReason=${finishReason}`,
           );
         }
@@ -166,9 +172,13 @@ export function createOpenRouterProvider(opts: {
       const response = await client.chat.completions.create({
         model: input.model,
         messages: input
-          .messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+          .messages as unknown as Array<
+            OpenAI.Chat.Completions.ChatCompletionMessageParam
+          >,
         tools: input
-          .tools as unknown as OpenAI.Chat.Completions.ChatCompletionTool[],
+          .tools as unknown as Array<
+            OpenAI.Chat.Completions.ChatCompletionTool
+          >,
         tool_choice: "auto",
         stream: false,
       });
@@ -176,7 +186,9 @@ export function createOpenRouterProvider(opts: {
       const choice = response.choices[0];
       const message = choice.message;
       const normalizedMessage = normalizeMessage(message);
-      const toolCalls = message.tool_calls?.map((tc) => ({
+      const toolCalls = message.tool_calls?.map((
+        tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+      ) => ({
         id: tc.id,
         name: tc.function.name,
         args: safeJson(tc.function.arguments),

@@ -18,6 +18,8 @@ import type {
 } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
+const logger = console;
+
 type ParsedFrontmatter = Record<string, unknown>;
 const RESPOND_MARKER = "gambit://respond";
 const INIT_MARKER = "gambit://init";
@@ -48,7 +50,7 @@ async function maybeLoadSchema(
 function normalizeActions(
   actions: unknown,
   basePath: string,
-): ActionDefinition[] {
+): Array<ActionDefinition> {
   if (!Array.isArray(actions)) return [];
   return actions
     .filter((a) => a && typeof a === "object")
@@ -72,9 +74,14 @@ function normalizeActions(
 
 function replaceEmbedMarkers(
   body: string,
-): { cleaned: string; embeds: string[]; respond: boolean; initHint: boolean } {
+): {
+  cleaned: string;
+  embeds: Array<string>;
+  respond: boolean;
+  initHint: boolean;
+} {
   const regex = /!\[[^\]]*\]\(([^)]+)\)/g;
-  const embeds: string[] = [];
+  const embeds: Array<string> = [];
   let respond = false;
   let initHint = false;
   const cleaned = body.replace(regex, (_m, p1: string) => {
@@ -95,7 +102,7 @@ function replaceEmbedMarkers(
 export async function loadMarkdownCard(
   filePath: string,
   parentPath?: string,
-  stack: string[] = [],
+  stack: Array<string> = [],
 ): Promise<LoadedCard> {
   const resolved = parentPath
     ? path.resolve(path.dirname(parentPath), filePath)
@@ -157,11 +164,11 @@ export async function loadMarkdownCard(
   const replaced = replaceEmbedMarkers(body);
   const embeds = replaced.embeds.concat(
     Array.isArray((attrs as { embeds?: unknown }).embeds)
-      ? (attrs as { embeds?: string[] }).embeds ?? []
+      ? (attrs as { embeds?: Array<string> }).embeds ?? []
       : [],
   );
   const cleanedBody = replaced.cleaned;
-  const embeddedCards: LoadedCard[] = [];
+  const embeddedCards: Array<LoadedCard> = [];
   for (const embed of embeds) {
     const card = await loadCard(embed, resolved, nextStack);
     embeddedCards.push(card);
@@ -235,7 +242,7 @@ export async function loadMarkdownDeck(
     resolved,
   );
 
-  const cards: LoadedCard[] = [];
+  const cards: Array<LoadedCard> = [];
   for (const embed of embeds) {
     const card = await loadCard(embed, resolved, [resolved]);
     cards.push(card);
@@ -275,7 +282,7 @@ export async function loadMarkdownDeck(
     if (!cfg) return undefined;
     const repeatMs = cfg.repeatMs ?? cfg.intervalMs;
     if (cfg.intervalMs !== undefined && cfg.repeatMs === undefined) {
-      console.warn(
+      logger.warn(
         `[gambit] handlers.${kind}.intervalMs is deprecated; use repeatMs (${resolved})`,
       );
     }
@@ -292,7 +299,7 @@ export async function loadMarkdownDeck(
     intervalAlias ? "onInterval" : "onBusy",
   );
   if (!deckMeta.handlers?.onBusy && intervalAlias) {
-    console.warn(
+    logger.warn(
       `[gambit] handlers.onInterval is deprecated; use handlers.onBusy (${resolved})`,
     );
   }
@@ -340,11 +347,11 @@ export function isMarkdownFile(filePath: string): boolean {
   return filePath.endsWith(".md");
 }
 
-function flattenCards(cards: LoadedCard[]): LoadedCard[] {
-  const flat: LoadedCard[] = [];
+function flattenCards(cards: Array<LoadedCard>): Array<LoadedCard> {
+  const flat: Array<LoadedCard> = [];
   for (const card of cards) {
     flat.push(card);
-    const nested = (card as { cards?: LoadedCard[] }).cards ?? [];
+    const nested = (card as { cards?: Array<LoadedCard> }).cards ?? [];
     if (nested.length) flat.push(...flattenCards(nested));
   }
   return flat;

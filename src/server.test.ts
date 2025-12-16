@@ -196,7 +196,7 @@ Deno.test("websocket simulator preserves state and user input", async () => {
   );
 
   const calls: Array<{
-    messages: import("./types.ts").ModelMessage[];
+    messages: Array<import("./types.ts").ModelMessage>;
     state?: import("./state.ts").SavedState;
   }> = [];
 
@@ -317,7 +317,7 @@ Deno.test("websocket simulator treats follow-up input as a user message when sta
   );
 
   const calls: Array<{
-    messages: import("./types.ts").ModelMessage[];
+    messages: Array<import("./types.ts").ModelMessage>;
     state?: import("./state.ts").SavedState;
   }> = [];
 
@@ -486,7 +486,7 @@ Deno.test("websocket simulator falls back when provider state lacks messages", a
   );
 
   const calls: Array<{
-    messages: import("./types.ts").ModelMessage[];
+    messages: Array<import("./types.ts").ModelMessage>;
     state?: import("./state.ts").SavedState;
   }> = [];
 

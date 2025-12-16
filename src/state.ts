@@ -3,7 +3,7 @@ import type { ModelMessage } from "./types.ts";
 
 export type SavedState = {
   runId: string;
-  messages: ModelMessage[];
+  messages: Array<ModelMessage>;
   meta?: Record<string, unknown>;
 };
 

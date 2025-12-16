@@ -23,7 +23,8 @@
     "rules": {
       "tags": [
         "recommended"
-      ]
+      ],
+      "exclude": ["bolt-foundry/no-parent-directory-traversal"]
     }
   },
   "fmt": {
@@ -32,6 +33,7 @@
   "imports": {
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
     "@std/path": "jsr:@std/path@^1.0.6",
+    "@std/cli": "jsr:@std/cli@^1.0.7",
     "@std/assert": "jsr:@std/assert@^1.0.6",
     "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
     "zod": "npm:zod@^3.23.8",

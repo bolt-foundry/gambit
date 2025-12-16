@@ -5,6 +5,8 @@ import type { SavedState } from "./state.ts";
 import type { ModelProvider, TraceEvent } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
+const logger = console;
+
 type IncomingMessage =
   | {
     type: "run";
@@ -31,7 +33,7 @@ type NormalizedSchema = {
   description?: string;
   example?: unknown;
   defaultValue?: unknown;
-  enumValues?: unknown[];
+  enumValues?: Array<unknown>;
   fields?: Record<string, NormalizedSchema>;
   items?: NormalizedSchema;
 };
@@ -100,7 +102,7 @@ function normalizeSchema(schema?: ZodTypeAny): NormalizedSchema | undefined {
     case "ZodBoolean":
       return { kind: "boolean", ...meta };
     case "ZodEnum": {
-      const values = (core as { _def: { values: unknown[] } })._def.values;
+      const values = (core as { _def: { values: Array<unknown> } })._def.values;
       return { kind: "enum", enumValues: [...values], ...meta };
     }
     case "ZodNativeEnum": {
@@ -269,7 +271,7 @@ export function startWebSocketSimulator(opts: {
     })
     .catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
-      console.warn(`[sim] failed to load deck schema: ${message}`);
+      logger.warn(`[sim] failed to load deck schema: ${message}`);
       return { error: message };
     });
 
@@ -375,7 +377,7 @@ export function startWebSocketSimulator(opts: {
         const initialUserMessage = msg.message ??
           (savedState ? msg.input : undefined);
         if (opts.verbose) {
-          console.log(
+          logger.log(
             `[sim] starting run runId=${
               savedState?.runId ?? "(new)"
             } messages=${savedState?.messages?.length ?? 0} stream=${stream}`,
@@ -430,7 +432,7 @@ export function startWebSocketSimulator(opts: {
   );
 
   const listenPort = (server.addr as Deno.NetAddr).port;
-  console.log(
+  logger.log(
     `WebSocket simulator listening on ws://localhost:${listenPort}/websocket (deck=${resolvedDeckPath})`,
   );
   return server;

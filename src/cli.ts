@@ -1,12 +1,14 @@
 #!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
 import * as path from "@std/path";
-import { parseArgs } from "jsr:@std/cli@1.0.7/parse-args";
+import { parseArgs } from "@std/cli/parse-args";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { runDeck } from "./runtime.ts";
 import { startWebSocketSimulator } from "./server.ts";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startRepl } from "./repl.ts";
 import { loadState, saveState } from "./state.ts";
+
+const logger = console;
 
 type Args = {
   cmd: "run" | "repl" | "serve";
@@ -33,7 +35,7 @@ const DEFAULT_REPL_DECK_URL = new URL(
 
 function resolveDefaultReplDeckPath(): string | null {
   if (DEFAULT_REPL_DECK_URL.protocol !== "file:") {
-    console.error(
+    logger.error(
       "Default REPL deck is unavailable when running from a remote URL. " +
         "Pass a deck path (e.g. src/decks/gambit-assistant.deck.md) or run from a local checkout.",
     );
@@ -67,7 +69,7 @@ function parsePortValue(value: unknown, label = "port"): number | undefined {
   return n;
 }
 
-function parseCliArgs(argv: string[]): Args {
+function parseCliArgs(argv: Array<string>): Args {
   const parsed = parseArgs(argv, {
     boolean: ["stream", "verbose", "help", "watch"],
     string: [
@@ -117,7 +119,7 @@ function parseCliArgs(argv: string[]): Args {
 }
 
 function printUsage() {
-  console.log(
+  logger.log(
     `Usage:
   gambit run [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
   gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
@@ -167,13 +169,13 @@ async function main() {
       Deno.exit(args.cmd ? 0 : 1);
     }
     if (!["run", "repl", "serve"].includes(args.cmd)) {
-      console.error("Only `run`, `repl`, and `serve` are supported");
+      logger.error("Only `run`, `repl`, and `serve` are supported");
       printUsage();
       Deno.exit(1);
     }
 
     if (args.example && args.deckPath) {
-      console.error("Provide either a deck path or --example, not both.");
+      logger.error("Provide either a deck path or --example, not both.");
       Deno.exit(1);
     }
 
@@ -191,7 +193,7 @@ async function main() {
       try {
         await Deno.stat(deckPath);
       } catch (err) {
-        console.error(
+        logger.error(
           `Example not found at ${deckPath}: ${(err as Error).message}`,
         );
         Deno.exit(1);
@@ -200,7 +202,7 @@ async function main() {
       try {
         await Deno.stat(deckPath);
       } catch {
-        console.error(
+        logger.error(
           `Default REPL deck not found at ${deckPath}. Pass a deck path explicitly.`,
         );
         Deno.exit(1);
@@ -277,7 +279,7 @@ async function main() {
         throw new Error("No watchable paths found for --watch");
       }
 
-      console.log(
+      logger.log(
         `[serve] watching for changes in ${
           watchTargets.join(", ")
         }; port=${port}`,
@@ -298,7 +300,7 @@ async function main() {
           // ignore
         }
         await server.finished.catch(() => {});
-        console.log(`[serve] restarting (${reason})...`);
+        logger.log(`[serve] restarting (${reason})...`);
         server = startServer();
       };
 
@@ -344,12 +346,12 @@ async function main() {
     });
 
     if (typeof result === "string") {
-      console.log(result);
+      logger.log(result);
     } else {
-      console.log(JSON.stringify(result, null, 2));
+      logger.log(JSON.stringify(result, null, 2));
     }
   } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+    logger.error(err instanceof Error ? err.message : String(err));
     Deno.exit(1);
   }
 }
