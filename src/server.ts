@@ -10,13 +10,7 @@ import {
 } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { loadDeck } from "./loader.ts";
-import editorAssistantInputSchema, {
-  type EditorAssistantInput,
-} from "./decks/schemas/editorAssistantInput.zod.ts";
-import patchProposalSchema, {
-  type PatchProposal,
-} from "./decks/schemas/patchProposal.zod.ts";
-import type { SavedState } from "./state.ts";
+import type { FeedbackEntry, SavedState } from "./state.ts";
 import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
@@ -45,6 +39,19 @@ const editorAssistantDeckPath = path.resolve(
   "editor-assistant.deck.md",
 );
 const EDITOR_ASSISTANT_PATCH_ACTION = "propose_patch";
+
+function resolveRoot(rootParam?: string | null) {
+  return rootParam ? path.resolve(rootParam) : Deno.cwd();
+}
+
+function resolveWithin(root: string, relativePath: string) {
+  const target = path.resolve(root, relativePath);
+  const rel = path.relative(root, target);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error("Path escapes root");
+  }
+  return target;
+}
 
 type IncomingMessage =
   | {
@@ -108,6 +115,11 @@ type SessionMeta = {
   deck?: string;
   deckSlug?: string;
   createdAt?: string;
+};
+
+type PatchProposal = {
+  summary: string;
+  edits: Array<{ start: number; end: number; text: string }>;
 };
 
 type OutgoingMessage =
@@ -207,6 +219,49 @@ function assistantMessagesFromState(
     .map((m) => ({ role: "assistant", content: String(m.content) }));
 }
 
+function normalizePatchProposal(
+  raw: unknown,
+): { patch?: PatchProposal; error?: string } {
+  if (!raw || typeof raw !== "object") {
+    return { error: "Patch payload missing" };
+  }
+  const summary = (raw as { summary?: unknown }).summary;
+  const editsRaw = (raw as { edits?: unknown }).edits;
+  if (typeof summary !== "string") {
+    return { error: "Patch summary is missing" };
+  }
+  if (!Array.isArray(editsRaw)) {
+    return { error: "Patch edits are missing" };
+  }
+  const edits: PatchProposal["edits"] = [];
+  for (let i = 0; i < editsRaw.length; i++) {
+    const edit = editsRaw[i] as {
+      start?: unknown;
+      end?: unknown;
+      text?: unknown;
+    };
+    const start = typeof edit.start === "number"
+      ? edit.start
+      : Number(edit.start);
+    const end = typeof edit.end === "number" ? edit.end : Number(edit.end);
+    const text = edit.text;
+    if (
+      !Number.isFinite(start) || !Number.isFinite(end) ||
+      typeof text !== "string"
+    ) {
+      return { error: `Edit ${i + 1} is invalid` };
+    }
+    if (start < 0 || end < 0 || end < start) {
+      return { error: `Edit ${i + 1} has invalid bounds` };
+    }
+    if (i > 0 && start < edits[i - 1].end) {
+      return { error: "Edits must be sorted and non-overlapping" };
+    }
+    edits.push({ start, end, text });
+  }
+  return { patch: { summary, edits } };
+}
+
 function validatePatchBounds(
   patch: PatchProposal,
   contentLength: number,
@@ -283,18 +338,17 @@ function extractPatchProposalFromState(args: {
       const candidate = rawPayload && typeof rawPayload === "object"
         ? (rawPayload as { payload?: unknown }).payload ?? rawPayload
         : rawPayload;
-      const parsedPatch = patchProposalSchema.safeParse(candidate);
-      if (!parsedPatch.success) {
-        lastError = parsedPatch.error.issues?.[0]?.message ??
-          "Invalid patch payload";
+      const normalized = normalizePatchProposal(candidate);
+      if (!normalized.patch) {
+        lastError = normalized.error ?? "Invalid patch payload";
         continue;
       }
-      const bounds = validatePatchBounds(parsedPatch.data, contentLength);
+      const bounds = validatePatchBounds(normalized.patch, contentLength);
       if (!bounds.ok) {
         lastError = bounds.error;
         continue;
       }
-      proposal = parsedPatch.data;
+      proposal = normalized.patch;
       lastError = undefined;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
@@ -623,7 +677,12 @@ export function startWebSocketSimulator(opts: {
     startedAt?: string;
     finishedAt?: string;
     maxTurns?: number;
-    messages: Array<{ role: string; content: string }>;
+    messages: Array<{
+      role: string;
+      content: string;
+      messageRefId?: string;
+      feedback?: FeedbackEntry;
+    }>;
   };
   type TestBotRunEntry = {
     run: TestBotRunStatus;
@@ -794,6 +853,40 @@ export function startWebSocketSimulator(opts: {
     return text.trim();
   };
 
+  const buildTestBotMessages = (
+    state: SavedState,
+  ): TestBotRunStatus["messages"] => {
+    const messages = state.messages ?? [];
+    const refs = state.messageRefs ?? [];
+    const feedbackByRef = new Map(
+      state.feedback?.map((entry) => [entry.messageRefId, entry]) ?? [],
+    );
+    const next: TestBotRunStatus["messages"] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (msg?.role !== "assistant" && msg?.role !== "user") continue;
+      const refId = refs[i]?.id;
+      next.push({
+        role: msg.role,
+        content: stringifyContent(msg.content),
+        messageRefId: refId,
+        feedback: refId ? feedbackByRef.get(refId) : undefined,
+      });
+    }
+    return next;
+  };
+
+  const syncTestBotRunFromState = (
+    run: TestBotRunStatus,
+    state: SavedState,
+  ) => {
+    run.messages = buildTestBotMessages(state);
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : undefined;
+    if (sessionId) run.sessionId = sessionId;
+  };
+
   const startTestBotRun = (runOpts: {
     maxTurnsOverride?: number;
     deckInput?: unknown;
@@ -846,18 +939,25 @@ export function startWebSocketSimulator(opts: {
 
     const appendFromState = (state: SavedState) => {
       const msgs = state.messages ?? [];
-      const newMessages = msgs.slice(lastCount).filter((m) =>
-        m?.role === "assistant" || m?.role === "user"
+      const feedbackByRef = new Map(
+        state.feedback?.map((entry) => [entry.messageRefId, entry]) ?? [],
       );
-      newMessages.forEach((m) => {
+      let appended = 0;
+      for (let i = lastCount; i < msgs.length; i++) {
+        const m = msgs[i];
+        if (m?.role !== "assistant" && m?.role !== "user") continue;
+        const refId = state.messageRefs?.[i]?.id;
         run.messages.push({
           role: m.role,
           content: stringifyContent(m.content),
+          messageRefId: refId,
+          feedback: refId ? feedbackByRef.get(refId) : undefined,
         });
-      });
+        appended++;
+      }
       lastCount = msgs.length;
       setSessionId(state);
-      if (newMessages.length > 0) {
+      if (appended > 0) {
         broadcastTestBot({ type: "testBotStatus", run });
       }
     };
@@ -1000,13 +1100,7 @@ export function startWebSocketSimulator(opts: {
         broadcastTestBot({ type: "testBotStatus", run });
       } finally {
         if (savedState?.messages) {
-          const filtered = savedState.messages.filter((m) =>
-            m?.role === "assistant" || m?.role === "user"
-          ).map((m) => ({
-            role: m.role,
-            content: stringifyContent(m.content),
-          }));
-          run.messages = filtered;
+          run.messages = buildTestBotMessages(savedState);
         }
         setSessionId(savedState);
         run.finishedAt = new Date().toISOString();
@@ -1103,26 +1197,31 @@ export function startWebSocketSimulator(opts: {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
         }
-        const rootParam = url.searchParams.get("root");
-        const root = rootParam ? path.resolve(rootParam) : Deno.cwd();
+        const root = resolveRoot(url.searchParams.get("root"));
         let limit = Number(url.searchParams.get("limit") ?? "500");
         if (!Number.isFinite(limit) || limit <= 0) limit = 500;
         let count = 0;
-        const files: Array<{ path: string; relative: string }> = [];
+        const files: Array<{ path: string; relative: string; kind: string }> =
+          [];
         try {
           const maxDepth = Number(url.searchParams.get("maxDepth") ?? "10");
           for await (
             const entry of walk(root, {
-              includeDirs: false,
+              includeDirs: true,
               followSymlinks: false,
               maxDepth: Number.isFinite(maxDepth) && maxDepth > 0
                 ? maxDepth
                 : 10,
             })
           ) {
-            if (!entry.isFile) continue;
+            if (!entry.isFile && !entry.isDirectory) continue;
             const relative = path.relative(root, entry.path);
-            files.push({ path: entry.path, relative });
+            if (!relative) continue;
+            files.push({
+              path: entry.path,
+              relative,
+              kind: entry.isDirectory ? "dir" : "file",
+            });
             count++;
             if (count >= limit) break;
           }
@@ -1137,6 +1236,113 @@ export function startWebSocketSimulator(opts: {
         return new Response(JSON.stringify({ root, files }), {
           headers: { "content-type": "application/json" },
         });
+      }
+
+      if (url.pathname === "/api/files/create") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            root?: string;
+            relative?: string;
+            kind?: "file" | "dir";
+            content?: string;
+          };
+          if (!body.relative || typeof body.relative !== "string") {
+            throw new Error("Missing relative path");
+          }
+          const root = resolveRoot(body.root);
+          const target = resolveWithin(root, body.relative);
+          if (body.kind === "dir") {
+            ensureDir(target);
+            return new Response(
+              JSON.stringify({ path: target, created: true }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          ensureDir(path.dirname(target));
+          await Deno.writeTextFile(target, body.content ?? "");
+          return new Response(
+            JSON.stringify({ path: target, created: true }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/files/delete") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            root?: string;
+            relative?: string;
+          };
+          if (!body.relative || typeof body.relative !== "string") {
+            throw new Error("Missing relative path");
+          }
+          const root = resolveRoot(body.root);
+          const target = resolveWithin(root, body.relative);
+          const info = await Deno.stat(target);
+          if (info.isDirectory) {
+            await Deno.remove(target, { recursive: true });
+          } else {
+            await Deno.remove(target);
+          }
+          return new Response(JSON.stringify({ deleted: true }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/files/rename") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            root?: string;
+            from?: string;
+            to?: string;
+          };
+          if (!body.from || typeof body.from !== "string") {
+            throw new Error("Missing source path");
+          }
+          if (!body.to || typeof body.to !== "string") {
+            throw new Error("Missing destination path");
+          }
+          const root = resolveRoot(body.root);
+          const source = resolveWithin(root, body.from);
+          const dest = resolveWithin(root, body.to);
+          ensureDir(path.dirname(dest));
+          await Deno.rename(source, dest);
+          return new Response(
+            JSON.stringify({ path: dest, renamed: true }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
       }
 
       if (url.pathname === "/api/file") {
@@ -1245,10 +1451,9 @@ export function startWebSocketSimulator(opts: {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
-        let parsed: EditorAssistantInput;
+        let body: unknown;
         try {
-          const body = await req.json();
-          parsed = editorAssistantInputSchema.parse(body);
+          body = await req.json();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           return new Response(
@@ -1257,17 +1462,30 @@ export function startWebSocketSimulator(opts: {
           );
         }
 
-        const lastUserMessage = [...parsed.messages].reverse().find((m) =>
-          m?.role === "user" && typeof m.content === "string"
-        )?.content;
+        const payload = (body ?? {}) as {
+          message?: unknown;
+          messages?: unknown;
+          content?: unknown;
+        };
+        const explicitMessage = typeof payload.message === "string"
+          ? payload.message
+          : undefined;
+        const history = Array.isArray(payload.messages) ? payload.messages : [];
+        const lastUserMessage = explicitMessage ??
+          [...history].reverse().find((m) =>
+            m?.role === "user" && typeof m.content === "string"
+          )?.content;
+        const contentLength = typeof payload.content === "string"
+          ? payload.content.length
+          : undefined;
 
         let capturedState: SavedState | undefined;
         let runOutput: unknown;
         try {
           runOutput = await runDeck({
             path: editorAssistantDeckPath,
-            input: parsed,
-            inputProvided: true,
+            input: undefined,
+            inputProvided: false,
             modelProvider: opts.modelProvider,
             defaultModel: opts.model,
             modelOverride: opts.modelForce,
@@ -1299,7 +1517,7 @@ export function startWebSocketSimulator(opts: {
         }
         const { patch, error: patchError } = extractPatchProposalFromState({
           state: capturedState,
-          contentLength: parsed.content.length,
+          contentLength: contentLength ?? 0,
           actionName: EDITOR_ASSISTANT_PATCH_ACTION,
         });
         if (assistantMessages.length === 0) {
@@ -1308,7 +1526,7 @@ export function startWebSocketSimulator(opts: {
             content: "No assistant response produced.",
           }];
         }
-        if (!patch && patchError) {
+        if (!patch && patchError && contentLength !== undefined) {
           assistantMessages = [
             ...assistantMessages,
             {
@@ -1437,6 +1655,17 @@ export function startWebSocketSimulator(opts: {
       if (url.pathname === "/api/test-bot/status") {
         const runId = url.searchParams.get("runId") ?? undefined;
         const entry = runId ? testBotRuns.get(runId) : undefined;
+        const run = entry?.run ?? {
+          id: runId ?? "",
+          status: "idle",
+          messages: [],
+        };
+        if (run.sessionId) {
+          const state = readSessionState(run.sessionId);
+          if (state) {
+            syncTestBotRunFromState(run, state);
+          }
+        }
         const cfg = loadTestBotConfig({
           autoCreate: false,
           path: opts.testBotPath,
@@ -1450,11 +1679,7 @@ export function startWebSocketSimulator(opts: {
           : schemaDesc?.defaults;
         return new Response(
           JSON.stringify({
-            run: entry?.run ?? {
-              id: runId ?? "",
-              status: "idle",
-              messages: [],
-            },
+            run,
             inputSchemaPath: cfg.inputSchemaPath,
             inputSchema: schemaDesc?.schema,
             inputSchemaError: schemaDesc?.error,
@@ -1553,6 +1778,92 @@ export function startWebSocketSimulator(opts: {
             JSON.stringify({
               sessionId: body.sessionId,
               notes: nextState.notes,
+              saved: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/session/feedback") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            messageRefId?: string;
+            score?: number;
+            reason?: string;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          if (!body.messageRefId) {
+            throw new Error("Missing messageRefId");
+          }
+          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
+            throw new Error("Invalid score");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) {
+            throw new Error("Session not found");
+          }
+          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+          const reason = typeof body.reason === "string"
+            ? body.reason
+            : undefined;
+          const runId = typeof state.runId === "string"
+            ? state.runId
+            : "session";
+          const existing = state.feedback ?? [];
+          const idx = existing.findIndex((entry) =>
+            entry.messageRefId === body.messageRefId
+          );
+          const now = new Date().toISOString();
+          const entry = idx >= 0
+            ? {
+              ...existing[idx],
+              score: clamped,
+              reason,
+              runId: existing[idx].runId ?? runId,
+            }
+            : {
+              id: randomId("fb"),
+              runId,
+              messageRefId: body.messageRefId,
+              score: clamped,
+              reason,
+              createdAt: now,
+            };
+          const feedback = idx >= 0
+            ? existing.map((item, i) => i === idx ? entry : item)
+            : [...existing, entry];
+          const nextState = persistSessionState({
+            ...state,
+            feedback,
+          });
+          const testBotRunId = typeof nextState.meta?.testBotRunId === "string"
+            ? nextState.meta.testBotRunId
+            : undefined;
+          if (testBotRunId) {
+            const testEntry = testBotRuns.get(testBotRunId);
+            if (testEntry) {
+              syncTestBotRunFromState(testEntry.run, nextState);
+              broadcastTestBot({ type: "testBotStatus", run: testEntry.run });
+            }
+          }
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              feedback: entry,
               saved: true,
             }),
             { headers: { "content-type": "application/json" } },

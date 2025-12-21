@@ -121,10 +121,17 @@ type TestBotRun = {
   startedAt?: string;
   finishedAt?: string;
   maxTurns?: number;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{
+    role: string;
+    content: string;
+    messageRefId?: string;
+    feedback?: FeedbackEntry;
+  }>;
 };
 
-function countUserMessages(messages: Array<{ role: string; content: string }>) {
+function countUserMessages(
+  messages: Array<{ role: string; content: string }>,
+) {
   return messages.filter((m) => m.role === "user").length;
 }
 
@@ -1989,7 +1996,107 @@ function SimulatorApp({ basePath }: { basePath: string }) {
   );
 }
 
-type EditorFile = { path: string; relative: string };
+type EditorFile = {
+  path: string;
+  relative: string;
+  kind: "file" | "dir";
+};
+
+type FileTreeNode = {
+  name: string;
+  relative: string;
+  kind: "file" | "dir";
+  path?: string;
+  children: FileTreeNode[];
+};
+
+function normalizeRelativePath(relative: string) {
+  return relative.replace(/\\/g, "/");
+}
+
+function sortFileNodes(nodes: FileTreeNode[]) {
+  nodes.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  nodes.forEach((node) => {
+    if (node.children.length) sortFileNodes(node.children);
+  });
+  return nodes;
+}
+
+function buildFileTree(entries: EditorFile[]) {
+  const root: FileTreeNode = {
+    name: "",
+    relative: "",
+    kind: "dir",
+    children: [],
+  };
+  const nodeByRelative = new Map<string, FileTreeNode>();
+  nodeByRelative.set("", root);
+  const entryByRelative = new Map<string, EditorFile>();
+  for (const entry of entries) {
+    const normalized = normalizeRelativePath(entry.relative);
+    if (!normalized) continue;
+    entryByRelative.set(normalized, { ...entry, relative: normalized });
+  }
+  const rels = Array.from(entryByRelative.keys()).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  for (const rel of rels) {
+    const entry = entryByRelative.get(rel);
+    if (!entry) continue;
+    const parts = rel.split("/");
+    let currentRel = "";
+    let parent = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      currentRel = currentRel ? `${currentRel}/${part}` : part;
+      let node = nodeByRelative.get(currentRel);
+      if (!node) {
+        const existing = entryByRelative.get(currentRel);
+        const kind = existing?.kind ??
+          (i === parts.length - 1 ? entry.kind : "dir");
+        node = {
+          name: part,
+          relative: currentRel,
+          kind,
+          path: existing?.path,
+          children: [],
+        };
+        nodeByRelative.set(currentRel, node);
+        parent.children.push(node);
+      }
+      parent = node;
+    }
+    const target = nodeByRelative.get(rel);
+    if (target) {
+      target.path = entry.path;
+      target.kind = entry.kind;
+    }
+  }
+  return sortFileNodes(root.children);
+}
+
+function filterFileTree(nodes: FileTreeNode[], query: string) {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return nodes;
+  const matches = (node: FileTreeNode) =>
+    node.name.toLowerCase().includes(trimmed) ||
+    node.relative.toLowerCase().includes(trimmed);
+  const filterNode = (node: FileTreeNode): FileTreeNode | null => {
+    const nextChildren = node.children
+      .map(filterNode)
+      .filter((child): child is FileTreeNode => Boolean(child));
+    if (matches(node) || nextChildren.length > 0) {
+      return { ...node, children: nextChildren };
+    }
+    return null;
+  };
+  return nodes
+    .map(filterNode)
+    .filter((node): node is FileTreeNode => Boolean(node));
+}
 
 function EditorApp(props: { onNavigateToSimulator: () => void }) {
   const { onNavigateToSimulator } = props;
@@ -2004,7 +2111,10 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
   const [files, setFiles] = useState<EditorFile[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [filesBusy, setFilesBusy] = useState(false);
   const [rootInput, setRootInput] = useState("");
+  const [fileQuery, setFileQuery] = useState("");
+  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string>("");
   const [fileStatus, setFileStatus] = useState<
@@ -2036,6 +2146,11 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
   const [quickMessage, setQuickMessage] = useState("");
   const [quickInitValue, setQuickInitValue] = useState<unknown>(undefined);
   const [quickInitDirty, setQuickInitDirty] = useState(false);
+  const [quickInitMode, setQuickInitMode] = useState<"form" | "json">("form");
+  const [quickInitJsonText, setQuickInitJsonText] = useState("");
+  const [quickInitJsonError, setQuickInitJsonError] = useState<string | null>(
+    null,
+  );
   const [quickJsonErrors, setQuickJsonErrors] = useState<
     Record<string, string | null>
   >({});
@@ -2182,6 +2297,123 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
     }
   }, []);
 
+  const fileByPath = useMemo(() => {
+    const map = new Map<string, EditorFile>();
+    files.forEach((entry) => map.set(entry.path, entry));
+    return map;
+  }, [files]);
+
+  const fileTree = useMemo(() => buildFileTree(files), [files]);
+  const filteredFileTree = useMemo(
+    () => filterFileTree(fileTree, fileQuery),
+    [fileTree, fileQuery],
+  );
+
+  const refreshFiles = useCallback(() => {
+    loadFiles(rootInput || ".");
+  }, [loadFiles, rootInput]);
+
+  const runFilesAction = useCallback(
+    async (endpoint: string, body: Record<string, unknown>) => {
+      setFilesBusy(true);
+      setFilesError(null);
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            typeof data?.error === "string" ? data.error : res.statusText,
+          );
+        }
+        return data;
+      } catch (err) {
+        setFilesError(
+          err instanceof Error ? err.message : "File operation failed",
+        );
+        return null;
+      } finally {
+        setFilesBusy(false);
+      }
+    },
+    [],
+  );
+
+  const handleCreateEntry = useCallback(
+    async (kind: "file" | "dir") => {
+      const label = kind === "file" ? "file" : "folder";
+      const relative = window.prompt(`New ${label} path (relative to root):`);
+      if (!relative) return;
+      const data = await runFilesAction("/api/files/create", {
+        root: rootInput || ".",
+        relative,
+        kind,
+        content: "",
+      });
+      await refreshFiles();
+      if (kind === "file" && data?.path && isAllowedFile(String(data.path))) {
+        await loadFile(String(data.path));
+      }
+    },
+    [runFilesAction, refreshFiles, rootInput, isAllowedFile, loadFile],
+  );
+
+  const handleRenameEntry = useCallback(
+    async (relative: string) => {
+      const next = window.prompt("Rename to (relative to root):", relative);
+      if (!next || next === relative) return;
+      const data = await runFilesAction("/api/files/rename", {
+        root: rootInput || ".",
+        from: relative,
+        to: next,
+      });
+      await refreshFiles();
+      if (data?.path && selectedFile) {
+        const prevEntry = fileByPath.get(selectedFile);
+        if (
+          prevEntry && normalizeRelativePath(prevEntry.relative) === relative
+        ) {
+          setSelectedFile(String(data.path));
+          loadFile(String(data.path));
+        }
+      }
+    },
+    [
+      runFilesAction,
+      refreshFiles,
+      rootInput,
+      selectedFile,
+      fileByPath,
+      loadFile,
+    ],
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (relative: string, kind: "file" | "dir") => {
+      const message = kind === "dir"
+        ? `Delete folder "${relative}" and all of its contents?`
+        : `Delete file "${relative}"?`;
+      if (!window.confirm(message)) return;
+      await runFilesAction("/api/files/delete", {
+        root: rootInput || ".",
+        relative,
+      });
+      if (selectedFile) {
+        const entry = fileByPath.get(selectedFile);
+        if (entry && normalizeRelativePath(entry.relative) === relative) {
+          setSelectedFile(null);
+          setFileContent("");
+          setFileStatus("idle");
+        }
+      }
+      await refreshFiles();
+    },
+    [runFilesAction, refreshFiles, rootInput, selectedFile, fileByPath],
+  );
+
   useEffect(() => {
     const root = config.rootPath ||
       (config.activeDeckPath ? pathDirname(config.activeDeckPath) : "") || "";
@@ -2207,6 +2439,22 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
   }, [config.activeDeckPath, loadingConfig, loadFile]);
 
   useEffect(() => {
+    if (!selectedFile) return;
+    const entry = fileByPath.get(selectedFile);
+    if (!entry) return;
+    const parts = normalizeRelativePath(entry.relative).split("/");
+    setExpandedDirs((prev) => {
+      const next = { ...prev };
+      let rel = "";
+      for (let i = 0; i < parts.length - 1; i++) {
+        rel = rel ? `${rel}/${parts[i]}` : parts[i];
+        next[rel] = true;
+      }
+      return next;
+    });
+  }, [selectedFile, fileByPath]);
+
+  useEffect(() => {
     setAssistantMessages([]);
     setAssistantPendingPatch(null);
     setAssistantInput("");
@@ -2230,6 +2478,20 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
       "string"
     ? quickSimulator.savedState.meta.sessionId
     : undefined;
+  const quickMessages = useMemo(() => {
+    if (!quickSimulator.savedState) return [];
+    const feedbackByRef = new Map(
+      quickSimulator.savedState.feedback?.map((f) => [f.messageRefId, f]) ?? [],
+    );
+    return quickSimulator.savedState.messages.map((message, idx) => {
+      const ref = quickSimulator.savedState?.messageRefs?.[idx];
+      return {
+        id: ref?.id,
+        message,
+        feedback: ref ? feedbackByRef.get(ref.id) : undefined,
+      };
+    });
+  }, [quickSimulator.savedState]);
 
   useEffect(() => {
     setQuickExpanded({});
@@ -2244,6 +2506,20 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
     }
     setQuickInitValue(deriveInitialFromSchema(quickSchemaShape));
   }, [quickSchemaShape, quickSchemaDefaults, quickInitDirty]);
+
+  useEffect(() => {
+    if (quickInitMode !== "json") return;
+    if (quickInitDirty) return;
+    try {
+      setQuickInitJsonText(
+        quickInitValue === undefined
+          ? ""
+          : JSON.stringify(quickInitValue, null, 2),
+      );
+    } catch {
+      setQuickInitJsonText(quickInitValue ? String(quickInitValue) : "");
+    }
+  }, [quickInitMode, quickInitValue, quickInitDirty]);
 
   const quickMissingRequired = useMemo(() => {
     if (!quickSchemaShape) return [];
@@ -2295,6 +2571,20 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
     quickSimulator,
   ]);
 
+  const handleQuickScore = useCallback(
+    (refId: string, score: number) => {
+      quickSimulator.sendFeedback(refId, score);
+    },
+    [quickSimulator],
+  );
+
+  const handleQuickReason = useCallback(
+    (refId: string, score: number, reason: string) => {
+      quickSimulator.sendFeedback(refId, score, reason);
+    },
+    [quickSimulator],
+  );
+
   useEffect(() => {
     const el = quickThreadRef.current;
     if (!el) return;
@@ -2302,7 +2592,7 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
       el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [quickSimulator.savedState?.messages?.length, quickSimulator.streamText]);
+  }, [quickMessages.length, quickSimulator.streamText]);
 
   const saveFile = useCallback(async (target: string, content: string) => {
     setFileStatus("saving");
@@ -2672,6 +2962,132 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
     return () => cancelAnimationFrame(frame);
   }, [assistantMessages.length]);
 
+  const toggleDir = useCallback((relative: string) => {
+    setExpandedDirs((prev) => ({
+      ...prev,
+      [relative]: !prev[relative],
+    }));
+  }, []);
+
+  const renderFileNode = useCallback(
+    (node: FileTreeNode, depth: number) => {
+      const isDir = node.kind === "dir";
+      const expanded = fileQuery
+        ? true
+        : expandedDirs[node.relative] ?? depth < 1;
+      const canOpen = !isDir && node.path && isAllowedFile(node.path);
+      const isSelected = !isDir && node.path === selectedFile;
+      return (
+        <div key={node.relative}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 6px",
+              borderRadius: 8,
+              background: isSelected ? "#e0f2fe" : "transparent",
+              marginBottom: 2,
+              paddingLeft: 6 + depth * 12,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (isDir) return toggleDir(node.relative);
+                if (!canOpen || !node.path) return;
+                loadFile(node.path);
+              }}
+              disabled={isDir ? false : !canOpen}
+              title={node.relative}
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                textAlign: "left",
+                border: "none",
+                background: "transparent",
+                padding: "2px 6px",
+                cursor: isDir || canOpen ? "pointer" : "not-allowed",
+                opacity: isDir || canOpen ? 1 : 0.5,
+                fontWeight: isDir ? 700 : 500,
+                color: isDir ? "#0f172a" : "#1f2937",
+              }}
+            >
+              <span
+                style={{
+                  width: 14,
+                  textAlign: "center",
+                  color: "#94a3b8",
+                  fontSize: 12,
+                }}
+              >
+                {isDir ? (expanded ? "▾" : "▸") : "•"}
+              </span>
+              {node.name}
+            </button>
+            <select
+              value=""
+              onChange={(e) => {
+                const value = e.target.value as "" | "rename" | "delete";
+                if (!value) return;
+                if (value === "rename") {
+                  handleRenameEntry(node.relative);
+                } else {
+                  handleDeleteEntry(node.relative, node.kind);
+                }
+                e.currentTarget.value = "";
+              }}
+              disabled={filesBusy}
+              title="Actions"
+              style={{
+                border: "1px solid #cbd5e1",
+                borderRadius: 6,
+                padding: "2px 6px",
+                fontSize: 11,
+                background: "white",
+                cursor: "pointer",
+              }}
+            >
+              <option value="">Actions</option>
+              <option value="rename">Rename</option>
+              <option value="delete">Delete</option>
+            </select>
+          </div>
+          {isDir && expanded && node.children.length > 0 && (
+            <div>
+              {node.children.map((child) => renderFileNode(child, depth + 1))}
+            </div>
+          )}
+          {isDir && expanded && node.children.length === 0 && (
+            <div
+              style={{
+                paddingLeft: 22 + depth * 12,
+                fontSize: 12,
+                color: "#94a3b8",
+                marginBottom: 4,
+              }}
+            >
+              Empty folder
+            </div>
+          )}
+        </div>
+      );
+    },
+    [
+      expandedDirs,
+      fileQuery,
+      filesBusy,
+      handleDeleteEntry,
+      handleRenameEntry,
+      isAllowedFile,
+      loadFile,
+      selectedFile,
+      toggleDir,
+    ],
+  );
+
   return (
     <div className="editor-shell">
       <div className="editor-header">
@@ -2714,81 +3130,120 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
           {leftTab === "files"
             ? (
               <>
-                <strong>Files (.md)</strong>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    value={rootInput}
-                    onChange={(e) => setRootInput(e.target.value)}
-                    placeholder="Root path (default: CWD)"
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div
                     style={{
-                      flex: 1,
-                      padding: 8,
-                      borderRadius: 8,
-                      border: "1px solid #cbd5e1",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
                     }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateConfig({ ...config, rootPath: rootInput })}
                   >
-                    Save root
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => loadFiles(rootInput || ".")}
+                    <strong>Files</strong>
+                    <span className="editor-status">
+                      {filesLoading ? "Loading..." : `${files.length} items`}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
                   >
-                    Refresh
-                  </button>
+                    <input
+                      value={rootInput}
+                      onChange={(e) => setRootInput(e.target.value)}
+                      placeholder="Root path (default: CWD)"
+                      style={{
+                        flex: 1,
+                        minWidth: 180,
+                        padding: 8,
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateConfig({ ...config, rootPath: rootInput })}
+                      disabled={filesBusy}
+                    >
+                      Save root
+                    </button>
+                    <button
+                      type="button"
+                      onClick={refreshFiles}
+                      disabled={filesBusy}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <input
+                      value={fileQuery}
+                      onChange={(e) => setFileQuery(e.target.value)}
+                      placeholder="Search files and folders"
+                      style={{
+                        flex: 1,
+                        minWidth: 180,
+                        padding: 8,
+                        borderRadius: 8,
+                        border: "1px solid #cbd5e1",
+                      }}
+                    />
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const value = e.target.value as
+                          | ""
+                          | "file"
+                          | "dir";
+                        if (!value) return;
+                        handleCreateEntry(value);
+                        e.currentTarget.value = "";
+                      }}
+                      disabled={filesBusy}
+                      style={{
+                        border: "1px solid #cbd5e1",
+                        borderRadius: 8,
+                        padding: "6px 10px",
+                        background: "white",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      <option value="">New…</option>
+                      <option value="file">File</option>
+                      <option value="dir">Folder</option>
+                    </select>
+                  </div>
                 </div>
                 {filesLoading && (
                   <div className="placeholder">Loading files…</div>
                 )}
                 {filesError && <div className="error">{filesError}</div>}
                 <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                  {files.map((file) => (
-                    <button
-                      key={file.path}
-                      disabled={!isAllowedFile(file.path)}
-                      style={{
-                        display: "block",
-                        width: "100%",
-                        textAlign: "left",
-                        padding: "6px 8px",
-                        borderRadius: 8,
-                        border: "1px solid #e2e8f0",
-                        background: selectedFile === file.path
-                          ? "#e0f2fe"
-                          : "#f8fafc",
-                        marginBottom: 6,
-                        cursor: isAllowedFile(file.path)
-                          ? "pointer"
-                          : "not-allowed",
-                        opacity: isAllowedFile(file.path) ? 1 : 0.6,
-                      }}
-                      title={isAllowedFile(file.path)
-                        ? file.path
-                        : "Only .md, .ts, .tsx files can be opened"}
-                      onClick={() => {
-                        if (!isAllowedFile(file.path)) return;
-                        loadFile(file.path);
-                      }}
-                    >
-                      <div style={{ fontWeight: 600 }}>{file.relative}</div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: "#475569",
-                          wordBreak: "break-all",
-                        }}
-                      >
-                        {file.path}
-                      </div>
-                    </button>
-                  ))}
-                  {!filesLoading && files.length === 0 && (
+                  {filteredFileTree.map((node) => renderFileNode(node, 0))}
+                  {!filesLoading && filteredFileTree.length === 0 && (
                     <div className="placeholder">
-                      No .md files under this root.
+                      {fileQuery.trim()
+                        ? "No matches."
+                        : "No files under this root."}
                     </div>
                   )}
                 </div>
@@ -3083,22 +3538,123 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
                   <details className="init-panel" open={!quickHasState}>
                     <summary>Init (gambit_init)</summary>
                     <div className="hint">
-                      Provide input for the active deck. Leave blank to skip.
+                      Provide input for the active deck. Use form fields or raw
+                      JSON; leave blank to skip.
                     </div>
-                    <InitForm
-                      schema={quickSchemaShape}
-                      value={quickInitValue}
-                      onChange={(next) => {
-                        setQuickInitValue(next);
-                        setQuickInitDirty(true);
-                      }}
-                      onJsonErrorChange={(pathKey, err) =>
-                        setQuickJsonErrors((prev) =>
-                          prev[pathKey] === err
-                            ? prev
-                            : { ...prev, [pathKey]: err }
+                    <div className="panel-tabs" style={{ marginTop: 6 }}>
+                      <button
+                        type="button"
+                        className={classNames(
+                          "panel-tab",
+                          quickInitMode === "form" && "active",
                         )}
-                    />
+                        onClick={() => {
+                          setQuickInitMode("form");
+                          setQuickInitJsonError(null);
+                          setQuickJsonErrors((prev) => ({
+                            ...prev,
+                            __root__: null,
+                          }));
+                        }}
+                      >
+                        Form
+                      </button>
+                      <button
+                        type="button"
+                        className={classNames(
+                          "panel-tab",
+                          quickInitMode === "json" && "active",
+                        )}
+                        onClick={() => {
+                          setQuickInitMode("json");
+                          try {
+                            setQuickInitJsonText(
+                              quickInitValue === undefined
+                                ? ""
+                                : JSON.stringify(quickInitValue, null, 2),
+                            );
+                          } catch {
+                            setQuickInitJsonText(
+                              quickInitValue ? String(quickInitValue) : "",
+                            );
+                          }
+                        }}
+                      >
+                        JSON
+                      </button>
+                    </div>
+                    {quickInitMode === "form"
+                      ? (
+                        <InitForm
+                          schema={quickSchemaShape}
+                          value={quickInitValue}
+                          onChange={(next) => {
+                            setQuickInitValue(next);
+                            setQuickInitDirty(true);
+                          }}
+                          onJsonErrorChange={(pathKey, err) =>
+                            setQuickJsonErrors((prev) =>
+                              prev[pathKey] === err
+                                ? prev
+                                : { ...prev, [pathKey]: err }
+                            )}
+                        />
+                      )
+                      : (
+                        <div className="init-field">
+                          <label>
+                            <span>Init JSON</span>
+                            <span className="badge">root</span>
+                          </label>
+                          <textarea
+                            className="json-input"
+                            value={quickInitJsonText}
+                            placeholder="Paste full init JSON payload"
+                            onChange={(e) => {
+                              const text = e.target.value;
+                              let error: string | null = null;
+                              let parsed: unknown = undefined;
+                              if (text.trim() === "") {
+                                parsed = undefined;
+                              } else {
+                                try {
+                                  parsed = JSON.parse(text);
+                                } catch (err) {
+                                  error = err instanceof Error
+                                    ? err.message
+                                    : "Invalid JSON";
+                                }
+                              }
+                              setQuickInitMode("json");
+                              setQuickInitJsonText(text);
+                              setQuickInitJsonError(error);
+                              setQuickInitDirty(true);
+                              if (!error) {
+                                setQuickInitValue(parsed);
+                                setQuickJsonErrors((prev) => ({
+                                  ...prev,
+                                  __root__: null,
+                                }));
+                              } else {
+                                setQuickJsonErrors((prev) => ({
+                                  ...prev,
+                                  __root__: error,
+                                }));
+                              }
+                            }}
+                            style={{ minHeight: 140 }}
+                          />
+                          {quickInitJsonError && (
+                            <div className="error">{quickInitJsonError}</div>
+                          )}
+                          {!quickInitJsonError && (
+                            <div className="secondary-note">
+                              Leave blank to unset init. Parsed JSON replaces
+                              the form.
+                            </div>
+                          )}
+                        </div>
+                      )}
                   </details>
                 )}
                 {!quickSchemaShape && !quickSchema.loading && (
@@ -3110,24 +3666,25 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
                   className="imessage-thread"
                   ref={quickThreadRef}
                 >
-                  {(quickSimulator.savedState?.messages?.length ?? 0) === 0 && (
+                  {quickMessages.length === 0 && (
                     <div className="placeholder">
                       No messages yet. Send a message or start a blank run.
                     </div>
                   )}
-                  {(quickSimulator.savedState?.messages ?? []).map((m, idx) => (
+                  {quickMessages.map((entry, idx) => (
                     (() => {
-                      const role = m.role ?? "assistant";
+                      const role = entry.message.role ?? "assistant";
                       const isUser = role === "user";
                       const isCollapsible = role === "system" ||
                         role === "tool";
                       const isMuted = role === "system" || role === "tool";
+                      const messageRefId = entry.id;
                       const expandKey = `${
                         quickSessionId ?? "local"
                       }-${idx}-${role}`;
                       const isCollapsed = isCollapsible &&
                         !quickExpanded[expandKey];
-                      const content = String(m.content ?? "");
+                      const content = String(entry.message.content ?? "");
                       if (!content.trim()) return null;
                       const preview = content.trim().slice(0, 160);
                       const collapsedText = `${role} message (click to expand)${
@@ -3169,6 +3726,14 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
                             }}
                           >
                             {isCollapsed ? collapsedText : content}
+                            {messageRefId && !isCollapsible && !isUser && (
+                              <FeedbackControls
+                                messageRefId={messageRefId}
+                                feedback={entry.feedback}
+                                onScore={handleQuickScore}
+                                onReasonChange={handleQuickReason}
+                              />
+                            )}
                           </div>
                         </div>
                       );
@@ -3249,6 +3814,9 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
                       setQuickPendingReset(true);
                       quickSimulator.resetLocal();
                       setQuickInitDirty(false);
+                      setQuickInitMode("form");
+                      setQuickInitJsonText("");
+                      setQuickInitJsonError(null);
                       setQuickJsonErrors({});
                     }}
                   >
@@ -3682,6 +4250,53 @@ function TestBotApp(props: {
     }
   }, [refreshStatus, run.id]);
 
+  const saveTestBotFeedback = useCallback(
+    async (messageRefId: string, score: number, reason?: string) => {
+      if (!run.sessionId) return;
+      try {
+        const res = await fetch("/api/session/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: run.sessionId,
+            messageRefId,
+            score,
+            reason,
+          }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json() as { feedback?: FeedbackEntry };
+        if (data.feedback) {
+          setRun((prev) => ({
+            ...prev,
+            messages: prev.messages.map((msg) =>
+              msg.messageRefId === messageRefId
+                ? { ...msg, feedback: data.feedback }
+                : msg
+            ),
+          }));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [run.sessionId],
+  );
+
+  const handleTestBotScore = useCallback(
+    (messageRefId: string, score: number) => {
+      saveTestBotFeedback(messageRefId, score);
+    },
+    [saveTestBotFeedback],
+  );
+
+  const handleTestBotReason = useCallback(
+    (messageRefId: string, score: number, reason: string) => {
+      saveTestBotFeedback(messageRefId, score, reason);
+    },
+    [saveTestBotFeedback],
+  );
+
   const runStatusLabel = run.status === "running"
     ? "Running test bot…"
     : run.status === "completed"
@@ -3870,6 +4485,14 @@ function TestBotApp(props: {
                   title={m.role}
                 >
                   {m.content}
+                  {m.messageRefId && m.role !== "user" && run.sessionId && (
+                    <FeedbackControls
+                      messageRefId={m.messageRefId}
+                      feedback={m.feedback}
+                      onScore={handleTestBotScore}
+                      onReasonChange={handleTestBotReason}
+                    />
+                  )}
                 </div>
               </div>
             ))}

@@ -150,6 +150,9 @@ body {
 .feedback-controls:focus-within {
   opacity: 1;
 }
+.imessage-bubble:hover .feedback-controls {
+  opacity: 1;
+}
 .feedback-scores {
   display: flex;
   gap: 6px;
