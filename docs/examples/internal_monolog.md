@@ -9,7 +9,7 @@ without tool calls) before completing its work.
   first thinks aloud (monolog), then calls a compute action, then responds.
 - `lookup_fact.deck.ts`: simple compute action the child calls.
 
-Run in the simulator to see monolog traces:
+Run in the debug UI to see monolog traces:
 
 ```bash
 deno run -A src/cli.ts serve examples/internal_monolog/internal_monolog_parent.deck.md --model openai/gpt-4o-mini --trace out.jsonl --verbose

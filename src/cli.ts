@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-read --allow-env --allow-net
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env --allow-net
 import * as path from "@std/path";
 import { parseArgs } from "@std/cli/parse-args";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
@@ -25,6 +25,10 @@ type Args = {
   verbose?: boolean;
   port?: number;
   watch?: boolean;
+  bundle?: boolean;
+  sourcemap?: boolean;
+  platform?: string;
+  testBot?: string;
   help?: boolean;
 };
 
@@ -71,13 +75,23 @@ function parsePortValue(value: unknown, label = "port"): number | undefined {
 
 function parseCliArgs(argv: Array<string>): Args {
   const parsed = parseArgs(argv, {
-    boolean: ["stream", "verbose", "help", "watch"],
+    boolean: [
+      "stream",
+      "verbose",
+      "help",
+      "watch",
+      "bundle",
+      "no-bundle",
+      "sourcemap",
+    ],
     string: [
       "example",
       "init",
       "message",
       "model",
       "model-force",
+      "platform",
+      "test-bot",
       "trace",
       "state",
       "port",
@@ -96,6 +110,16 @@ function parseCliArgs(argv: Array<string>): Args {
   }
 
   const [cmdRaw, deckPathRaw] = parsed._;
+  const hasBundleFlag = argv.includes("--bundle");
+  const hasNoBundleFlag = argv.includes("--no-bundle");
+  if (hasBundleFlag && hasNoBundleFlag) {
+    throw new Error("Use either --bundle or --no-bundle, not both.");
+  }
+  const hasSourceMapFlag = argv.includes("--sourcemap");
+  const hasNoSourceMapFlag = argv.includes("--no-sourcemap");
+  if (hasSourceMapFlag && hasNoSourceMapFlag) {
+    throw new Error("Use either --sourcemap or --no-sourcemap, not both.");
+  }
   const cmd = cmdRaw as Args["cmd"];
   const deckPath = deckPathRaw as string | undefined;
 
@@ -114,6 +138,10 @@ function parseCliArgs(argv: Array<string>): Args {
     verbose: Boolean(parsed.verbose),
     port: parsePortValue(parsed.port),
     watch: Boolean(parsed.watch),
+    bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
+    sourcemap: hasNoSourceMapFlag ? false : hasSourceMapFlag ? true : undefined,
+    platform: parsed.platform as string | undefined,
+    testBot: parsed["test-bot"] as string | undefined,
     help: Boolean(parsed.help),
   };
 }
@@ -123,7 +151,7 @@ function printUsage() {
     `Usage:
   gambit run [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
   gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch]
+  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--test-bot <path>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
 
 Flags:
   --init <json|string>    Init payload (when provided, sent via gambit_init)
@@ -135,7 +163,13 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
+  --test-bot <path>       Path to test bot markdown (serve/test-bot UI)
   --watch                 Restart server on file changes (serve)
+  --bundle                Force auto-bundling (serve; default)
+  --no-bundle             Disable auto-bundling for simulator UI (serve)
+  --sourcemap             Generate external source maps (serve; default)
+  --no-sourcemap          Disable source map generation (serve)
+  --platform <platform>   Bundle target platform: deno (default) or web (browser)
   --example <path>        Path relative to examples/ (e.g. hello_world.deck.md)
   -h, --help              Show this help
   repl default deck       src/decks/gambit-assistant.deck.md
@@ -245,6 +279,21 @@ async function main() {
     if (args.cmd === "serve") {
       const envPort = parsePortValue(Deno.env.get("PORT"), "PORT");
       const port = args.port ?? envPort ?? 8000;
+      const bundlePlatform = (() => {
+        const raw = (args.platform ?? "deno").toLowerCase();
+        if (raw === "deno") return "deno" as const;
+        if (raw === "web" || raw === "browser") return "browser" as const;
+        throw new Error(
+          `Invalid --platform ${args.platform}; expected deno or web`,
+        );
+      })();
+      const autoBundle = args.bundle ?? true;
+      const sourceMap = args.sourcemap ?? true;
+      if (!autoBundle && sourceMap) {
+        throw new Error(
+          "--sourcemap requires bundling; remove --no-bundle or add --no-sourcemap.",
+        );
+      }
       const startServer = () =>
         startWebSocketSimulator({
           deckPath,
@@ -253,6 +302,10 @@ async function main() {
           modelProvider: provider,
           port,
           verbose: args.verbose,
+          testBotPath: args.testBot,
+          autoBundle,
+          sourceMap,
+          bundlePlatform,
         });
 
       if (!args.watch) {

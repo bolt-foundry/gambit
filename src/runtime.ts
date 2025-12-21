@@ -154,6 +154,29 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   }
 }
 
+function toProviderParams(
+  params: import("./types.ts").ModelParams | undefined,
+): Record<string, unknown> | undefined {
+  if (!params) return undefined;
+  const {
+    model: _model,
+    temperature,
+    top_p,
+    frequency_penalty,
+    presence_penalty,
+    max_tokens,
+  } = params;
+  const out: Record<string, unknown> = {};
+  if (temperature !== undefined) out.temperature = temperature;
+  if (top_p !== undefined) out.top_p = top_p;
+  if (frequency_penalty !== undefined) {
+    out.frequency_penalty = frequency_penalty;
+  }
+  if (presence_penalty !== undefined) out.presence_penalty = presence_penalty;
+  if (max_tokens !== undefined) out.max_tokens = max_tokens;
+  return Object.keys(out).length ? out : undefined;
+}
+
 function ensureSchemaPresence(deck: LoadedDeck, isRoot: boolean) {
   if (!isRoot) {
     if (!deck.inputSchema || !deck.outputSchema) {
@@ -179,7 +202,26 @@ function resolveInput(args: {
   const persisted = extractInitInput(args.state);
   if (persisted !== undefined) return persisted;
 
-  if (args.initialUserMessage !== undefined) return "";
+  if (args.initialUserMessage !== undefined) {
+    const schema = args.deck.inputSchema as {
+      safeParse?: (v: unknown) => {
+        success: boolean;
+        data?: unknown;
+      };
+    } | undefined;
+    if (schema?.safeParse) {
+      const candidates: Array<unknown> = [undefined, {}, ""];
+      for (const candidate of candidates) {
+        try {
+          const result = schema.safeParse(candidate);
+          if (result?.success) return candidate;
+        } catch {
+          // ignore and try next candidate
+        }
+      }
+    }
+    return "";
+  }
 
   return args.input;
 }
@@ -422,12 +464,19 @@ async function runLlmDeck(
   }
 
   if (initialUserMessage !== undefined) {
-    messages.push(
-      sanitizeMessage({
-        role: "user",
-        content: formatInputForUser(initialUserMessage),
-      }),
-    );
+    const userMessage = sanitizeMessage({
+      role: "user",
+      content: formatInputForUser(initialUserMessage),
+    });
+    messages.push(userMessage);
+    ctx.trace?.({
+      type: "message.user",
+      runId,
+      actionCallId,
+      deckPath: deck.path,
+      message: userMessage,
+      parentActionCallId: ctx.parentActionCallId,
+    });
   }
   idleController.touch();
 
@@ -477,6 +526,7 @@ async function runLlmDeck(
         tools,
         stream: ctx.stream,
         state: ctx.state,
+        params: toProviderParams(deck.modelParams),
         onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
           ? wrappedOnStreamText
           : undefined,
@@ -1407,8 +1457,10 @@ function buildSystemPrompt(deck: LoadedDeck): string {
   const parts: Array<string> = [];
   const prompt = deck.body ?? deck.prompt;
   if (prompt) parts.push(prompt.trim());
-  for (const card of deck.cards) {
-    if (card.body) parts.push(card.body.trim());
+  if (!deck.inlineEmbeds) {
+    for (const card of deck.cards) {
+      if (card.body) parts.push(card.body.trim());
+    }
   }
   return parts.join("\n\n").trim();
 }

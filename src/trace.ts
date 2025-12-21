@@ -45,6 +45,14 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         logger.log(`[trace] run.end runId=${event.runId}${fmtMs(start)}`);
         break;
       }
+      case "message.user": {
+        logger.log(
+          `[trace] message.user runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} content=${
+            JSON.stringify(event.message?.content ?? "")
+          }`,
+        );
+        break;
+      }
       case "deck.start":
         started.set(event.actionCallId, now());
         logger.log(

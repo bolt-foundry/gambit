@@ -100,8 +100,8 @@ export default defineDeck({
 - Run once:
   `deno run -A src/cli.ts run path/to/deck --init '"hi"' --message '"hello"' --stream`.
 - REPL: `deno run -A src/cli.ts repl path/to/deck --model openai/gpt-4o-mini`.
-- Simulator UI: `deno run -A src/cli.ts serve path/to/deck --port 8000` then
-  open http://localhost:8000/.
+- Debug UI: `deno run -A src/cli.ts serve path/to/deck --port 8000` then open
+  http://localhost:8000/debug.
 - Tracing: add `--verbose` for console traces or `--trace out.jsonl` to persist
   events; use `--state state.json` with `run` to persist conversation state
   between turns.
@@ -109,7 +109,7 @@ export default defineDeck({
 ### Compute deck logging
 
 - In TypeScript decks, `ctx.log(entry | string)` emits a structured trace event
-  (shown with `--verbose`, `--trace`, or in the simulator). Example:
+  (shown with `--verbose`, `--trace`, or in the debug UI). Example:
   ```ts
   run(ctx) {
     ctx.log({ level: "debug", message: "starting fetch", meta: { attempt: 1 } });
@@ -132,5 +132,6 @@ export default defineDeck({
   `examples/agent_with_typescript/` (Markdown + TS action),
   `examples/agent_with_multi_actions/` (routing with multiple tools),
   `examples/handlers_*` (busy/idle/error handlers).
+- Hourglass prompting (context engineering) best practices: `docs/hourglass.md`.
 - Prompt structuring: `docs/hourglass.md`.
 - Handler details: `docs/handlers.md`.

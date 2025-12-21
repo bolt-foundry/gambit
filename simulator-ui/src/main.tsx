@@ -6,6 +6,10 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import { FeedbackList } from "./components/FeedbackList.tsx";
+import { SessionDrawer } from "./components/SessionDrawer.tsx";
+import { globalStyles } from "./styles.ts";
+import { classNames, formatTimestamp } from "./utils.ts";
 
 type NormalizedSchema = {
   kind:
@@ -76,6 +80,24 @@ type SessionRating = {
   updatedAt?: string;
 };
 
+type SessionState = {
+  messages?: ModelMessage[];
+  messageRefs?: MessageRef[];
+  notes?: SessionNotes;
+};
+
+type SessionContextWindow = {
+  sessionId: string;
+  targetIndex: number;
+  start: number;
+  end: number;
+  messages: Array<{
+    role: string;
+    content?: string | null;
+    id?: string;
+  }>;
+};
+
 type TraceEvent = {
   type?: string;
   runId?: string;
@@ -91,6 +113,75 @@ type SessionMeta = {
   createdAt?: string;
 };
 
+type TestBotRun = {
+  id?: string;
+  status: "idle" | "running" | "completed" | "error" | "canceled";
+  sessionId?: string;
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  maxTurns?: number;
+  messages: Array<{ role: string; content: string }>;
+};
+
+function countUserMessages(messages: Array<{ role: string; content: string }>) {
+  return messages.filter((m) => m.role === "user").length;
+}
+
+type TestBotStreamEvent = {
+  type: "testBotStream";
+  runId?: string;
+  role: "user" | "assistant";
+  chunk: string;
+  turn?: number;
+};
+
+type TestBotStreamEndEvent = {
+  type: "testBotStreamEnd";
+  runId?: string;
+  role: "user" | "assistant";
+  turn?: number;
+};
+
+type TestBotStatusEvent = {
+  type: "testBotStatus";
+  run?: TestBotRun;
+};
+
+type TestBotSocketMessage =
+  | TestBotStreamEvent
+  | TestBotStreamEndEvent
+  | TestBotStatusEvent;
+
+type TestBotDefaults = {
+  model?: string;
+  temperature?: number;
+  maxTurns?: number;
+  input?: unknown;
+};
+
+type AssistantChatMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+type ReplaceRangeEdit = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+type PatchProposal = {
+  summary: string;
+  edits: ReplaceRangeEdit[];
+};
+
+type EditorAssistantResponse = {
+  messages?: Array<{ role?: string; content?: string | null }>;
+  patch?: PatchProposal;
+  error?: string;
+};
+
 type SimulatorMessage =
   | {
     type: "ready";
@@ -103,507 +194,15 @@ type SimulatorMessage =
   | { type: "state"; state: SavedState }
   | { type: "trace"; event: TraceEvent }
   | { type: "stream"; chunk: string; runId?: string }
+  | { type: "result"; result: unknown; runId?: string; streamed?: boolean }
   | { type: "pong" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; runId?: string };
 
 const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
 
 const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
   .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
 
-const globalStyles = `
-:root {
-  color-scheme: light;
-  font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-body {
-  margin: 0;
-  background: #f6f7fb;
-}
-.app-shell {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  padding: 24px;
-  gap: 16px;
-}
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-.app-header h1 {
-  margin: 0;
-  font-size: 24px;
-}
-.deck-path {
-  font-family: monospace;
-  font-size: 13px;
-  color: #475569;
-}
-.header-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.header-actions button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 8px 14px;
-  background: white;
-  cursor: pointer;
-  font-weight: 600;
-}
-.header-actions button.primary {
-  background: #0b93f6;
-  color: white;
-  border-color: #0b93f6;
-}
-.status-indicator {
-  text-transform: capitalize;
-  font-size: 13px;
-  color: #475569;
-}
-.status-indicator.connected {
-  color: #0f9d58;
-}
-.app-main {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 16px;
-}
-.chat-column {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 16px;
-  border: 1px solid #e2e8f0;
-  max-height: 70vh;
-  overflow-y: auto;
-}
-.chat-row {
-  display: flex;
-  justify-content: flex-start;
-}
-.bubble {
-  background: #f1f5f9;
-  border-radius: 16px;
-  padding: 12px;
-  width: 100%;
-  box-shadow: inset 0 0 0 1px #e2e8f0;
-}
-.bubble-user {
-  background: #0b93f6;
-  color: white;
-  box-shadow: none;
-}
-.bubble-role {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #94a3b8;
-  margin-bottom: 6px;
-}
-.bubble-user .bubble-role {
-  color: rgba(255,255,255,0.7);
-}
-.bubble-text {
-  line-height: 1.5;
-}
-.bubble-json {
-  background: rgba(0,0,0,0.04);
-  padding: 8px;
-  border-radius: 8px;
-  font-size: 12px;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.feedback-controls {
-  margin-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  opacity: 0.25;
-  transition: opacity 120ms ease-in-out;
-}
-.bubble:hover .feedback-controls,
-.feedback-controls:focus-within {
-  opacity: 1;
-}
-.feedback-scores {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.score-button {
-  border: 1px solid #cbd5e1;
-  background: white;
-  border-radius: 8px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 12px;
-}
-.score-button-active {
-  background: #0b93f6;
-  color: white;
-  border-color: #0b93f6;
-}
-.feedback-reason {
-  width: 100%;
-  min-height: 48px;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  padding: 8px;
-  resize: vertical;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-.feedback-meta {
-  font-size: 11px;
-  color: #475569;
-}
-.feedback-status {
-  font-size: 11px;
-  color: #94a3b8;
-}
-.feedback-status.saving {
-  color: #0b93f6;
-}
-.feedback-status.unsaved {
-  color: #b45309;
-}
-.init-panel {
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background: #f8fafc;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-.init-panel summary {
-  cursor: pointer;
-  font-weight: 700;
-  color: #0f172a;
-}
-.init-panel .hint {
-  margin-top: 6px;
-  font-size: 12px;
-  color: #475569;
-}
-.init-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
-}
-.init-field {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.init-field label {
-  font-weight: 700;
-  color: #111827;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.badge {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #e2e8f0;
-  color: #475569;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-.init-field input,
-.init-field select,
-.init-field textarea {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 8px;
-  box-sizing: border-box;
-  font-family: inherit;
-}
-.init-field textarea {
-  min-height: 80px;
-  resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-.init-summary-json {
-  margin-top: 10px;
-  background: rgba(15, 23, 42, 0.06);
-  border-radius: 12px;
-  padding: 10px;
-  overflow-x: auto;
-  font-size: 12px;
-}
-.init-missing {
-  margin-top: 8px;
-  font-size: 12px;
-  color: #b91c1c;
-}
-.init-controls {
-  margin-top: 10px;
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.secondary-note {
-  font-size: 12px;
-  color: #475569;
-}
-.trace-panel {
-  background: white;
-  border-radius: 16px;
-  padding: 16px;
-  border: 1px solid #e2e8f0;
-  height: 70vh;
-  overflow-y: auto;
-}
-.trace-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-}
-.trace-row {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 8px;
-  background: #f8fafc;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.trace-json {
-  font-size: 11px;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-.composer {
-  background: white;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.composer-inputs {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.message-input {
-  width: 100%;
-  min-height: 80px;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  padding: 10px;
-  resize: vertical;
-  font-family: inherit;
-  box-sizing: border-box;
-}
-.notes-inline {
-  flex: 1;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.notes-inline header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-.notes-inline label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.notes-inline textarea {
-  width: 100%;
-  min-height: 80px;
-  border-radius: 10px;
-  border: 1px solid #cbd5e1;
-  padding: 10px;
-  resize: vertical;
-  font-family: inherit;
-  box-sizing: border-box;
-}
-.notes-inline-status {
-  font-size: 12px;
-  color: #475569;
-}
-.notes-inline-status .state {
-  font-weight: 600;
-}
-.notes-inline-status .state.saving {
-  color: #0b93f6;
-}
-.notes-inline-status .state.unsaved {
-  color: #b45309;
-}
-.notes-inline-status .state.idle {
-  color: #94a3b8;
-}
-.notes-inline-status .state.saved {
-  color: #0f9d58;
-}
-.rating-controls {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.rating-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.rating-status {
-  font-size: 12px;
-  color: #475569;
-}
-.rating-button {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  background: white;
-  cursor: pointer;
-}
-.rating-button.active {
-  background: #0b93f6;
-  color: white;
-  border-color: #0b93f6;
-}
-.composer-actions {
-  display: flex;
-  gap: 10px;
-}
-.composer-actions button {
-  padding: 10px 18px;
-  border-radius: 10px;
-  border: none;
-  background: #0b93f6;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-}
-.reset-note {
-  font-size: 12px;
-  color: #b45309;
-}
-.error {
-  color: #b91c1c;
-  font-size: 13px;
-}
-.session-meta {
-  font-size: 12px;
-  color: #475569;
-}
-.sessions-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15,23,42,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.sessions-dialog {
-  background: white;
-  border-radius: 16px;
-  padding: 20px;
-  width: min(520px, 90%);
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.sessions-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-}
-.sessions-dialog header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.sessions-dialog ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.sessions-dialog li button {
-  width: 100%;
-  text-align: left;
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 10px;
-  background: #f8fafc;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sessions-dialog li button:hover {
-  background: #e2e8f0;
-}
-.trace-empty, .empty-state {
-  padding: 12px;
-  color: #475569;
-  text-align: center;
-}
-.recent-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-}
-.recent-session-button {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
-  padding: 10px;
-  background: #f8fafc;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.recent-session-button:hover {
-  background: #e2e8f0;
-}
-.empty-state-actions {
-  margin-top: 12px;
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-`;
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
 document.head.appendChild(globalStyleEl);
@@ -615,6 +214,8 @@ function useSimulator() {
   const [savedState, setSavedState] = useState<SavedState | null>(null);
   const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
+  const [streamText, setStreamText] = useState("");
+  const [isRunning, setIsRunning] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const [connectSeq, setConnectSeq] = useState(0);
   const [readySeq, setReadySeq] = useState(0);
@@ -639,11 +240,15 @@ function useSimulator() {
 
     ws.onclose = () => {
       setConnectionStatus("closed");
+      setIsRunning(false);
+      setStreamText("");
     };
 
     ws.onerror = () => {
       setConnectionStatus("error");
       setErrors((prev) => [...prev, "WebSocket connection error"]);
+      setIsRunning(false);
+      setStreamText("");
     };
 
     ws.onmessage = (event) => {
@@ -662,10 +267,21 @@ function useSimulator() {
           if (Array.isArray(msg.state.traces)) {
             setTraceEvents(msg.state.traces as TraceEvent[]);
           }
+        } else if (msg.type === "stream") {
+          if (typeof msg.chunk === "string" && msg.chunk.length > 0) {
+            setStreamText((prev) => prev + msg.chunk);
+          }
+        } else if (msg.type === "result") {
+          setIsRunning(false);
+          setStreamText("");
         } else if (msg.type === "trace" && msg.event) {
           setTraceEvents((prev) => [...prev, msg.event].slice(-200));
         } else if (msg.type === "error") {
           setErrors((prev) => [...prev, msg.message ?? "Unknown error"]);
+          if (msg.runId || msg.message !== "Run already in progress") {
+            setIsRunning(false);
+          }
+          setStreamText("");
         }
       } catch (err) {
         console.error("[sim] failed to parse message", err);
@@ -690,6 +306,8 @@ function useSimulator() {
       resetState?: boolean;
       trace?: boolean;
     }) => {
+      setIsRunning(true);
+      setStreamText("");
       send({
         type: "run",
         stream: true,
@@ -731,6 +349,7 @@ function useSimulator() {
     setSavedState(null);
     setTraceEvents([]);
     setErrors([]);
+    setStreamText("");
   }, []);
 
   return {
@@ -740,6 +359,8 @@ function useSimulator() {
     errors,
     schemaResponse,
     readySeq,
+    isRunning,
+    streamText,
     run,
     sendFeedback,
     loadSession,
@@ -775,15 +396,10 @@ function useSessions() {
   return { sessions, loading, error, refresh };
 }
 
-function classNames(...parts: Array<string | false | null | undefined>) {
-  return parts.filter(Boolean).join(" ");
-}
-
-function formatTimestamp(iso?: string) {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString();
+function pathDirname(p: string): string {
+  const parts = p.split(/[/\\]+/);
+  parts.pop();
+  return parts.join("/") || ".";
 }
 
 function toDeckSlug(input: string): string {
@@ -796,12 +412,32 @@ function toDeckSlug(input: string): string {
   return slug || "session";
 }
 
-function getSessionIdFromPath(pathname?: string): string | null {
+function normalizeBasePath(basePath: string): string {
+  if (basePath === "/") return "";
+  return basePath.replace(/\/+$/, "");
+}
+
+function getSessionIdFromPath(
+  pathname?: string,
+  basePath = "/debug",
+): string | null {
   const target = typeof pathname === "string"
     ? pathname
     : window.location.pathname;
-  const match = target.match(/^\/sessions\/([^/]+)$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  const bases = [basePath, "/simulate", ""];
+  for (const base of bases) {
+    const normalized = normalizeBasePath(base);
+    const prefix = `${normalized}/sessions/`.replace(/^\/\//, "/");
+    if (normalized === "" && !target.startsWith("/sessions/")) continue;
+    if (normalized !== "" && !target.startsWith(prefix)) continue;
+    const remainder = normalized === ""
+      ? target.slice("/sessions/".length)
+      : target.slice(prefix.length);
+    if (remainder.length > 0) {
+      return decodeURIComponent(remainder);
+    }
+  }
+  return null;
 }
 
 function cloneValue<T>(value: T): T {
@@ -815,6 +451,73 @@ function cloneValue<T>(value: T): T {
       return value;
     }
   }
+}
+
+function normalizePatchProposal(
+  raw: unknown,
+): { patch?: PatchProposal; error?: string } {
+  if (!raw || typeof raw !== "object") {
+    return { error: "Patch payload missing" };
+  }
+  const summary = (raw as { summary?: unknown }).summary;
+  const editsRaw = (raw as { edits?: unknown }).edits;
+  if (typeof summary !== "string") {
+    return { error: "Patch summary is missing" };
+  }
+  if (!Array.isArray(editsRaw)) {
+    return { error: "Patch edits are missing" };
+  }
+  const edits: ReplaceRangeEdit[] = [];
+  for (let i = 0; i < editsRaw.length; i++) {
+    const edit = editsRaw[i] as {
+      start?: unknown;
+      end?: unknown;
+      text?: unknown;
+    };
+    const start = typeof edit.start === "number"
+      ? edit.start
+      : Number(edit.start);
+    const end = typeof edit.end === "number" ? edit.end : Number(edit.end);
+    const text = edit.text;
+    if (
+      !Number.isFinite(start) || !Number.isFinite(end) ||
+      typeof text !== "string"
+    ) {
+      return { error: `Edit ${i + 1} is invalid` };
+    }
+    if (start < 0 || end < 0 || end < start) {
+      return { error: `Edit ${i + 1} has invalid bounds` };
+    }
+    if (i > 0 && start < edits[i - 1].end) {
+      return {
+        error: "Edits must be sorted and non-overlapping",
+      };
+    }
+    edits.push({ start, end, text });
+  }
+  return { patch: { summary, edits } };
+}
+
+function applyPatchProposal(
+  content: string,
+  patch: PatchProposal,
+): { ok: true; next: string } | { ok: false; error: string } {
+  let cursor = 0;
+  let next = "";
+  for (let i = 0; i < patch.edits.length; i++) {
+    const edit = patch.edits[i];
+    if (edit.start < cursor) {
+      return { ok: false, error: "Edits overlap; cannot apply patch" };
+    }
+    if (edit.start > content.length || edit.end > content.length) {
+      return { ok: false, error: `Edit ${i + 1} is out of bounds` };
+    }
+    next += content.slice(cursor, edit.start);
+    next += edit.text;
+    cursor = edit.end;
+  }
+  next += content.slice(cursor);
+  return { ok: true, next };
 }
 
 function getPathValue(value: unknown, path: string[]): unknown {
@@ -1232,29 +935,32 @@ function TraceList(props: { traces: TraceEvent[] }) {
     <div className="trace-panel" ref={panelRef}>
       <h3>Traces & Tools</h3>
       <div className="trace-list">
-        {entries.map(({ trace, depth }, idx) => (
-          <div
-            key={idx}
-            className="trace-row"
-            style={depth > 0
-              ? {
-                marginLeft: depth * 12,
-                borderLeft: "2px solid #e2e8f0",
-                paddingLeft: 8,
-              }
-              : undefined}
-          >
-            <strong>{trace.type ?? "trace"}</strong>
-            {trace.message?.content && (
-              <div className="trace-text">{trace.message.content}</div>
-            )}
-            {!trace.message?.content && (
-              <pre className="trace-json">
-                {JSON.stringify(trace, null, 2)}
-              </pre>
-            )}
-          </div>
-        ))}
+        {entries.map(({ trace, depth }, idx) => {
+          const isUser = trace.type === "message.user";
+          return (
+            <div
+              key={idx}
+              className={classNames("trace-row", isUser && "trace-row-user")}
+              style={depth > 0
+                ? {
+                  marginLeft: depth * 12,
+                  borderLeft: "2px solid #e2e8f0",
+                  paddingLeft: 8,
+                }
+                : undefined}
+            >
+              <strong>{trace.type ?? "trace"}</strong>
+              {trace.message?.content && (
+                <div className="trace-text">{trace.message.content}</div>
+              )}
+              {!trace.message?.content && (
+                <pre className="trace-json">
+                  {JSON.stringify(trace, null, 2)}
+                </pre>
+              )}
+            </div>
+          );
+        })}
         {traces.length === 0 && (
           <div className="trace-empty">No trace events yet.</div>
         )}
@@ -1289,10 +995,7 @@ function SessionModal(props: {
           <ul>
             {sessions.map((session) => (
               <li key={session.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(session.id)}
-                >
+                <button type="button" onClick={() => onSelect(session.id)}>
                   <strong>
                     {session.deckSlug ?? session.deck ?? "session"}
                   </strong>
@@ -1388,6 +1091,8 @@ function JsonInputField(props: {
   onErrorChange?: (error: string | null) => void;
 }) {
   const { value, optional, placeholder, onChange, onErrorChange } = props;
+  const onChangeRef = useRef(onChange);
+  const onErrorChangeRef = useRef(onErrorChange);
   const [text, setText] = useState(() => {
     if (value === undefined) return "";
     try {
@@ -1398,6 +1103,11 @@ function JsonInputField(props: {
   });
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    onErrorChangeRef.current = onErrorChange;
+  }, [onChange, onErrorChange]);
 
   useEffect(() => {
     if (dirty) return;
@@ -1413,8 +1123,8 @@ function JsonInputField(props: {
   }, [value, dirty]);
 
   useEffect(() => {
-    onErrorChange?.(error);
-  }, [error, onErrorChange]);
+    onErrorChangeRef.current?.(error);
+  }, [error]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -1423,7 +1133,7 @@ function JsonInputField(props: {
       if (trimmed === "") {
         if (optional) {
           setError(null);
-          onChange(undefined);
+          onChangeRef.current(undefined);
         } else {
           setError("Required");
         }
@@ -1432,13 +1142,13 @@ function JsonInputField(props: {
       try {
         const parsed = JSON.parse(text);
         setError(null);
-        onChange(parsed);
+        onChangeRef.current(parsed);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Invalid JSON");
       }
     }, 500);
     return () => window.clearTimeout(handle);
-  }, [dirty, text, optional, onChange]);
+  }, [dirty, text, optional]);
 
   return (
     <>
@@ -1572,10 +1282,19 @@ function InitPanel(props: {
   value: unknown;
   lockedValue: unknown;
   editable: boolean;
+  mode: "form" | "json";
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onModeChange: (mode: "form" | "json") => void;
   missingRequired: string[];
   jsonErrorCount: number;
+  rootJsonText: string;
+  rootJsonError: string | null;
+  onRootJsonChange: (
+    text: string,
+    error: string | null,
+    parsed?: unknown,
+  ) => void;
   schemaError?: string;
   onChange: (next: unknown) => void;
   onJsonErrorChange: (pathKey: string, err: string | null) => void;
@@ -1585,10 +1304,15 @@ function InitPanel(props: {
     value,
     lockedValue,
     editable,
+    mode,
     open,
     onOpenChange,
+    onModeChange,
     missingRequired,
     jsonErrorCount,
+    rootJsonText,
+    rootJsonError,
+    onRootJsonChange,
     schemaError,
     onChange,
     onJsonErrorChange,
@@ -1609,17 +1333,73 @@ function InitPanel(props: {
       <summary>{summaryLabel}</summary>
       {schemaError && <div className="error">Schema error: {schemaError}</div>}
       <div className="hint">
-        Fields are generated from the deck input schema. Start a new chat to
-        change init.
+        Fields are generated from the deck input schema. You can use the form or
+        a raw JSON payload. Start a new chat to change init.
       </div>
       {editable && (
         <>
-          <InitForm
-            schema={schema}
-            value={value}
-            onChange={onChange}
-            onJsonErrorChange={onJsonErrorChange}
-          />
+          <div className="panel-tabs" style={{ marginTop: 6 }}>
+            <button
+              type="button"
+              className={classNames("panel-tab", mode === "form" && "active")}
+              onClick={() => onModeChange("form")}
+            >
+              Form
+            </button>
+            <button
+              type="button"
+              className={classNames("panel-tab", mode === "json" && "active")}
+              onClick={() => onModeChange("json")}
+            >
+              JSON
+            </button>
+          </div>
+          {mode === "form"
+            ? (
+              <InitForm
+                schema={schema}
+                value={value}
+                onChange={onChange}
+                onJsonErrorChange={onJsonErrorChange}
+              />
+            )
+            : (
+              <div className="init-field">
+                <label>
+                  <span>Init JSON</span>
+                  <span className="badge">root</span>
+                </label>
+                <textarea
+                  className="json-input"
+                  value={rootJsonText}
+                  placeholder="Paste full init JSON payload"
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    let error: string | null = null;
+                    let parsed: unknown = undefined;
+                    if (text.trim() === "") {
+                      parsed = undefined;
+                    } else {
+                      try {
+                        parsed = JSON.parse(text);
+                      } catch (err) {
+                        error = err instanceof Error
+                          ? err.message
+                          : "Invalid JSON";
+                      }
+                    }
+                    onRootJsonChange(text, error, parsed);
+                  }}
+                  style={{ minHeight: 140 }}
+                />
+                {rootJsonError && <div className="error">{rootJsonError}</div>}
+                {!rootJsonError && (
+                  <div className="secondary-note">
+                    Leave blank to unset init. Parsed JSON replaces the form.
+                  </div>
+                )}
+              </div>
+            )}
           {(missingRequired.length > 0 || jsonErrorCount > 0) && (
             <div className="init-missing">
               {missingRequired.length > 0 && (
@@ -1644,22 +1424,28 @@ function InitPanel(props: {
   );
 }
 
-function App() {
+function SimulatorApp({ basePath }: { basePath: string }) {
   const simulator = useSimulator();
   const httpSchema = useHttpSchema();
   const { sessions, loading: sessionsLoading, error: sessionsError, refresh } =
     useSessions();
+  const normalizedBase = normalizeBasePath(basePath || "/debug");
+  const rootPath = normalizedBase === "" ? "/" : normalizedBase;
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pendingReset, setPendingReset] = useState(false);
   const [initValue, setInitValue] = useState<unknown>(undefined);
   const [initDirty, setInitDirty] = useState(false);
+  const [initMode, setInitMode] = useState<"form" | "json">("form");
+  const [initJsonText, setInitJsonText] = useState("");
+  const [initJsonError, setInitJsonError] = useState<string | null>(null);
   const [initOpen, setInitOpen] = useState(false);
   const [jsonErrors, setJsonErrors] = useState<Record<string, string | null>>(
     {},
   );
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const appliedSessionIdRef = useRef<string | null>(null);
+  const initializedRef = useRef(false);
   const currentDeckSlug = useMemo(() => toDeckSlug(deckPath), []);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteStatus, setNoteStatus] = useState<
@@ -1715,6 +1501,18 @@ function App() {
   }, [schema, schemaDefaults, initDirty]);
 
   useEffect(() => {
+    if (initMode !== "json") return;
+    if (initDirty) return;
+    try {
+      setInitJsonText(
+        initValue === undefined ? "" : JSON.stringify(initValue, null, 2),
+      );
+    } catch {
+      setInitJsonText(initValue ? String(initValue) : "");
+    }
+  }, [initMode, initValue, initDirty]);
+
+  useEffect(() => {
     if (initEditable) {
       setInitOpen(true);
     }
@@ -1751,6 +1549,9 @@ function App() {
     jsonErrorCount === 0;
 
   const resetInitValue = useCallback(() => {
+    setInitJsonError(null);
+    setJsonErrors((prev) => ({ ...prev, __root__: null }));
+    setInitJsonText("");
     if (schemaDefaults !== undefined) {
       setInitValue(cloneValue(schemaDefaults));
     } else if (schema) {
@@ -1764,10 +1565,11 @@ function App() {
     (opts?: { pushHistory?: boolean; replace?: boolean }) => {
       const shouldPush = opts?.pushHistory ?? true;
       if (shouldPush) {
+        const target = rootPath || "/";
         if (opts?.replace) {
-          window.history.replaceState({}, "", "/");
+          window.history.replaceState({}, "", target);
         } else {
-          window.history.pushState({}, "", "/");
+          window.history.pushState({}, "", target);
         }
       }
       setPendingSessionId(null);
@@ -1775,6 +1577,8 @@ function App() {
       setPendingReset(true);
       simulator.resetLocal();
       setInitDirty(false);
+      setInitJsonError(null);
+      setInitJsonText("");
       setJsonErrors({});
       resetInitValue();
       setInitOpen(Boolean(schema));
@@ -1797,7 +1601,11 @@ function App() {
 
   const navigateToSession = useCallback(
     (sessionId: string, opts?: { replace?: boolean }) => {
-      const url = `/sessions/${encodeURIComponent(sessionId)}`;
+      const prefix = rootPath === "/" ? "" : rootPath;
+      const url = `${prefix}/sessions/${encodeURIComponent(sessionId)}`.replace(
+        /^\/\//,
+        "/",
+      );
       if (opts?.replace) {
         window.history.replaceState({}, "", url);
       } else {
@@ -1809,17 +1617,21 @@ function App() {
   );
 
   useEffect(() => {
-    const initialSession = getSessionIdFromPath();
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    const initialSession = getSessionIdFromPath(undefined, rootPath) ??
+      getSessionIdFromPath();
     if (initialSession) {
       navigateToSession(initialSession, { replace: true });
-    } else {
-      startNewChat({ pushHistory: false });
+      return;
     }
-  }, [navigateToSession, startNewChat]);
+    startNewChat({ pushHistory: false });
+  }, [navigateToSession, startNewChat, rootPath]);
 
   useEffect(() => {
     const handler = () => {
-      const sessionFromPath = getSessionIdFromPath();
+      const sessionFromPath = getSessionIdFromPath(undefined, rootPath) ??
+        getSessionIdFromPath();
       if (sessionFromPath) {
         adoptSessionFromPath(sessionFromPath);
       } else {
@@ -1828,7 +1640,7 @@ function App() {
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
-  }, [adoptSessionFromPath, startNewChat]);
+  }, [adoptSessionFromPath, startNewChat, rootPath]);
 
   useEffect(() => {
     if (!pendingSessionId) return;
@@ -1902,7 +1714,12 @@ function App() {
       return;
     }
 
-    if (!trimmed) return;
+    if (!trimmed) {
+      simulator.run({ resetState: pendingReset, trace: true });
+      setMessage("");
+      setPendingReset(false);
+      return;
+    }
     simulator.run({ message: trimmed, resetState: pendingReset, trace: true });
     setMessage("");
     setPendingReset(false);
@@ -1963,7 +1780,7 @@ function App() {
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <h1>Gambit Simulator</h1>
+          <h1>Gambit Debug</h1>
           <div className="deck-path">{deckPath}</div>
         </div>
         <div className="header-actions">
@@ -1992,17 +1809,51 @@ function App() {
                 value={initValue}
                 lockedValue={lockedInitValue}
                 editable={initEditable}
+                mode={initMode}
                 open={initOpen}
                 onOpenChange={setInitOpen}
+                onModeChange={(mode) => {
+                  setInitMode(mode);
+                  if (mode === "form") {
+                    setInitJsonError(null);
+                    setJsonErrors((prev) => ({ ...prev, __root__: null }));
+                  } else {
+                    try {
+                      setInitJsonText(
+                        initValue === undefined
+                          ? ""
+                          : JSON.stringify(initValue, null, 2),
+                      );
+                    } catch {
+                      setInitJsonText(initValue ? String(initValue) : "");
+                    }
+                  }
+                }}
                 missingRequired={missingRequired}
                 jsonErrorCount={jsonErrorCount}
+                rootJsonText={initJsonText}
+                rootJsonError={initJsonError}
+                onRootJsonChange={(text, error, parsed) => {
+                  setInitMode("json");
+                  setInitJsonText(text);
+                  setInitJsonError(error);
+                  setInitDirty(true);
+                  if (!error) {
+                    setInitValue(parsed);
+                    setJsonErrors((prev) => ({ ...prev, __root__: null }));
+                  } else {
+                    setJsonErrors((prev) => ({ ...prev, __root__: error }));
+                  }
+                }}
                 schemaError={schemaError}
                 onChange={(next) => {
                   setInitValue(next);
                   setInitDirty(true);
                 }}
                 onJsonErrorChange={(pathKey, err) =>
-                  setJsonErrors((prev) => ({ ...prev, [pathKey]: err }))}
+                  setJsonErrors((prev) =>
+                    prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
+                  )}
               />
             )
             : undefined}
@@ -2018,7 +1869,7 @@ function App() {
             className="message-input"
             placeholder={schema && initEditable
               ? "Optional first message (init will be sent too)"
-              : "Send a user message to the assistant"}
+              : "Optional message (assistant can start)"}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={(e) => {
@@ -2135,6 +1986,2074 @@ function App() {
         onClose={() => setSessionsOpen(false)}
       />
     </div>
+  );
+}
+
+type EditorFile = { path: string; relative: string };
+
+function EditorApp(props: { onNavigateToSimulator: () => void }) {
+  const { onNavigateToSimulator } = props;
+  const allowedExtensions = useMemo(
+    () => [".md", ".ts", ".tsx"],
+    [],
+  );
+  const [config, setConfig] = useState<
+    { activeDeckPath?: string; rootPath?: string }
+  >({});
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [files, setFiles] = useState<EditorFile[]>([]);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [rootInput, setRootInput] = useState("");
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+  const [fileStatus, setFileStatus] = useState<
+    "idle" | "dirty" | "saving" | "saved" | "error"
+  >("idle");
+  const [notesContent, setNotesContent] = useState<string>("");
+  const [notesStatus, setNotesStatus] = useState<
+    "idle" | "dirty" | "saving" | "saved" | "error"
+  >("idle");
+  const [assistantMessages, setAssistantMessages] = useState<
+    AssistantChatMessage[]
+  >([]);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantPendingPatch, setAssistantPendingPatch] = useState<
+    PatchProposal | null
+  >(null);
+  const [assistantRunning, setAssistantRunning] = useState(false);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [assistantRejectReason, setAssistantRejectReason] = useState("");
+  const [assistantApplyError, setAssistantApplyError] = useState<
+    string | null
+  >(null);
+  const [leftTab, setLeftTab] = useState<"files" | "iteration">("files");
+  const [rightTab, setRightTab] = useState<"assistant" | "quick-chat">(
+    "quick-chat",
+  );
+  const quickSimulator = useSimulator();
+  const quickSchema = useHttpSchema();
+  const [quickMessage, setQuickMessage] = useState("");
+  const [quickInitValue, setQuickInitValue] = useState<unknown>(undefined);
+  const [quickInitDirty, setQuickInitDirty] = useState(false);
+  const [quickJsonErrors, setQuickJsonErrors] = useState<
+    Record<string, string | null>
+  >({});
+  const [quickPendingReset, setQuickPendingReset] = useState(false);
+  const [quickExpanded, setQuickExpanded] = useState<Record<string, boolean>>(
+    {},
+  );
+  const quickThreadRef = useRef<HTMLDivElement | null>(null);
+  const [feedback, setFeedback] = useState<
+    Array<{
+      sessionId: string;
+      messageRefId: string;
+      score?: number;
+      reason?: string;
+      createdAt?: string;
+      archivedAt?: string;
+      messageContent?: unknown;
+      sessionCreatedAt?: string;
+    }>
+  >([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiving, setArchiving] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerLoading, setDrawerLoading] = useState(false);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [drawerSession, setDrawerSession] = useState<SessionState | null>(null);
+  const [drawerContext, setDrawerContext] = useState<
+    SessionContextWindow | null
+  >(null);
+  const [drawerShowFull, setDrawerShowFull] = useState(false);
+  const [drawerNotesStatus, setDrawerNotesStatus] = useState<
+    "idle" | "saving" | "error"
+  >("idle");
+  const drawerTargetRef = useRef<
+    { sessionId: string; messageRefId: string } | null
+  >(null);
+  const assistantThreadRef = useRef<HTMLDivElement | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
+  const saveNotesTimeoutRef = useRef<number | null>(null);
+  const initialFileRef = useRef<string | null>(null);
+  const autoLoadedActiveRef = useRef(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fileParam = params.get("file");
+    if (fileParam) {
+      try {
+        initialFileRef.current = decodeURIComponent(fileParam);
+      } catch {
+        initialFileRef.current = fileParam;
+      }
+    }
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    setLoadingConfig(true);
+    try {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      setConfig(data ?? {});
+      const nextRoot = (data?.rootPath as string) ||
+        (data?.activeDeckPath
+          ? pathDirname(data.activeDeckPath as string)
+          : "");
+      setRootInput(nextRoot);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const isAllowedFile = useCallback(
+    (p: string) => {
+      const lower = p.toLowerCase();
+      return allowedExtensions.some((ext) => lower.endsWith(ext));
+    },
+    [allowedExtensions],
+  );
+
+  const updateConfig = useCallback(
+    async (next: { activeDeckPath?: string; rootPath?: string }) => {
+      try {
+        const res = await fetch("/api/config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(next),
+        });
+        const data = await res.json();
+        setConfig(data ?? next);
+        if (data?.rootPath) setRootInput(data.rootPath);
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [],
+  );
+
+  const loadFiles = useCallback(
+    async (root: string) => {
+      setFilesLoading(true);
+      setFilesError(null);
+      try {
+        const res = await fetch(
+          `/api/files?root=${encodeURIComponent(root || "")}`,
+        );
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json() as { files?: EditorFile[] };
+        setFiles(data.files ?? []);
+      } catch (err) {
+        setFilesError(
+          err instanceof Error ? err.message : "Failed to list files",
+        );
+        setFiles([]);
+      } finally {
+        setFilesLoading(false);
+      }
+    },
+    [],
+  );
+
+  const loadFile = useCallback(async (target: string) => {
+    try {
+      const res = await fetch(`/api/file?path=${encodeURIComponent(target)}`);
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json() as { content?: string };
+      setSelectedFile(target);
+      setFileContent(data.content ?? "");
+      setFileStatus("idle");
+      const url = new URL(window.location.href);
+      url.searchParams.set("file", encodeURIComponent(target));
+      window.history.replaceState({}, "", url.toString());
+    } catch (err) {
+      setSelectedFile(target);
+      setFileContent("");
+      setFileStatus("error");
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => {
+    const root = config.rootPath ||
+      (config.activeDeckPath ? pathDirname(config.activeDeckPath) : "") || "";
+    if (!loadingConfig) {
+      setRootInput(root);
+      loadFiles(root || ".");
+    }
+  }, [config.rootPath, config.activeDeckPath, loadFiles, loadingConfig]);
+  useEffect(() => {
+    if (loadingConfig) return;
+    if (!initialFileRef.current) return;
+    const target = initialFileRef.current;
+    initialFileRef.current = null;
+    loadFile(target);
+  }, [loadingConfig, loadFile]);
+  useEffect(() => {
+    if (loadingConfig) return;
+    if (autoLoadedActiveRef.current) return;
+    if (initialFileRef.current) return;
+    if (!config.activeDeckPath) return;
+    autoLoadedActiveRef.current = true;
+    loadFile(config.activeDeckPath);
+  }, [config.activeDeckPath, loadingConfig, loadFile]);
+
+  useEffect(() => {
+    setAssistantMessages([]);
+    setAssistantPendingPatch(null);
+    setAssistantInput("");
+    setAssistantError(null);
+    setAssistantRejectReason("");
+    setAssistantApplyError(null);
+    setAssistantRunning(false);
+  }, [selectedFile]);
+
+  const quickSchemaShape = quickSimulator.schemaResponse?.schema ??
+    quickSchema.schemaResponse?.schema;
+  const quickSchemaDefaults = quickSimulator.schemaResponse?.defaults ??
+    quickSchema.schemaResponse?.defaults;
+  const quickSchemaError = quickSimulator.schemaResponse?.error ??
+    quickSchema.schemaResponse?.error ??
+    quickSchema.error ??
+    undefined;
+  const quickHasState = Boolean(quickSimulator.savedState) &&
+    !quickPendingReset;
+  const quickSessionId = typeof quickSimulator.savedState?.meta?.sessionId ===
+      "string"
+    ? quickSimulator.savedState.meta.sessionId
+    : undefined;
+
+  useEffect(() => {
+    setQuickExpanded({});
+  }, [quickSessionId]);
+
+  useEffect(() => {
+    if (!quickSchemaShape) return;
+    if (quickInitDirty) return;
+    if (quickSchemaDefaults !== undefined) {
+      setQuickInitValue(cloneValue(quickSchemaDefaults));
+      return;
+    }
+    setQuickInitValue(deriveInitialFromSchema(quickSchemaShape));
+  }, [quickSchemaShape, quickSchemaDefaults, quickInitDirty]);
+
+  const quickMissingRequired = useMemo(() => {
+    if (!quickSchemaShape) return [];
+    return findMissingRequiredFields(quickSchemaShape, quickInitValue);
+  }, [quickSchemaShape, quickInitValue]);
+
+  const quickJsonErrorCount = useMemo(() => {
+    return Object.values(quickJsonErrors).filter((v) =>
+      typeof v === "string" && v
+    )
+      .length;
+  }, [quickJsonErrors]);
+
+  const quickIncludeInit = Boolean(quickSchemaShape) &&
+    (!quickHasState || quickInitDirty);
+  const quickCanStartWithInit = !quickIncludeInit ||
+    (quickMissingRequired.length === 0 && quickJsonErrorCount === 0);
+  const quickTrimmedMessage = quickMessage.trim();
+  const quickCanSend = quickCanStartWithInit &&
+    (quickIncludeInit || quickTrimmedMessage.length > 0 || !quickHasState);
+  const quickCanSendNow = quickCanSend && !quickSimulator.isRunning;
+
+  const handleQuickSend = useCallback(() => {
+    if (!quickCanSendNow) return;
+    const trimmed = quickTrimmedMessage;
+    const payload: {
+      input?: unknown;
+      message?: string;
+      resetState?: boolean;
+      trace?: boolean;
+    } = { resetState: quickPendingReset, trace: true };
+    if (quickIncludeInit) {
+      payload.input = quickInitValue === undefined ? {} : quickInitValue;
+    }
+    if (trimmed) {
+      payload.message = trimmed;
+    }
+    quickSimulator.run(payload);
+    setQuickMessage("");
+    setQuickPendingReset(false);
+    if (quickIncludeInit) setQuickInitDirty(true);
+  }, [
+    quickCanSendNow,
+    quickIncludeInit,
+    quickTrimmedMessage,
+    quickPendingReset,
+    quickInitValue,
+    quickHasState,
+    quickSimulator,
+  ]);
+
+  useEffect(() => {
+    const el = quickThreadRef.current;
+    if (!el) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [quickSimulator.savedState?.messages?.length, quickSimulator.streamText]);
+
+  const saveFile = useCallback(async (target: string, content: string) => {
+    setFileStatus("saving");
+    try {
+      await fetch("/api/file", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: target, content }),
+      });
+      setFileStatus("saved");
+    } catch (err) {
+      setFileStatus("error");
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (fileStatus !== "dirty" || !selectedFile) return;
+    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = window.setTimeout(() => {
+      saveFile(selectedFile, fileContent);
+    }, 600);
+    return () => {
+      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+    };
+  }, [fileStatus, selectedFile, fileContent, saveFile]);
+
+  useEffect(() => {
+    if (notesStatus !== "dirty" || !config.activeDeckPath) return;
+    if (saveNotesTimeoutRef.current) {
+      window.clearTimeout(saveNotesTimeoutRef.current);
+    }
+    saveNotesTimeoutRef.current = window.setTimeout(async () => {
+      setNotesStatus("saving");
+      try {
+        await fetch("/api/deck-notes", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            deckPath: config.activeDeckPath,
+            content: notesContent,
+          }),
+        });
+        setNotesStatus("saved");
+      } catch (err) {
+        setNotesStatus("error");
+        console.error(err);
+      }
+    }, 600);
+    return () => {
+      if (saveNotesTimeoutRef.current) {
+        window.clearTimeout(saveNotesTimeoutRef.current);
+      }
+    };
+  }, [notesStatus, notesContent, config.activeDeckPath]);
+
+  const loadNotes = useCallback(async (deckPath?: string) => {
+    if (!deckPath) {
+      setNotesContent("");
+      setNotesStatus("idle");
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/deck-notes?deckPath=${encodeURIComponent(deckPath)}`,
+      );
+      const data = await res.json() as { content?: string };
+      setNotesContent(data.content ?? "");
+      setNotesStatus(data.content ? "saved" : "idle");
+    } catch (err) {
+      console.error(err);
+      setNotesContent("");
+      setNotesStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotes(config.activeDeckPath);
+  }, [config.activeDeckPath, loadNotes]);
+
+  const loadFeedback = useCallback(async (deckPath?: string) => {
+    if (!deckPath) {
+      setFeedback([]);
+      setFeedbackError(null);
+      return;
+    }
+    setFeedbackLoading(true);
+    setFeedbackError(null);
+    try {
+      const res = await fetch(
+        `/api/feedback?deckPath=${encodeURIComponent(deckPath)}`,
+      );
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json() as { items?: typeof feedback };
+      setFeedback(data.items ?? []);
+    } catch (err) {
+      setFeedbackError(
+        err instanceof Error ? err.message : "Failed to load feedback",
+      );
+      setFeedback([]);
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFeedback(config.activeDeckPath);
+  }, [config.activeDeckPath, loadFeedback]);
+
+  const archiveFeedback = useCallback(
+    async (sessionId: string, messageRefId: string, archived: boolean) => {
+      setArchiving(`${sessionId}:${messageRefId}`);
+      try {
+        const res = await fetch("/api/feedback/archive", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, messageRefId, archived }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        setFeedback((prev) =>
+          prev.map((f) =>
+            f.sessionId === sessionId && f.messageRefId === messageRefId
+              ? {
+                ...f,
+                archivedAt: archived ? new Date().toISOString() : undefined,
+              }
+              : f
+          )
+        );
+      } catch (err) {
+        setFeedbackError(
+          err instanceof Error ? err.message : "Failed to update feedback",
+        );
+      } finally {
+        setArchiving(null);
+      }
+    },
+    [],
+  );
+
+  const buildContextWindow = (
+    sessionId: string,
+    messageRefId: string,
+    state: SessionState,
+    showFull: boolean,
+  ): SessionContextWindow | null => {
+    if (!state.messages || !state.messageRefs) return null;
+    const idx = state.messageRefs.findIndex((ref) => ref?.id === messageRefId);
+    if (idx === -1) return null;
+    const windowSize = 5;
+    const start = showFull ? 0 : Math.max(0, idx - windowSize);
+    const end = showFull
+      ? state.messages.length
+      : Math.min(state.messages.length, idx + windowSize + 1);
+    const slice = state.messages.slice(start, end).map((m, i) => ({
+      role: m.role,
+      content: m.content ?? "",
+      id: state.messageRefs?.[start + i]?.id,
+    }));
+    return {
+      sessionId,
+      targetIndex: idx,
+      start,
+      end,
+      messages: slice,
+    };
+  };
+
+  const openSessionDrawer = useCallback(
+    async (sessionId: string, messageRefId: string) => {
+      drawerTargetRef.current = { sessionId, messageRefId };
+      setDrawerOpen(true);
+      setDrawerLoading(true);
+      setDrawerError(null);
+      setDrawerSession(null);
+      setDrawerContext(null);
+      try {
+        const res = await fetch(
+          `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
+        );
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json() as SessionState;
+        setDrawerSession(data);
+        const context = buildContextWindow(
+          sessionId,
+          messageRefId,
+          data,
+          drawerShowFull,
+        );
+        setDrawerContext(context);
+      } catch (err) {
+        setDrawerError(
+          err instanceof Error ? err.message : "Failed to load session",
+        );
+      } finally {
+        setDrawerLoading(false);
+      }
+    },
+    [drawerShowFull],
+  );
+
+  const saveDrawerNotes = useCallback(
+    async (sessionId: string, text: string) => {
+      setDrawerNotesStatus("saving");
+      try {
+        const res = await fetch("/api/session/notes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, text }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        setDrawerNotesStatus("idle");
+      } catch (err) {
+        setDrawerNotesStatus("error");
+        console.error(err);
+      }
+    },
+    [],
+  );
+
+  const handleToggleDrawerShowFull = useCallback(() => {
+    const next = !drawerShowFull;
+    setDrawerShowFull(next);
+    const target = drawerTargetRef.current;
+    if (target && drawerSession) {
+      setDrawerContext(
+        buildContextWindow(
+          target.sessionId,
+          target.messageRefId,
+          drawerSession,
+          next,
+        ),
+      );
+    }
+  }, [drawerShowFull, drawerSession]);
+
+  const runAssistant = useCallback(
+    async (transcript: AssistantChatMessage[]) => {
+      if (!selectedFile) {
+        setAssistantError("Select a file to start.");
+        return;
+      }
+      setAssistantRunning(true);
+      setAssistantError(null);
+      setAssistantPendingPatch(null);
+      try {
+        const res = await fetch("/api/editor-assistant/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            filePath: selectedFile,
+            content: fileContent,
+            messages: transcript,
+          }),
+        });
+        const data = await res.json() as EditorAssistantResponse;
+        if (!res.ok) {
+          throw new Error(
+            data?.error ?? `${res.status} ${res.statusText}`,
+          );
+        }
+        const replies = Array.isArray(data.messages)
+          ? data.messages
+            .filter((m) =>
+              m?.role === "assistant" && typeof m.content === "string" &&
+              m.content.trim().length > 0
+            )
+            .map((m) => ({
+              role: "assistant" as const,
+              content: (m.content ?? "") as string,
+            }))
+          : [];
+        const nextTranscript = [...transcript, ...replies];
+        if (data.patch !== undefined) {
+          const normalized = normalizePatchProposal(data.patch);
+          if (normalized.patch) {
+            setAssistantPendingPatch(normalized.patch);
+            setAssistantApplyError(null);
+          } else if (normalized.error) {
+            setAssistantPendingPatch(null);
+            nextTranscript.push({
+              role: "assistant",
+              content: `Patch proposal invalid: ${normalized.error}`,
+            });
+          }
+        } else {
+          setAssistantPendingPatch(null);
+        }
+        setAssistantMessages(nextTranscript);
+      } catch (err) {
+        setAssistantError(
+          err instanceof Error ? err.message : "Assistant request failed",
+        );
+      } finally {
+        setAssistantRunning(false);
+      }
+    },
+    [fileContent, selectedFile],
+  );
+
+  const handleSendAssistant = useCallback(async () => {
+    const text = assistantInput.trim();
+    if (!text || assistantRunning) return;
+    if (!selectedFile) {
+      setAssistantError("Select a file to start.");
+      return;
+    }
+    const userMessage: AssistantChatMessage = { role: "user", content: text };
+    const transcript = [...assistantMessages, userMessage];
+    setAssistantMessages(transcript);
+    setAssistantPendingPatch(null);
+    setAssistantApplyError(null);
+    setAssistantInput("");
+    await runAssistant(transcript);
+  }, [
+    assistantInput,
+    assistantMessages,
+    assistantRunning,
+    runAssistant,
+    selectedFile,
+  ]);
+
+  const handleAcceptPatch = useCallback(() => {
+    if (!assistantPendingPatch) return;
+    const applied = applyPatchProposal(fileContent, assistantPendingPatch);
+    if (!applied.ok) {
+      setAssistantApplyError(applied.error);
+      return;
+    }
+    setAssistantApplyError(null);
+    setFileContent(applied.next);
+    setFileStatus("dirty");
+    setAssistantPendingPatch(null);
+    setAssistantMessages((prev) => [
+      ...prev,
+      { role: "system", content: "Applied patch." },
+    ]);
+  }, [assistantPendingPatch, fileContent]);
+
+  const handleRejectPatch = useCallback(async () => {
+    if (!assistantPendingPatch || assistantRunning) return;
+    const reason = assistantRejectReason.trim();
+    const rejection: AssistantChatMessage = {
+      role: "user",
+      content: reason ? `Rejected patch: ${reason}` : "Rejected patch.",
+    };
+    const transcript = [...assistantMessages, rejection];
+    setAssistantMessages(transcript);
+    setAssistantPendingPatch(null);
+    setAssistantRejectReason("");
+    setAssistantApplyError(null);
+    await runAssistant(transcript);
+  }, [
+    assistantPendingPatch,
+    assistantRejectReason,
+    assistantMessages,
+    assistantRunning,
+    runAssistant,
+  ]);
+
+  useEffect(() => {
+    const el = assistantThreadRef.current;
+    if (!el) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [assistantMessages.length]);
+
+  return (
+    <div className="editor-shell">
+      <div className="editor-header">
+        <div>
+          <h1 className="editor-title">Gambit Editor</h1>
+          <div className="editor-status">
+            Active deck: {config.activeDeckPath
+              ? <code>{config.activeDeckPath}</code>
+              : "not set"}
+          </div>
+        </div>
+      </div>
+      <div className="editor-main">
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <div className="panel-tabs">
+            <button
+              type="button"
+              className={classNames(
+                "panel-tab",
+                leftTab === "files" && "active",
+              )}
+              onClick={() => setLeftTab("files")}
+            >
+              Files
+            </button>
+            <button
+              type="button"
+              className={classNames(
+                "panel-tab",
+                leftTab === "iteration" && "active",
+              )}
+              onClick={() => setLeftTab("iteration")}
+            >
+              Iteration
+            </button>
+          </div>
+          {leftTab === "files"
+            ? (
+              <>
+                <strong>Files (.md)</strong>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    value={rootInput}
+                    onChange={(e) => setRootInput(e.target.value)}
+                    placeholder="Root path (default: CWD)"
+                    style={{
+                      flex: 1,
+                      padding: 8,
+                      borderRadius: 8,
+                      border: "1px solid #cbd5e1",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateConfig({ ...config, rootPath: rootInput })}
+                  >
+                    Save root
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loadFiles(rootInput || ".")}
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {filesLoading && (
+                  <div className="placeholder">Loading files…</div>
+                )}
+                {filesError && <div className="error">{filesError}</div>}
+                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                  {files.map((file) => (
+                    <button
+                      key={file.path}
+                      disabled={!isAllowedFile(file.path)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "6px 8px",
+                        borderRadius: 8,
+                        border: "1px solid #e2e8f0",
+                        background: selectedFile === file.path
+                          ? "#e0f2fe"
+                          : "#f8fafc",
+                        marginBottom: 6,
+                        cursor: isAllowedFile(file.path)
+                          ? "pointer"
+                          : "not-allowed",
+                        opacity: isAllowedFile(file.path) ? 1 : 0.6,
+                      }}
+                      title={isAllowedFile(file.path)
+                        ? file.path
+                        : "Only .md, .ts, .tsx files can be opened"}
+                      onClick={() => {
+                        if (!isAllowedFile(file.path)) return;
+                        loadFile(file.path);
+                      }}
+                    >
+                      <div style={{ fontWeight: 600 }}>{file.relative}</div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#475569",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {file.path}
+                      </div>
+                    </button>
+                  ))}
+                  {!filesLoading && files.length === 0 && (
+                    <div className="placeholder">
+                      No .md files under this root.
+                    </div>
+                  )}
+                </div>
+              </>
+            )
+            : (
+              config.activeDeckPath
+                ? (
+                  <>
+                    <label style={{ fontSize: 13, fontWeight: 600 }}>
+                      Deck notes (.gambit/notes)
+                    </label>
+                    <textarea
+                      value={notesContent}
+                      onChange={(e) => {
+                        setNotesContent(e.target.value);
+                        setNotesStatus("dirty");
+                      }}
+                      style={{
+                        width: "100%",
+                        height: 160,
+                        resize: "vertical",
+                        padding: 10,
+                        borderRadius: 10,
+                        border: "1px solid #cbd5e1",
+                        fontFamily:
+                          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                      }}
+                      placeholder="Deck-level notes (local only)"
+                    />
+                    <div className="editor-status">
+                      {notesStatus === "saving"
+                        ? "Saving…"
+                        : notesStatus === "dirty"
+                        ? "Unsaved changes"
+                        : notesStatus === "saved"
+                        ? "Saved"
+                        : notesStatus === "error"
+                        ? "Save failed"
+                        : "Idle"}
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                      <FeedbackList
+                        items={feedback}
+                        showArchived={showArchived}
+                        archivingKey={archiving}
+                        loading={feedbackLoading}
+                        error={feedbackError}
+                        onToggleShowArchived={(next) => setShowArchived(next)}
+                        onView={(sessionId, messageRefId) =>
+                          openSessionDrawer(sessionId, messageRefId)}
+                        onArchive={(sessionId, messageRefId, archived) =>
+                          archiveFeedback(sessionId, messageRefId, archived)}
+                      />
+                    </div>
+                  </>
+                )
+                : (
+                  <p className="placeholder">
+                    Set an active deck to edit notes and view feedback.
+                  </p>
+                )
+            )}
+        </div>
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <strong>Editor</strong>
+          {selectedFile
+            ? (
+              <>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#475569",
+                    wordBreak: "break-all",
+                  }}
+                >
+                  {selectedFile}
+                </div>
+                <textarea
+                  value={fileContent}
+                  onChange={(e) => {
+                    setFileContent(e.target.value);
+                    setFileStatus("dirty");
+                  }}
+                  style={{
+                    width: "100%",
+                    flex: 1,
+                    minHeight: 0,
+                    resize: "none",
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #cbd5e1",
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                  }}
+                />
+                <div className="editor-status">
+                  {fileStatus === "saving"
+                    ? "Saving…"
+                    : fileStatus === "dirty"
+                    ? "Unsaved changes"
+                    : fileStatus === "saved"
+                    ? "Saved"
+                    : fileStatus === "error"
+                    ? "Save failed"
+                    : "Idle"}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedFile) {
+                        const nextRoot = pathDirname(selectedFile);
+                        setRootInput(nextRoot);
+                        loadFiles(nextRoot);
+                        updateConfig({
+                          ...config,
+                          activeDeckPath: selectedFile,
+                          rootPath: nextRoot,
+                        });
+                      }
+                    }}
+                    className={classNames(
+                      "ghost-btn",
+                      config.activeDeckPath === selectedFile && "active",
+                    )}
+                  >
+                    Set as active deck
+                  </button>
+                  <button type="button" onClick={onNavigateToSimulator}>
+                    Open debug
+                  </button>
+                </div>
+              </>
+            )
+            : <p className="placeholder">Select a file to edit.</p>}
+        </div>
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <div className="panel-tabs">
+            <button
+              type="button"
+              className={classNames(
+                "panel-tab",
+                rightTab === "quick-chat" && "active",
+              )}
+              onClick={() => setRightTab("quick-chat")}
+            >
+              Quick Chat
+            </button>
+            <button
+              type="button"
+              className={classNames(
+                "panel-tab",
+                rightTab === "assistant" && "active",
+              )}
+              onClick={() => setRightTab("assistant")}
+            >
+              Editor Assistant
+            </button>
+          </div>
+          {rightTab === "assistant"
+            ? selectedFile
+              ? (
+                <>
+                  <div className="editor-status" style={{ gap: 4 }}>
+                    Editor assistant target: <code>{selectedFile}</code>
+                  </div>
+                  {assistantPendingPatch && (
+                    <div className="patch-card">
+                      <div className="patch-summary">
+                        {assistantPendingPatch.summary}
+                      </div>
+                      <div className="patch-meta">
+                        Proposed changes ready ·{" "}
+                        {assistantPendingPatch.edits.length} edit
+                        {assistantPendingPatch.edits.length === 1 ? "" : "s"}
+                      </div>
+                      {assistantApplyError && (
+                        <div className="error">{assistantApplyError}</div>
+                      )}
+                      <input
+                        className="patch-reason-input"
+                        value={assistantRejectReason}
+                        onChange={(e) =>
+                          setAssistantRejectReason(e.target.value)}
+                        placeholder="Short reason to share (optional)"
+                      />
+                      <div className="patch-actions">
+                        <button type="button" onClick={handleAcceptPatch}>
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-btn"
+                          onClick={handleRejectPatch}
+                          disabled={assistantRunning}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    className="imessage-thread assistant-thread"
+                    ref={assistantThreadRef}
+                  >
+                    {assistantMessages.length === 0 && (
+                      <div className="placeholder">
+                        Ask for changes to get started.
+                      </div>
+                    )}
+                    {assistantMessages.map((m, idx) => (
+                      <div
+                        key={`${m.role}-${idx}-${m.content.slice(0, 12)}`}
+                        className={`imessage-row ${
+                          m.role === "user" ? "right" : "left"
+                        }`}
+                      >
+                        <div
+                          className={`imessage-bubble ${
+                            m.role === "user" ? "right" : "left"
+                          }`}
+                          title={m.role}
+                        >
+                          {m.content}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {assistantError && (
+                    <div className="error">{assistantError}</div>
+                  )}
+                  <textarea
+                    value={assistantInput}
+                    onChange={(e) => setAssistantInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || e.shiftKey) return;
+                      if (!assistantInput.trim().length || assistantRunning) {
+                        return;
+                      }
+                      e.preventDefault();
+                      handleSendAssistant();
+                    }}
+                    style={{
+                      width: "100%",
+                      minHeight: 96,
+                      resize: "vertical",
+                      padding: 10,
+                      borderRadius: 10,
+                      border: "1px solid #cbd5e1",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                    }}
+                    placeholder="Ask the assistant to update this file"
+                  />
+                  <div className="assistant-actions">
+                    <button
+                      type="button"
+                      onClick={handleSendAssistant}
+                      disabled={!assistantInput.trim().length ||
+                        assistantRunning}
+                    >
+                      {assistantRunning ? "Sending…" : "Send"}
+                    </button>
+                    <div className="editor-status">
+                      {assistantRunning ? "Waiting for assistant…" : "Idle"}
+                    </div>
+                  </div>
+                </>
+              )
+              : <p className="placeholder">Select a file to start.</p>
+            : (
+              <>
+                <div className="editor-status">
+                  Status: {quickSimulator.connectionStatus}
+                </div>
+                {quickSessionId && (
+                  <div className="editor-status">
+                    Session: <code>{quickSessionId}</code>
+                  </div>
+                )}
+                {quickSchemaError && (
+                  <div className="error">{quickSchemaError}</div>
+                )}
+                {quickSchemaShape && (
+                  <details className="init-panel" open={!quickHasState}>
+                    <summary>Init (gambit_init)</summary>
+                    <div className="hint">
+                      Provide input for the active deck. Leave blank to skip.
+                    </div>
+                    <InitForm
+                      schema={quickSchemaShape}
+                      value={quickInitValue}
+                      onChange={(next) => {
+                        setQuickInitValue(next);
+                        setQuickInitDirty(true);
+                      }}
+                      onJsonErrorChange={(pathKey, err) =>
+                        setQuickJsonErrors((prev) =>
+                          prev[pathKey] === err
+                            ? prev
+                            : { ...prev, [pathKey]: err }
+                        )}
+                    />
+                  </details>
+                )}
+                {!quickSchemaShape && !quickSchema.loading && (
+                  <div className="placeholder">
+                    No input schema; you can start with a blank message.
+                  </div>
+                )}
+                <div
+                  className="imessage-thread"
+                  ref={quickThreadRef}
+                >
+                  {(quickSimulator.savedState?.messages?.length ?? 0) === 0 && (
+                    <div className="placeholder">
+                      No messages yet. Send a message or start a blank run.
+                    </div>
+                  )}
+                  {(quickSimulator.savedState?.messages ?? []).map((m, idx) => (
+                    (() => {
+                      const role = m.role ?? "assistant";
+                      const isUser = role === "user";
+                      const isCollapsible = role === "system" ||
+                        role === "tool";
+                      const isMuted = role === "system" || role === "tool";
+                      const expandKey = `${
+                        quickSessionId ?? "local"
+                      }-${idx}-${role}`;
+                      const isCollapsed = isCollapsible &&
+                        !quickExpanded[expandKey];
+                      const content = String(m.content ?? "");
+                      if (!content.trim()) return null;
+                      const preview = content.trim().slice(0, 160);
+                      const collapsedText = `${role} message (click to expand)${
+                        preview
+                          ? ` - ${preview}${content.length > 160 ? "..." : ""}`
+                          : ""
+                      }`;
+                      const toggleCollapsed = () => {
+                        if (!isCollapsible) return;
+                        setQuickExpanded((prev) => ({
+                          ...prev,
+                          [expandKey]: !prev[expandKey],
+                        }));
+                      };
+                      return (
+                        <div
+                          key={`${role}-${idx}`}
+                          className={`imessage-row ${
+                            isUser ? "right" : "left"
+                          }`}
+                        >
+                          <div
+                            className={classNames(
+                              "imessage-bubble",
+                              isUser ? "right" : "left",
+                              isCollapsible && "imessage-bubble-collapsible",
+                              isCollapsed && "imessage-bubble-collapsed",
+                              isMuted && "imessage-bubble-muted",
+                            )}
+                            title={role}
+                            role={isCollapsible ? "button" : undefined}
+                            tabIndex={isCollapsible ? 0 : -1}
+                            onClick={toggleCollapsed}
+                            onKeyDown={(e) => {
+                              if (!isCollapsible) return;
+                              if (e.key !== "Enter" && e.key !== " ") return;
+                              e.preventDefault();
+                              toggleCollapsed();
+                            }}
+                          >
+                            {isCollapsed ? collapsedText : content}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ))}
+                  {quickSimulator.streamText.length > 0 && (
+                    <div className="imessage-row left">
+                      <div className="imessage-bubble left" title="assistant">
+                        {quickSimulator.streamText}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <textarea
+                  value={quickMessage}
+                  onChange={(e) => setQuickMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.shiftKey) return;
+                    if (!quickCanSendNow) return;
+                    e.preventDefault();
+                    handleQuickSend();
+                  }}
+                  style={{
+                    width: "100%",
+                    minHeight: 96,
+                    resize: "vertical",
+                    padding: 10,
+                    borderRadius: 10,
+                    border: "1px solid #cbd5e1",
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+                  }}
+                  placeholder="Optional message (assistant can start)"
+                />
+                {quickMissingRequired.length > 0 && quickIncludeInit && (
+                  <div className="error">
+                    Missing required init fields:{" "}
+                    {quickMissingRequired.slice(0, 6).join(", ")}
+                    {quickMissingRequired.length > 6 ? "…" : ""}
+                  </div>
+                )}
+                {quickJsonErrorCount > 0 && (
+                  <div className="error">Fix invalid init fields to run.</div>
+                )}
+                {quickPendingReset && (
+                  <div className="reset-note">
+                    Next message will start a new chat.
+                  </div>
+                )}
+                <div className="assistant-actions">
+                  <button
+                    type="button"
+                    onClick={handleQuickSend}
+                    disabled={!quickCanSendNow}
+                  >
+                    Send
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => {
+                      if (!quickSessionId) return;
+                      window.location.assign(
+                        `/debug/sessions/${encodeURIComponent(quickSessionId)}`,
+                      );
+                    }}
+                    disabled={!quickSessionId}
+                    title={quickSessionId
+                      ? "Open this session in the debugger"
+                      : "No active session yet"}
+                  >
+                    Open debug
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => {
+                      setQuickPendingReset(true);
+                      quickSimulator.resetLocal();
+                      setQuickInitDirty(false);
+                      setQuickJsonErrors({});
+                    }}
+                  >
+                    New chat
+                  </button>
+                </div>
+                {quickSimulator.errors.map((err, idx) => (
+                  <div key={idx} className="error">
+                    {err}
+                  </div>
+                ))}
+              </>
+            )}
+        </div>
+      </div>
+      <SessionDrawer
+        open={drawerOpen}
+        loading={drawerLoading}
+        error={drawerError}
+        context={drawerContext}
+        session={drawerSession}
+        showFull={drawerShowFull}
+        notesStatus={drawerNotesStatus}
+        onToggleShowFull={handleToggleDrawerShowFull}
+        onClose={() => setDrawerOpen(false)}
+        onSaveNotes={(sessionId, text) => saveDrawerNotes(sessionId, text)}
+      />
+    </div>
+  );
+}
+
+function TestBotApp(props: {
+  onNavigateToSimulator: () => void;
+  onNavigateToSession: (sessionId: string) => void;
+}) {
+  const { onNavigateToSimulator, onNavigateToSession } = props;
+  const [config, setConfig] = useState<
+    { activeDeckPath?: string; rootPath?: string }
+  >({});
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [botContent, setBotContent] = useState("");
+  const [botDefaults, setBotDefaults] = useState<TestBotDefaults>({});
+  const [botInputSchema, setBotInputSchema] = useState<NormalizedSchema | null>(
+    null,
+  );
+  const [botInputSchemaError, setBotInputSchemaError] = useState<string | null>(
+    null,
+  );
+  const [botInputValue, setBotInputValue] = useState<unknown>(undefined);
+  const [botInputDirty, setBotInputDirty] = useState(false);
+  const [botInputJsonErrors, setBotInputJsonErrors] = useState<
+    Record<string, string | null>
+  >({});
+  const [botStatus, setBotStatus] = useState<
+    "loading" | "dirty" | "saving" | "saved" | "error"
+  >("loading");
+  const [initialUserMessage, setInitialUserMessage] = useState("");
+  const [run, setRun] = useState<TestBotRun>({
+    status: "idle",
+    messages: [],
+  });
+  const runRef = useRef<TestBotRun>({
+    status: "idle",
+    messages: [],
+  });
+  const [streamingUser, setStreamingUser] = useState<
+    {
+      runId: string;
+      turn: number;
+      text: string;
+      expectedUserCount?: number;
+    } | null
+  >(null);
+  const [streamingAssistant, setStreamingAssistant] = useState<
+    {
+      runId: string;
+      turn: number;
+      text: string;
+    } | null
+  >(null);
+  const deckSchema = useHttpSchema();
+  const deckInputSchema = deckSchema.schemaResponse?.schema;
+  const deckSchemaDefaults = deckSchema.schemaResponse?.defaults;
+  const deckSchemaError = deckSchema.schemaResponse?.error ??
+    deckSchema.error ??
+    undefined;
+  const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
+  const [deckInitDirty, setDeckInitDirty] = useState(false);
+  const [deckJsonErrors, setDeckJsonErrors] = useState<
+    Record<string, string | null>
+  >({});
+  const [botPath, setBotPath] = useState<string | null>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const runIdRef = useRef<string | undefined>(undefined);
+  const wsUrl = useMemo(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    return `${protocol}://${window.location.host}/websocket`;
+  }, []);
+
+  const loadConfig = useCallback(async () => {
+    setLoadingConfig(true);
+    try {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      setConfig(data ?? {});
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingConfig(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConfig();
+  }, [loadConfig]);
+
+  const loadTestBot = useCallback(async () => {
+    setBotStatus("loading");
+    try {
+      const res = await fetch("/api/test-bot");
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json() as {
+        path?: string;
+        content?: string;
+        defaults?: TestBotDefaults;
+        inputSchema?: NormalizedSchema;
+        inputSchemaError?: string;
+      };
+      setBotContent(data.content ?? "");
+      setBotDefaults(data.defaults ?? {});
+      setBotInputSchema(data.inputSchema ?? null);
+      setBotInputSchemaError(
+        typeof data.inputSchemaError === "string"
+          ? data.inputSchemaError
+          : null,
+      );
+      setBotPath(typeof data.path === "string" ? data.path : null);
+      setBotInputDirty(false);
+      setBotInputJsonErrors({});
+      setBotInputValue(data.defaults?.input);
+      setBotStatus("saved");
+    } catch (err) {
+      setBotContent("");
+      setBotStatus("error");
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTestBot();
+  }, [loadTestBot]);
+
+  useEffect(() => {
+    runIdRef.current = run.id;
+    runRef.current = run;
+    setStreamingUser(null);
+    setStreamingAssistant(null);
+  }, [run.id]);
+
+  useEffect(() => {
+    runRef.current = run;
+  }, [run]);
+
+  useEffect(() => {
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: "testBotSubscribe" }));
+    };
+
+    ws.onmessage = (event) => {
+      let msg: TestBotSocketMessage | null = null;
+      try {
+        msg = JSON.parse(event.data) as TestBotSocketMessage;
+      } catch {
+        return;
+      }
+      if (!msg) return;
+      const activeRunId = runIdRef.current;
+      if (msg.type === "testBotStatus" && msg.run) {
+        if (activeRunId && msg.run.id === activeRunId) {
+          setRun({
+            ...msg.run,
+            messages: msg.run.messages ?? [],
+          });
+        }
+        return;
+      }
+      if (msg.type === "testBotStream") {
+        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
+        const streamRunId = msg.runId;
+        const turn = typeof msg.turn === "number" ? msg.turn : 0;
+        if (msg.role === "user") {
+          const expectedUserCount = countUserMessages(runRef.current.messages) +
+            1;
+          setStreamingUser((prev) =>
+            prev && prev.runId === streamRunId && prev.turn === turn
+              ? { ...prev, text: prev.text + msg.chunk }
+              : {
+                runId: streamRunId,
+                turn,
+                text: msg.chunk,
+                expectedUserCount,
+              }
+          );
+        } else {
+          setStreamingAssistant((prev) =>
+            prev && prev.runId === streamRunId && prev.turn === turn
+              ? { ...prev, text: prev.text + msg.chunk }
+              : { runId: streamRunId, turn, text: msg.chunk }
+          );
+        }
+        return;
+      }
+      if (msg.type === "testBotStreamEnd") {
+        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
+        const streamRunId = msg.runId;
+        const turn = typeof msg.turn === "number" ? msg.turn : 0;
+        if (msg.role === "user") {
+          setStreamingUser((prev) => {
+            if (!prev || prev.runId !== streamRunId || prev.turn !== turn) {
+              return prev;
+            }
+            return prev.expectedUserCount ? prev : {
+              ...prev,
+              expectedUserCount: countUserMessages(runRef.current.messages) +
+                1,
+            };
+          });
+        } else {
+          setStreamingAssistant((prev) =>
+            prev && prev.runId === streamRunId && prev.turn === turn
+              ? null
+              : prev
+          );
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+    };
+
+    ws.onerror = () => {
+      wsRef.current = null;
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [wsUrl]);
+
+  useEffect(() => {
+    if (botStatus !== "dirty") return;
+    if (saveTimeoutRef.current) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      setBotStatus("saving");
+      try {
+        await fetch("/api/test-bot", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: botContent }),
+        });
+        setBotStatus("saved");
+      } catch (err) {
+        setBotStatus("error");
+        console.error(err);
+      }
+    }, 700);
+    return () => {
+      if (saveTimeoutRef.current) {
+        window.clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [botStatus, botContent]);
+
+  const refreshStatus = useCallback(async (runIdOverride?: string) => {
+    try {
+      const runId = runIdOverride ?? run.id;
+      const res = await fetch(
+        runId
+          ? `/api/test-bot/status?runId=${encodeURIComponent(runId)}`
+          : "/api/test-bot/status",
+      );
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json() as {
+        run?: TestBotRun;
+        defaults?: TestBotDefaults;
+      };
+      if (data.defaults) setBotDefaults(data.defaults);
+      const nextRun = data.run ?? { status: "idle", messages: [] };
+      setRun({
+        ...nextRun,
+        messages: nextRun.messages ?? [],
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }, [run.id]);
+
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!botInputSchema) return;
+    if (botInputDirty) return;
+    const nextBotInput = botDefaults.input !== undefined
+      ? cloneValue(botDefaults.input)
+      : deriveInitialFromSchema(botInputSchema);
+    setBotInputValue(nextBotInput);
+  }, [botInputSchema, botInputDirty, botDefaults.input]);
+
+  useEffect(() => {
+    if (!deckInputSchema) return;
+    if (deckInitDirty) return;
+    const nextInit = deckSchemaDefaults !== undefined
+      ? cloneValue(deckSchemaDefaults)
+      : deriveInitialFromSchema(deckInputSchema);
+    setDeckInitValue(nextInit);
+  }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
+
+  const missingBotInput = useMemo(() => {
+    if (!botInputSchema) return [];
+    return findMissingRequiredFields(botInputSchema, botInputValue);
+  }, [botInputSchema, botInputValue]);
+
+  const botJsonErrorCount = useMemo(() => {
+    return Object.values(botInputJsonErrors).filter((v) =>
+      typeof v === "string" && v
+    )
+      .length;
+  }, [botInputJsonErrors]);
+
+  const missingDeckInit = useMemo(() => {
+    if (!deckInputSchema) return [];
+    return findMissingRequiredFields(deckInputSchema, deckInitValue);
+  }, [deckInputSchema, deckInitValue]);
+
+  const deckJsonErrorCount = useMemo(() => {
+    return Object.values(deckJsonErrors).filter((v) =>
+      typeof v === "string" && v
+    )
+      .length;
+  }, [deckJsonErrors]);
+
+  const canStart = (!botInputSchema || missingBotInput.length === 0) &&
+    (!deckInputSchema || missingDeckInit.length === 0) &&
+    botJsonErrorCount === 0 &&
+    deckJsonErrorCount === 0;
+
+  useEffect(() => {
+    if (run.status !== "running") {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+      return;
+    }
+    pollRef.current = window.setInterval(() => {
+      refreshStatus();
+    }, 1500);
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, [run.status, refreshStatus]);
+
+  useEffect(() => {
+    if (
+      streamingUser?.expectedUserCount !== undefined &&
+      streamingUser.runId === run.id &&
+      countUserMessages(run.messages) >= streamingUser.expectedUserCount
+    ) {
+      setStreamingUser(null);
+    }
+    if (run.status !== "running" && streamingUser) {
+      setStreamingUser(null);
+    }
+    const el = transcriptRef.current;
+    if (!el) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    run.id,
+    run.messages,
+    run.status,
+    streamingUser,
+    streamingAssistant?.text,
+  ]);
+
+  const startRun = useCallback(async () => {
+    try {
+      const res = await fetch("/api/test-bot/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          init: deckInitValue,
+          botInput: botInputValue,
+          initialUserMessage,
+        }),
+      });
+      const data = await res.json() as { run?: TestBotRun };
+      if (data.run) {
+        setRun({ ...data.run, messages: data.run.messages ?? [] });
+      } else {
+        setRun({ status: "running", messages: [] });
+      }
+      refreshStatus(data.run?.id);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [deckInitValue, botInputValue, initialUserMessage, refreshStatus]);
+
+  const stopRun = useCallback(async () => {
+    if (!run.id) return;
+    try {
+      await fetch("/api/test-bot/stop", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: run.id }),
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      refreshStatus(run.id);
+    }
+  }, [refreshStatus, run.id]);
+
+  const runStatusLabel = run.status === "running"
+    ? "Running test bot…"
+    : run.status === "completed"
+    ? "Completed"
+    : run.status === "error"
+    ? "Failed"
+    : run.status === "canceled"
+    ? "Stopped"
+    : "Idle";
+
+  return (
+    <div className="editor-shell">
+      <div className="editor-header">
+        <div>
+          <h1 className="editor-title">Test Bot</h1>
+          <div className="editor-status">
+            Active deck: {loadingConfig
+              ? "Loading…"
+              : config.activeDeckPath
+              ? <code>{config.activeDeckPath}</code>
+              : "not set"}
+          </div>
+        </div>
+        <div className="header-actions">
+          <button type="button" onClick={onNavigateToSimulator}>
+            Open debug
+          </button>
+        </div>
+      </div>
+      <div className="editor-main">
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <strong>Scenario (Test Bot input)</strong>
+          {botInputSchemaError && (
+            <div className="error">{botInputSchemaError}</div>
+          )}
+          {botInputSchema && (
+            <InitForm
+              schema={botInputSchema}
+              value={botInputValue}
+              onChange={(next) => {
+                setBotInputValue(next);
+                setBotInputDirty(true);
+              }}
+              onJsonErrorChange={(pathKey, err) =>
+                setBotInputJsonErrors((prev) =>
+                  prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
+                )}
+            />
+          )}
+          {!botInputSchema && (
+            <div className="placeholder">
+              No test bot input schema configured.
+            </div>
+          )}
+          <strong>Initial user message (optional)</strong>
+          <textarea
+            value={initialUserMessage}
+            onChange={(e) => setInitialUserMessage(e.target.value)}
+            style={{
+              width: "100%",
+              minHeight: 90,
+              resize: "vertical",
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #cbd5e1",
+              fontFamily: "inherit",
+            }}
+            placeholder="If provided, this is sent as the first user message."
+          />
+          <strong>
+            Test bot deck ({botPath ?? ".gambit/test-bot.md"})
+          </strong>
+          <textarea
+            value={botContent}
+            onChange={(e) => {
+              setBotContent(e.target.value);
+              setBotStatus("dirty");
+            }}
+            style={{
+              width: "100%",
+              flex: 1,
+              minHeight: 0,
+              resize: "none",
+              padding: 10,
+              borderRadius: 10,
+              border: "1px solid #cbd5e1",
+              fontFamily:
+                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+            }}
+            placeholder="Define the QA bot persona and model params (TOML front matter)."
+          />
+          <div className="editor-status">
+            {botStatus === "saving"
+              ? "Saving…"
+              : botStatus === "dirty"
+              ? "Unsaved changes"
+              : botStatus === "saved"
+              ? "Saved"
+              : botStatus === "error"
+              ? "Save failed"
+              : "Loading…"}
+          </div>
+          <div style={{ fontSize: 12, color: "#475569" }}>
+            Defaults: model {botDefaults.model ?? "gpt-4o"}, temperature{" "}
+            {botDefaults.temperature ?? 0.2}, max turns{" "}
+            {botDefaults.maxTurns ?? 20}
+          </div>
+        </div>
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 8 }}
+        >
+          <strong>Latest test run</strong>
+          <div className="editor-status">{runStatusLabel}</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={startRun} disabled={!canStart}>
+              Run test bot
+            </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={stopRun}
+              disabled={run.status !== "running"}
+            >
+              Stop
+            </button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => refreshStatus()}
+            >
+              Refresh
+            </button>
+          </div>
+          {run.error && <div className="error">{run.error}</div>}
+          {run.sessionId && (
+            <div className="editor-status">
+              Session: <code>{run.sessionId}</code>
+            </div>
+          )}
+          {run.sessionId && (
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={() => onNavigateToSession(run.sessionId!)}
+            >
+              Open in debug
+            </button>
+          )}
+          {!canStart && (
+            <div className="error">
+              {botJsonErrorCount > 0 || deckJsonErrorCount > 0
+                ? "Fix invalid JSON fields to run."
+                : missingBotInput.length > 0
+                ? `Missing required bot inputs: ${
+                  missingBotInput.slice(0, 6).join(", ")
+                }${missingBotInput.length > 6 ? "…" : ""}`
+                : missingDeckInit.length > 0
+                ? `Missing required init fields: ${
+                  missingDeckInit.slice(0, 6).join(", ")
+                }${missingDeckInit.length > 6 ? "…" : ""}`
+                : ""}
+            </div>
+          )}
+          <div
+            className="imessage-thread"
+            ref={transcriptRef}
+          >
+            {run.messages.length === 0 && (
+              <div className="placeholder">No messages yet.</div>
+            )}
+            {run.messages.map((m, idx) => (
+              <div
+                key={`${m.role}-${idx}`}
+                className={`imessage-row ${
+                  m.role === "user" ? "right" : "left"
+                }`}
+              >
+                <div
+                  className={`imessage-bubble ${
+                    m.role === "user" ? "right" : "left"
+                  }`}
+                  title={m.role}
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {streamingUser?.text && streamingUser.runId === run.id &&
+              (streamingUser.expectedUserCount === undefined ||
+                countUserMessages(run.messages) <
+                  streamingUser.expectedUserCount) &&
+              (
+                <div className="imessage-row right">
+                  <div
+                    className="imessage-bubble right imessage-bubble-muted"
+                    title="user"
+                  >
+                    {streamingUser.text}
+                  </div>
+                </div>
+              )}
+            {streamingAssistant?.text && streamingAssistant.runId === run.id &&
+              (
+                <div className="imessage-row left">
+                  <div
+                    className="imessage-bubble left imessage-bubble-muted"
+                    title="assistant"
+                  >
+                    {streamingAssistant.text}
+                  </div>
+                </div>
+              )}
+          </div>
+        </div>
+        <div
+          className="editor-panel"
+          style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        >
+          <strong>Deck to test</strong>
+          <div className="editor-status">
+            <code>{deckPath}</code>
+          </div>
+          <strong>Init (gambit_init)</strong>
+          {deckSchema.loading && (
+            <div className="editor-status">Loading schema…</div>
+          )}
+          {deckSchemaError && <div className="error">{deckSchemaError}</div>}
+          {deckInputSchema && (
+            <>
+              <InitForm
+                schema={deckInputSchema}
+                value={deckInitValue}
+                onChange={(next) => {
+                  setDeckInitValue(next);
+                  setDeckInitDirty(true);
+                }}
+                onJsonErrorChange={(pathKey, err) =>
+                  setDeckJsonErrors((prev) =>
+                    prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
+                  )}
+              />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => {
+                    setDeckInitDirty(false);
+                    setDeckJsonErrors({});
+                    const nextInit = deckSchemaDefaults !== undefined
+                      ? cloneValue(deckSchemaDefaults)
+                      : deriveInitialFromSchema(deckInputSchema);
+                    setDeckInitValue(nextInit);
+                  }}
+                >
+                  Reset init
+                </button>
+                <button
+                  type="button"
+                  className="ghost-btn"
+                  onClick={() => deckSchema.refresh()}
+                >
+                  Refresh schema
+                </button>
+              </div>
+            </>
+          )}
+          {!deckInputSchema && !deckSchema.loading && (
+            <div className="placeholder">
+              No input schema found for this deck.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [path, setPath] = useState(() => window.location.pathname);
+  const [bundleStamp, setBundleStamp] = useState<string | null>(null);
+  const basePath = "/debug";
+
+  useEffect(() => {
+    const handler = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  useEffect(() => {
+    const loadBundleStamp = async () => {
+      try {
+        const res = await fetch("/ui/bundle.js", { method: "HEAD" });
+        if (!res.ok) return;
+        const header = res.headers.get("last-modified");
+        if (!header) return;
+        const date = new Date(header);
+        setBundleStamp(
+          Number.isNaN(date.getTime()) ? header : date.toLocaleString(),
+        );
+      } catch {
+        // ignore
+      }
+    };
+    loadBundleStamp();
+  }, []);
+
+  const navigate = useCallback((next: string) => {
+    if (next === path) return;
+    window.history.pushState({}, "", next);
+    setPath(next);
+  }, [path]);
+
+  const isSimulator = path.startsWith("/debug") ||
+    path.startsWith("/simulate") ||
+    path.startsWith("/sessions");
+  const isTestBot = path.startsWith("/test-bot");
+  const currentPage = isSimulator ? "debug" : isTestBot ? "test-bot" : "editor";
+
+  return (
+    <>
+      <div className="app-root">
+        <div className="top-nav">
+          <button
+            type="button"
+            className={currentPage === "editor" ? "active" : ""}
+            onClick={() => navigate("/")}
+          >
+            Editor
+          </button>
+          <button
+            type="button"
+            className={currentPage === "debug" ? "active" : ""}
+            onClick={() => navigate(basePath)}
+          >
+            Debug
+          </button>
+          <button
+            type="button"
+            className={currentPage === "test-bot" ? "active" : ""}
+            onClick={() => navigate("/test-bot")}
+          >
+            Test Bot
+          </button>
+          {bundleStamp && (
+            <span className="bundle-stamp">Bundle: {bundleStamp}</span>
+          )}
+        </div>
+        <div className="page-shell">
+          {currentPage === "debug"
+            ? <SimulatorApp basePath={basePath} />
+            : currentPage === "test-bot"
+            ? (
+              <TestBotApp
+                onNavigateToSimulator={() => navigate(basePath)}
+                onNavigateToSession={(sessionId) =>
+                  navigate(
+                    `${basePath}/sessions/${encodeURIComponent(sessionId)}`,
+                  )}
+              />
+            )
+            : (
+              <EditorApp
+                onNavigateToSimulator={() => navigate(basePath)}
+              />
+            )}
+        </div>
+      </div>
+    </>
   );
 }
 

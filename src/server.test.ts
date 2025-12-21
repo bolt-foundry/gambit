@@ -50,8 +50,8 @@ Deno.test("websocket simulator streams responses", async () => {
 
   const homepage = await fetch(`http://127.0.0.1:${port}/`);
   const html = await homepage.text();
-  if (!html.includes("Gambit WebSocket Simulator")) {
-    throw new Error("Simulator page missing expected content");
+  if (!html.includes("Gambit WebSocket Debug")) {
+    throw new Error("Debug page missing expected content");
   }
 
   const resultPromise = new Promise<Record<string, unknown>>(

@@ -161,6 +161,11 @@ export type ModelProvider = {
     stream?: boolean;
     state?: SavedState;
     onStreamText?: (chunk: string) => void;
+    /**
+     * Provider-specific pass-through parameters (e.g. OpenAI chat completion
+     * fields like temperature/max_tokens).
+     */
+    params?: Record<string, unknown>;
   }) => Promise<{
     message: ModelMessage;
     finishReason: "stop" | "tool_calls" | "length";
@@ -170,6 +175,11 @@ export type ModelProvider = {
       args: Record<string, JSONValue>;
     }>;
     updatedState?: SavedState;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
   }>;
 };
 
@@ -184,6 +194,7 @@ export type LoadedDeck = DeckDefinition & {
   actions: Array<ActionDefinition>;
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
+  inlineEmbeds?: boolean;
 };
 
 export type ToolCallResult = {
@@ -198,6 +209,14 @@ export type TraceEvent =
     deckPath?: string;
     input?: JSONValue;
     initialUserMessage?: JSONValue;
+  }
+  | {
+    type: "message.user";
+    runId: string;
+    actionCallId: string;
+    deckPath: string;
+    message: ModelMessage;
+    parentActionCallId?: string;
   }
   | { type: "run.end"; runId: string }
   | {
