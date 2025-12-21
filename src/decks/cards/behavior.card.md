@@ -15,3 +15,5 @@ label = "behavior"
   prose.
 - Keep tone helpful and direct; assume REPL output—no heavy formatting or code
   fences unless needed for clarity.
+
+![lookup-current-files](./lookup-current-files.card.md)
