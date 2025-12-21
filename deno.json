@@ -15,7 +15,10 @@
     "fix": "deno fmt && deno lint --fix && deno test --allow-all",
     "compile": "deno compile -A --output dist/gambit src/cli.ts",
     "precommit": "deno fmt && deno lint && deno check && deno test -A",
-    "bundle:sim": "sh -c 'deno bundle simulator-ui/src/main.tsx > simulator-ui/dist/bundle.js'"
+    "bundle:sim": "deno bundle --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
+    "bundle:sim:sourcemap": "deno bundle --sourcemap=external --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
+    "bundle:sim:web": "deno bundle --platform=browser --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
+    "bundle:sim:web:sourcemap": "deno bundle --platform=browser --sourcemap=external --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx"
   },
   "lint": {
     "include": [
@@ -37,6 +40,7 @@
   },
   "imports": {
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
+    "@std/fs": "jsr:@std/fs@^1.0.20",
     "@std/path": "jsr:@std/path@^1.0.6",
     "@std/cli": "jsr:@std/cli@^1.0.7",
     "@std/assert": "jsr:@std/assert@^1.0.6",
@@ -46,5 +50,9 @@
     "@openai/openai": "npm:openai@^4.78.1",
     "react": "npm:react@18.3.1",
     "react-dom": "npm:react-dom@18.3.1"
+  },
+  "deploy": {
+    "org": "boltfoundry",
+    "app": "gambit-demo"
   }
 }

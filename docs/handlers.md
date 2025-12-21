@@ -73,7 +73,7 @@ Notes:
 - Busy/idle handlers can return a string or object; the stringified message is
   streamed/logged and injected as an assistant message with elapsed ms appended.
 - Handler errors are swallowed; they should never crash the run.
-- The simulator shows busy/idle streams in the “status” lane separate from
+- The debug UI shows busy/idle streams in the “status” lane separate from
   assistant turns.
 
 ## Examples

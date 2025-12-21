@@ -53,7 +53,9 @@ export function createOpenRouterProvider(opts: {
       stream?: boolean;
       state?: import("../state.ts").SavedState;
       onStreamText?: (chunk: string) => void;
+      params?: Record<string, unknown>;
     }) {
+      const params = input.params ?? {};
       if (input.stream) {
         if (debugStream) {
           logger.log(
@@ -75,6 +77,7 @@ export function createOpenRouterProvider(opts: {
             >,
           tool_choice: "auto",
           stream: true,
+          ...(params as Record<string, unknown>),
         });
 
         let finishReason: "stop" | "tool_calls" | "length" | null = null;
@@ -181,6 +184,7 @@ export function createOpenRouterProvider(opts: {
           >,
         tool_choice: "auto",
         stream: false,
+        ...(params as Record<string, unknown>),
       });
 
       const choice = response.choices[0];
@@ -200,6 +204,13 @@ export function createOpenRouterProvider(opts: {
           (choice.finish_reason as "stop" | "tool_calls" | "length" | null) ??
             "stop",
         toolCalls,
+        usage: response.usage
+          ? {
+            promptTokens: response.usage.prompt_tokens ?? 0,
+            completionTokens: response.usage.completion_tokens ?? 0,
+            totalTokens: response.usage.total_tokens ?? 0,
+          }
+          : undefined,
       };
     },
   };

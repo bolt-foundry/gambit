@@ -72,31 +72,57 @@ function normalizeActions(
     });
 }
 
-function replaceEmbedMarkers(
-  body: string,
-): {
-  cleaned: string;
-  embeds: Array<string>;
+async function expandEmbedsInBody(args: {
+  body: string;
+  resolvedPath: string;
+  stack: Array<string>;
+  extraEmbeds?: Array<string>;
+}): Promise<{
+  body: string;
+  embeds: Array<LoadedCard>;
   respond: boolean;
   initHint: boolean;
-} {
+}> {
+  const { body, resolvedPath, stack, extraEmbeds } = args;
   const regex = /!\[[^\]]*\]\(([^)]+)\)/g;
-  const embeds: Array<string> = [];
+  const embeds: Array<LoadedCard> = [];
   let respond = false;
   let initHint = false;
-  const cleaned = body.replace(regex, (_m, p1: string) => {
-    if (p1 === RESPOND_MARKER) {
+  let out = "";
+  let lastIndex = 0;
+
+  for (const match of body.matchAll(regex)) {
+    const matchIndex = match.index ?? 0;
+    const target = match[1];
+    out += body.slice(lastIndex, matchIndex);
+    if (target === RESPOND_MARKER) {
       respond = true;
-      return RESPOND_TEXT;
-    }
-    if (p1 === INIT_MARKER) {
+      out += RESPOND_TEXT;
+    } else if (target === INIT_MARKER) {
       initHint = true;
-      return INIT_TEXT;
+      out += INIT_TEXT;
+    } else {
+      const card = await loadCard(target, resolvedPath, stack);
+      embeds.push(card);
+      if (card.body) out += card.body;
     }
-    embeds.push(p1);
-    return "";
-  });
-  return { cleaned, embeds, respond, initHint };
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  out += body.slice(lastIndex);
+
+  if (Array.isArray(extraEmbeds)) {
+    for (const embed of extraEmbeds) {
+      const card = await loadCard(embed, resolvedPath, stack);
+      embeds.push(card);
+      if (card.body) {
+        if (out.trim().length) out += "\n\n";
+        out += card.body;
+      }
+    }
+  }
+
+  return { body: out, embeds, respond, initHint };
 }
 
 export async function loadMarkdownCard(
@@ -161,25 +187,24 @@ export async function loadMarkdownCard(
     (attrs as { outputSchema?: unknown }).outputSchema,
     resolved,
   );
-  const replaced = replaceEmbedMarkers(body);
-  const embeds = replaced.embeds.concat(
-    Array.isArray((attrs as { embeds?: unknown }).embeds)
-      ? (attrs as { embeds?: Array<string> }).embeds ?? []
-      : [],
-  );
-  const cleanedBody = replaced.cleaned;
-  const embeddedCards: Array<LoadedCard> = [];
-  for (const embed of embeds) {
-    const card = await loadCard(embed, resolved, nextStack);
-    embeddedCards.push(card);
-  }
+  const extraEmbeds = Array.isArray((attrs as { embeds?: unknown }).embeds)
+    ? Array.from((attrs as { embeds?: Array<string> }).embeds ?? [])
+    : [];
+  const replaced = await expandEmbedsInBody({
+    body,
+    resolvedPath: resolved,
+    stack: nextStack,
+    extraEmbeds,
+  });
+  const cleanedBody = replaced.body;
+  const embeddedCards = replaced.embeds;
 
   return {
     kind: "gambit.card",
     path: resolved,
     body: cleanedBody.trim(),
     actions,
-    embeds,
+    embeds: embeddedCards.map((card) => card.path),
     cards: embeddedCards,
     inputFragment,
     outputFragment,
@@ -230,8 +255,13 @@ export async function loadMarkdownDeck(
     }
   });
 
-  const replaced = replaceEmbedMarkers(body);
-  const embeds = replaced.embeds.concat(deckMeta.embeds ?? []);
+  const replaced = await expandEmbedsInBody({
+    body,
+    resolvedPath: resolved,
+    stack: [resolved],
+    extraEmbeds: Array.from(deckMeta.embeds ?? []),
+  });
+  const cards = replaced.embeds;
 
   const inputSchema = await maybeLoadSchema(
     (deckMeta as { inputSchema?: unknown }).inputSchema,
@@ -242,13 +272,8 @@ export async function loadMarkdownDeck(
     resolved,
   );
 
-  const cards: Array<LoadedCard> = [];
-  for (const embed of embeds) {
-    const card = await loadCard(embed, resolved, [resolved]);
-    cards.push(card);
-  }
   const allCards = flattenCards(cards);
-  const cleanedBody = replaced.cleaned;
+  const cleanedBody = replaced.body;
 
   const mergedActions: Record<string, ActionDefinition> = {};
   for (const card of allCards) {
@@ -327,7 +352,7 @@ export async function loadMarkdownDeck(
     body: cleanedBody.trim(),
     actions: Object.values(mergedActions),
     cards: allCards,
-    embeds,
+    embeds: cards.map((card) => card.path),
     label: deckMeta.label,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
@@ -340,6 +365,7 @@ export async function loadMarkdownDeck(
         replaced.respond ||
         allCards.some((c) => c.syntheticTools?.respond),
     },
+    inlineEmbeds: true,
   };
 }
 

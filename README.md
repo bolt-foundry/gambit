@@ -32,7 +32,7 @@ provide exactly the right amount of context at the right time.
   of dumping every document.
 - Keep orchestration logic local and testable; run decks offline with
   predictable traces.
-- Ship with built-in observability (streaming, REPL, simulator) so debugging
+- Ship with built-in observability (streaming, REPL, debug UI) so debugging
   feels like regular software, not guesswork.
 
 ## 5-minute quickstart
@@ -67,11 +67,11 @@ Talk to it in a REPL (default deck is `src/decks/gambit-assistant.deck.md`):
 deno run -A src/cli.ts repl --message '"hello"' --stream --verbose
 ```
 
-Open the simulator UI:
+Open the debug UI:
 
 ```sh
 deno run -A src/cli.ts serve src/decks/gambit-assistant.deck.md --port 8000
-open http://localhost:8000/
+open http://localhost:8000/debug
 ```
 
 Install the CLI once (uses the published JSR package):
@@ -165,7 +165,7 @@ export default defineDeck({
 - CLI entry: `src/cli.ts`; runtime: `src/runtime.ts`; definitions: `mod.ts`.
 - Examples: `examples/hello_world.deck.md`,
   `examples/agent_with_multi_actions/`.
-- Simulator assets: `src/server.ts` (built-in UI now renders schema-driven init
+- Debug UI assets: `src/server.ts` (built-in UI now renders schema-driven init
   forms beneath the user message box with a raw JSON tab, reconnect button, and
   a trace-formatting hook).
 - Tests/lint/format: `deno task test`, `deno task lint`, `deno task fmt`;
@@ -177,8 +177,37 @@ export default defineDeck({
 
 - Authoring decks/cards: `docs/authoring.md`
 - Runtime/guardrails: `docs/runtime.md`
-- CLI, REPL, simulator: `docs/cli.md`
+- CLI, REPL, debug UI: `docs/cli.md`
 - Examples guide: `docs/examples.md`
+- OpenAI Chat Completions compatibility: `docs/openai-compat.md`
+
+## OpenAI Chat Completions compatibility
+
+If you already construct OpenAI Chat Completions-style requests, you can use
+Gambit as a drop-in-ish wrapper that applies a deck prompt and can execute only
+deck-defined tools (actions).
+
+```ts
+import {
+  chatCompletionsWithDeck,
+  createOpenRouterProvider,
+} from "jsr:@bolt-foundry/gambit";
+
+const provider = createOpenRouterProvider({
+  apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
+});
+
+const resp = await chatCompletionsWithDeck({
+  deckPath: "./path/to/root.deck.md",
+  modelProvider: provider,
+  request: {
+    model: "openai/gpt-4o-mini",
+    messages: [{ role: "user", content: "hello" }],
+  },
+});
+
+console.log(resp.choices[0].message);
+```
 
 ## Handlers (error/busy/idle)
 
@@ -194,8 +223,8 @@ export default defineDeck({
   should return an envelope `{message?, code?, status?, meta?, payload?}`.
 - Example implementations live under `examples/handlers_ts` and
   `examples/handlers_md`.
-- Simulator UI streams handler output in a “status” lane (busy/idle) separate
-  from assistant turns.
+- Debug UI streams handler output in a “status” lane (busy/idle) separate from
+  assistant turns.
 
 ## Next steps
 

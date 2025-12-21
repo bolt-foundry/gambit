@@ -1,9 +1,23 @@
 import * as path from "@std/path";
+import { walk } from "@std/fs/walk";
 import { runDeck } from "./runtime.ts";
+import { GAMBIT_TOOL_COMPLETE } from "./constants.ts";
+import {
+  DEFAULT_TEST_BOT,
+  loadTestBotConfig,
+  sanitizeNumber,
+  TEST_BOT_DEFAULT_PATH,
+} from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { loadDeck } from "./loader.ts";
+import editorAssistantInputSchema, {
+  type EditorAssistantInput,
+} from "./decks/schemas/editorAssistantInput.zod.ts";
+import patchProposalSchema, {
+  type PatchProposal,
+} from "./decks/schemas/patchProposal.zod.ts";
 import type { SavedState } from "./state.ts";
-import type { ModelProvider, TraceEvent } from "./types.ts";
+import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
 const logger = console;
@@ -15,6 +29,22 @@ const simulatorBundlePath = path.resolve(
   "dist",
   "bundle.js",
 );
+const simulatorBundleSourceMapPath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "dist",
+  "bundle.js.map",
+);
+const gambitDir = path.resolve(Deno.cwd(), ".gambit");
+const notesDir = path.join(gambitDir, "notes");
+const configPath = path.join(gambitDir, "config.json");
+const editorAssistantDeckPath = path.resolve(
+  moduleDir,
+  "decks",
+  "editor-assistant.deck.md",
+);
+const EDITOR_ASSISTANT_PATCH_ACTION = "propose_patch";
 
 type IncomingMessage =
   | {
@@ -46,6 +76,7 @@ type IncomingMessage =
     type: "loadSession";
     sessionId: string;
   }
+  | { type: "testBotSubscribe" }
   | { type: "ping" };
 
 type NormalizedSchema = {
@@ -120,11 +151,192 @@ function resolveDefaultValue(raw: unknown): unknown {
   return raw;
 }
 
+function ensureDir(dir: string) {
+  try {
+    Deno.mkdirSync(dir, { recursive: true });
+  } catch {
+    // ignore
+  }
+}
+
+function readJsonFile<T>(filePath: string): T | undefined {
+  try {
+    const text = Deno.readTextFileSync(filePath);
+    return JSON.parse(text) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeJsonFile(filePath: string, data: unknown) {
+  try {
+    ensureDir(path.dirname(filePath));
+    Deno.writeTextFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch (err) {
+    logger.warn(
+      `[sim] failed to write ${filePath}: ${
+        err instanceof Error ? err.message : err
+      }`,
+    );
+  }
+}
+
+function hashDeckPath(deckPath: string): string {
+  try {
+    const base = btoa(unescape(encodeURIComponent(deckPath)));
+    return base.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } catch {
+    return deckPath.replace(/[^a-zA-Z0-9._-]/g, "_");
+  }
+}
+
+function notesFileForDeck(deckPath: string): string {
+  const hashed = hashDeckPath(deckPath);
+  return path.join(notesDir, `${hashed}.md`);
+}
+
+function assistantMessagesFromState(
+  state?: SavedState,
+): Array<{ role: "assistant"; content: string }> {
+  if (!state?.messages) return [];
+  return state.messages
+    .filter((m) =>
+      m && m.role === "assistant" && typeof m.content === "string" &&
+      m.content.trim().length > 0
+    )
+    .map((m) => ({ role: "assistant", content: String(m.content) }));
+}
+
+function validatePatchBounds(
+  patch: PatchProposal,
+  contentLength: number,
+): { ok: true; patch: PatchProposal } | { ok: false; error: string } {
+  let lastEnd = 0;
+  for (let i = 0; i < patch.edits.length; i++) {
+    const edit = patch.edits[i];
+    if (edit.start < 0 || edit.end < 0 || edit.end < edit.start) {
+      return { ok: false, error: `Edit ${i + 1} has invalid bounds` };
+    }
+    if (i > 0 && edit.start < lastEnd) {
+      return {
+        ok: false,
+        error: "Edits must be sorted and non-overlapping",
+      };
+    }
+    if (edit.end > contentLength) {
+      return {
+        ok: false,
+        error: `Edit ${i + 1} exceeds content length (${contentLength})`,
+      };
+    }
+    lastEnd = edit.end;
+  }
+  return { ok: true, patch };
+}
+
+function extractPatchProposalFromState(args: {
+  state?: SavedState;
+  contentLength: number;
+  actionName: string;
+}): { patch?: PatchProposal; error?: string } {
+  const { state, contentLength, actionName } = args;
+  if (!state?.messages) return {};
+  let proposal: PatchProposal | undefined;
+  let lastError: string | undefined;
+
+  for (const msg of state.messages) {
+    if (!msg || msg.role !== "tool") continue;
+    if (msg.name !== GAMBIT_TOOL_COMPLETE) continue;
+    if (typeof msg.content !== "string") continue;
+    try {
+      const parsed = JSON.parse(msg.content) as
+        | {
+          payload?: unknown;
+          status?: unknown;
+          message?: unknown;
+          source?: {
+            actionName?: string;
+          };
+        }
+        | unknown;
+      const sourceAction = (parsed && typeof parsed === "object" &&
+          typeof (parsed as { source?: { actionName?: unknown } }).source
+              ?.actionName === "string")
+        ? (parsed as { source: { actionName: string } }).source.actionName
+        : undefined;
+      if (sourceAction && sourceAction !== actionName) continue;
+      const status = (parsed &&
+          typeof parsed === "object" &&
+          typeof (parsed as { status?: unknown }).status === "number")
+        ? (parsed as { status: number }).status
+        : undefined;
+      if (status && status >= 400) {
+        lastError =
+          typeof (parsed as { message?: unknown }).message === "string"
+            ? (parsed as { message: string }).message
+            : `Patch tool returned status ${status}`;
+        continue;
+      }
+      const rawPayload = (parsed && typeof parsed === "object")
+        ? (parsed as { payload?: unknown }).payload ?? parsed
+        : parsed;
+      const candidate = rawPayload && typeof rawPayload === "object"
+        ? (rawPayload as { payload?: unknown }).payload ?? rawPayload
+        : rawPayload;
+      const parsedPatch = patchProposalSchema.safeParse(candidate);
+      if (!parsedPatch.success) {
+        lastError = parsedPatch.error.issues?.[0]?.message ??
+          "Invalid patch payload";
+        continue;
+      }
+      const bounds = validatePatchBounds(parsedPatch.data, contentLength);
+      if (!bounds.ok) {
+        lastError = bounds.error;
+        continue;
+      }
+      proposal = parsedPatch.data;
+      lastError = undefined;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  return { patch: proposal, error: proposal ? undefined : lastError };
+}
+
+type TestBotConfig = import("./test_bot.ts").TestBotConfig;
+
 function describeZodSchema(schema?: ZodTypeAny): SchemaDescription {
   try {
     const normalized = normalizeSchema(schema);
     const defaults = normalized ? materializeDefaults(normalized) : undefined;
     return { schema: normalized, defaults };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: message };
+  }
+}
+
+async function loadSchemaFromPath(
+  schemaPath?: string,
+  basePath?: string,
+): Promise<ZodTypeAny | undefined> {
+  if (!schemaPath || typeof schemaPath !== "string") return undefined;
+  const baseDir = basePath ? path.dirname(basePath) : Deno.cwd();
+  const resolved = path.resolve(baseDir, schemaPath);
+  const mod = await import(path.toFileUrl(resolved).href);
+  return mod.default as ZodTypeAny;
+}
+
+async function describeSchemaFromPath(
+  schemaPath?: string,
+  basePath?: string,
+): Promise<SchemaDescription | undefined> {
+  if (!schemaPath || typeof schemaPath !== "string") return undefined;
+  try {
+    const schema = await loadSchemaFromPath(schemaPath, basePath);
+    if (!schema) return undefined;
+    return describeZodSchema(schema);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { error: message };
@@ -275,6 +487,17 @@ function cloneValue<T>(value: T): T {
   }
 }
 
+function resolveDeckPath(p: string): string {
+  const absolutePath = path.isAbsolute(p) ? p : path.resolve(p);
+  try {
+    const url = import.meta.resolve(path.toFileUrl(absolutePath).href);
+    if (url.startsWith("file:")) return path.fromFileUrl(url);
+    return url;
+  } catch {
+    return absolutePath;
+  }
+}
+
 function materializeDefaults(schema?: NormalizedSchema): unknown {
   if (!schema) return undefined;
   if (schema.defaultValue !== undefined) return cloneValue(schema.defaultValue);
@@ -301,6 +524,34 @@ function materializeDefaults(schema?: NormalizedSchema): unknown {
   }
 }
 
+function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
+  if (!schema) return undefined;
+  if (schema.defaultValue !== undefined) return cloneValue(schema.defaultValue);
+  if (schema.example !== undefined) return cloneValue(schema.example);
+
+  switch (schema.kind) {
+    case "object": {
+      const out: Record<string, unknown> = {};
+      for (const [key, child] of Object.entries(schema.fields ?? {})) {
+        const value = deriveInitialFromSchema(child);
+        if (value !== undefined) out[key] = value;
+      }
+      return out;
+    }
+    case "array": {
+      if (schema.items) {
+        const item = deriveInitialFromSchema(schema.items);
+        if (item !== undefined) return [item];
+      }
+      return [];
+    }
+    case "boolean":
+      return false;
+    default:
+      return undefined;
+  }
+}
+
 export function startWebSocketSimulator(opts: {
   deckPath: string;
   modelProvider: ModelProvider;
@@ -310,10 +561,29 @@ export function startWebSocketSimulator(opts: {
   verbose?: boolean;
   signal?: AbortSignal;
   sessionDir?: string;
+  testBotPath?: string;
+  autoBundle?: boolean;
+  sourceMap?: boolean;
+  bundlePlatform?: "deno" | "browser";
 }): ReturnType<typeof Deno.serve> {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
-  let resolvedDeckPath = opts.deckPath;
+  let resolvedDeckPath = resolveDeckPath(opts.deckPath);
+  const existingConfig = readJsonFile<Record<string, unknown>>(configPath) ??
+    {};
+  const maybeRootFromDeck = path.dirname(resolvedDeckPath || Deno.cwd());
+  const mergedConfig = {
+    ...existingConfig,
+    // Always pin simulator root/active deck to the deck we were asked to serve.
+    rootPath: maybeRootFromDeck,
+    activeDeckPath: resolvedDeckPath,
+  };
+  if (
+    mergedConfig.rootPath !== existingConfig.rootPath ||
+    mergedConfig.activeDeckPath !== existingConfig.activeDeckPath
+  ) {
+    writeJsonFile(configPath, mergedConfig);
+  }
   const sessionsRoot = (() => {
     const base = opts.sessionDir
       ? path.resolve(opts.sessionDir)
@@ -344,6 +614,37 @@ export function startWebSocketSimulator(opts: {
       "",
     );
     return slug || "session";
+  };
+  type TestBotRunStatus = {
+    id: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    sessionId?: string;
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    maxTurns?: number;
+    messages: Array<{ role: string; content: string }>;
+  };
+  type TestBotRunEntry = {
+    run: TestBotRunStatus;
+    promise: Promise<void> | null;
+    abort: AbortController | null;
+  };
+  const testBotRuns = new Map<string, TestBotRunEntry>();
+  const testBotSubscribers = new Set<WebSocket>();
+  const broadcastTestBot = (payload: unknown) => {
+    const message = JSON.stringify(payload);
+    for (const socket of testBotSubscribers) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(message);
+        } else {
+          testBotSubscribers.delete(socket);
+        }
+      } catch {
+        testBotSubscribers.delete(socket);
+      }
+    }
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   const enrichStateWithSession = (state: SavedState): {
@@ -431,7 +732,296 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
-  const schemaPromise: Promise<SchemaDescription> = loadDeck(opts.deckPath)
+  const stringifyContent = (value: unknown): string => {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const generateTestBotUserMessage = async (
+    cfg: TestBotConfig,
+    scenario: string | undefined,
+    history: Array<ModelMessage>,
+    streamOpts?: { onStreamText?: (chunk: string) => void },
+  ): Promise<string> => {
+    const recent = history
+      .filter((m) => m && (m.role === "assistant" || m.role === "user"))
+      .slice(-8)
+      .map((m) =>
+        `${m.role.toUpperCase()}: ${stringifyContent(m.content ?? "")}`
+      )
+      .join("\n");
+    const systemPrompt = [
+      "You are a QA test user talking to an assistant. Generate the next user turn.",
+      "Persona / goals:",
+      cfg.body.trim(),
+      scenario ? "Scenario:" : undefined,
+      scenario ? scenario.trim() : undefined,
+      "Rules:",
+      "- Keep the message concise and natural.",
+      "- Return only the user message text. No analysis or role labels.",
+    ].filter((line): line is string =>
+      typeof line === "string" && line.trim().length > 0
+    )
+      .join("\n\n");
+    const messages: Array<ModelMessage> = [
+      { role: "system", content: systemPrompt },
+    ];
+    if (recent) {
+      messages.push({
+        role: "user",
+        content:
+          `Conversation so far:\n${recent}\n\nRespond with the next user message.`,
+      });
+    } else {
+      messages.push({
+        role: "user",
+        content: "Start the conversation with an opening question or request.",
+      });
+    }
+
+    const result = await opts.modelProvider.chat({
+      model: cfg.model,
+      messages,
+      stream: Boolean(streamOpts?.onStreamText),
+      onStreamText: streamOpts?.onStreamText,
+    });
+    const text = stringifyContent(result.message?.content ?? "");
+    return text.trim();
+  };
+
+  const startTestBotRun = (runOpts: {
+    maxTurnsOverride?: number;
+    deckInput?: unknown;
+    botInput?: unknown;
+    initialUserMessage?: string;
+  } = {}): TestBotRunStatus => {
+    const cfg = loadTestBotConfig({
+      autoCreate: true,
+      path: opts.testBotPath,
+    });
+    const maxTurns = Math.round(
+      sanitizeNumber(
+        runOpts.maxTurnsOverride ?? cfg.maxTurns,
+        cfg.maxTurns,
+        { min: 1, max: 200 },
+      ),
+    );
+    const deckInput = runOpts.deckInput;
+    const hasDeckInput = deckInput !== undefined;
+    let botInput: unknown = runOpts.botInput ?? cfg.input;
+    const initialUserMessage = typeof runOpts.initialUserMessage === "string"
+      ? runOpts.initialUserMessage.trim()
+      : "";
+    const runId = randomId("testbot");
+    const startedAt = new Date().toISOString();
+    const controller = new AbortController();
+    const entry: TestBotRunEntry = {
+      run: {
+        id: runId,
+        status: "running",
+        startedAt,
+        maxTurns,
+        messages: [],
+      },
+      promise: null,
+      abort: controller,
+    };
+    testBotRuns.set(runId, entry);
+    const run = entry.run;
+    let savedState: SavedState | undefined = undefined;
+    let lastCount = 0;
+    const capturedTraces: Array<TraceEvent> = [];
+
+    const setSessionId = (state: SavedState | undefined) => {
+      const sessionId = typeof state?.meta?.sessionId === "string"
+        ? state.meta.sessionId
+        : undefined;
+      if (sessionId) run.sessionId = sessionId;
+    };
+
+    const appendFromState = (state: SavedState) => {
+      const msgs = state.messages ?? [];
+      const newMessages = msgs.slice(lastCount).filter((m) =>
+        m?.role === "assistant" || m?.role === "user"
+      );
+      newMessages.forEach((m) => {
+        run.messages.push({
+          role: m.role,
+          content: stringifyContent(m.content),
+        });
+      });
+      lastCount = msgs.length;
+      setSessionId(state);
+      if (newMessages.length > 0) {
+        broadcastTestBot({ type: "testBotStatus", run });
+      }
+    };
+
+    const tracer = (event: TraceEvent) => {
+      capturedTraces.push(event);
+      consoleTracer?.(event);
+    };
+
+    const loadBotInputFromSchema = async () => {
+      if (botInput !== undefined) return;
+      if (!cfg.inputSchemaPath) return;
+      const desc = await describeSchemaFromPath(
+        cfg.inputSchemaPath,
+        cfg.path,
+      );
+      if (desc?.defaults !== undefined) {
+        botInput = desc.defaults;
+      } else if (desc?.error) {
+        logger.warn(
+          `[test-bot] failed to load bot input schema ${cfg.inputSchemaPath}: ${desc.error}`,
+        );
+      }
+    };
+
+    const readScenario = (): string | undefined => {
+      if (typeof botInput === "string") return botInput;
+      if (!botInput || typeof botInput !== "object") return undefined;
+      const scenario = (botInput as { scenario?: unknown }).scenario;
+      return typeof scenario === "string" && scenario.trim()
+        ? scenario
+        : undefined;
+    };
+
+    const loop = async () => {
+      try {
+        await loadBotInputFromSchema();
+        const scenario = readScenario();
+
+        if (!controller.signal.aborted) {
+          await runDeck({
+            path: resolvedDeckPath,
+            input: deckInput,
+            inputProvided: hasDeckInput,
+            modelProvider: opts.modelProvider,
+            defaultModel: opts.model,
+            modelOverride: opts.modelForce,
+            trace: tracer,
+            stream: false,
+            state: savedState,
+            allowRootStringInput: true,
+            initialUserMessage: initialUserMessage || undefined,
+            onStateUpdate: (state) => {
+              const enriched = persistSessionState({
+                ...state,
+                meta: {
+                  ...(state.meta ?? {}),
+                  testBot: true,
+                  testBotRunId: runId,
+                  testBotConfigPath: cfg.path,
+                },
+                traces: capturedTraces,
+              });
+              savedState = enriched;
+              appendFromState(enriched);
+            },
+          });
+        }
+        for (let turn = 0; turn < maxTurns; turn++) {
+          if (controller.signal.aborted) break;
+          const userMessage = await generateTestBotUserMessage(
+            cfg,
+            scenario,
+            savedState?.messages ?? [],
+            {
+              onStreamText: (chunk) =>
+                broadcastTestBot({
+                  type: "testBotStream",
+                  runId,
+                  role: "user",
+                  chunk,
+                  turn,
+                }),
+            },
+          );
+          broadcastTestBot({
+            type: "testBotStreamEnd",
+            runId,
+            role: "user",
+            turn,
+          });
+          if (!userMessage) break;
+          await runDeck({
+            path: resolvedDeckPath,
+            input: deckInput,
+            inputProvided: hasDeckInput,
+            modelProvider: opts.modelProvider,
+            defaultModel: opts.model,
+            modelOverride: opts.modelForce,
+            trace: tracer,
+            stream: true,
+            state: savedState,
+            allowRootStringInput: true,
+            initialUserMessage: userMessage,
+            onStateUpdate: (state) => {
+              const enriched = persistSessionState({
+                ...state,
+                meta: {
+                  ...(state.meta ?? {}),
+                  testBot: true,
+                  testBotRunId: runId,
+                  testBotConfigPath: cfg.path,
+                },
+                traces: capturedTraces,
+              });
+              savedState = enriched;
+              appendFromState(enriched);
+            },
+            onStreamText: (chunk) =>
+              broadcastTestBot({
+                type: "testBotStream",
+                runId,
+                role: "assistant",
+                chunk,
+                turn,
+              }),
+          });
+          broadcastTestBot({
+            type: "testBotStreamEnd",
+            runId,
+            role: "assistant",
+            turn,
+          });
+        }
+        run.status = controller.signal.aborted ? "canceled" : "completed";
+        broadcastTestBot({ type: "testBotStatus", run });
+      } catch (err) {
+        run.status = "error";
+        run.error = err instanceof Error ? err.message : String(err);
+        broadcastTestBot({ type: "testBotStatus", run });
+      } finally {
+        if (savedState?.messages) {
+          const filtered = savedState.messages.filter((m) =>
+            m?.role === "assistant" || m?.role === "user"
+          ).map((m) => ({
+            role: m.role,
+            content: stringifyContent(m.content),
+          }));
+          run.messages = filtered;
+        }
+        setSessionId(savedState);
+        run.finishedAt = new Date().toISOString();
+        entry.abort = null;
+        entry.promise = null;
+        broadcastTestBot({ type: "testBotStatus", run });
+      }
+    };
+
+    entry.promise = loop();
+    broadcastTestBot({ type: "testBotStatus", run });
+    return run;
+  };
+
+  const schemaPromise: Promise<SchemaDescription> = loadDeck(resolvedDeckPath)
     .then((deck) => {
       resolvedDeckPath = deck.path;
       deckSlug = deckSlugFromPath(resolvedDeckPath);
@@ -443,14 +1033,675 @@ export function startWebSocketSimulator(opts: {
       return { error: message };
     });
 
+  const wantsSourceMap = Boolean(opts.sourceMap);
+  const bundlePlatform = opts.bundlePlatform ?? "deno";
+  if (opts.autoBundle) {
+    try {
+      const p = new Deno.Command("deno", {
+        args: [
+          "bundle",
+          "--platform",
+          bundlePlatform,
+          ...(wantsSourceMap ? ["--sourcemap=external"] : []),
+          "--output",
+          "simulator-ui/dist/bundle.js",
+          "simulator-ui/src/main.tsx",
+        ],
+        cwd: path.resolve(moduleDir, ".."),
+        stdout: "null",
+        stderr: "null",
+      });
+      p.outputSync();
+    } catch (err) {
+      logger.warn(
+        `[sim] auto-bundle failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
   const server = Deno.serve(
     { port, signal: opts.signal, onListen: () => {} },
     async (req) => {
       const url = new URL(req.url);
-      if (url.pathname === "/" || url.pathname.startsWith("/sessions/")) {
+      if (url.pathname === "/api/config") {
+        if (req.method === "GET") {
+          const data = readJsonFile<Record<string, unknown>>(configPath) ?? {};
+          return new Response(JSON.stringify(data), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (req.method === "POST") {
+          try {
+            const body = await req.json() as {
+              activeDeckPath?: string;
+              rootPath?: string;
+            };
+            const next = {
+              activeDeckPath: typeof body.activeDeckPath === "string"
+                ? body.activeDeckPath
+                : undefined,
+              rootPath: typeof body.rootPath === "string"
+                ? body.rootPath
+                : undefined,
+            };
+            writeJsonFile(configPath, next);
+            return new Response(JSON.stringify(next), {
+              headers: { "content-type": "application/json" },
+            });
+          } catch (err) {
+            return new Response(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+      }
+
+      if (url.pathname === "/api/files") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const rootParam = url.searchParams.get("root");
+        const root = rootParam ? path.resolve(rootParam) : Deno.cwd();
+        let limit = Number(url.searchParams.get("limit") ?? "500");
+        if (!Number.isFinite(limit) || limit <= 0) limit = 500;
+        let count = 0;
+        const files: Array<{ path: string; relative: string }> = [];
+        try {
+          const maxDepth = Number(url.searchParams.get("maxDepth") ?? "10");
+          for await (
+            const entry of walk(root, {
+              includeDirs: false,
+              followSymlinks: false,
+              maxDepth: Number.isFinite(maxDepth) && maxDepth > 0
+                ? maxDepth
+                : 10,
+            })
+          ) {
+            if (!entry.isFile) continue;
+            const relative = path.relative(root, entry.path);
+            files.push({ path: entry.path, relative });
+            count++;
+            if (count >= limit) break;
+          }
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ root, files }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (url.pathname === "/api/file") {
+        if (req.method === "GET") {
+          const target = url.searchParams.get("path");
+          if (!target) {
+            return new Response(
+              JSON.stringify({ error: "Missing path" }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+          try {
+            const content = await Deno.readTextFile(target);
+            return new Response(JSON.stringify({ path: target, content }), {
+              headers: { "content-type": "application/json" },
+            });
+          } catch (err) {
+            return new Response(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+        if (req.method === "PUT") {
+          try {
+            const body = await req.json() as {
+              path?: string;
+              content?: string;
+            };
+            if (!body.path || typeof body.path !== "string") {
+              throw new Error("Missing path");
+            }
+            const content = typeof body.content === "string"
+              ? body.content
+              : "";
+            ensureDir(path.dirname(body.path));
+            await Deno.writeTextFile(body.path, content);
+            return new Response(
+              JSON.stringify({ path: body.path, saved: true }),
+              { headers: { "content-type": "application/json" } },
+            );
+          } catch (err) {
+            return new Response(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+      }
+
+      if (url.pathname === "/api/deck-notes") {
+        if (req.method === "GET") {
+          const deckPathParam = url.searchParams.get("deckPath");
+          if (!deckPathParam) {
+            return new Response(
+              JSON.stringify({ error: "Missing deckPath" }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+          const filePath = notesFileForDeck(deckPathParam);
+          try {
+            const content = await Deno.readTextFile(filePath);
+            return new Response(
+              JSON.stringify({ path: filePath, content }),
+              { headers: { "content-type": "application/json" } },
+            );
+          } catch {
+            return new Response(
+              JSON.stringify({ path: filePath, content: "" }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+        if (req.method === "PUT") {
+          try {
+            const body = await req.json() as {
+              deckPath?: string;
+              content?: string;
+            };
+            if (!body.deckPath || typeof body.deckPath !== "string") {
+              throw new Error("Missing deckPath");
+            }
+            const filePath = notesFileForDeck(body.deckPath);
+            ensureDir(path.dirname(filePath));
+            await Deno.writeTextFile(filePath, body.content ?? "");
+            return new Response(
+              JSON.stringify({ path: filePath, saved: true }),
+              { headers: { "content-type": "application/json" } },
+            );
+          } catch (err) {
+            return new Response(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+      }
+
+      if (url.pathname === "/api/editor-assistant/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let parsed: EditorAssistantInput;
+        try {
+          const body = await req.json();
+          parsed = editorAssistantInputSchema.parse(body);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(
+            JSON.stringify({ error: message }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        const lastUserMessage = [...parsed.messages].reverse().find((m) =>
+          m?.role === "user" && typeof m.content === "string"
+        )?.content;
+
+        let capturedState: SavedState | undefined;
+        let runOutput: unknown;
+        try {
+          runOutput = await runDeck({
+            path: editorAssistantDeckPath,
+            input: parsed,
+            inputProvided: true,
+            modelProvider: opts.modelProvider,
+            defaultModel: opts.model,
+            modelOverride: opts.modelForce,
+            trace: opts.verbose ? consoleTracer : undefined,
+            stream: false,
+            state: undefined,
+            onStateUpdate: (state) => {
+              capturedState = state;
+            },
+            initialUserMessage: lastUserMessage,
+            allowRootStringInput: false,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(
+            JSON.stringify({
+              messages: [{
+                role: "assistant",
+                content: `Assistant run failed: ${message}`,
+              }],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+
+        let assistantMessages = assistantMessagesFromState(capturedState);
+        if (assistantMessages.length === 0 && typeof runOutput === "string") {
+          assistantMessages = [{ role: "assistant", content: runOutput }];
+        }
+        const { patch, error: patchError } = extractPatchProposalFromState({
+          state: capturedState,
+          contentLength: parsed.content.length,
+          actionName: EDITOR_ASSISTANT_PATCH_ACTION,
+        });
+        if (assistantMessages.length === 0) {
+          assistantMessages = [{
+            role: "assistant",
+            content: "No assistant response produced.",
+          }];
+        }
+        if (!patch && patchError) {
+          assistantMessages = [
+            ...assistantMessages,
+            {
+              role: "assistant",
+              content: `Patch proposal invalid: ${patchError}`,
+            },
+          ];
+        }
+        return new Response(
+          JSON.stringify({ messages: assistantMessages, patch }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.pathname === "/api/test-bot") {
+        if (req.method === "GET") {
+          const cfg = loadTestBotConfig({
+            autoCreate: true,
+            path: opts.testBotPath,
+          });
+          const schemaDesc = await describeSchemaFromPath(
+            cfg.inputSchemaPath,
+            cfg.path,
+          );
+          const inputDefault = cfg.input !== undefined
+            ? cfg.input
+            : schemaDesc?.defaults;
+          return new Response(
+            JSON.stringify({
+              path: cfg.path,
+              content: cfg.content,
+              attrs: cfg.attrs,
+              inputSchemaPath: cfg.inputSchemaPath,
+              inputSchema: schemaDesc?.schema,
+              inputSchemaError: schemaDesc?.error,
+              defaults: {
+                model: cfg.model,
+                temperature: cfg.temperature,
+                maxTurns: cfg.maxTurns,
+                input: inputDefault,
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        if (req.method === "PUT") {
+          try {
+            const body = await req.json() as { content?: string };
+            const content = typeof body.content === "string"
+              ? body.content
+              : DEFAULT_TEST_BOT;
+            const targetPath = opts.testBotPath
+              ? path.resolve(opts.testBotPath)
+              : TEST_BOT_DEFAULT_PATH;
+            ensureDir(path.dirname(targetPath));
+            await Deno.writeTextFile(targetPath, content);
+            return new Response(
+              JSON.stringify({ path: targetPath, saved: true }),
+              { headers: { "content-type": "application/json" } },
+            );
+          } catch (err) {
+            return new Response(
+              JSON.stringify({
+                error: err instanceof Error ? err.message : String(err),
+              }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+        return new Response("Method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/test-bot/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let maxTurnsOverride: number | undefined = undefined;
+        let deckInput: unknown = undefined;
+        let botInput: unknown = undefined;
+        let initialUserMessage: string | undefined = undefined;
+        try {
+          const body = await req.json() as {
+            maxTurns?: number;
+            init?: unknown;
+            botInput?: unknown;
+            initialUserMessage?: unknown;
+          };
+          if (
+            typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
+          ) {
+            maxTurnsOverride = body.maxTurns;
+          }
+          deckInput = body.init;
+          botInput = body.botInput;
+          if (
+            typeof body.initialUserMessage === "string" &&
+            body.initialUserMessage.trim().length > 0
+          ) {
+            initialUserMessage = body.initialUserMessage;
+          }
+        } catch {
+          // ignore parse errors; use defaults
+        }
+        if (deckInput === undefined) {
+          try {
+            const desc = await schemaPromise;
+            deckInput = desc.defaults !== undefined
+              ? desc.defaults
+              : deriveInitialFromSchema(desc.schema);
+          } catch {
+            // ignore; keep undefined
+          }
+        }
+        const run = startTestBotRun({
+          maxTurnsOverride,
+          deckInput,
+          botInput,
+          initialUserMessage,
+        });
+        return new Response(
+          JSON.stringify({ run }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.pathname === "/api/test-bot/status") {
+        const runId = url.searchParams.get("runId") ?? undefined;
+        const entry = runId ? testBotRuns.get(runId) : undefined;
+        const cfg = loadTestBotConfig({
+          autoCreate: false,
+          path: opts.testBotPath,
+        });
+        const schemaDesc = await describeSchemaFromPath(
+          cfg.inputSchemaPath,
+          cfg.path,
+        );
+        const inputDefault = cfg.input !== undefined
+          ? cfg.input
+          : schemaDesc?.defaults;
+        return new Response(
+          JSON.stringify({
+            run: entry?.run ?? {
+              id: runId ?? "",
+              status: "idle",
+              messages: [],
+            },
+            inputSchemaPath: cfg.inputSchemaPath,
+            inputSchema: schemaDesc?.schema,
+            inputSchemaError: schemaDesc?.error,
+            defaults: {
+              model: cfg.model,
+              temperature: cfg.temperature,
+              maxTurns: cfg.maxTurns,
+              input: inputDefault,
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.pathname === "/api/test-bot/stop") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let runId: string | undefined = undefined;
+        try {
+          const body = await req.json() as { runId?: string };
+          if (typeof body.runId === "string") runId = body.runId;
+        } catch {
+          // ignore
+        }
+        const entry = runId ? testBotRuns.get(runId) : undefined;
+        const wasRunning = Boolean(entry?.promise);
+        if (entry?.abort) {
+          entry.abort.abort();
+        }
+        return new Response(
+          JSON.stringify({
+            stopped: wasRunning,
+            run: entry?.run ?? {
+              id: runId ?? "",
+              status: "idle",
+              messages: [],
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.pathname === "/api/session") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const sessionId = url.searchParams.get("sessionId");
+        if (!sessionId) {
+          return new Response(
+            JSON.stringify({ error: "Missing sessionId" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        const state = readSessionState(sessionId);
+        if (!state) {
+          return new Response(
+            JSON.stringify({ error: "Session not found" }),
+            { status: 404, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            sessionId,
+            messages: state.messages,
+            messageRefs: state.messageRefs,
+            notes: state.notes,
+            meta: state.meta,
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (url.pathname === "/api/session/notes") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            text?: string;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) {
+            throw new Error("Session not found");
+          }
+          const now = new Date().toISOString();
+          const nextState = persistSessionState({
+            ...state,
+            notes: { text: body.text ?? "", updatedAt: now },
+          });
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              notes: nextState.notes,
+              saved: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/feedback") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const deckPathParam = url.searchParams.get("deckPath");
+        if (!deckPathParam) {
+          return new Response(
+            JSON.stringify({ error: "Missing deckPath" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        const items: Array<Record<string, unknown>> = [];
+        try {
+          for await (const entry of Deno.readDir(sessionsRoot)) {
+            if (!entry.isDirectory) continue;
+            const sessionId = entry.name;
+            const state = readSessionState(sessionId);
+            if (!state) continue;
+            if (state.meta?.deck !== deckPathParam) continue;
+            const feedbackList = Array.isArray(state.feedback)
+              ? state.feedback
+              : [];
+            feedbackList.forEach((fb) => {
+              if (!fb || typeof fb !== "object") return;
+              const messageRefId = (fb as { messageRefId?: string })
+                .messageRefId;
+              if (typeof messageRefId !== "string") return;
+              let messageContent: unknown = undefined;
+              if (
+                Array.isArray(state.messageRefs) &&
+                Array.isArray(state.messages)
+              ) {
+                const idx = state.messageRefs.findIndex((ref) =>
+                  ref?.id === messageRefId
+                );
+                if (idx >= 0) {
+                  messageContent = state.messages[idx]?.content;
+                }
+              }
+              items.push({
+                sessionId,
+                deck: state.meta?.deck,
+                sessionCreatedAt: state.meta?.sessionCreatedAt,
+                messageRefId,
+                score: (fb as { score?: number }).score,
+                reason: (fb as { reason?: string }).reason,
+                createdAt: (fb as { createdAt?: string }).createdAt,
+                archivedAt: (fb as { archivedAt?: string }).archivedAt,
+                messageContent,
+              });
+            });
+          }
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        items.sort((a, b) => {
+          const aTime = String(a.createdAt ?? "") || "";
+          const bTime = String(b.createdAt ?? "") || "";
+          return bTime.localeCompare(aTime);
+        });
+        return new Response(
+          JSON.stringify({ deckPath: deckPathParam, items }),
+          {
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      if (url.pathname === "/api/feedback/archive" && req.method === "POST") {
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            messageRefId?: string;
+            archived?: boolean;
+          };
+          if (!body.sessionId || !body.messageRefId) {
+            throw new Error("Missing sessionId or messageRefId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state || !Array.isArray(state.feedback)) {
+            throw new Error("Session not found");
+          }
+          const idx = state.feedback.findIndex((fb) =>
+            (fb as { messageRefId?: string }).messageRefId === body.messageRefId
+          );
+          if (idx === -1) throw new Error("Feedback not found");
+          const next = { ...state.feedback[idx] };
+          if (body.archived === false) {
+            delete (next as Record<string, unknown>).archivedAt;
+          } else {
+            (next as Record<string, unknown>).archivedAt = new Date()
+              .toISOString();
+          }
+          const nextFeedback = state.feedback.map((fb, i) =>
+            i === idx ? next : fb
+          );
+          const updated = persistSessionState({
+            ...state,
+            feedback: nextFeedback,
+          });
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              messageRefId: body.messageRefId,
+              archivedAt: (next as { archivedAt?: string }).archivedAt,
+              saved: true,
+              feedbackCount: updated.feedback?.length ?? 0,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (
+        url.pathname === "/" || url.pathname.startsWith("/sessions/") ||
+        url.pathname.startsWith("/simulate") ||
+        url.pathname.startsWith("/debug") ||
+        url.pathname.startsWith("/editor") ||
+        url.pathname.startsWith("/test-bot")
+      ) {
         const body = hasReactBundle()
-          ? simulatorReactHtml(opts.deckPath)
-          : simulatorHtml(opts.deckPath);
+          ? simulatorReactHtml(resolvedDeckPath)
+          : simulatorHtml(resolvedDeckPath);
         return new Response(body, {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
@@ -471,20 +1722,49 @@ export function startWebSocketSimulator(opts: {
 
       if (url.pathname === "/ui/bundle.js") {
         if (!hasReactBundle()) {
-          return new Response("Bundle missing. Run deno task bundle:sim.", {
-            status: 404,
-          });
+          return new Response(
+            "Bundle missing. Run `deno task bundle:sim` (or start with `--bundle`).",
+            { status: 404 },
+          );
         }
         try {
           const data = await Deno.readFile(simulatorBundlePath);
+          const headers = new Headers({
+            "content-type": "application/javascript; charset=utf-8",
+          });
+          // Hint the browser about the external source map since Deno's bundle
+          // output does not embed a sourceMappingURL comment.
+          if (hasReactBundleSourceMap()) {
+            headers.set("SourceMap", "/ui/bundle.js.map");
+          }
+          return new Response(data, { headers });
+        } catch (err) {
+          return new Response(
+            `Failed to read bundle: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            { status: 500 },
+          );
+        }
+      }
+
+      if (url.pathname === "/ui/bundle.js.map") {
+        if (!hasReactBundleSourceMap()) {
+          return new Response(
+            "Source map missing. Run `deno task bundle:sim:sourcemap` (or start with `--bundle --sourcemap`).",
+            { status: 404 },
+          );
+        }
+        try {
+          const data = await Deno.readFile(simulatorBundleSourceMapPath);
           return new Response(data, {
             headers: {
-              "content-type": "application/javascript; charset=utf-8",
+              "content-type": "application/json; charset=utf-8",
             },
           });
         } catch (err) {
           return new Response(
-            `Failed to read bundle: ${
+            `Failed to read source map: ${
               err instanceof Error ? err.message : String(err)
             }`,
             { status: 500 },
@@ -553,6 +1833,11 @@ export function startWebSocketSimulator(opts: {
 
         if (!msg) {
           safeSend({ type: "error", message: "Invalid message" });
+          return;
+        }
+
+        if (msg.type === "testBotSubscribe") {
+          testBotSubscribers.add(socket);
           return;
         }
 
@@ -737,7 +2022,7 @@ export function startWebSocketSimulator(opts: {
 
         try {
           const result = await runDeck({
-            path: opts.deckPath,
+            path: resolvedDeckPath,
             input: msg.input,
             inputProvided: msg.input !== undefined,
             modelProvider: opts.modelProvider,
@@ -795,9 +2080,11 @@ export function startWebSocketSimulator(opts: {
 
       socket.onclose = () => {
         running = false;
+        testBotSubscribers.delete(socket);
       };
       socket.onerror = () => {
         running = false;
+        testBotSubscribers.delete(socket);
       };
 
       return response;
@@ -824,7 +2111,8 @@ function parseIncoming(
       if (
         parsed.type === "run" || parsed.type === "ping" ||
         parsed.type === "feedback" || parsed.type === "loadSession" ||
-        parsed.type === "notes" || parsed.type === "conversationScore"
+        parsed.type === "notes" || parsed.type === "conversationScore" ||
+        parsed.type === "testBotSubscribe"
       ) {
         return parsed as IncomingMessage;
       }
@@ -844,13 +2132,34 @@ function hasReactBundle(): boolean {
   }
 }
 
+function hasReactBundleSourceMap(): boolean {
+  try {
+    const stat = Deno.statSync(simulatorBundleSourceMapPath);
+    return stat.isFile;
+  } catch {
+    return false;
+  }
+}
+
 function simulatorReactHtml(deckPath: string): string {
   const deckLabel = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const bundleStamp = (() => {
+    try {
+      const stat = Deno.statSync(simulatorBundlePath);
+      const mtime = stat.mtime?.getTime();
+      return typeof mtime === "number" ? String(mtime) : "";
+    } catch {
+      return "";
+    }
+  })();
+  const bundleUrl = bundleStamp
+    ? `/ui/bundle.js?v=${bundleStamp}`
+    : "/ui/bundle.js";
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Gambit Simulator</title>
+  <title>Gambit Debug</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { margin: 0; background: #f3f5f9; }
@@ -859,11 +2168,11 @@ function simulatorReactHtml(deckPath: string): string {
 </head>
 <body>
   <div id="root"></div>
-  <span style="display:none">Gambit WebSocket Simulator</span>
+  <span style="display:none">Gambit WebSocket Debug</span>
   <script>
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(deckLabel)};
   </script>
-  <script type="module" src="/ui/bundle.js"></script>
+  <script type="module" src="${bundleUrl}"></script>
 </body>
 </html>`;
 }
@@ -873,7 +2182,7 @@ function simulatorHtml(deckPath: string): string {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Gambit WebSocket Simulator</title>
+  <title>Gambit WebSocket Debug</title>
   <style>
     body { font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: linear-gradient(135deg, #eaf2ff, #f7f9ff); color: #0f172a; }
     .shell { max-width: 1080px; margin: 24px auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -968,7 +2277,7 @@ function simulatorHtml(deckPath: string): string {
     <div class="card">
       <header>
         <div>
-          <h1>Gambit WebSocket Simulator</h1>
+          <h1>Gambit WebSocket Debug</h1>
           <div class="meta">Deck: <code>${deckPath}</code> · Socket: <code>/websocket</code></div>
         </div>
         <div class="header-actions">
@@ -1547,6 +2856,14 @@ function simulatorHtml(deckPath: string): string {
             return "model.result " + (ev.model ?? "(default)") +
               " · finish=" + finish + " · toolCalls=" + toolCalls;
           }
+          case "message.user": {
+            const content = ev?.message?.content;
+            const text = content === null || content === undefined
+              ? ""
+              : String(content);
+            const snippet = text.length > 120 ? text.slice(0, 117) + "..." : text;
+            return "user message" + (snippet ? " · " + snippet : "");
+          }
           case "monolog": {
             const text = (() => {
               if (typeof ev.content === "string") return ev.content;
@@ -1565,6 +2882,7 @@ function simulatorHtml(deckPath: string): string {
 
       function traceRole(ev) {
         if (!ev || typeof ev !== "object") return "trace";
+        if (ev.type === "message.user") return "user";
         if (ev.type === "monolog") return "monolog";
         const name = typeof ev.name === "string" ? ev.name : undefined;
         const deckPath = typeof ev.deckPath === "string" ? ev.deckPath : undefined;
@@ -1872,7 +3190,8 @@ function simulatorHtml(deckPath: string): string {
 
       function updateModeHint() {
         if (initPanel.hidden) {
-          modeHint.textContent = "Deck has no input schema; only user messages will be sent.";
+          modeHint.textContent =
+            "Deck has no input schema; send a message or leave blank to let the assistant start.";
           return;
         }
         if (latestState) {
@@ -2102,7 +3421,7 @@ function simulatorHtml(deckPath: string): string {
         if (hasMessage) {
           addBubble(transcript, "user", text);
           addEvent("user", text);
-        } else if (payload.input === undefined) {
+        } else if (payload.input === undefined && hasState) {
           addEvent("error", "Nothing to send. Provide init input or a message.");
           return;
         }

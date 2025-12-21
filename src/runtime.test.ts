@@ -324,6 +324,45 @@ Deno.test("LLM deck completes via gambit_respond", async () => {
   assertEquals(result, { payload: "ok" });
 });
 
+Deno.test("root deck with object inputSchema accepts --message without --init", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "object-input.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ query: z.string().optional() }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: undefined,
+    inputProvided: false,
+    initialUserMessage: "pipeline recap",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(result, "ok");
+});
+
 Deno.test("LLM deck gambit_respond propagates status and message", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
