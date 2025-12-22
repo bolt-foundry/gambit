@@ -9,6 +9,7 @@ Per-example docs:
 - [handlers_ts](./examples/handlers_ts.md)
 - [internal_monolog](./examples/internal_monolog.md)
 - [schema_form](./examples/schema_form.md)
+- [cold_emailer](./examples/cold_emailer.md)
 
 Notes:
 

@@ -4,7 +4,7 @@ How Gambit runs decks and keeps them safe/observable.
 
 ## Guardrails and flow
 
-- Defaults: `maxDepth=3`, `maxPasses=3`, `timeoutMs≈120s`; override per deck
+- Defaults: `maxDepth=3`, `maxPasses=10`, `timeoutMs≈120s`; override per deck
   with `guardrails`.
 - Compute vs LLM: a deck with `modelParams` runs as LLM; otherwise it must
   expose `run`/`execute` for compute.

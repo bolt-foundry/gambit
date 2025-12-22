@@ -1,6 +1,6 @@
 export const DEFAULT_GUARDRAILS = {
   maxDepth: 3,
-  maxPasses: 3,
+  maxPasses: 10,
   timeoutMs: 120_000,
 } as const;
 
