@@ -2098,8 +2098,7 @@ function filterFileTree(nodes: FileTreeNode[], query: string) {
     .filter((node): node is FileTreeNode => Boolean(node));
 }
 
-function EditorApp(props: { onNavigateToSimulator: () => void }) {
-  const { onNavigateToSimulator } = props;
+function EditorApp() {
   const allowedExtensions = useMemo(
     () => [".md", ".ts", ".tsx"],
     [],
@@ -3353,32 +3352,6 @@ function EditorApp(props: { onNavigateToSimulator: () => void }) {
                     : fileStatus === "error"
                     ? "Save failed"
                     : "Idle"}
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedFile) {
-                        const nextRoot = pathDirname(selectedFile);
-                        setRootInput(nextRoot);
-                        loadFiles(nextRoot);
-                        updateConfig({
-                          ...config,
-                          activeDeckPath: selectedFile,
-                          rootPath: nextRoot,
-                        });
-                      }
-                    }}
-                    className={classNames(
-                      "ghost-btn",
-                      config.activeDeckPath === selectedFile && "active",
-                    )}
-                  >
-                    Set as active deck
-                  </button>
-                  <button type="button" onClick={onNavigateToSimulator}>
-                    Open debug
-                  </button>
                 </div>
               </>
             )
@@ -4669,11 +4642,7 @@ function App() {
                   )}
               />
             )
-            : (
-              <EditorApp
-                onNavigateToSimulator={() => navigate(basePath)}
-              />
-            )}
+            : <EditorApp />}
         </div>
       </div>
     </>
