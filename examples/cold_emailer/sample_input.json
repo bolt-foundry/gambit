@@ -1,0 +1,21 @@
+{
+  "name": "Randall Bennett",
+  "details": "Co-founder at Bolt Foundry. Reaching out about PostHog and product analytics.",
+  "sender": "James@PostHog",
+  "products": [
+    "Product analytics",
+    "Session replay",
+    "Feature flags",
+    "Surveys",
+    "Data warehouse",
+    "Heatmaps",
+    "Funnels",
+    "Retention"
+  ],
+  "voiceOptions": [
+    "founder-to-founder",
+    "casual concise",
+    "technical direct",
+    "warm consultative"
+  ]
+}

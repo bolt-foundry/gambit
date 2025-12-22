@@ -121,7 +121,7 @@ export default defineDeck({
 
 ## Guardrails and defaults
 
-- Defaults: `maxDepth=3`, `maxPasses=3`, `timeout≈120s`; override per deck via
+- Defaults: `maxDepth=3`, `maxPasses=10`, `timeout≈120s`; override per deck via
   `[guardrails]` or `guardrails` field.
 - Busy/idle handlers fire after `delayMs` (default 800ms) and optionally repeat
   with `repeatMs`.

@@ -1,0 +1,10 @@
+{
+  "schema": "CREATE TABLE patients (patient_id TEXT PRIMARY KEY, name TEXT, dob TEXT, email TEXT, status TEXT); CREATE TABLE tests (test_id TEXT PRIMARY KEY, test_name TEXT, ordered_at TEXT); CREATE TABLE tests_patients_active_results (patient_id TEXT, test_id TEXT, result TEXT, status TEXT, recorded_at TEXT, PRIMARY KEY (patient_id, test_id));",
+  "lookup": {
+    "name": "Ada Lovelace",
+    "dob": "1815-12-10"
+  },
+  "updateField": "test_id",
+  "updateValue": "12345",
+  "callingContext": "Simulated follow-up workflow"
+}
