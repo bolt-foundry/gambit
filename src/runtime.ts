@@ -391,7 +391,7 @@ async function runLlmDeck(
   } = ctx;
   const actionCallId = randomId("action");
   const start = performance.now();
-  const respondEnabled = Boolean(deck.respond);
+  const respondEnabled = Boolean(deck.syntheticTools?.respond);
 
   const systemPrompt = buildSystemPrompt(deck);
 
@@ -819,7 +819,7 @@ async function handleToolCall(
     idle?: IdleController;
   },
 ): Promise<ToolCallResult> {
-  const action = ctx.parentDeck.actionDecks.find((a) => a.name === call.name);
+  const action = ctx.parentDeck.actions.find((a) => a.name === call.name);
   const source = {
     deckPath: ctx.parentDeck.path,
     actionName: action?.name ?? call.name,
@@ -1483,7 +1483,7 @@ function sanitizeMessage(msg: ModelMessage): ModelMessage {
 
 async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {
   const defs: Array<ToolDefinition> = [];
-  if (deck.respond) {
+  if (deck.syntheticTools?.respond) {
     defs.push({
       type: "function",
       function: {
@@ -1503,7 +1503,7 @@ async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {
       },
     });
   }
-  for (const action of deck.actionDecks) {
+  for (const action of deck.actions) {
     const child = await loadDeck(action.path, deck.path);
     ensureSchemaPresence(child, false);
     const schema = child.inputSchema!;

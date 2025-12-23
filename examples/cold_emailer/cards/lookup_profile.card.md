@@ -1,7 +1,7 @@
 +++
 label = "lookup_profile_card"
 
-[[actionDecks]]
+[[actions]]
 name = "lookup_profile"
 path = "../lookup_profile.deck.ts"
 description = "Return demo profile data for the recipient."

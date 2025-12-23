@@ -153,7 +153,7 @@ async function buildGambitActionTools(deck: LoadedDeck): Promise<{
   const toolNameSet = new Set<string>();
   const actionPathByName = new Map<string, string>();
 
-  for (const action of deck.actionDecks) {
+  for (const action of deck.actions) {
     const child = await loadDeck(action.path, deck.path);
     if (!child.inputSchema || !child.outputSchema) {
       throw new Error(

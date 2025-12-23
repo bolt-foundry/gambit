@@ -2,14 +2,13 @@
 label = "monolog_child"
 modelParams = { model = "openai/gpt-4o", temperature = 0 }
 guardrails = { maxPasses = 200 }
-actionDecks = [
+syntheticTools = { respond = true }
+actions = [
   { name = "lookup_fact", path = "./lookup_fact.deck.ts", description = "Return a short factoid to help answer the question." },
 ]
 inputSchema = "./schemas/child_input.zod.ts"
 outputSchema = "./schemas/child_output.zod.ts"
 +++
-
-![respond](gambit://respond)
 
 You are an internal helper. Work in explicit phases and never skip or reorder
 them:

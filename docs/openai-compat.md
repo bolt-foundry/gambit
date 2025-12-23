@@ -2,13 +2,13 @@
 
 Gambit can act as a drop-in-ish wrapper around the OpenAI Chat Completions
 request/response shape, while still letting you point at a Gambit deck for
-system prompt + deck-defined action decks.
+system prompt + deck-defined actions.
 
 This is useful when you already have code that constructs Chat Completions
 requests and you want to:
 
 - keep the same request shape (`{ model, messages, tools, ... }`)
-- optionally execute _deck-defined_ tools (Gambit action decks)
+- optionally execute _deck-defined_ tools (Gambit actions)
 - return a full OpenAI-shaped `chat.completion` response object
 
 ## API
@@ -49,9 +49,9 @@ Gambit will ensure the deck system prompt is present.
 
 ## Tool call behavior (deck tools vs external tools)
 
-Gambit only executes tool calls that match the deck’s action decks:
+Gambit only executes tool calls that match the deck’s actions:
 
-- If the model requests a tool call whose `name` matches a deck action deck,
+- If the model requests a tool call whose `name` matches a deck action,
   `chatCompletionsWithDeck` runs the child deck and appends a `tool` message
   with the result, then continues the loop.
 - If the model requests any tool call that is _not_ a deck action, Gambit does
@@ -72,7 +72,7 @@ await chatCompletionsWithDeck({
 ### Name collisions
 
 If you provide external `tools` in the request and an external tool has the same
-name as a deck action deck, Gambit throws a startup error (ambiguous executor).
+name as a deck action, Gambit throws a startup error (ambiguous executor).
 
 ## Response extras
 

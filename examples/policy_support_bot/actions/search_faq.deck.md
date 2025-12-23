@@ -1,11 +1,10 @@
 +++
 label = "search_faq"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
+syntheticTools = { respond = true }
 inputSchema = "../schemas/search_faq_input.zod.ts"
 outputSchema = "../schemas/search_faq_output.zod.ts"
 +++
-
-![respond](gambit://respond)
 
 You are the AcmeFlow FAQ retrieval assistant. Given a user question, read the
 embedded knowledge base and return the best-matching FAQ entries.

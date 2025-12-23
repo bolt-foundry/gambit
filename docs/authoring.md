@@ -6,20 +6,16 @@ Audience: new deck authors who want to build runnable Gambit assistants quickly.
 
 - Decks are single units of work. They can be LLM-powered (via `modelParams`) or
   compute-only (via `run`/`execute`).
-- Cards are reusable prompt fragments. Embedding cards merges their deck
-  references (action/test/grader) and schema fragments into the parent deck.
-- Action decks are child decks exposed as model tools. Names must match
+- Cards are reusable prompt fragments. Embedding cards merges their actions and
+  schema fragments into the deck.
+- Actions are child decks exposed as model tools. Names must match
   `^[A-Za-z_][A-Za-z0-9_]*$` and avoid the `gambit_` prefix (reserved).
-- Persona/test decks may accept free-form user turns. Use the `acceptsUserTurns`
-  flag to control this behavior: root decks default to `true`, while action
-  decks default to `false`. Set it explicitly to `true` for persona/bot decks or
-  to `false` for workflow-only decks.
 
 ## Pick a format
 
 - Markdown deck/card: great for quick prompt-first flows. Front matter declares
-  label/model/actionDecks/testDecks/graderDecks/handlers; body is the prompt.
-  Embeds via image syntax pull in cards or special markers.
+  label/model/actions/handlers; body is the prompt. Embeds via image syntax pull
+  in cards or special markers.
 - TypeScript deck/card: best when you need compute logic or co-locate schemas.
   Export `defineDeck`/`defineCard` with Zod schemas and a `run`/`execute` for
   compute decks.
@@ -67,34 +63,23 @@ export default defineDeck({
 - LLM outputs are validated against `outputSchema`; compute decks validate
   returned payloads as well.
 
-## Action decks, test decks, grader decks
+## Actions (tools)
 
-- Add action decks in front matter or TS definitions:
-  `actionDecks = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
-- Action decks defined on embedded cards are merged into the deck; duplicates
-  are overridden by the deck’s own entries.
+- Add actions in front matter or TS definitions:
+  `actions = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
+- Actions defined on embedded cards are merged into the deck; duplicates are
+  overridden by the deck’s own actions.
 - In compute decks, call child decks with `ctx.spawnAndWait({ path, input })`.
-- In LLM decks, the model chooses action decks via tool calls. Provide clear
+- In LLM decks, the model chooses actions via tool calls. Provide clear
   descriptions so the model routes correctly.
-- `testDecks` describe persona decks (synthetic users/bots). Each entry points
-  to a deck that produces user turns/scenarios—use them for automated QA,
-  persona-vs-workflow simulations, or even bot-vs-bot runs.
-- `graderDecks` describe calibration decks that score transcripts/artifacts. The
-  simulator Calibrate page will run these decks against stored runs.
-- Configure `acceptsUserTurns` alongside these references:
-  - Markdown roots default to `true`; TypeScript decks default to `false`
-    everywhere. Set it to `false` for any workflow deck that should never accept
-    user turns (regardless of how it's run).
-  - Persona/test decks should set `acceptsUserTurns = true` so they can receive
-    messages even when invoked as non-root bots.
 
 ## Synthetic tools and handlers
 
 - `gambit_init`: injected automatically when `--init` is provided; carries the
   raw input as the first tool result.
-- `gambit_respond`: enable by inserting the `![respond](gambit://respond)`
-  marker in Markdown decks (or `respond: true` in TypeScript). Required for LLM
-  decks finish via a structured envelope:
+- `gambit_respond`: enable by setting `syntheticTools.respond = true` (or
+  `![...](gambit://respond)` in Markdown). Required for LLM decks that should
+  finish via a structured envelope:
   `{ status?, payload, message?, code?, meta? }`.
 - `gambit_complete`: emitted by child actions and handled errors to wrap their
   results for the parent.
@@ -108,7 +93,7 @@ export default defineDeck({
   `![behavior](./cards/behavior.card.md)`. Special markers: `gambit://init`
   hints init tool, `gambit://respond` injects respond instructions.
 - Cards can also be TS files exported with `defineCard`. They may contain
-  action/test/grader deck references and schema fragments, but no handlers.
+  actions and schema fragments, but no handlers.
 
 ## Running and debugging
 
@@ -145,7 +130,7 @@ export default defineDeck({
 
 - Examples: `examples/hello_world.deck.md` (LLM),
   `examples/agent_with_typescript/` (Markdown + TS action),
-  `examples/agent_with_multi_actions/` (routing with multiple action decks),
+  `examples/agent_with_multi_actions/` (routing with multiple tools),
   `examples/handlers_*` (busy/idle/error handlers).
 - Hourglass prompting (context engineering) best practices: `docs/hourglass.md`.
 - Prompt structuring: `docs/hourglass.md`.
