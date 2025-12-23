@@ -10,6 +10,7 @@ Per-example docs:
 - [internal_monolog](./examples/internal_monolog.md)
 - [schema_form](./examples/schema_form.md)
 - [cold_emailer](./examples/cold_emailer.md)
+- [voice_front_desk](./examples/voice_front_desk.md)
 
 Notes:
 
