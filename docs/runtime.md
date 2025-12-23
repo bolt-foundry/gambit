@@ -10,8 +10,8 @@ How Gambit runs decks and keeps them safe/observable.
   expose `run`/`execute` for compute.
 - Non-root decks must declare both `inputSchema` and `outputSchema`; roots allow
   looser IO but should still use schemas.
-- Child calls use `actions` (LLM tool calls) or `spawnAndWait` in compute decks;
-  names must avoid the `gambit_` prefix.
+- Child calls use `actionDecks` (LLM tool calls) or `spawnAndWait` in compute
+  decks; names must avoid the `gambit_` prefix.
 - Outputs are validated against `outputSchema`. Root defaults to string-ish
   output if no schema is present; non-root always validates.
 
@@ -20,8 +20,8 @@ How Gambit runs decks and keeps them safe/observable.
 - `gambit_init`: sent once when `--init` is provided; payload is the raw input.
   Useful for assistant-first flows so the model can read input without a user
   turn.
-- `gambit_respond`: enable with `syntheticTools.respond=true` (or
-  `gambit://respond` marker in Markdown). Required for LLM decks that should
+- `gambit_respond`: enable with the `gambit://respond` marker in Markdown (or
+  `respond: true` in TypeScript decks). Required for LLM decks that should
   finish with a structured envelope
   `{ payload, status?, message?, code?, meta? }`.
 - `gambit_complete`: emitted automatically for child completions and handled

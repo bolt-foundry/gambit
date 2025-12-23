@@ -1,7 +1,7 @@
 +++
 label = "echo_input_card"
 
-[[actions]]
+[[actionDecks]]
 name = "echo_input"
 path = "../decks/echo_input.deck.ts"
 description = "Echo back the provided text payload."

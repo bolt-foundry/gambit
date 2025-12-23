@@ -14,11 +14,13 @@ import {
   loadMarkdownDeck,
 } from "./markdown.ts";
 import type {
-  ActionDefinition,
+  ActionDeckDefinition,
   CardDefinition,
   DeckDefinition,
+  GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
+  TestDeckDefinition,
 } from "./types.ts";
 
 const logger = console;
@@ -28,20 +30,40 @@ function toFileUrl(p: string): string {
   return path.toFileUrl(abs).href;
 }
 
-function normalizeActions(
-  actions: DeckDefinition["actions"] | CardDefinition["actions"],
+function normalizeActionDecks(
+  actions:
+    | DeckDefinition["actionDecks"]
+    | CardDefinition["actionDecks"]
+    | DeckDefinition["actions"]
+    | CardDefinition["actions"],
   basePath?: string,
-): Array<ActionDefinition> {
+): Array<ActionDeckDefinition> {
   if (!actions) return [];
   return actions.map((a) => ({
-    name: a.name,
+    ...a,
     path: basePath ? path.resolve(path.dirname(basePath), a.path) : a.path,
-    description: a.description,
-    label: (a as { label?: string }).label,
   }));
 }
 
-function checkReserved(action: ActionDefinition) {
+function normalizeCompanionDecks<T extends { path: string }>(
+  decks:
+    | ReadonlyArray<T>
+    | DeckDefinition["testDecks"]
+    | DeckDefinition["graderDecks"]
+    | CardDefinition["testDecks"]
+    | CardDefinition["graderDecks"],
+  basePath?: string,
+): Array<T> {
+  if (!decks) return [];
+  return decks.map((deck) => ({
+    ...deck,
+    path: basePath
+      ? path.resolve(path.dirname(basePath), deck.path)
+      : deck.path,
+  })) as Array<T>;
+}
+
+function checkReserved(action: ActionDeckDefinition) {
   if (
     action.name.startsWith(RESERVED_TOOL_PREFIX) &&
     action.name !== GAMBIT_TOOL_INIT &&
@@ -75,8 +97,6 @@ async function loadCardInternal(
       `Card/embed cycle detected: ${[...stack, resolved].join(" -> ")}`,
     );
   }
-  const nextStack = [...stack, resolved];
-
   const mod = await import(toFileUrl(resolved));
   const card = mod.default;
   if (!isCardDefinition(card)) {
@@ -89,22 +109,34 @@ async function loadCardInternal(
   }
   const cardLabel = card.label;
 
-  const embeds = card.embeds ?? [];
-  const embeddedCards: Array<LoadedCard> = [];
-  for (const embed of embeds) {
-    const loaded = await loadCard(embed, resolved, nextStack);
-    embeddedCards.push(loaded);
+  const actionDecks = normalizeActionDecks(
+    card.actionDecks ?? card.actions,
+    resolved,
+  );
+  if (!card.actionDecks && card.actions?.length) {
+    logger.warn(
+      `[gambit] card at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
+    );
   }
-
-  const actions = normalizeActions(card.actions, resolved);
-  actions.forEach(checkReserved);
+  const testDecks = normalizeCompanionDecks<TestDeckDefinition>(
+    card.testDecks,
+    resolved,
+  );
+  const graderDecks = normalizeCompanionDecks<GraderDeckDefinition>(
+    card.graderDecks,
+    resolved,
+  );
+  actionDecks.forEach(checkReserved);
   const { label: _l, ...rest } = card as CardDefinition;
   return {
     ...rest,
     label: cardLabel,
-    actions,
+    actionDecks,
+    actions: actionDecks,
+    testDecks,
+    graderDecks,
     path: resolved,
-    cards: embeddedCards,
+    cards: [],
   };
 }
 
@@ -140,27 +172,28 @@ export async function loadDeck(
 
   const deckLabel = deck.label;
 
-  const cardPaths = deck.embeds ?? [];
   const cards: Array<LoadedCard> = [];
-  for (const cardPath of cardPaths) {
-    const loaded = await loadCard(cardPath, resolved, [resolved]);
-    cards.push(loaded);
-  }
 
-  const mergedActions: Record<string, ActionDefinition> = {};
+  const mergedActions: Record<string, ActionDeckDefinition> = {};
   const allCards = flattenCards(cards);
   for (const card of allCards) {
-    for (const action of card.actions ?? []) {
+    for (const action of card.actionDecks ?? []) {
       checkReserved(action);
       mergedActions[action.name] = action;
     }
   }
-  for (const action of normalizeActions(deck.actions, resolved)) {
+  const deckActionDecks = deck.actionDecks ?? deck.actions;
+  if (!deck.actionDecks && deck.actions?.length) {
+    logger.warn(
+      `[gambit] deck at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
+    );
+  }
+  for (const action of normalizeActionDecks(deckActionDecks, resolved)) {
     checkReserved(action);
     mergedActions[action.name] = action;
   }
 
-  const actions = Object.values(mergedActions);
+  const actionDecks = Object.values(mergedActions);
 
   let inputSchema = deck.inputSchema;
   let outputSchema = deck.outputSchema;
@@ -230,12 +263,21 @@ export async function loadDeck(
     label: deckLabel,
     path: resolved,
     cards: allCards,
-    actions,
+    actionDecks,
+    actions: actionDecks,
+    testDecks: normalizeCompanionDecks<TestDeckDefinition>(
+      deck.testDecks,
+      resolved,
+    ),
+    graderDecks: normalizeCompanionDecks<GraderDeckDefinition>(
+      deck.graderDecks,
+      resolved,
+    ),
     inputSchema,
     outputSchema,
     executor,
     handlers,
-    syntheticTools: deck.syntheticTools,
+    respond: deck.respond,
   };
 }
 

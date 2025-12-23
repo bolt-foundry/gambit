@@ -1,13 +1,13 @@
 # Policy-Aware Support Bot
 
 This example (located at `packages/gambit/examples/policy_support_bot/`) shows
-how to combine Markdown decks and compute actions to build a refusal-first
+how to combine Markdown decks and compute action decks to build a refusal-first
 support bot grounded entirely in a curated FAQ.
 
 Key ideas:
 
 1. **FAQ ingestion** – `cards/faq_knowledge.card.md` is the canonical knowledge
-   base. The Markdown action `actions/search_faq.deck.md` reads that card
+   base. The Markdown action deck `actions/search_faq.deck.md` reads that card
    directly, selects the best entries, and emits structured matches with manual
    confidence scores (no external vector store required).
 2. **Policy-aware orchestration** – `policy_support_bot.deck.md` embeds persona,

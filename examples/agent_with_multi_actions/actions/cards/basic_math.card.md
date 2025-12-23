@@ -1,7 +1,7 @@
 +++
 label = "basic_math_card"
 
-[[actions]]
+[[actionDecks]]
 name = "basic_math"
 path = "../decks/basic_math.deck.ts"
 description = "Perform basic arithmetic (add, subtract, multiply, divide)."
