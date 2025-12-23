@@ -155,7 +155,7 @@ async function buildDeckActionTools(deckPath: string): Promise<{
   const tools: Array<ToolDefinition> = [];
   const actionPathsByName: Record<string, string> = {};
 
-  for (const action of deck.actions) {
+  for (const action of deck.actionDecks) {
     const child = await loadDeck(action.path, deck.path);
     if (!child.inputSchema || !child.outputSchema) {
       throw new Error(

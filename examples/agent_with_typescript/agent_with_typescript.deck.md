@@ -1,11 +1,12 @@
 +++
 label = "agent_with_typescript"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-actions = [
+actionDecks = [
   { name = "get_time", path = "./get_time.deck.ts", description = "Return the current ISO timestamp." },
 ]
-embeds = ["./tooling.card.md"]
 +++
+
+![tooling](./tooling.card.md)
 
 A tiny agent that mixes a Markdown deck with a TypeScript action.
 

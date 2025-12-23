@@ -1,10 +1,11 @@
 +++
 label = "voice_critic"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0.2 }
-syntheticTools = { respond = true }
 inputSchema = "./schemas/voice_critic_input.zod.ts"
 outputSchema = "./schemas/voice_critic_output.zod.ts"
 +++
+
+![respond](gambit://respond)
 
 You are a voice critic. Your job is to identify if the draft feels stiff,
 corporate, or corny and provide concrete fixes.

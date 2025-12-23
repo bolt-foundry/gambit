@@ -43,7 +43,7 @@ Deno.test("renderDeck prepends deck system prompt and merges deck tools", async 
       label: "root",
       body: "Deck system prompt.",
       modelParams: { model: "deck-model", temperature: 0 },
-      actions: [{ name: "child", path: "${childPath}" }],
+      actionDecks: [{ name: "child", path: "${childPath}" }],
     });
     `,
   );
@@ -128,7 +128,7 @@ Deno.test("renderDeck rejects tool name collisions with deck actions", async () 
     export default defineDeck({
       label: "root",
       modelParams: { model: "deck-model" },
-      actions: [{ name: "dup", path: "${childPath}" }],
+      actionDecks: [{ name: "dup", path: "${childPath}" }],
     });
     `,
   );

@@ -1,7 +1,7 @@
 +++
 label = "log_revision_plan_card"
 
-[[actions]]
+[[actionDecks]]
 name = "log_revision_plan"
 path = "../log_revision_plan.deck.ts"
 description = "Log the revision plan derived from the critique."

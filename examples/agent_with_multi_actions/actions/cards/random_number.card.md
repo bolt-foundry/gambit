@@ -1,7 +1,7 @@
 +++
 label = "random_number_card"
 
-[[actions]]
+[[actionDecks]]
 name = "random_number"
 path = "../decks/random_number.deck.ts"
 description = "Generate a random integer (optionally bounded)."
