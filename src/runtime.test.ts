@@ -295,7 +295,7 @@ Deno.test("LLM deck completes via gambit_respond", async () => {
       inputSchema: z.string(),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
-      syntheticTools: { respond: true },
+      respond: true,
     });
     `,
   );
@@ -377,7 +377,7 @@ Deno.test("LLM deck gambit_respond propagates status and message", async () => {
       inputSchema: z.string(),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
-      syntheticTools: { respond: true },
+      respond: true,
     });
     `,
   );
@@ -1281,167 +1281,6 @@ Deno.test("non-root missing schemas fails load", async () => {
   );
 });
 
-Deno.test("deck.actions merge overrides card actions", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
-
-  await writeTempDeck(
-    dir,
-    "card.card.ts",
-    `
-    import { defineCard } from "${modHref}";
-    export default defineCard({
-      actions: [{ name: "from_card", path: "./child.deck.ts", description: "card" }]
-    });
-    `,
-  );
-
-  const rootPath = await writeTempDeck(
-    dir,
-    "root.deck.ts",
-    `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-      actions: [
-        { name: "from_card", path: "./child.deck.ts", description: "deck override" },
-        { name: "from_deck", path: "./child.deck.ts", description: "deck only" }
-      ],
-      modelParams: { model: "test-model" },
-      embeds: ["./card.card.ts"]
-    });
-    `,
-  );
-
-  // child deck for schema validation
-  await writeTempDeck(
-    dir,
-    "child.deck.ts",
-    `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.object({ text: z.string() }),
-      outputSchema: z.string(),
-      run(ctx: { input: { text: string } }) {
-        return ctx.input.text;
-      }
-    });
-    `,
-  );
-
-  const loaded = await runDeck({
-    path: rootPath,
-    input: "hello",
-    modelProvider: dummyProvider,
-    isRoot: true,
-  });
-
-  // dummy provider returns "dummy" so root output will be validated as string
-  assertEquals(typeof loaded, "string");
-});
-
-Deno.test("card schema fragments merge into deck schemas", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
-
-  await writeTempDeck(
-    dir,
-    "card.card.ts",
-    `
-    import { defineCard } from "${modHref}";
-    import { z } from "zod";
-    export default defineCard({
-      inputFragment: z.object({ extra: z.string() }),
-      outputFragment: z.object({ note: z.string() })
-    });
-    `,
-  );
-
-  const rootPath = await writeTempDeck(
-    dir,
-    "root.deck.ts",
-    `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.object({ text: z.string() }),
-      outputSchema: z.object({ result: z.string() }),
-      actions: [],
-      embeds: ["./card.card.ts"],
-      run(ctx: { input: { text: string, extra: string } }) {
-        return { result: ctx.input.text, note: ctx.input.extra };
-      }
-    });
-    `,
-  );
-
-  const result = await runDeck({
-    path: rootPath,
-    input: { text: "hi", extra: "more" },
-    modelProvider: dummyProvider,
-    isRoot: true,
-  });
-
-  assertEquals(typeof result, "object");
-});
-
-Deno.test("card embed cycles are rejected", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
-
-  await writeTempDeck(
-    dir,
-    "a.card.ts",
-    `
-    import { defineCard } from "${modHref}";
-    export default defineCard({
-      embeds: ["./b.card.ts"]
-    });
-    `,
-  );
-
-  await writeTempDeck(
-    dir,
-    "b.card.ts",
-    `
-    import { defineCard } from "${modHref}";
-    export default defineCard({
-      embeds: ["./a.card.ts"]
-    });
-    `,
-  );
-
-  const rootPath = await writeTempDeck(
-    dir,
-    "root.deck.ts",
-    `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-      embeds: ["./a.card.ts"],
-      modelParams: { model: "test-model" },
-    });
-    `,
-  );
-
-  await assertRejects(
-    () =>
-      runDeck({
-        path: rootPath,
-        input: "hello",
-        modelProvider: dummyProvider,
-        isRoot: true,
-      }),
-    Error,
-    "cycle",
-  );
-});
-
 Deno.test("markdown deck merges actions from embedded cards", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -1466,7 +1305,7 @@ Deno.test("markdown deck merges actions from embedded cards", async () => {
     path.join(dir, "nested.card.md"),
     `
 +++
-actions = [{ name = "nested_action", path = "./child.deck.ts" }]
+actionDecks = [{ name = "nested_action", path = "./child.deck.ts" }]
 +++
 
 Nested card body.
@@ -1477,11 +1316,12 @@ Nested card body.
     path.join(dir, "root.card.md"),
     `
 +++
-embeds = ["./nested.card.md"]
-actions = [{ name = "card_action", path = "./child.deck.ts" }]
+actionDecks = [{ name = "card_action", path = "./child.deck.ts" }]
 +++
 
 Root card body.
+
+![Nested card](./nested.card.md)
 `.trim(),
   );
 
@@ -1490,16 +1330,17 @@ Root card body.
     deckPath,
     `
 +++
-embeds = ["./root.card.md"]
-actions = [{ name = "deck_action", path = "./child.deck.ts" }]
+actionDecks = [{ name = "deck_action", path = "./child.deck.ts" }]
 +++
 
 Deck body.
+
+![Root card](./root.card.md)
 `.trim(),
   );
 
   const deck = await loadDeck(deckPath);
-  const actionNames = deck.actions.map((a) => a.name).sort();
+  const actionNames = deck.actionDecks.map((a) => a.name).sort();
 
   assertEquals(actionNames, ["card_action", "deck_action", "nested_action"]);
   assertEquals(deck.cards.length, 2);
@@ -1572,10 +1413,11 @@ Deno.test("markdown card embed cycles are rejected", async () => {
     path.join(dir, "a.card.md"),
     `
 +++
-embeds = ["./b.card.md"]
 +++
 
 A card body.
+
+![B card](./b.card.md)
 `.trim(),
   );
 
@@ -1583,10 +1425,11 @@ A card body.
     path.join(dir, "b.card.md"),
     `
 +++
-embeds = ["./a.card.md"]
 +++
 
 B card body.
+
+![A card](./a.card.md)
 `.trim(),
   );
 
@@ -1596,10 +1439,11 @@ B card body.
     `
 +++
 modelParams = { model = "dummy-model" }
-embeds = ["./a.card.md"]
 +++
 
 Deck with cyclic cards.
+
+![A card](./a.card.md)
 `.trim(),
   );
 
@@ -1654,10 +1498,11 @@ Fragments card body.
 +++
 inputSchema = "./base_input.zod.ts"
 outputSchema = "./base_output.zod.ts"
-embeds = ["./fragments.card.md"]
 +++
 
 Deck body.
+
+![Fragments card](./fragments.card.md)
 `.trim(),
   );
 
@@ -1706,17 +1551,16 @@ Deno.test("cards cannot declare handlers (ts card)", async () => {
 
   const deckPath = await writeTempDeck(
     dir,
-    "root.deck.ts",
+    "root.deck.md",
     `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-      embeds: ["./bad_handlers.card.ts"],
-      modelParams: { model: "dummy-model" }
-    });
-    `,
++++
+modelParams = { model = "dummy-model" }
++++
+
+Deck.
+
+![Bad handlers](./bad_handlers.card.ts)
+`.trim(),
   );
 
   await assertRejects(
@@ -1752,10 +1596,11 @@ Body.
     `
 +++
 modelParams = { model = "dummy-model" }
-embeds = ["./bad.card.md"]
 +++
 
 Deck.
+
+![Bad card](./bad.card.md)
 `.trim(),
   );
 

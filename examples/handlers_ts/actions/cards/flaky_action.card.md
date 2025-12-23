@@ -1,7 +1,7 @@
 +++
 label = "flaky_action_ts_card"
 
-[[actions]]
+[[actionDecks]]
 name = "flaky_action_ts"
 path = "../decks/flaky_action.deck.ts"
 description = "Echoes text but throws when fail=true or text contains 'fail'."

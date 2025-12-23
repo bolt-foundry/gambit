@@ -1,7 +1,7 @@
 +++
 label = "policy_support_bot"
 modelParams = { model = "openai/gpt-4o", temperature = 0 }
-[[actions]]
+[[actionDecks]]
 name = "search_faq"
 path = "./actions/search_faq.deck.md"
 description = "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores."

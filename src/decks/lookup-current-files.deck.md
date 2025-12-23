@@ -1,7 +1,7 @@
 +++
 label = "current files"
 
-[[actions]]
+[[actionDecks]]
 name = "lookup_current_files"
 path = "./lookup-current-files.deck.ts"
 description = "Return the current set of files available to the assistant."
