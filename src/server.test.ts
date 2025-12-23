@@ -106,7 +106,7 @@ Deno.test("websocket simulator exposes schema and defaults", async () => {
     import { z } from "zod";
     export default defineDeck({
       inputSchema: z.object({
-        name: z.string().default("Simbie"),
+        name: z.string().default("CallFlow"),
         mode: z.enum(["a", "b"]).describe("mode selector"),
         age: z.number().optional(),
       }),
@@ -141,7 +141,7 @@ Deno.test("websocket simulator exposes schema and defaults", async () => {
 
   assert(schemaBody.schema);
   assertEquals(schemaBody.schema?.kind, "object");
-  assertEquals(schemaBody.defaults?.name, "Simbie");
+  assertEquals(schemaBody.defaults?.name, "CallFlow");
 
   const readyMsg = await new Promise<Record<string, unknown>>(
     (resolve, reject) => {
@@ -174,7 +174,7 @@ Deno.test("websocket simulator exposes schema and defaults", async () => {
   assertEquals(schema.kind, "object");
   assertEquals(schema.fields?.name?.kind, "string");
   const defaults = readyMsg.defaults as { name?: string };
-  assertEquals(defaults?.name, "Simbie");
+  assertEquals(defaults?.name, "CallFlow");
 });
 
 Deno.test("websocket simulator preserves state and user input", async () => {
