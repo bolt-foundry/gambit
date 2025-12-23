@@ -36,12 +36,20 @@ export type Guardrails = {
 
 export type Label = string;
 
-export type ActionDefinition = {
-  name: string;
+export type DeckReferenceDefinition = {
   path: string;
-  description?: string;
   label?: Label;
+  description?: string;
+  id?: string;
 };
+
+export type ActionDeckDefinition = DeckReferenceDefinition & {
+  name: string;
+};
+
+export type TestDeckDefinition = DeckReferenceDefinition;
+
+export type GraderDeckDefinition = DeckReferenceDefinition;
 
 export type ErrorHandlerConfig = { path: string; label?: Label };
 export type BusyHandlerConfig = {
@@ -73,10 +81,14 @@ export type BaseDefinition = {
   label?: Label;
   inputSchema?: ZodTypeAny;
   outputSchema?: ZodTypeAny;
-  actions?: ReadonlyArray<ActionDefinition>;
-  embeds?: ReadonlyArray<string>;
+  /**
+   * @deprecated Use actionDecks/testDecks/graderDecks instead.
+   */
+  actions?: ReadonlyArray<ActionDeckDefinition>;
+  actionDecks?: ReadonlyArray<ActionDeckDefinition>;
+  testDecks?: ReadonlyArray<TestDeckDefinition>;
+  graderDecks?: ReadonlyArray<GraderDeckDefinition>;
   guardrails?: Partial<Guardrails>;
-  syntheticTools?: { respond?: boolean };
 };
 
 export type DeckDefinition<Input = unknown> = BaseDefinition & {
@@ -87,6 +99,7 @@ export type DeckDefinition<Input = unknown> = BaseDefinition & {
   body?: string;
   run?: DeckExecutor<Input>;
   execute?: DeckExecutor<Input>;
+  respond?: boolean;
 };
 
 export type CardDefinition = BaseDefinition & {
@@ -94,6 +107,7 @@ export type CardDefinition = BaseDefinition & {
   body?: string;
   inputFragment?: ZodTypeAny;
   outputFragment?: ZodTypeAny;
+  respond?: boolean;
 };
 
 export type CompleteEnvelope = {
@@ -183,15 +197,33 @@ export type ModelProvider = {
   }>;
 };
 
-export type LoadedCard = CardDefinition & {
+type WithDeckRefs<T> = Omit<
+  T,
+  "actions" | "actionDecks" | "testDecks" | "graderDecks"
+>;
+
+export type LoadedCard = WithDeckRefs<CardDefinition> & {
   path: string;
   cards?: Array<LoadedCard>;
+  actionDecks: Array<ActionDeckDefinition>;
+  /**
+   * @deprecated Use actionDecks instead.
+   */
+  actions: Array<ActionDeckDefinition>;
+  testDecks: Array<TestDeckDefinition>;
+  graderDecks: Array<GraderDeckDefinition>;
 };
 
-export type LoadedDeck = DeckDefinition & {
+export type LoadedDeck = WithDeckRefs<DeckDefinition> & {
   path: string;
   cards: Array<LoadedCard>;
-  actions: Array<ActionDefinition>;
+  actionDecks: Array<ActionDeckDefinition>;
+  /**
+   * @deprecated Use actionDecks instead.
+   */
+  actions: Array<ActionDeckDefinition>;
+  testDecks: Array<TestDeckDefinition>;
+  graderDecks: Array<GraderDeckDefinition>;
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
   inlineEmbeds?: boolean;

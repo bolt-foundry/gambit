@@ -151,7 +151,7 @@ Deno.test("chatCompletionsWithDeck executes deck tool calls and continues", asyn
       label: "parent",
       modelParams: { model: "ignored" },
       body: "Call the child tool once, then respond.",
-      actions: [{ name: "child", path: "${childPath}" }],
+      actionDecks: [{ name: "child", path: "${childPath}" }],
     });
     `,
   );
@@ -297,7 +297,7 @@ Deno.test("chatCompletionsWithDeck rejects tool name collisions", async () => {
     export default defineDeck({
       label: "root",
       modelParams: { model: "ignored" },
-      actions: [{ name: "dup", path: "${childPath}" }],
+      actionDecks: [{ name: "dup", path: "${childPath}" }],
     });
     `,
   );

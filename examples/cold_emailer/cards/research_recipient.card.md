@@ -1,7 +1,7 @@
 +++
 label = "research_recipient_card"
 
-[[actions]]
+[[actionDecks]]
 name = "research_recipient"
 path = "../research_recipient.deck.md"
 description = "Analyze recipient details and return safe personalization insights."
