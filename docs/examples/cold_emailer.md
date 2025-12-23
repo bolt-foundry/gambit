@@ -12,10 +12,6 @@ Key files
   tone constraints.
 - `examples/cold_emailer/schemas/cold_emailer_input.zod.ts` — input schema with
   `name`, `details`, `sender`, `products`, and optional voice fields.
-- `examples/cold_emailer/tests/buyer_feedback.deck.md` — test deck that
-  simulates a buyer persona’s requests/objections.
-- `examples/cold_emailer/tests/buyer_feedback.deck.md` — test deck that
-  simulates buyer feedback and drives the Test page runs.
 - `examples/cold_emailer/research_recipient.deck.md` — research action deck for
   personalization insights.
 - `examples/cold_emailer/voice_critic.deck.md` — critique action deck for tone

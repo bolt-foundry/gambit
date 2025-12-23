@@ -1,15 +1,12 @@
 export { defineCard, defineDeck } from "./src/definitions.ts";
 export type {
-  ActionDeckDefinition,
+  ActionDefinition,
   CardDefinition,
   DeckDefinition,
-  DeckReferenceDefinition,
   ExecutionContext,
-  GraderDeckDefinition,
   Guardrails,
   JSONValue,
   ModelProvider,
-  TestDeckDefinition,
 } from "./src/types.ts";
 export { runDeck } from "./src/runtime.ts";
 export { chatCompletionsWithDeck } from "./src/openai_compat.ts";

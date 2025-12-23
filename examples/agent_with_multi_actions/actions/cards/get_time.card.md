@@ -1,7 +1,7 @@
 +++
 label = "get_time_card"
 
-[[actionDecks]]
+[[actions]]
 name = "get_time"
 path = "../decks/get_time.deck.ts"
 description = "Return the current ISO timestamp."

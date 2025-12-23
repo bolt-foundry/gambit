@@ -135,7 +135,7 @@ Deck with a child action (calls a TypeScript tool):
 +++
 label = "agent_with_time"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-actionDecks = [
+actions = [
   { name = "get_time", path = "./get_time.deck.ts", description = "Return the current ISO timestamp." },
 ]
 +++
@@ -185,7 +185,7 @@ export default defineDeck({
 
 If you already construct OpenAI Chat Completions-style requests, you can use
 Gambit as a drop-in-ish wrapper that applies a deck prompt and can execute only
-deck-defined tools (action decks).
+deck-defined tools (actions).
 
 ```ts
 import {
@@ -230,7 +230,7 @@ console.log(resp.choices[0].message);
 
 - Swap `modelParams.model` or pass `--model`/`--model-force` to test other
   providers.
-- Add `actionDecks` to a deck and call child decks; use `spawnAndWait` inside
+- Add `actions` to a deck and call child decks; use `spawnAndWait` inside
   compute decks.
 - Use `--stream` and `--verbose` while iterating; pass `--trace <file>` to
   capture JSONL traces.

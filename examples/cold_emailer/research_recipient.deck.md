@@ -1,11 +1,10 @@
 +++
 label = "research_recipient"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0.2 }
+syntheticTools = { respond = true }
 inputSchema = "./schemas/research_input.zod.ts"
 outputSchema = "./schemas/research_output.zod.ts"
 +++
-
-![respond](gambit://respond)
 
 You are a sales research assistant. You only use the provided input; do not
 invent facts or browse.

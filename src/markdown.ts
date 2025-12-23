@@ -11,12 +11,10 @@ import { isCardDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
 import { mergeZodObjects } from "./schema.ts";
 import type {
-  ActionDeckDefinition,
+  ActionDefinition,
   DeckDefinition,
-  GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
-  TestDeckDefinition,
 } from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
@@ -49,61 +47,43 @@ async function maybeLoadSchema(
   return mod.default as ZodTypeAny;
 }
 
-type DeckRef = {
-  path: string;
-  label?: string;
-  description?: string;
-  id?: string;
-};
-
-function normalizeDeckRefs<T extends DeckRef>(
-  refs: unknown,
+function normalizeActions(
+  actions: unknown,
   basePath: string,
-): Array<T> {
-  if (!Array.isArray(refs)) return [];
-  return refs
+): Array<ActionDefinition> {
+  if (!Array.isArray(actions)) return [];
+  return actions
     .filter((a) => a && typeof a === "object")
     .map((a) => {
       const rec = a as Record<string, unknown>;
+      const name = String(rec.name ?? "").trim();
       const p = String(rec.path ?? "").trim();
-      if (!p) {
-        throw new Error("Deck reference must include a path");
+      if (!name || !p) {
+        throw new Error("Action must include name and path");
       }
-      const normalized: Record<string, unknown> = { ...rec };
-      normalized.path = path.resolve(path.dirname(basePath), p);
-      if (typeof rec.description !== "string") delete normalized.description;
-      if (typeof rec.label !== "string") delete normalized.label;
-      if (typeof rec.id !== "string") delete normalized.id;
-      return normalized as T;
+      return {
+        name,
+        path: path.resolve(path.dirname(basePath), p),
+        description: typeof rec.description === "string"
+          ? rec.description
+          : undefined,
+        label: typeof rec.label === "string" ? rec.label : undefined,
+      };
     });
-}
-
-function normalizeActionDecks(
-  entries: unknown,
-  basePath: string,
-): Array<ActionDeckDefinition> {
-  return normalizeDeckRefs<ActionDeckDefinition>(entries, basePath).map(
-    (entry) => {
-      const name = "name" in entry ? String(entry.name ?? "").trim() : "";
-      if (!name) {
-        throw new Error(`Action deck must include a name (${basePath})`);
-      }
-      return { ...entry, name };
-    },
-  );
 }
 
 async function expandEmbedsInBody(args: {
   body: string;
   resolvedPath: string;
   stack: Array<string>;
+  extraEmbeds?: Array<string>;
 }): Promise<{
   body: string;
   embeds: Array<LoadedCard>;
   respond: boolean;
   initHint: boolean;
 }> {
-  const { body, resolvedPath, stack } = args;
+  const { body, resolvedPath, stack, extraEmbeds } = args;
   const regex = /!\[[^\]]*\]\(([^)]+)\)/g;
   const embeds: Array<LoadedCard> = [];
   let respond = false;
@@ -130,6 +110,17 @@ async function expandEmbedsInBody(args: {
   }
 
   out += body.slice(lastIndex);
+
+  if (Array.isArray(extraEmbeds)) {
+    for (const embed of extraEmbeds) {
+      const card = await loadCard(embed, resolvedPath, stack);
+      embeds.push(card);
+      if (card.body) {
+        if (out.trim().length) out += "\n\n";
+        out += card.body;
+      }
+    }
+  }
 
   return { body: out, embeds, respond, initHint };
 }
@@ -168,18 +159,11 @@ export async function loadMarkdownCard(
       `Card at ${resolved} cannot declare handlers (deck-only)`,
     );
   }
-  const hasNewActionField = (attrs as { actionDecks?: unknown }).actionDecks;
-  const legacyActions = (attrs as { actions?: unknown }).actions;
-  const actionDecks = normalizeActionDecks(
-    hasNewActionField ?? legacyActions,
+  const actions = normalizeActions(
+    (attrs as { actions?: unknown }).actions,
     resolved,
   );
-  if (!hasNewActionField && legacyActions) {
-    logger.warn(
-      `[gambit] card at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
-    );
-  }
-  actionDecks.forEach((a) => {
+  actions.forEach((a) => {
     if (
       a.name.startsWith(RESERVED_TOOL_PREFIX) &&
       a.name !== GAMBIT_TOOL_INIT &&
@@ -203,10 +187,14 @@ export async function loadMarkdownCard(
     (attrs as { outputSchema?: unknown }).outputSchema,
     resolved,
   );
+  const extraEmbeds = Array.isArray((attrs as { embeds?: unknown }).embeds)
+    ? Array.from((attrs as { embeds?: Array<string> }).embeds ?? [])
+    : [];
   const replaced = await expandEmbedsInBody({
     body,
     resolvedPath: resolved,
     stack: nextStack,
+    extraEmbeds,
   });
   const cleanedBody = replaced.body;
   const embeddedCards = replaced.embeds;
@@ -215,20 +203,12 @@ export async function loadMarkdownCard(
     kind: "gambit.card",
     path: resolved,
     body: cleanedBody.trim(),
-    actionDecks,
-    actions: actionDecks,
-    testDecks: normalizeDeckRefs<TestDeckDefinition>(
-      (attrs as { testDecks?: unknown }).testDecks,
-      resolved,
-    ),
-    graderDecks: normalizeDeckRefs<GraderDeckDefinition>(
-      (attrs as { graderDecks?: unknown }).graderDecks,
-      resolved,
-    ),
+    actions,
+    embeds: embeddedCards.map((card) => card.path),
     cards: embeddedCards,
     inputFragment,
     outputFragment,
-    respond: replaced.respond,
+    syntheticTools: replaced.respond ? { respond: true } : undefined,
   };
 }
 
@@ -254,20 +234,11 @@ export async function loadMarkdownDeck(
   const deckMeta: Partial<DeckDefinition> =
     (deckAttrs.deck ?? deckAttrs) as DeckDefinition;
 
-  const hasNewActionDecks = (deckMeta as {
-    actionDecks?: unknown;
-  }).actionDecks;
-  const legacyDeckActions = (deckMeta as { actions?: unknown }).actions;
-  const actionDecks = normalizeActionDecks(
-    hasNewActionDecks ?? legacyDeckActions,
+  const actions = normalizeActions(
+    (deckMeta as unknown as { actions?: unknown }).actions,
     resolved,
   );
-  if (!hasNewActionDecks && legacyDeckActions) {
-    logger.warn(
-      `[gambit] deck at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
-    );
-  }
-  actionDecks.forEach((a) => {
+  actions.forEach((a) => {
     if (
       a.name.startsWith(RESERVED_TOOL_PREFIX) &&
       a.name !== GAMBIT_TOOL_INIT &&
@@ -288,6 +259,7 @@ export async function loadMarkdownDeck(
     body,
     resolvedPath: resolved,
     stack: [resolved],
+    extraEmbeds: Array.from(deckMeta.embeds ?? []),
   });
   const cards = replaced.embeds;
 
@@ -303,13 +275,13 @@ export async function loadMarkdownDeck(
   const allCards = flattenCards(cards);
   const cleanedBody = replaced.body;
 
-  const mergedActions: Record<string, ActionDeckDefinition> = {};
+  const mergedActions: Record<string, ActionDefinition> = {};
   for (const card of allCards) {
-    for (const action of card.actionDecks ?? []) {
+    for (const action of card.actions ?? []) {
       mergedActions[action.name] = action;
     }
   }
-  for (const action of actionDecks) {
+  for (const action of actions) {
     mergedActions[action.name] = action;
   }
 
@@ -374,30 +346,25 @@ export async function loadMarkdownDeck(
     }
     : undefined;
 
-  const mergedActionDecks = Object.values(mergedActions);
-
   return {
     kind: "gambit.deck",
     path: resolved,
     body: cleanedBody.trim(),
-    actionDecks: mergedActionDecks,
-    actions: mergedActionDecks,
-    testDecks: normalizeDeckRefs<TestDeckDefinition>(
-      (deckMeta as { testDecks?: unknown }).testDecks,
-      resolved,
-    ),
-    graderDecks: normalizeDeckRefs<GraderDeckDefinition>(
-      (deckMeta as { graderDecks?: unknown }).graderDecks,
-      resolved,
-    ),
+    actions: Object.values(mergedActions),
     cards: allCards,
+    embeds: cards.map((card) => card.path),
     label: deckMeta.label,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
     handlers,
-    respond: replaced.respond || allCards.some((c) => c.respond),
+    syntheticTools: {
+      ...deckMeta.syntheticTools,
+      respond: deckMeta.syntheticTools?.respond ||
+        replaced.respond ||
+        allCards.some((c) => c.syntheticTools?.respond),
+    },
     inlineEmbeds: true,
   };
 }

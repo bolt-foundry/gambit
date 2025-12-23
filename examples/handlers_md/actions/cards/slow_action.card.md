@@ -1,7 +1,7 @@
 +++
 label = "slow_action_card"
 
-[[actionDecks]]
+[[actions]]
 name = "slow_action"
 path = "../decks/slow_action.deck.ts"
 description = "Echoes text after an artificial delay (triggers onBusy)."
