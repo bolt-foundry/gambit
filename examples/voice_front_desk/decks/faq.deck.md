@@ -1,11 +1,15 @@
 +++
 label = "faq_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "frontdesk_faq", path = "../actions/frontdesk_faq.deck.ts", description = "Answer operational front-desk questions." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "frontdesk_faq"
+path = "../actions/frontdesk_faq.deck.ts"
+description = "Answer operational front-desk questions."
 +++
 
 ![faq_behavior](../cards/faq_behavior.card.md)

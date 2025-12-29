@@ -1,11 +1,15 @@
 +++
 label = "insurance_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "insurance_check", path = "../actions/insurance_check.deck.ts", description = "Verify coverage or log new plan details." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "insurance_check"
+path = "../actions/insurance_check.deck.ts"
+description = "Verify coverage or log new plan details."
 +++
 
 ![insurance_behavior](../cards/insurance_behavior.card.md)

@@ -28,7 +28,6 @@ type Args = {
   bundle?: boolean;
   sourcemap?: boolean;
   platform?: string;
-  testBot?: string;
   help?: boolean;
 };
 
@@ -91,7 +90,6 @@ function parseCliArgs(argv: Array<string>): Args {
       "model",
       "model-force",
       "platform",
-      "test-bot",
       "trace",
       "state",
       "port",
@@ -141,7 +139,6 @@ function parseCliArgs(argv: Array<string>): Args {
     bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
     sourcemap: hasNoSourceMapFlag ? false : hasSourceMapFlag ? true : undefined,
     platform: parsed.platform as string | undefined,
-    testBot: parsed["test-bot"] as string | undefined,
     help: Boolean(parsed.help),
   };
 }
@@ -151,7 +148,7 @@ function printUsage() {
     `Usage:
   gambit run [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
   gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--test-bot <path>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
+  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
 
 Flags:
   --init <json|string>    Init payload (when provided, sent via gambit_init)
@@ -163,7 +160,6 @@ Flags:
   --stream                Enable streaming responses
   --verbose               Print trace events to console
   --port <n>              Port for serve (default: 8000)
-  --test-bot <path>       Path to test bot markdown (serve/test-bot UI)
   --watch                 Restart server on file changes (serve)
   --bundle                Force auto-bundling (serve; default)
   --no-bundle             Disable auto-bundling for simulator UI (serve)
@@ -302,7 +298,6 @@ async function main() {
           modelProvider: provider,
           port,
           verbose: args.verbose,
-          testBotPath: args.testBot,
           autoBundle,
           sourceMap,
           bundlePlatform,

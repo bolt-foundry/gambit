@@ -1,9 +1,13 @@
 +++
 label = "routing_orchestrator"
 inputSchema = "../schemas/routing_input.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
 outputSchema = "../schemas/routing_output.zod.ts"
-guardrails = { maxPasses = 80 }
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[guardrails]
+maxPasses = 80
 +++
 
 ![routing_behaviors](../cards/routing_behaviors.card.md)

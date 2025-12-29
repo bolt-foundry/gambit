@@ -9,7 +9,38 @@ function modImportPath() {
   return path.toFileUrl(modPath).href;
 }
 
-Deno.test("websocket simulator streams responses", async () => {
+async function runSimulator(
+  port: number,
+  payload: Record<string, unknown>,
+): Promise<{ runId?: string; sessionId?: string }> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/simulator/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      typeof body?.error === "string" ? body.error : res.statusText,
+    );
+  }
+  return body as { runId?: string; sessionId?: string };
+}
+
+async function readStreamEvents(port: number, offset = 0) {
+  const res = await fetch(
+    `http://127.0.0.1:${port}/api/durable-streams/stream/gambit-simulator?offset=${offset}`,
+  );
+  if (!res.ok) {
+    throw new Error(res.statusText);
+  }
+  const body = await res.json() as {
+    events?: Array<{ offset?: number; data?: unknown }>;
+  };
+  return body.events ?? [];
+}
+
+Deno.test("simulator streams responses", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -45,56 +76,32 @@ Deno.test("websocket simulator streams responses", async () => {
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-  const messages: Array<{ type?: string; chunk?: string; result?: unknown }> =
-    [];
 
   const homepage = await fetch(`http://127.0.0.1:${port}/`);
   const html = await homepage.text();
-  if (!html.includes("Gambit WebSocket Debug")) {
+  if (!html.includes("Gambit Simulator Debug")) {
     throw new Error("Debug page missing expected content");
   }
 
-  const resultPromise = new Promise<Record<string, unknown>>(
-    (resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout")), 2000);
-
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data as string) as {
-          type?: string;
-          chunk?: string;
-          result?: unknown;
-        };
-        messages.push(msg);
-        if (msg.type === "result") {
-          clearTimeout(timer);
-          ws.close();
-          resolve(msg as Record<string, unknown>);
-        }
-      };
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "run", input: "hello" }));
-      };
-    },
+  await runSimulator(port, { input: "hello", stream: true });
+  const events = await readStreamEvents(port, 0);
+  const messages = events.map((event) =>
+    event.data as { type?: string; chunk?: string; result?: unknown }
   );
-
-  const resultMsg = await resultPromise;
   await server.shutdown();
   await server.finished;
 
-  assertEquals(resultMsg.result, "hi");
+  const resultMsg = messages.find((m) => m.type === "result");
+  assertEquals(resultMsg?.result, "hi");
   const streams = messages.filter((m) => m.type === "stream").map((m) =>
     m.chunk ?? ""
   )
     .join("");
   assertEquals(streams, "hi");
-
-  const types = messages.map((m) => m.type);
-  assertEquals(types.includes("ready"), true);
-  assertEquals(types.includes("result"), true);
+  assertEquals(messages.some((m) => m.type === "result"), true);
 });
 
-Deno.test("websocket simulator exposes schema and defaults", async () => {
+Deno.test("simulator exposes schema and defaults", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -142,42 +149,11 @@ Deno.test("websocket simulator exposes schema and defaults", async () => {
   assert(schemaBody.schema);
   assertEquals(schemaBody.schema?.kind, "object");
   assertEquals(schemaBody.defaults?.name, "CallFlow");
-
-  const readyMsg = await new Promise<Record<string, unknown>>(
-    (resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout")), 2000);
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data as string) as Record<string, unknown>;
-        if (msg.type === "ready") {
-          clearTimeout(timer);
-          ws.close();
-          resolve(msg);
-        }
-      };
-      ws.onerror = () => {
-        clearTimeout(timer);
-        reject(new Error("ws error"));
-      };
-    },
-  );
-
   await server.shutdown();
   await server.finished;
-
-  assertEquals(readyMsg.type, "ready");
-  const schema = readyMsg.schema as {
-    kind?: string;
-    fields?: Record<string, { kind?: string }>;
-  };
-  assert(schema);
-  assertEquals(schema.kind, "object");
-  assertEquals(schema.fields?.name?.kind, "string");
-  const defaults = readyMsg.defaults as { name?: string };
-  assertEquals(defaults?.name, "CallFlow");
 });
 
-Deno.test("websocket simulator preserves state and user input", async () => {
+Deno.test("simulator preserves state and user input", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -220,49 +196,17 @@ Deno.test("websocket simulator preserves state and user input", async () => {
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-  const done = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), 4000);
-    let sentFirst = false;
-    let sentSecond = false;
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data as string) as { type?: string };
-      if (msg.type === "ready" && !sentFirst) {
-        sentFirst = true;
-        ws.send(
-          JSON.stringify({
-            type: "run",
-            input: "hello",
-            message: "hello",
-          }),
-        );
-        return;
-      }
-      if (msg.type === "result" && sentFirst && !sentSecond) {
-        sentSecond = true;
-        ws.send(
-          JSON.stringify({
-            type: "run",
-            input: "again",
-            message: "again",
-          }),
-        );
-        return;
-      }
-      if (msg.type === "result" && sentSecond) {
-        clearTimeout(timer);
-        ws.close();
-        resolve();
-      }
-    };
-    ws.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("ws error"));
-    };
+  const first = await runSimulator(port, {
+    input: "hello",
+    message: "hello",
+    stream: false,
   });
-
-  await done;
+  await runSimulator(port, {
+    input: "again",
+    message: "again",
+    stream: false,
+    sessionId: first.sessionId,
+  });
   await server.shutdown();
   await server.finished;
 
@@ -298,7 +242,7 @@ Deno.test("websocket simulator preserves state and user input", async () => {
   assertEquals(lastUser?.content, "again");
 });
 
-Deno.test("websocket simulator treats follow-up input as a user message when state exists", async () => {
+Deno.test("simulator treats follow-up input as a user message when state exists", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -341,37 +285,12 @@ Deno.test("websocket simulator treats follow-up input as a user message when sta
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-  const done = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), 4000);
-    let sentFirst = false;
-    let sentSecond = false;
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data as string) as { type?: string };
-      if (msg.type === "ready" && !sentFirst) {
-        sentFirst = true;
-        ws.send(JSON.stringify({ type: "run", input: "context" }));
-        return;
-      }
-      if (msg.type === "result" && sentFirst && !sentSecond) {
-        sentSecond = true;
-        ws.send(JSON.stringify({ type: "run", input: "follow-up" }));
-        return;
-      }
-      if (msg.type === "result" && sentSecond) {
-        clearTimeout(timer);
-        ws.close();
-        resolve();
-      }
-    };
-    ws.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("ws error"));
-    };
+  const first = await runSimulator(port, { input: "context", stream: false });
+  await runSimulator(port, {
+    input: "follow-up",
+    stream: false,
+    sessionId: first.sessionId,
   });
-
-  await done;
   await server.shutdown();
   await server.finished;
 
@@ -382,7 +301,7 @@ Deno.test("websocket simulator treats follow-up input as a user message when sta
   assertEquals(secondLastUser?.content, "follow-up");
 });
 
-Deno.test("websocket simulator emits state updates for download", async () => {
+Deno.test("simulator emits state updates for download", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -422,52 +341,26 @@ Deno.test("websocket simulator emits state updates for download", async () => {
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-
-  const done = new Promise<import("./state.ts").SavedState>(
-    (resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout")), 4000);
-      let captured: import("./state.ts").SavedState | undefined;
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data as string) as {
-          type?: string;
-          state?: unknown;
-        };
-        if (msg.type === "ready") {
-          ws.send(JSON.stringify({ type: "run", input: "save-me" }));
-          return;
-        }
-        if (msg.type === "state") {
-          captured = msg.state as import("./state.ts").SavedState;
-          return;
-        }
-        if (msg.type === "result") {
-          clearTimeout(timer);
-          ws.close();
-          if (captured) {
-            resolve(captured);
-          } else {
-            reject(new Error("missing state message"));
-          }
-        }
-      };
-      ws.onerror = () => {
-        clearTimeout(timer);
-        reject(new Error("ws error"));
-      };
-    },
+  await runSimulator(port, { input: "save-me", stream: false });
+  const events = await readStreamEvents(port, 0);
+  const stateEvent = [...events].reverse().find((event) =>
+    (event.data as { type?: string })?.type === "state"
   );
-
-  const state = await done;
+  if (!stateEvent) throw new Error("missing state event");
+  const state = (stateEvent.data as { state?: unknown }).state as {
+    messages?: Array<unknown>;
+    meta?: { note?: string };
+    runId?: string;
+  };
   await server.shutdown();
   await server.finished;
 
-  assert(state.messages.length > 0);
+  assert((state.messages?.length ?? 0) > 0);
   assertEquals(state.meta?.note, "saved");
   assert(Boolean(state.runId));
 });
 
-Deno.test("websocket simulator falls back when provider state lacks messages", async () => {
+Deno.test("simulator falls back when provider state lacks messages", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -514,45 +407,17 @@ Deno.test("websocket simulator falls back when provider state lacks messages", a
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/websocket`);
-  const done = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timeout")), 4000);
-    let sentFirst = false;
-    let sentSecond = false;
-    ws.onmessage = (ev) => {
-      const msg = JSON.parse(ev.data as string) as { type?: string };
-      if (msg.type === "ready" && !sentFirst) {
-        sentFirst = true;
-        ws.send(JSON.stringify({
-          type: "run",
-          input: "one",
-          message: "one",
-        }));
-        return;
-      }
-      if (msg.type === "result" && sentFirst && !sentSecond) {
-        sentSecond = true;
-        ws.send(JSON.stringify({
-          type: "run",
-          input: "two",
-          message: "two",
-        }));
-        return;
-      }
-      if (msg.type === "result" && sentSecond) {
-        clearTimeout(timer);
-        ws.close();
-        resolve();
-      }
-    };
-    ws.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("ws error"));
-    };
+  const first = await runSimulator(port, {
+    input: "one",
+    message: "one",
+    stream: false,
   });
-
-  await done;
+  await runSimulator(port, {
+    input: "two",
+    message: "two",
+    stream: false,
+    sessionId: first.sessionId,
+  });
   await server.shutdown();
   await server.finished;
 

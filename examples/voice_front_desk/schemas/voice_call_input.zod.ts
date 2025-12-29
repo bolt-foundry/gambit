@@ -12,4 +12,12 @@ export default z.object({
   currentDate: z.string().describe(
     "ISO date for 'today' so the assistant can reference it in speech",
   ).default(todayIso),
+  clinicName: z.string().describe("The clinic or organization name").default(
+    "Bolt Foundry Clinic",
+  ),
+  initialGreeting: z.string().describe(
+    "First line the assistant should use when answering",
+  ).default(
+    "Hi and thanks for calling the Bolt Foundry Clinic. You've reached our after hours line, and I'm an AI assistant. How can I help you today?",
+  ),
 });

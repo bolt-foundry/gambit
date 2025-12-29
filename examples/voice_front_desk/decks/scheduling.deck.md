@@ -1,12 +1,17 @@
 +++
 label = "scheduling_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "scheduling_ops", path = "../actions/scheduling_ops.deck.ts", description = "Return slot options or waitlist guidance." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
-guardrails = { maxPasses = 120 }
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[guardrails]
+maxPasses = 120
+[[actionDecks]]
+name = "scheduling_ops"
+path = "../actions/scheduling_ops.deck.ts"
+description = "Return slot options or waitlist guidance."
 +++
 
 ![scheduling_behavior](../cards/scheduling_behavior.card.md)

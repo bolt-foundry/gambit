@@ -1,11 +1,15 @@
 +++
 label = "billing_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "billing_support", path = "../actions/billing_support.deck.ts", description = "Capture billing concerns and determine next steps." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "billing_support"
+path = "../actions/billing_support.deck.ts"
+description = "Capture billing concerns and determine next steps."
 +++
 
 ![billing_behavior](../cards/billing_behavior.card.md)
