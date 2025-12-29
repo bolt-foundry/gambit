@@ -1,7 +1,7 @@
 +++
 label = "faq_service"
 inputSchema = "../schemas/service_request.zod.ts"
-outputSchema = "../schemas/service_response.zod.ts"
+outputSchema = "../schemas/faq_context_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0
@@ -9,13 +9,21 @@ temperature = 0
 [[actionDecks]]
 name = "frontdesk_faq"
 path = "../actions/frontdesk_faq.deck.ts"
-description = "Answer operational front-desk questions."
+description = "Fetch raw clinic FAQ content."
 +++
 
 ![faq_behavior](../cards/faq_behavior.card.md)
 
-![respond](gambit://respond)
-
 Call `frontdesk_faq` with the caller's operational question when you need
-structured wording. Otherwise, use the clinic info card facts directly. Respond
-with `{ spokenResponse, followUp }`.
+specific clinic facts (services, hours, address, pricing). The tool returns raw
+clinic-authored content. Extract the most relevant facts and return them as
+structured context. Do not invent clinic details. If nothing matches, return an
+empty facts list and a suggested follow-up.
+
+Respond with JSON:
+
+```
+{ "facts": string[], "suggestedFollowUp"?: string }
+```
+
+![respond](gambit://respond)

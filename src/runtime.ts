@@ -416,9 +416,12 @@ async function runLlmDeck(
     onStreamText: ctx.onStreamText,
     pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
   });
+  let streamingBuffer = "";
+  let streamingCommitted = false;
   const wrappedOnStreamText = (chunk: string) => {
     if (!chunk) return;
     idleController.touch();
+    streamingBuffer += chunk;
     ctx.onStreamText?.(chunk);
   };
   if (!resumed) {
@@ -495,6 +498,8 @@ async function runLlmDeck(
       if (performance.now() - start > guardrails.timeoutMs) {
         throw new Error("Timeout exceeded");
       }
+      streamingBuffer = "";
+      streamingCommitted = false;
       const model = ctx.modelOverride ??
         deck.modelParams?.model ??
         ctx.defaultModel ??
@@ -571,6 +576,12 @@ async function runLlmDeck(
         let responded = false;
         let respondValue: unknown;
         const appendedMessages: Array<ModelMessage> = [];
+        if (!streamingCommitted && streamingBuffer) {
+          messages.push(
+            sanitizeMessage({ role: "assistant", content: streamingBuffer }),
+          );
+          streamingCommitted = true;
+        }
 
         for (const call of result.toolCalls) {
           if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {

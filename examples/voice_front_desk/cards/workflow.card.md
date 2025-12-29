@@ -19,7 +19,8 @@
      `refill_service` and `insurance_service` all return structured responses.
      Read the `spokenResponse` field to the caller and follow their suggested
      next steps.
-   - `faq_service` returns short operational answers; read them verbatim.
+   - `faq_service` returns facts and suggested follow-ups; summarize them in
+     your voice.
    - `transfer_service` returns instructions for handing off to a human; explain
      the transfer reason before executing it.
    - If `routing_orchestrator` returns `targetDeck = "log_message"`, call

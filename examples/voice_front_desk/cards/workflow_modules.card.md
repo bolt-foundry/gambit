@@ -29,10 +29,10 @@ label = "workflow modules"
 # name = "insurance_service"
 # path = "../decks/insurance.deck.md"
 # description = "Confirm on-file insurance or capture new coverage details."
-# [[actionDecks]]
-# name = "faq_service"
-# path = "../decks/faq.deck.md"
-# description = "Answer operational front-desk FAQs (hours, directions, costs)."
+[[actionDecks]]
+name = "faq_service"
+path = "../decks/faq.deck.md"
+description = "Answer operational front-desk FAQs (hours, directions, costs)."
 # [[actionDecks]]
 # name = "transfer_service"
 # path = "../decks/transfer.deck.md"
@@ -40,7 +40,5 @@ label = "workflow modules"
 [[actionDecks]]
 name = "message_logger"
 path = "../decks/message_log.deck.md"
-description = "Log a callback ticket with urgency and summary."
+description = "Leave a note for office staff to call back the caller. Includes urgency and summary."
 +++
-
-Right now, the only action which you can do is log a callback ticket.

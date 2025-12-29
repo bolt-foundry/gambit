@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { createRoot } from "react-dom/client";
 import { globalStyles } from "./styles.ts";
-import { classNames, formatTimestamp } from "./utils.ts";
+import { classNames, formatTimestamp, formatTimestampShort } from "./utils.ts";
 
 type NormalizedSchema = {
   kind:
@@ -125,19 +125,37 @@ type CalibrationRun = {
   graderId: string;
   graderPath: string;
   graderLabel?: string;
-  status: "completed" | "error";
+  status: "running" | "completed" | "error";
   runAt?: string;
+  referenceSample?: {
+    score: number;
+    reason: string;
+    evidence?: string[];
+  };
+  input?: unknown;
   result?: unknown;
   error?: string;
 };
 
 type CalibrateSession = SessionMeta & {
-  calibrationRuns?: Array<CalibrationRun>;
+  gradingRuns?: Array<CalibrationRun>;
 };
 
 type CalibrateResponse = {
   graderDecks?: Array<GraderDeckMeta>;
   sessions?: Array<CalibrateSession>;
+};
+
+type CalibrateStreamMessage = {
+  type: "calibrateSession";
+  sessionId: string;
+  run: CalibrationRun;
+  session: CalibrateSession;
+};
+
+type CalibrateRef = {
+  runId?: string;
+  turnIndex?: number;
 };
 
 type TestBotRun = {
@@ -169,12 +187,99 @@ function countUserMessages(
   return messages.filter((m) => m.role === "user").length;
 }
 
+function extractScoreAndReason(result: unknown): {
+  score?: number;
+  reason?: string;
+} {
+  if (!result || typeof result !== "object") return {};
+  const record = result as Record<string, unknown>;
+  const score = typeof record.score === "number" ? record.score : undefined;
+  const reason = typeof record.reason === "string" ? record.reason : undefined;
+  return { score, reason };
+}
+
+function extractScoreAndReasonFromSample(sample?: {
+  score?: number;
+  reason?: string;
+}): { score?: number; reason?: string } {
+  if (!sample) return {};
+  return {
+    score: typeof sample.score === "number" ? sample.score : undefined,
+    reason: typeof sample.reason === "string" ? sample.reason : undefined,
+  };
+}
+
+function extractTurnContext(input?: unknown): {
+  priorUser?: string;
+  gradedAssistant?: string;
+} {
+  if (!input || typeof input !== "object") return {};
+  const record = input as Record<string, unknown>;
+  const session = record.session;
+  const messageToGrade = record.messageToGrade;
+  const gradedAssistant = messageToGrade &&
+      typeof messageToGrade === "object" &&
+      typeof (messageToGrade as { content?: unknown }).content === "string"
+    ? String((messageToGrade as { content?: string }).content)
+    : undefined;
+  const messages = session &&
+      typeof session === "object" &&
+      Array.isArray((session as { messages?: unknown }).messages)
+    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
+      .messages
+    : [];
+  let priorUser: string | undefined = undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg || msg.role !== "user") continue;
+    if (typeof msg.content === "string") {
+      priorUser = msg.content;
+      break;
+    }
+  }
+  return { priorUser, gradedAssistant };
+}
+
+function extractConversationContext(input?: unknown): {
+  latestUser?: string;
+  latestAssistant?: string;
+} {
+  if (!input || typeof input !== "object") return {};
+  const record = input as Record<string, unknown>;
+  const session = record.session;
+  const messages = session &&
+      typeof session === "object" &&
+      Array.isArray((session as { messages?: unknown }).messages)
+    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
+      .messages
+    : [];
+  let latestUser: string | undefined = undefined;
+  let latestAssistant: string | undefined = undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (!msg) continue;
+    if (!latestAssistant && msg.role === "assistant") {
+      if (typeof msg.content === "string") {
+        latestAssistant = msg.content;
+      }
+    }
+    if (!latestUser && msg.role === "user") {
+      if (typeof msg.content === "string") {
+        latestUser = msg.content;
+      }
+    }
+    if (latestUser && latestAssistant) break;
+  }
+  return { latestUser, latestAssistant };
+}
+
 type TestBotStreamEvent = {
   type: "testBotStream";
   runId?: string;
   role: "user" | "assistant";
   chunk: string;
   turn?: number;
+  ts?: number;
 };
 
 type TestBotStreamEndEvent = {
@@ -182,6 +287,7 @@ type TestBotStreamEndEvent = {
   runId?: string;
   role: "user" | "assistant";
   turn?: number;
+  ts?: number;
 };
 
 type TestBotStatusEvent = {
@@ -259,8 +365,8 @@ const repoRootPath = guessRepoRoot(normalizedDeckPath);
 const deckDisplayPath = toRelativePath(normalizedDeckPath, repoRootPath) ??
   normalizedDeckPath;
 const SESSIONS_BASE_PATH = "/sessions";
-const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new`;
-const DEFAULT_HOME_PATH = "/test-bot";
+const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
+const DEFAULT_HOME_PATH = `${SESSIONS_BASE_PATH}/new/test-bot`;
 const CALIBRATE_PATH_SUFFIX = "/calibrate";
 const buildCalibratePath = (sessionId: string) =>
   `${SESSIONS_BASE_PATH}/${
@@ -269,6 +375,7 @@ const buildCalibratePath = (sessionId: string) =>
 const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
+const CALIBRATE_STREAM_ID = "gambit-calibrate";
 
 function getDurableStreamOffset(streamId: string): number {
   try {
@@ -598,7 +705,7 @@ function getSessionIdFromPath(
     : window.location.pathname;
   const normalizedTarget = target.replace(/\/+$/, "");
   const canonical = normalizedTarget.match(
-    /^\/sessions\/([^/]+)(?:\/(debug|calibrate))?$/,
+    /^\/sessions\/([^/]+)(?:\/(debug|calibrate|test-bot))?$/,
   );
   if (canonical) {
     const id = canonical[1];
@@ -680,6 +787,28 @@ function getCalibrateSessionIdFromLocation(): string | null {
   const params = new URLSearchParams(window.location.search);
   const param = params.get("sessionId");
   return param ? decodeURIComponent(param) : null;
+}
+
+function getCalibrateRefFromLocation(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const ref = params.get("ref");
+  return ref && ref.trim().length ? ref.trim() : null;
+}
+
+function parseGradingRef(ref: string): {
+  runId?: string;
+  turnIndex?: number;
+} {
+  const match = ref.match(
+    /^gradingRun:([^#]+)(?:#turn:(\d+))?$/i,
+  );
+  if (!match) return {};
+  const runId = match[1];
+  const turnIndex = match[2] ? Number(match[2]) : undefined;
+  return {
+    runId: runId || undefined,
+    turnIndex: Number.isFinite(turnIndex) ? turnIndex : undefined,
+  };
 }
 
 function CopyBadge(props: {
@@ -1308,13 +1437,12 @@ function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
       }
       summary.status = "running";
       summary.parentActionCallId = parentActionCallId;
-      if (summary.depth === undefined) {
-        const parentDepth =
-          parentActionCallId && depthMap.has(parentActionCallId)
-            ? depthMap.get(parentActionCallId)!
-            : -1;
-        summary.depth = parentDepth + 1;
-      }
+      const parentDepth = parentActionCallId && depthMap.has(parentActionCallId)
+        ? depthMap.get(parentActionCallId)!
+        : -1;
+      const nextDepth = parentDepth + 1;
+      summary.depth = summary.depth ?? nextDepth;
+      depthMap.set(actionCallId, nextDepth);
     } else if (type === "tool.result") {
       if ("result" in trace) {
         summary.result = (trace as { result?: unknown }).result;
@@ -2486,14 +2614,28 @@ function CalibrateApp() {
   const initialCalibrateSessionRef = useRef<string | null>(
     getCalibrateSessionIdFromLocation(),
   );
+  const initialCalibrateRef = useRef<CalibrateRef>(
+    (() => {
+      const ref = getCalibrateRefFromLocation();
+      return ref ? parseGradingRef(ref) : {};
+    })(),
+  );
 
-  const updateCalibratePath = useCallback((sessionId: string | null) => {
+  const updateCalibratePath = useCallback((
+    sessionId: string | null,
+    opts?: { ref?: string | null },
+  ) => {
     const targetPath = sessionId ? buildCalibratePath(sessionId) : "/calibrate";
     if (window.location.pathname === targetPath) return;
     const url = new URL(window.location.href);
     url.pathname = targetPath;
     if (!sessionId) {
       url.searchParams.delete("sessionId");
+    }
+    if (opts?.ref) {
+      url.searchParams.set("ref", opts.ref);
+    } else {
+      url.searchParams.delete("ref");
     }
     window.history.replaceState({}, "", url.toString());
   }, []);
@@ -2544,6 +2686,49 @@ function CalibrateApp() {
   }, [loadCalibrateData]);
 
   useEffect(() => {
+    const streamId = CALIBRATE_STREAM_ID;
+    const streamUrl = buildDurableStreamUrl(
+      streamId,
+      getDurableStreamOffset(streamId),
+    );
+    const source = new EventSource(streamUrl);
+
+    source.onmessage = (event) => {
+      let envelope: { offset?: unknown; data?: unknown } | null = null;
+      try {
+        envelope = JSON.parse(event.data) as {
+          offset?: unknown;
+          data?: unknown;
+        };
+      } catch {
+        return;
+      }
+      if (
+        envelope &&
+        typeof envelope.offset === "number" &&
+        Number.isFinite(envelope.offset)
+      ) {
+        setDurableStreamOffset(streamId, envelope.offset + 1);
+      }
+      const msg = envelope?.data as CalibrateStreamMessage | undefined;
+      if (!msg || msg.type !== "calibrateSession") return;
+      setSessions((prev) => {
+        const next = [...prev];
+        const index = next.findIndex((sess) => sess.id === msg.session.id);
+        if (index >= 0) {
+          next[index] = msg.session;
+          return next;
+        }
+        return [msg.session, ...next];
+      });
+    };
+
+    return () => {
+      source.close();
+    };
+  }, []);
+
+  useEffect(() => {
     if (selectedSessionId) {
       updateCalibratePath(selectedSessionId);
     } else {
@@ -2583,9 +2768,134 @@ function CalibrateApp() {
     ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(selectedSession.id)}/debug`
     : null;
   const sessionRuns = useMemo(() => {
-    if (!selectedSession?.calibrationRuns) return [];
-    return [...selectedSession.calibrationRuns].reverse();
+    if (!selectedSession?.gradingRuns) return [];
+    return [...selectedSession.gradingRuns].reverse();
   }, [selectedSession]);
+  const runItems = useMemo(() => {
+    const items: Array<{
+      key: string;
+      label: string;
+      status: CalibrationRun["status"];
+      runAt?: string;
+      error?: string;
+      input?: unknown;
+      result?: unknown;
+      messageIndex?: number;
+      runId: string;
+      turnIndex?: number;
+      refId: string;
+      referenceSample?: {
+        score: number;
+        reason: string;
+        evidence?: string[];
+      };
+    }> = [];
+    for (const run of sessionRuns) {
+      const result = run.result;
+      if (
+        result && typeof result === "object" && "mode" in result &&
+        (result as { mode?: unknown }).mode === "turns" &&
+        Array.isArray((result as { turns?: unknown }).turns)
+      ) {
+        const turns = (result as { turns?: unknown })
+          .turns as Array<{
+            index?: number;
+            input?: unknown;
+            result?: unknown;
+            referenceSample?: {
+              score: number;
+              reason: string;
+              evidence?: string[];
+            };
+          }>;
+        const turnsDescending = [...turns].reverse();
+        turnsDescending.forEach((turn, idx) => {
+          const assistantTurnNumber = turns.length - idx;
+          items.push({
+            key: `${run.id}-${turn.index ?? idx}`,
+            label: `${
+              run.graderLabel ?? run.graderId
+            } · assistant turn ${assistantTurnNumber}`,
+            status: run.status,
+            runAt: run.runAt,
+            error: run.error,
+            input: turn.input,
+            result: turn.result,
+            messageIndex: turn.index ?? idx,
+            runId: run.id,
+            turnIndex: turn.index ?? idx,
+            refId: `gradingRun:${run.id}#turn:${turn.index ?? idx}`,
+            referenceSample: turn.referenceSample,
+          });
+        });
+        if (turns.length === 0) {
+          items.push({
+            key: `${run.id}-empty`,
+            label: `${run.graderLabel ?? run.graderId} · turns`,
+            status: run.status,
+            runAt: run.runAt,
+            error: run.error,
+            input: run.input,
+            result: run.result,
+            runId: run.id,
+            refId: `gradingRun:${run.id}`,
+            referenceSample: run.referenceSample,
+          });
+        }
+        continue;
+      }
+      items.push({
+        key: run.id,
+        label: run.graderLabel ?? run.graderId,
+        status: run.status,
+        runAt: run.runAt,
+        error: run.error,
+        input: run.input,
+        result: run.result,
+        runId: run.id,
+        refId: `gradingRun:${run.id}`,
+        referenceSample: run.referenceSample,
+      });
+    }
+    const withOrder = items.map((item, index) => ({
+      item,
+      index,
+      runAtMs: item.runAt ? Date.parse(item.runAt) : 0,
+    }));
+    withOrder.sort((a, b) => {
+      if (a.runAtMs !== b.runAtMs) return b.runAtMs - a.runAtMs;
+      return a.index - b.index;
+    });
+    return withOrder.map((entry) => entry.item);
+  }, [sessionRuns]);
+  const [expandedResults, setExpandedResults] = useState<
+    Record<string, boolean>
+  >({});
+  const [highlightedResult, setHighlightedResult] = useState<string | null>(
+    null,
+  );
+  const [copiedRef, setCopiedRef] = useState<string | null>(null);
+  const [referenceDrafts, setReferenceDrafts] = useState<
+    Record<
+      string,
+      { score: number; reason: string; evidenceText: string }
+    >
+  >({});
+  const [showRawInputs, setShowRawInputs] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  useEffect(() => {
+    const ref = initialCalibrateRef.current;
+    if (!ref.runId) return;
+    const match = runItems.find((item) =>
+      item.runId === ref.runId &&
+      (ref.turnIndex === undefined || item.turnIndex === ref.turnIndex)
+    );
+    if (!match) return;
+    setExpandedResults((prev) => ({ ...prev, [match.key]: true }));
+    setHighlightedResult(match.key);
+  }, [runItems]);
 
   const runGrader = useCallback(async () => {
     if (!selectedSessionId || !selectedGraderId) return;
@@ -2673,7 +2983,7 @@ function CalibrateApp() {
               {sessions.length > 0 && graders.length > 0 && (
                 <>
                   <div
-                    className="editor-panel"
+                    className="editor-panel calibrate-runner"
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -2757,7 +3067,7 @@ function CalibrateApp() {
                     </div>
                   </div>
                   <div
-                    className="editor-panel"
+                    className="editor-panel calibrate-results"
                     style={{
                       display: "flex",
                       flexDirection: "column",
@@ -2768,29 +3078,476 @@ function CalibrateApp() {
                       Recent results {selectedSession &&
                         `(Session ${selectedSession.id})`}
                     </strong>
-                    {sessionRuns.length === 0 && (
+                    {runItems.length === 0 && (
                       <div className="placeholder">
                         No grader runs for this session yet.
                       </div>
                     )}
-                    {sessionRuns.map((run) => (
-                      <div key={run.id} className="trace-row">
-                        <div style={{ fontWeight: 700 }}>
-                          {run.graderLabel ?? run.graderId} · {run.status}
+                    {runItems.map((item) => {
+                      const graded = extractScoreAndReason(item.result);
+                      const reference = extractScoreAndReasonFromSample(
+                        item.referenceSample,
+                      );
+                      const displayScore = reference.score ?? graded.score;
+                      const displayReason = reference.reason ?? graded.reason;
+                      const turnContext = extractTurnContext(item.input);
+                      const conversationContext = extractConversationContext(
+                        item.input,
+                      );
+                      const delta = reference.score !== undefined &&
+                          graded.score !== undefined
+                        ? reference.score - graded.score
+                        : undefined;
+                      const polarityFlip = graded.score !== undefined &&
+                        reference.score !== undefined &&
+                        graded.score !== 0 &&
+                        reference.score !== 0 &&
+                        (graded.score > 0) !== (reference.score > 0);
+                      const scoreClass = displayScore === undefined
+                        ? "calibrate-score--neutral"
+                        : displayScore > 0
+                        ? "calibrate-score--positive"
+                        : displayScore < 0
+                        ? "calibrate-score--negative"
+                        : "calibrate-score--neutral";
+                      const isOpen = Boolean(expandedResults[item.key]);
+                      const draft = referenceDrafts[item.key];
+                      return (
+                        <div
+                          key={item.key}
+                          className={`trace-row${
+                            highlightedResult === item.key
+                              ? " trace-row-highlight"
+                              : ""
+                          }`}
+                        >
+                          <div className="calibrate-result-header">
+                            <div className="calibrate-result-main">
+                              <div
+                                className={`calibrate-score-badge ${scoreClass}`}
+                              >
+                                {displayScore !== undefined
+                                  ? displayScore
+                                  : "—"}
+                              </div>
+                              <div className="calibrate-result-meta">
+                                <div className="calibrate-result-title">
+                                  {item.label}
+                                </div>
+                                <div className="calibrate-result-subtitle">
+                                  {item.status}
+                                  {item.runAt
+                                    ? ` · ${formatTimestampShort(item.runAt)}`
+                                    : ""}
+                                  {reference.score !== undefined && (
+                                    <span className="calibrate-score-chip">
+                                      ref
+                                    </span>
+                                  )}
+                                  {delta !== undefined && (
+                                    <span className="calibrate-delta-chip">
+                                      {delta >= 0 ? `+${delta}` : `${delta}`}
+                                    </span>
+                                  )}
+                                  {polarityFlip && (
+                                    <span className="calibrate-alert-chip">
+                                      !
+                                    </span>
+                                  )}
+                                </div>
+                                {displayReason && (
+                                  <div className="calibrate-result-reason">
+                                    {displayReason}
+                                  </div>
+                                )}
+                                {reference.score !== undefined &&
+                                  graded.score !== undefined && (
+                                  <div className="calibrate-result-secondary">
+                                    Graded score: {graded.score}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="calibrate-result-actions">
+                              <button
+                                type="button"
+                                className="ghost-btn calibrate-ref-copy"
+                                onClick={() => {
+                                  const basePath = selectedSession?.statePath ??
+                                    selectedSession?.sessionDir ??
+                                    "";
+                                  const refPath = basePath
+                                    ? `${basePath}#${item.refId}`
+                                    : item.refId;
+                                  navigator.clipboard?.writeText(refPath);
+                                  setCopiedRef(item.key);
+                                  window.setTimeout(
+                                    () =>
+                                      setCopiedRef((prev) =>
+                                        prev === item.key ? null : prev
+                                      ),
+                                    1200,
+                                  );
+                                }}
+                              >
+                                {copiedRef === item.key ? "Copied" : "Copy ref"}
+                              </button>
+                              <button
+                                type="button"
+                                className="ghost-btn calibrate-toggle"
+                                onClick={() =>
+                                  setExpandedResults((prev) => {
+                                    const nextOpen = !isOpen;
+                                    if (
+                                      nextOpen && !referenceDrafts[item.key]
+                                    ) {
+                                      const seedScore = reference.score ?? NaN;
+                                      const seedReason = reference.reason ?? "";
+                                      const seedEvidence = item.referenceSample
+                                          ?.evidence
+                                        ? item.referenceSample.evidence.join(
+                                          "\n",
+                                        )
+                                        : "";
+                                      setReferenceDrafts((drafts) => ({
+                                        ...drafts,
+                                        [item.key]: {
+                                          score: seedScore,
+                                          reason: seedReason,
+                                          evidenceText: seedEvidence,
+                                        },
+                                      }));
+                                    }
+                                    return { ...prev, [item.key]: nextOpen };
+                                  })}
+                              >
+                                {isOpen ? "Hide details" : "Show details"}
+                              </button>
+                            </div>
+                          </div>
+                          {item.error && (
+                            <div className="error">{item.error}</div>
+                          )}
+                          {item.turnIndex !== undefined && (
+                            <div className="calibrate-context calibrate-context-compact">
+                              {turnContext.priorUser && (
+                                <div className="calibrate-context-row">
+                                  <div className="calibrate-context-label">
+                                    Prior user
+                                  </div>
+                                  <div className="calibrate-context-bubble calibrate-context-user">
+                                    {turnContext.priorUser}
+                                  </div>
+                                </div>
+                              )}
+                              {turnContext.gradedAssistant && (
+                                <div className="calibrate-context-row">
+                                  <div className="calibrate-context-label">
+                                    Graded assistant
+                                  </div>
+                                  <div className="calibrate-context-bubble calibrate-context-assistant">
+                                    {turnContext.gradedAssistant}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {isOpen && (
+                            <div className="calibrate-result-details">
+                              <div>
+                                <div className="calibrate-section-title">
+                                  Graded sample
+                                </div>
+                                <pre className="trace-json">
+                                  {JSON.stringify(item.result ?? null, null, 2)}
+                                </pre>
+                              </div>
+                              <div>
+                                <div className="calibrate-section-title">
+                                  Input
+                                </div>
+                                {typeof item.messageIndex === "number" && (
+                                  <div className="calibrate-result-meta-line">
+                                    Message index: {item.messageIndex}
+                                  </div>
+                                )}
+                                {item.turnIndex !== undefined
+                                  ? (
+                                    <div className="calibrate-context">
+                                      {turnContext.priorUser && (
+                                        <div className="calibrate-context-row">
+                                          <div className="calibrate-context-label">
+                                            Prior user
+                                          </div>
+                                          <div className="calibrate-context-bubble calibrate-context-user">
+                                            {turnContext.priorUser}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {turnContext.gradedAssistant && (
+                                        <div className="calibrate-context-row">
+                                          <div className="calibrate-context-label">
+                                            Graded assistant
+                                          </div>
+                                          <div className="calibrate-context-bubble calibrate-context-assistant">
+                                            {turnContext.gradedAssistant}
+                                          </div>
+                                        </div>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="ghost-btn calibrate-toggle"
+                                        onClick={() =>
+                                          setShowRawInputs((prev) => ({
+                                            ...prev,
+                                            [item.key]: !prev[item.key],
+                                          }))}
+                                      >
+                                        {showRawInputs[item.key]
+                                          ? "Hide raw input"
+                                          : "Show raw input"}
+                                      </button>
+                                      {showRawInputs[item.key] && (
+                                        <pre className="trace-json">
+                                        {JSON.stringify(
+                                          item.input ?? null,
+                                          null,
+                                          2,
+                                        )}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  )
+                                  : (
+                                    <div className="calibrate-context">
+                                      {conversationContext.latestUser && (
+                                        <div className="calibrate-context-row">
+                                          <div className="calibrate-context-label">
+                                            Latest user
+                                          </div>
+                                          <div className="calibrate-context-bubble calibrate-context-user">
+                                            {conversationContext.latestUser}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {conversationContext.latestAssistant && (
+                                        <div className="calibrate-context-row">
+                                          <div className="calibrate-context-label">
+                                            Latest assistant
+                                          </div>
+                                          <div className="calibrate-context-bubble calibrate-context-assistant">
+                                            {conversationContext
+                                              .latestAssistant}
+                                          </div>
+                                        </div>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="ghost-btn calibrate-toggle"
+                                        onClick={() =>
+                                          setShowRawInputs((prev) => ({
+                                            ...prev,
+                                            [item.key]: !prev[item.key],
+                                          }))}
+                                      >
+                                        {showRawInputs[item.key]
+                                          ? "Hide raw input"
+                                          : "Show raw input"}
+                                      </button>
+                                      {showRawInputs[item.key] && (
+                                        <pre className="trace-json">
+                                        {JSON.stringify(
+                                          item.input ?? null,
+                                          null,
+                                          2,
+                                        )}
+                                        </pre>
+                                      )}
+                                    </div>
+                                  )}
+                              </div>
+                              <div>
+                                <div className="calibrate-section-title">
+                                  Reference sample
+                                </div>
+                                {item.referenceSample
+                                  ? (
+                                    <pre className="trace-json">
+                                    {JSON.stringify(
+                                      item.referenceSample,
+                                      null,
+                                      2,
+                                    )}
+                                    </pre>
+                                  )
+                                  : (
+                                    <div className="placeholder">
+                                      No reference sample yet.
+                                    </div>
+                                  )}
+                                {draft && (
+                                  <div className="calibrate-reference-form">
+                                    <div className="calibrate-score-buttons">
+                                      {SCORE_VALUES.map((value) => (
+                                        <button
+                                          key={value}
+                                          type="button"
+                                          className={Number.isNaN(draft.score)
+                                            ? "score-btn"
+                                            : value === draft.score
+                                            ? "score-btn score-btn-active"
+                                            : "score-btn"}
+                                          onClick={() =>
+                                            setReferenceDrafts((prev) => ({
+                                              ...prev,
+                                              [item.key]: {
+                                                ...draft,
+                                                score: value,
+                                              },
+                                            }))}
+                                        >
+                                          {value}
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <label>
+                                      Reason
+                                      <textarea
+                                        value={draft.reason}
+                                        onChange={(e) =>
+                                          setReferenceDrafts((prev) => ({
+                                            ...prev,
+                                            [item.key]: {
+                                              ...draft,
+                                              reason: e.target.value,
+                                            },
+                                          }))}
+                                      />
+                                    </label>
+                                    <label>
+                                      Evidence (one per line)
+                                      <textarea
+                                        value={draft.evidenceText}
+                                        onChange={(e) =>
+                                          setReferenceDrafts((prev) => ({
+                                            ...prev,
+                                            [item.key]: {
+                                              ...draft,
+                                              evidenceText: e.target.value,
+                                            },
+                                          }))}
+                                      />
+                                    </label>
+                                    <div className="calibrate-reference-actions">
+                                      <button
+                                        type="button"
+                                        className="ghost-btn"
+                                        onClick={async () => {
+                                          if (!selectedSessionId) return;
+                                          if (graded.score === undefined) {
+                                            setError(
+                                              "No graded score available to agree with.",
+                                            );
+                                            return;
+                                          }
+                                          const payload = {
+                                            sessionId: selectedSessionId,
+                                            runId: item.runId,
+                                            turnIndex: item.turnIndex,
+                                            referenceSample: {
+                                              score: graded.score,
+                                              reason: graded.reason ?? "",
+                                            },
+                                          };
+                                          setReferenceDrafts((prev) => ({
+                                            ...prev,
+                                            [item.key]: {
+                                              ...draft,
+                                              score: graded.score!,
+                                              reason: graded.reason ?? "",
+                                              evidenceText: "",
+                                            },
+                                          }));
+                                          const res = await fetch(
+                                            "/api/grading/reference",
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "content-type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify(payload),
+                                            },
+                                          );
+                                          if (!res.ok) {
+                                            const message = await res.text();
+                                            setError(
+                                              message ||
+                                                "Failed to save reference",
+                                            );
+                                          }
+                                        }}
+                                      >
+                                        Agree with graded
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={async () => {
+                                          if (!selectedSessionId) return;
+                                          const evidence = draft.evidenceText
+                                            .split("\n")
+                                            .map((line) => line.trim())
+                                            .filter(Boolean);
+                                          if (Number.isNaN(draft.score)) {
+                                            setError(
+                                              "Select a reference score.",
+                                            );
+                                            return;
+                                          }
+                                          const payload = {
+                                            sessionId: selectedSessionId,
+                                            runId: item.runId,
+                                            turnIndex: item.turnIndex,
+                                            referenceSample: {
+                                              score: draft.score,
+                                              reason: draft.reason,
+                                              evidence: evidence.length
+                                                ? evidence
+                                                : undefined,
+                                            },
+                                          };
+                                          const res = await fetch(
+                                            "/api/grading/reference",
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "content-type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify(payload),
+                                            },
+                                          );
+                                          if (!res.ok) {
+                                            const message = await res.text();
+                                            setError(
+                                              message ||
+                                                "Failed to save reference",
+                                            );
+                                          }
+                                        }}
+                                      >
+                                        Save reference
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className="trace-json">
-                          {run.runAt
-                            ? formatTimestamp(run.runAt)
-                            : "Unknown time"}
-                        </div>
-                        {run.error && <div className="error">{run.error}</div>}
-                        {run.result !== undefined && (
-                          <pre className="trace-json">
-                            {JSON.stringify(run.result, null, 2)}
-                          </pre>
-                        )}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}
@@ -2871,8 +3628,17 @@ function CalibrateApp() {
 function TestBotApp(props: {
   onNavigateToSimulator: () => void;
   onNavigateToSession: (sessionId: string) => void;
+  onReplaceTestBotSession: (sessionId: string) => void;
+  onResetTestBotSession: () => void;
+  activeSessionId: string | null;
 }) {
-  const { onNavigateToSimulator, onNavigateToSession } = props;
+  const {
+    onNavigateToSimulator,
+    onNavigateToSession,
+    onReplaceTestBotSession,
+    onResetTestBotSession,
+    activeSessionId,
+  } = props;
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [botLabel, setBotLabel] = useState<string | null>(null);
@@ -2902,6 +3668,23 @@ function TestBotApp(props: {
     traces: [],
     toolInserts: [],
   });
+  const lastRunMessageCountRef = useRef(0);
+  const [toolCallsOpen, setToolCallsOpen] = useState<
+    Record<number, boolean>
+  >({});
+  const [latencyByTurn, setLatencyByTurn] = useState<
+    Record<number, number>
+  >({});
+  const lastUserEndByTurnRef = useRef<Record<number, number>>({});
+  const firstAssistantTokenByTurnRef = useRef<Record<number, boolean>>({});
+
+  useEffect(() => {
+    lastRunMessageCountRef.current = 0;
+    setToolCallsOpen({});
+    setLatencyByTurn({});
+    lastUserEndByTurnRef.current = {};
+    firstAssistantTokenByTurnRef.current = {};
+  }, [run.id]);
   const [streamingUser, setStreamingUser] = useState<
     {
       runId: string;
@@ -2984,6 +3767,11 @@ function TestBotApp(props: {
   }, [run.id]);
 
   useEffect(() => {
+    if (!run.sessionId) return;
+    onReplaceTestBotSession(run.sessionId);
+  }, [onReplaceTestBotSession, run.sessionId]);
+
+  useEffect(() => {
     runRef.current = run;
   }, [run]);
 
@@ -3034,6 +3822,19 @@ function TestBotApp(props: {
         if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
         const streamRunId = msg.runId;
         const turn = typeof msg.turn === "number" ? msg.turn : 0;
+        if (msg.role === "assistant") {
+          if (!firstAssistantTokenByTurnRef.current[turn]) {
+            firstAssistantTokenByTurnRef.current[turn] = true;
+            const userEnd = lastUserEndByTurnRef.current[turn];
+            if (typeof userEnd === "number" && typeof msg.ts === "number") {
+              const delta = msg.ts - userEnd;
+              setLatencyByTurn((prev) => ({
+                ...prev,
+                [turn]: delta,
+              }));
+            }
+          }
+        }
         if (msg.role === "user") {
           const expectedUserCount = countUserMessages(runRef.current.messages) +
             1;
@@ -3060,6 +3861,12 @@ function TestBotApp(props: {
         if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
         const streamRunId = msg.runId;
         const turn = typeof msg.turn === "number" ? msg.turn : 0;
+        if (msg.role === "user") {
+          lastUserEndByTurnRef.current[turn] = typeof msg.ts === "number"
+            ? msg.ts
+            : Date.now();
+          delete firstAssistantTokenByTurnRef.current[turn];
+        }
         if (msg.role === "user") {
           setStreamingUser((prev) => {
             if (!prev || prev.runId !== streamRunId || prev.turn !== turn) {
@@ -3091,11 +3898,15 @@ function TestBotApp(props: {
     };
   }, []);
 
-  const refreshStatus = useCallback(async (runIdOverride?: string) => {
+  const refreshStatus = useCallback(async (
+    opts?: { runId?: string; sessionId?: string },
+  ) => {
     try {
-      const runId = runIdOverride ?? run.id;
+      const runId = opts?.runId ?? run.id;
+      const sessionId = opts?.sessionId;
       const params = new URLSearchParams();
       if (runId) params.set("runId", runId);
+      if (sessionId) params.set("sessionId", sessionId);
       const deckParam = testDecks.length
         ? (selectedDeckId || testDecks[0]?.id || "")
         : "";
@@ -3121,6 +3932,11 @@ function TestBotApp(props: {
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    refreshStatus({ sessionId: activeSessionId });
+  }, [activeSessionId, refreshStatus]);
 
   useEffect(() => {
     if (!deckInputSchema) return;
@@ -3170,13 +3986,69 @@ function TestBotApp(props: {
   );
 
   const toolBuckets = useMemo(() => {
+    const deriveInsertsFromTraces = (
+      traces: TraceEvent[],
+      messageCount: number,
+    ) => {
+      const inserts: Array<{
+        actionCallId?: string;
+        parentActionCallId?: string;
+        name?: string;
+        index: number;
+      }> = [];
+      let messageIndex = 0;
+      for (const trace of traces) {
+        if (!trace || typeof trace !== "object") continue;
+        const traceRecord = trace as Record<string, unknown>;
+        const type = typeof traceRecord.type === "string"
+          ? traceRecord.type
+          : "";
+        if (type === "message.user") {
+          messageIndex++;
+          continue;
+        }
+        if (type === "model.result") {
+          const finishReason = typeof traceRecord.finishReason === "string"
+            ? traceRecord.finishReason
+            : "";
+          if (finishReason !== "tool_calls") {
+            messageIndex++;
+          }
+          continue;
+        }
+        if (type === "tool.call") {
+          const actionCallId = typeof traceRecord.actionCallId === "string"
+            ? traceRecord.actionCallId
+            : undefined;
+          const parentActionCallId =
+            typeof traceRecord.parentActionCallId === "string"
+              ? traceRecord.parentActionCallId
+              : undefined;
+          const name = typeof traceRecord.name === "string"
+            ? traceRecord.name
+            : undefined;
+          inserts.push({
+            actionCallId,
+            parentActionCallId,
+            name,
+            index: Math.min(messageIndex, messageCount),
+          });
+        }
+      }
+      return inserts;
+    };
     const map = new Map<number, ToolCallSummary[]>();
     if (!toolCallSummaries.length) return map;
+    const traceInserts = Array.isArray(run.traces) && run.traces.length > 0
+      ? deriveInsertsFromTraces(run.traces, run.messages.length)
+      : [];
     const insertMap = new Map<
       string,
       { index: number; name?: string; parentActionCallId?: string }
     >();
-    (run.toolInserts ?? []).forEach((insert) => {
+    const inserts = traceInserts.length > 0 ? traceInserts : run.toolInserts ??
+      [];
+    inserts.forEach((insert) => {
       if (
         typeof insert?.index === "number" &&
         insert.index >= 0 &&
@@ -3208,8 +4080,20 @@ function TestBotApp(props: {
       }
     }
     return map;
-  }, [toolCallSummaries, run.toolInserts, run.messages.length]);
-
+  }, [toolCallSummaries, run.toolInserts, run.traces, run.messages.length]);
+  const assistantLatencyByMessageIndex = useMemo(() => {
+    const map: Record<number, number> = {};
+    let assistantTurn = 0;
+    run.messages.forEach((msg, index) => {
+      if (msg.role !== "assistant") return;
+      const latency = latencyByTurn[assistantTurn];
+      if (typeof latency === "number") {
+        map[index] = latency;
+      }
+      assistantTurn += 1;
+    });
+    return map;
+  }, [run.messages, latencyByTurn]);
   const canRunPersona = testDecks.length > 0;
   const hasPersonaSelection = canRunPersona && Boolean(selectedDeckId);
   const canStart = hasPersonaSelection &&
@@ -3244,13 +4128,17 @@ function TestBotApp(props: {
     }
     const el = transcriptRef.current;
     if (!el) return;
+    const shouldScroll = run.messages.length > lastRunMessageCountRef.current ||
+      Boolean(streamingUser?.text || streamingAssistant?.text);
+    lastRunMessageCountRef.current = run.messages.length;
+    if (!shouldScroll) return;
     const frame = requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
   }, [
     run.id,
-    run.messages,
+    run.messages.length,
     run.status,
     streamingUser,
     streamingAssistant?.text,
@@ -3284,7 +4172,7 @@ function TestBotApp(props: {
           toolInserts: [],
         });
       }
-      refreshStatus(data.run?.id);
+      refreshStatus({ runId: data.run?.id });
     } catch (err) {
       console.error(err);
     }
@@ -3307,9 +4195,22 @@ function TestBotApp(props: {
     } catch (err) {
       console.error(err);
     } finally {
-      refreshStatus(run.id);
+      refreshStatus({ runId: run.id });
     }
   }, [refreshStatus, run.id]);
+
+  const handleNewChat = useCallback(async () => {
+    if (run.status === "running") {
+      await stopRun();
+    }
+    setRun({
+      status: "idle",
+      messages: [],
+      traces: [],
+      toolInserts: [],
+    });
+    onResetTestBotSession();
+  }, [onResetTestBotSession, run.status, stopRun]);
 
   const saveTestBotFeedback = useCallback(
     async (messageRefId: string, score: number, reason?: string) => {
@@ -3384,6 +4285,9 @@ function TestBotApp(props: {
           </div>
         </div>
         <div className="header-actions">
+          <button type="button" className="primary" onClick={handleNewChat}>
+            New chat
+          </button>
           <button type="button" onClick={onNavigateToSimulator}>
             Open debug
           </button>
@@ -3477,7 +4381,12 @@ function TestBotApp(props: {
           <strong>Latest test run</strong>
           <div className="editor-status">{runStatusLabel}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" onClick={startRun} disabled={!canStart}>
+            <button
+              type="button"
+              className="primary"
+              onClick={startRun}
+              disabled={!canStart}
+            >
               Run test bot
             </button>
             <button
@@ -3537,20 +4446,54 @@ function TestBotApp(props: {
             )}
             {(() => {
               const rows: React.ReactNode[] = [];
-              const pushBucket = (index: number) => {
+              const renderToolBucket = (index: number) => {
                 const bucket = toolBuckets.get(index);
-                if (!bucket) return;
-                bucket.forEach((call, callIdx) => {
-                  rows.push(
-                    <ToolCallBubble
-                      key={`tool-${call.id}-${index}-${callIdx}`}
-                      call={call}
-                    />,
-                  );
-                });
+                if (!bucket || bucket.length === 0) return;
+                const isOpen = Boolean(toolCallsOpen[index]);
+                let latencyLabel: string | null = null;
+                for (let i = index; i < run.messages.length; i += 1) {
+                  if (run.messages[i]?.role === "assistant") {
+                    const latency = assistantLatencyByMessageIndex[i];
+                    if (typeof latency === "number") {
+                      latencyLabel = `${Math.max(0, Math.round(latency))}ms`;
+                    }
+                    break;
+                  }
+                }
+                rows.push(
+                  <div
+                    key={`tool-bucket-${index}`}
+                    className="tool-calls-collapsible"
+                  >
+                    <button
+                      type="button"
+                      className="tool-calls-toggle"
+                      onClick={() =>
+                        setToolCallsOpen((prev) => ({
+                          ...prev,
+                          [index]: !prev[index],
+                        }))}
+                    >
+                      <span className="tool-calls-toggle-label">
+                        Tool calls ({bucket.length})
+                        {latencyLabel ? ` · ${latencyLabel}` : ""} ·{" "}
+                        {isOpen ? "Hide" : "Show"}
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="tool-calls-list">
+                        {bucket.map((call, callIdx) => (
+                          <ToolCallBubble
+                            key={`tool-${call.id}-${index}-${callIdx}`}
+                            call={call}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>,
+                );
               };
-              pushBucket(0);
-              let renderedCount = 0;
+              renderToolBucket(0);
               run.messages.forEach((m, idx) => {
                 rows.push(
                   <div
@@ -3577,8 +4520,7 @@ function TestBotApp(props: {
                     </div>
                   </div>,
                 );
-                renderedCount++;
-                pushBucket(renderedCount);
+                renderToolBucket(idx + 1);
               });
               return rows;
             })()}
@@ -3680,6 +4622,12 @@ function normalizeAppPath(input: string): string {
     }
     return DEFAULT_HOME_PATH;
   }
+  if (trimmed === "/test-bot") {
+    if (window.location.pathname !== DEFAULT_HOME_PATH) {
+      window.history.replaceState({}, "", DEFAULT_HOME_PATH);
+    }
+    return DEFAULT_HOME_PATH;
+  }
   if (
     trimmed === "/debug" || trimmed === "/simulate" ||
     trimmed === SESSIONS_BASE_PATH
@@ -3688,6 +4636,9 @@ function normalizeAppPath(input: string): string {
       window.history.replaceState({}, "", DEFAULT_SESSION_PATH);
     }
     return DEFAULT_SESSION_PATH;
+  }
+  if (/^\/sessions\/[^/]+\/(debug|test-bot|calibrate)$/.test(trimmed)) {
+    return trimmed;
   }
   if (/^\/sessions\/[^/]+\/calibrate/.test(trimmed)) {
     return trimmed;
@@ -3720,6 +4671,7 @@ function App() {
     normalizeAppPath(window.location.pathname)
   );
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
+  const activeSessionId = getSessionIdFromPath(path);
 
   useEffect(() => {
     const handler = () => setPath(normalizeAppPath(window.location.pathname));
@@ -3751,7 +4703,13 @@ function App() {
     setPath(next);
   }, [path]);
 
-  const isTestBot = path.startsWith("/test-bot");
+  const replacePath = useCallback((next: string) => {
+    if (next === path) return;
+    window.history.replaceState({}, "", next);
+    setPath(next);
+  }, [path]);
+
+  const isTestBot = /\/test-bot$/.test(path);
   const isCalibrate = path.startsWith("/calibrate") ||
     /^\/sessions\/[^/]+\/calibrate/.test(path);
   const isSimulator = !isTestBot && !isCalibrate;
@@ -3762,6 +4720,15 @@ function App() {
     : isCalibrate
     ? "calibrate"
     : "debug";
+  const testBotPath = activeSessionId
+    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/test-bot`
+    : DEFAULT_HOME_PATH;
+  const debugPath = activeSessionId
+    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/debug`
+    : DEFAULT_SESSION_PATH;
+  const calibratePath = activeSessionId
+    ? buildCalibratePath(activeSessionId)
+    : "/calibrate";
 
   return (
     <>
@@ -3771,21 +4738,21 @@ function App() {
             <button
               type="button"
               className={currentPage === "test-bot" ? "active" : ""}
-              onClick={() => navigate(DEFAULT_HOME_PATH)}
+              onClick={() => navigate(testBotPath)}
             >
               Test Bot
             </button>
             <button
               type="button"
               className={currentPage === "debug" ? "active" : ""}
-              onClick={() => navigate(DEFAULT_SESSION_PATH)}
+              onClick={() => navigate(debugPath)}
             >
               Debug
             </button>
             <button
               type="button"
               className={currentPage === "calibrate" ? "active" : ""}
-              onClick={() => navigate("/calibrate")}
+              onClick={() => navigate(calibratePath)}
             >
               Calibrate
             </button>
@@ -3802,13 +4769,21 @@ function App() {
             : currentPage === "test-bot"
             ? (
               <TestBotApp
-                onNavigateToSimulator={() => navigate(DEFAULT_SESSION_PATH)}
+                onNavigateToSimulator={() => navigate(debugPath)}
                 onNavigateToSession={(sessionId) =>
                   navigate(
                     `${simulatorBasePath}/${
                       encodeURIComponent(sessionId)
                     }/debug`,
                   )}
+                onReplaceTestBotSession={(sessionId) =>
+                  replacePath(
+                    `${simulatorBasePath}/${
+                      encodeURIComponent(sessionId)
+                    }/test-bot`,
+                  )}
+                onResetTestBotSession={() => replacePath(DEFAULT_HOME_PATH)}
+                activeSessionId={activeSessionId}
               />
             )
             : <CalibrateApp />}
