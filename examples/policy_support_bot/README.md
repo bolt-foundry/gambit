@@ -22,8 +22,12 @@ includes:
 | `schemas/*.zod.ts`            | Zod schemas for bot outputs and search inputs.                                                                   |
 | `tests/faq_dataset.test.ts`   | Deno unit tests that ensure the FAQ knowledge base stays intact.                                                 |
 | `demo-script.md`              | Suggested prompts (answers + refusals) for the Gambit Debug UI.                                                  |
-| `test-bot.md`                 | QA test bot script for the debug UI test-bot page.                                                               |
-| `test-bot.input.zod.ts`       | Scenario input schema for the policy support bot test bot.                                                       |
+
+To wire synthetic QA personas into the Test Bot tab, add `[[testDecks]]` entries
+to `policy_support_bot.deck.md` that point at persona decks (for example
+`./tests/new_account_persona.deck.md`). Those persona decks should set
+`acceptsUserTurns = true` and can declare an `inputSchema` so the Scenario form
+is auto-generated.
 
 ## FAQ ingestion format
 

@@ -8,8 +8,8 @@ label = "call_playbook"
    number.
 2. **Triage quickly** – ask one clarifying question; tag as scheduling, message,
    or FYI.
-3. **Narrate tools** – say "Let me check Dr. Malik's calendar" before calling a
-   tool.
+3. **Narrate tools** – try to explain what you're about to do before you call a
+   tool. ie: "Let me check Dr. Malik's calendar" before calling a calendar tool.
 4. **Summaries over scripts** – restate the request before finalizing an action.
 5. **Escalate with context** – callback tickets must include who, what, urgency,
    and desired outcome.

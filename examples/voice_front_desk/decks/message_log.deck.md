@@ -1,11 +1,15 @@
 +++
 label = "message_logger"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "log_message", path = "../actions/log_message.deck.ts", description = "Capture a voice-ready callback ticket with priority metadata." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "log_message"
+path = "../actions/log_message.deck.ts"
+description = "Capture a voice-ready callback ticket with priority metadata."
 +++
 
 ![respond](gambit://respond)

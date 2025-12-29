@@ -12,8 +12,9 @@ How to run decks locally, iterate quickly, and observe runs.
 - Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` then open
   http://localhost:8000/. This serves a multi-page UI:
 
-  - Editor (default): `http://localhost:8000/`
-  - Debug: `http://localhost:8000/debug`
+  - Debug (default): `http://localhost:8000/debug`
+  - Test: `http://localhost:8000/test-bot`
+  - Calibrate: `http://localhost:8000/calibrate`
 
   The WebSocket server streams turns, traces, and status updates.
 - Examples without cloning:
@@ -35,8 +36,6 @@ How to run decks locally, iterate quickly, and observe runs.
   console. Combine with `--stream` to watch live output while capturing traces.
 - `--port <n>` overrides debug UI port (default 8000); `PORT` env is honored
   when `--port` is not provided.
-- `--test-bot <path>` (serve only): load/save the test bot markdown from a
-  custom path instead of `.gambit/test-bot.md`.
 - `serve` auto-builds the debug UI bundle on every start and generates source
   maps by default.
 - `--no-bundle` (serve only): disable auto-bundling.
@@ -66,23 +65,20 @@ How to run decks locally, iterate quickly, and observe runs.
   `window.gambitFormatTrace` hook in the page; return a string or
   `{role?, summary?, details?, depth?}` to override the entry that appears in
   the Traces & Tools pane.
-
-## Editor UI notes
-
-The editor page (`/`) is for iterating on a deck and its related markdown files.
-
-- File browser: recursively lists `*.md` files under the current root.
-- Editor: opens a markdown file and autosaves changes to disk (debounced).
-  Selecting a file updates the URL with `?file=...` so reloads restore the
-  active file.
-- Active deck: any opened markdown file can be set as the active deck; the file
-  list root defaults to `dirname(activeDeckPath)`.
-- Iteration sidebar:
-  - Deck notes: stored as a local-only sidecar under `.gambit/notes/` and tied
-    to the active deck path.
-  - Feedback: aggregated from saved sessions for the active deck (newest-first),
-    with archive/unarchive support. Clicking “View” opens a session context
-    drawer (message window + session notes).
+- The Test page reuses the same simulator runtime but drives persona/test-bot
+  decks so you can batch synthetic conversations, inspect per-turn scoring, and
+  export JSONL artifacts for later ingestion. List personas by declaring
+  `[[testDecks]]` entries in your root deck (for example
+  `packages/gambit/examples/voice_front_desk/decks/root.deck.md`). Each entry’s
+  `path` should point to a persona deck (Markdown or TS) that includes
+  `acceptsUserTurns = true`; the persona deck’s own `inputSchema` and defaults
+  power the Scenario/Test Bot form (see
+  `packages/gambit/examples/voice_front_desk/tests/new_patient_intake.deck.md`).
+  Editing those deck files is how you add/remove personas now—there is no
+  `.gambit/test-bot.md` override.
+- The Calibrate page is the regroup/diagnostics view for graders that run
+  against saved Debug/Test sessions; it currently serves as a placeholder until
+  the grading transport lands.
 
 ## Local persistence (.gambit)
 
@@ -91,5 +87,3 @@ The debug UI/editor is local-first and persists lightweight state under
 
 - `.gambit/sessions/<sessionId>/state.json`: per-session transcript, message
   refs, feedback, traces, and session notes.
-- `.gambit/config.json`: editor state (e.g., `rootPath`, `activeDeckPath`).
-- `.gambit/notes/*.md`: deck-level notes sidecars (keyed by deck path).

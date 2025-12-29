@@ -1,11 +1,15 @@
 +++
 label = "refill_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "refill_ops", path = "../actions/refill_ops.deck.ts", description = "Check refill eligibility or route to scheduling." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "refill_ops"
+path = "../actions/refill_ops.deck.ts"
+description = "Check refill eligibility or route to scheduling."
 +++
 
 ![refill_behavior](../cards/refill_behavior.card.md)

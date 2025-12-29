@@ -1,13 +1,21 @@
 +++
 label = "identity_orchestrator"
 inputSchema = "../schemas/identity_input.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "patient_lookup", path = "../actions/patient_lookup.deck.ts", description = "Resolve an existing patient record once name + DOB are confirmed." },
-  { name = "acquire_new_patient", path = "../actions/acquire_new_patient.deck.ts", description = "Create a starter chart for brand-new patients." },
-]
 outputSchema = "../schemas/identity_output.zod.ts"
-guardrails = { maxPasses = 120 }
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[guardrails]
+maxPasses = 10
+[[actionDecks]]
+name = "patient_lookup"
+path = "../actions/patient_lookup.deck.ts"
+description = "Resolve an existing patient record once name + DOB are confirmed."
+[[actionDecks]]
+name = "acquire_new_patient"
+path = "../actions/acquire_new_patient.deck.ts"
+description = "Create a starter chart for brand-new patients."
 +++
 
 ![identity_behaviors](../cards/identity_behaviors.card.md)

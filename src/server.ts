@@ -1,17 +1,19 @@
 import * as path from "@std/path";
-import { walk } from "@std/fs/walk";
 import { runDeck } from "./runtime.ts";
-import { GAMBIT_TOOL_COMPLETE } from "./constants.ts";
-import {
-  DEFAULT_TEST_BOT,
-  loadTestBotConfig,
-  sanitizeNumber,
-  TEST_BOT_DEFAULT_PATH,
-} from "./test_bot.ts";
+import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { loadDeck } from "./loader.ts";
+import {
+  appendDurableStreamEvent,
+  handleDurableStreamRequest,
+} from "./durable_streams.ts";
 import type { FeedbackEntry, SavedState } from "./state.ts";
-import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
+import type {
+  LoadedDeck,
+  ModelMessage,
+  ModelProvider,
+  TraceEvent,
+} from "./types.ts";
 import type { ZodTypeAny } from "zod";
 
 const logger = console;
@@ -30,61 +32,27 @@ const simulatorBundleSourceMapPath = path.resolve(
   "dist",
   "bundle.js.map",
 );
-const gambitDir = path.resolve(Deno.cwd(), ".gambit");
-const notesDir = path.join(gambitDir, "notes");
-const configPath = path.join(gambitDir, "config.json");
-const editorAssistantDeckPath = path.resolve(
-  moduleDir,
-  "decks",
-  "editor-assistant.deck.md",
-);
-const EDITOR_ASSISTANT_PATCH_ACTION = "propose_patch";
+const SIMULATOR_STREAM_ID = "gambit-simulator";
+const TEST_BOT_STREAM_ID = "gambit-test-bot";
+type AvailableTestDeck = {
+  id: string;
+  label: string;
+  description?: string;
+  path: string;
+};
+type AvailableGraderDeck = {
+  id: string;
+  label: string;
+  description?: string;
+  path: string;
+};
 
-function resolveRoot(rootParam?: string | null) {
-  return rootParam ? path.resolve(rootParam) : Deno.cwd();
-}
-
-function resolveWithin(root: string, relativePath: string) {
-  const target = path.resolve(root, relativePath);
-  const rel = path.relative(root, target);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error("Path escapes root");
-  }
-  return target;
-}
-
-type IncomingMessage =
-  | {
-    type: "run";
-    input?: unknown;
-    message?: unknown;
-    stream?: boolean;
-    model?: string;
-    modelForce?: string;
-    trace?: boolean;
-    resetState?: boolean;
-  }
-  | {
-    type: "feedback";
-    messageRefId: string;
-    score: number;
-    reason?: string;
-    runId?: string;
-  }
-  | {
-    type: "notes";
-    text?: string;
-  }
-  | {
-    type: "conversationScore";
-    score: number;
-  }
-  | {
-    type: "loadSession";
-    sessionId: string;
-  }
-  | { type: "testBotSubscribe" }
-  | { type: "ping" };
+let availableTestDecks: Array<AvailableTestDeck> = [];
+const testDeckByPath = new Map<string, AvailableTestDeck>();
+const testDeckById = new Map<string, AvailableTestDeck>();
+let availableGraderDecks: Array<AvailableGraderDeck> = [];
+const graderDeckByPath = new Map<string, AvailableGraderDeck>();
+const graderDeckById = new Map<string, AvailableGraderDeck>();
 
 type NormalizedSchema = {
   kind:
@@ -115,11 +83,20 @@ type SessionMeta = {
   deck?: string;
   deckSlug?: string;
   createdAt?: string;
+  calibrationRuns?: Array<CalibrationRunRecord>;
+  sessionDir?: string;
+  statePath?: string;
 };
 
-type PatchProposal = {
-  summary: string;
-  edits: Array<{ start: number; end: number; text: string }>;
+type CalibrationRunRecord = {
+  id: string;
+  graderId: string;
+  graderPath: string;
+  graderLabel?: string;
+  status: "completed" | "error";
+  runAt?: string;
+  result?: unknown;
+  error?: string;
 };
 
 type OutgoingMessage =
@@ -163,234 +140,24 @@ function resolveDefaultValue(raw: unknown): unknown {
   return raw;
 }
 
-function ensureDir(dir: string) {
+async function describeDeckInputSchemaFromPath(
+  deckPath: string,
+): Promise<SchemaDescription> {
   try {
-    Deno.mkdirSync(dir, { recursive: true });
-  } catch {
-    // ignore
-  }
-}
-
-function readJsonFile<T>(filePath: string): T | undefined {
-  try {
-    const text = Deno.readTextFileSync(filePath);
-    return JSON.parse(text) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-function writeJsonFile(filePath: string, data: unknown) {
-  try {
-    ensureDir(path.dirname(filePath));
-    Deno.writeTextFileSync(filePath, JSON.stringify(data, null, 2));
+    const deck = await loadDeck(deckPath);
+    return describeZodSchema(deck.inputSchema);
   } catch (err) {
-    logger.warn(
-      `[sim] failed to write ${filePath}: ${
-        err instanceof Error ? err.message : err
-      }`,
-    );
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[sim] failed to load test deck schema: ${message}`);
+    return { error: message };
   }
 }
-
-function hashDeckPath(deckPath: string): string {
-  try {
-    const base = btoa(unescape(encodeURIComponent(deckPath)));
-    return base.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  } catch {
-    return deckPath.replace(/[^a-zA-Z0-9._-]/g, "_");
-  }
-}
-
-function notesFileForDeck(deckPath: string): string {
-  const hashed = hashDeckPath(deckPath);
-  return path.join(notesDir, `${hashed}.md`);
-}
-
-function assistantMessagesFromState(
-  state?: SavedState,
-): Array<{ role: "assistant"; content: string }> {
-  if (!state?.messages) return [];
-  return state.messages
-    .filter((m) =>
-      m && m.role === "assistant" && typeof m.content === "string" &&
-      m.content.trim().length > 0
-    )
-    .map((m) => ({ role: "assistant", content: String(m.content) }));
-}
-
-function normalizePatchProposal(
-  raw: unknown,
-): { patch?: PatchProposal; error?: string } {
-  if (!raw || typeof raw !== "object") {
-    return { error: "Patch payload missing" };
-  }
-  const summary = (raw as { summary?: unknown }).summary;
-  const editsRaw = (raw as { edits?: unknown }).edits;
-  if (typeof summary !== "string") {
-    return { error: "Patch summary is missing" };
-  }
-  if (!Array.isArray(editsRaw)) {
-    return { error: "Patch edits are missing" };
-  }
-  const edits: PatchProposal["edits"] = [];
-  for (let i = 0; i < editsRaw.length; i++) {
-    const edit = editsRaw[i] as {
-      start?: unknown;
-      end?: unknown;
-      text?: unknown;
-    };
-    const start = typeof edit.start === "number"
-      ? edit.start
-      : Number(edit.start);
-    const end = typeof edit.end === "number" ? edit.end : Number(edit.end);
-    const text = edit.text;
-    if (
-      !Number.isFinite(start) || !Number.isFinite(end) ||
-      typeof text !== "string"
-    ) {
-      return { error: `Edit ${i + 1} is invalid` };
-    }
-    if (start < 0 || end < 0 || end < start) {
-      return { error: `Edit ${i + 1} has invalid bounds` };
-    }
-    if (i > 0 && start < edits[i - 1].end) {
-      return { error: "Edits must be sorted and non-overlapping" };
-    }
-    edits.push({ start, end, text });
-  }
-  return { patch: { summary, edits } };
-}
-
-function validatePatchBounds(
-  patch: PatchProposal,
-  contentLength: number,
-): { ok: true; patch: PatchProposal } | { ok: false; error: string } {
-  let lastEnd = 0;
-  for (let i = 0; i < patch.edits.length; i++) {
-    const edit = patch.edits[i];
-    if (edit.start < 0 || edit.end < 0 || edit.end < edit.start) {
-      return { ok: false, error: `Edit ${i + 1} has invalid bounds` };
-    }
-    if (i > 0 && edit.start < lastEnd) {
-      return {
-        ok: false,
-        error: "Edits must be sorted and non-overlapping",
-      };
-    }
-    if (edit.end > contentLength) {
-      return {
-        ok: false,
-        error: `Edit ${i + 1} exceeds content length (${contentLength})`,
-      };
-    }
-    lastEnd = edit.end;
-  }
-  return { ok: true, patch };
-}
-
-function extractPatchProposalFromState(args: {
-  state?: SavedState;
-  contentLength: number;
-  actionName: string;
-}): { patch?: PatchProposal; error?: string } {
-  const { state, contentLength, actionName } = args;
-  if (!state?.messages) return {};
-  let proposal: PatchProposal | undefined;
-  let lastError: string | undefined;
-
-  for (const msg of state.messages) {
-    if (!msg || msg.role !== "tool") continue;
-    if (msg.name !== GAMBIT_TOOL_COMPLETE) continue;
-    if (typeof msg.content !== "string") continue;
-    try {
-      const parsed = JSON.parse(msg.content) as
-        | {
-          payload?: unknown;
-          status?: unknown;
-          message?: unknown;
-          source?: {
-            actionName?: string;
-          };
-        }
-        | unknown;
-      const sourceAction = (parsed && typeof parsed === "object" &&
-          typeof (parsed as { source?: { actionName?: unknown } }).source
-              ?.actionName === "string")
-        ? (parsed as { source: { actionName: string } }).source.actionName
-        : undefined;
-      if (sourceAction && sourceAction !== actionName) continue;
-      const status = (parsed &&
-          typeof parsed === "object" &&
-          typeof (parsed as { status?: unknown }).status === "number")
-        ? (parsed as { status: number }).status
-        : undefined;
-      if (status && status >= 400) {
-        lastError =
-          typeof (parsed as { message?: unknown }).message === "string"
-            ? (parsed as { message: string }).message
-            : `Patch tool returned status ${status}`;
-        continue;
-      }
-      const rawPayload = (parsed && typeof parsed === "object")
-        ? (parsed as { payload?: unknown }).payload ?? parsed
-        : parsed;
-      const candidate = rawPayload && typeof rawPayload === "object"
-        ? (rawPayload as { payload?: unknown }).payload ?? rawPayload
-        : rawPayload;
-      const normalized = normalizePatchProposal(candidate);
-      if (!normalized.patch) {
-        lastError = normalized.error ?? "Invalid patch payload";
-        continue;
-      }
-      const bounds = validatePatchBounds(normalized.patch, contentLength);
-      if (!bounds.ok) {
-        lastError = bounds.error;
-        continue;
-      }
-      proposal = normalized.patch;
-      lastError = undefined;
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  return { patch: proposal, error: proposal ? undefined : lastError };
-}
-
-type TestBotConfig = import("./test_bot.ts").TestBotConfig;
 
 function describeZodSchema(schema?: ZodTypeAny): SchemaDescription {
   try {
     const normalized = normalizeSchema(schema);
     const defaults = normalized ? materializeDefaults(normalized) : undefined;
     return { schema: normalized, defaults };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { error: message };
-  }
-}
-
-async function loadSchemaFromPath(
-  schemaPath?: string,
-  basePath?: string,
-): Promise<ZodTypeAny | undefined> {
-  if (!schemaPath || typeof schemaPath !== "string") return undefined;
-  const baseDir = basePath ? path.dirname(basePath) : Deno.cwd();
-  const resolved = path.resolve(baseDir, schemaPath);
-  const mod = await import(path.toFileUrl(resolved).href);
-  return mod.default as ZodTypeAny;
-}
-
-async function describeSchemaFromPath(
-  schemaPath?: string,
-  basePath?: string,
-): Promise<SchemaDescription | undefined> {
-  if (!schemaPath || typeof schemaPath !== "string") return undefined;
-  try {
-    const schema = await loadSchemaFromPath(schemaPath, basePath);
-    if (!schema) return undefined;
-    return describeZodSchema(schema);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return { error: message };
@@ -615,7 +382,6 @@ export function startWebSocketSimulator(opts: {
   verbose?: boolean;
   signal?: AbortSignal;
   sessionDir?: string;
-  testBotPath?: string;
   autoBundle?: boolean;
   sourceMap?: boolean;
   bundlePlatform?: "deno" | "browser";
@@ -623,21 +389,6 @@ export function startWebSocketSimulator(opts: {
   const port = opts.port ?? 8000;
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = resolveDeckPath(opts.deckPath);
-  const existingConfig = readJsonFile<Record<string, unknown>>(configPath) ??
-    {};
-  const maybeRootFromDeck = path.dirname(resolvedDeckPath || Deno.cwd());
-  const mergedConfig = {
-    ...existingConfig,
-    // Always pin simulator root/active deck to the deck we were asked to serve.
-    rootPath: maybeRootFromDeck,
-    activeDeckPath: resolvedDeckPath,
-  };
-  if (
-    mergedConfig.rootPath !== existingConfig.rootPath ||
-    mergedConfig.activeDeckPath !== existingConfig.activeDeckPath
-  ) {
-    writeJsonFile(configPath, mergedConfig);
-  }
   const sessionsRoot = (() => {
     const base = opts.sessionDir
       ? path.resolve(opts.sessionDir)
@@ -683,6 +434,13 @@ export function startWebSocketSimulator(opts: {
       messageRefId?: string;
       feedback?: FeedbackEntry;
     }>;
+    traces?: Array<TraceEvent>;
+    toolInserts?: Array<{
+      actionCallId?: string;
+      parentActionCallId?: string;
+      name?: string;
+      index: number;
+    }>;
   };
   type TestBotRunEntry = {
     run: TestBotRunStatus;
@@ -690,20 +448,8 @@ export function startWebSocketSimulator(opts: {
     abort: AbortController | null;
   };
   const testBotRuns = new Map<string, TestBotRunEntry>();
-  const testBotSubscribers = new Set<WebSocket>();
   const broadcastTestBot = (payload: unknown) => {
-    const message = JSON.stringify(payload);
-    for (const socket of testBotSubscribers) {
-      try {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(message);
-        } else {
-          testBotSubscribers.delete(socket);
-        }
-      } catch {
-        testBotSubscribers.delete(socket);
-      }
-    }
+    appendDurableStreamEvent(TEST_BOT_STREAM_ID, payload);
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   const enrichStateWithSession = (state: SavedState): {
@@ -725,6 +471,12 @@ export function startWebSocketSimulator(opts: {
     }
     if (typeof meta.sessionDir !== "string") {
       meta.sessionDir = path.join(sessionsRoot, String(meta.sessionId));
+    }
+    if (
+      typeof meta.sessionStatePath !== "string" &&
+      typeof meta.sessionDir === "string"
+    ) {
+      meta.sessionStatePath = path.join(meta.sessionDir, "state.json");
     }
     const dir = typeof meta.sessionDir === "string"
       ? meta.sessionDir
@@ -763,6 +515,26 @@ export function startWebSocketSimulator(opts: {
     return undefined;
   };
 
+  const cloneTraces = (traces: Array<TraceEvent>): Array<TraceEvent> => {
+    try {
+      return structuredClone(traces);
+    } catch {
+      try {
+        return JSON.parse(JSON.stringify(traces));
+      } catch {
+        return [...traces];
+      }
+    }
+  };
+
+  let simulatorRunning = false;
+  let simulatorCurrentRunId: string | undefined;
+  let simulatorSavedState: SavedState | undefined;
+  let simulatorCapturedTraces: Array<TraceEvent> = [];
+  const emitSimulator = (payload: OutgoingMessage) => {
+    appendDurableStreamEvent(SIMULATOR_STREAM_ID, payload);
+  };
+
   const listSessions = (): Array<SessionMeta> => {
     try {
       const entries: Array<SessionMeta> = [];
@@ -770,15 +542,7 @@ export function startWebSocketSimulator(opts: {
         if (!entry.isDirectory) continue;
         const state = readSessionState(entry.name);
         if (!state) continue;
-        const createdAt = typeof state.meta?.sessionCreatedAt === "string"
-          ? state.meta.sessionCreatedAt
-          : undefined;
-        entries.push({
-          id: entry.name,
-          deck: state.meta?.deck as string | undefined,
-          deckSlug: state.meta?.deckSlug as string | undefined,
-          createdAt,
-        });
+        entries.push(buildSessionMeta(entry.name, state));
       }
       entries.sort((a, b) => {
         const aKey = a.createdAt ?? a.id;
@@ -791,6 +555,48 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
+  const buildSessionMeta = (
+    sessionId: string,
+    state?: SavedState,
+  ): SessionMeta => {
+    const meta = state?.meta ?? {};
+    const createdAt = typeof meta.sessionCreatedAt === "string"
+      ? meta.sessionCreatedAt
+      : undefined;
+    const deck = typeof meta.deck === "string" ? meta.deck : undefined;
+    const deckSlug = typeof meta.deckSlug === "string"
+      ? meta.deckSlug
+      : undefined;
+    const calibrationRuns = Array.isArray(meta.calibrationRuns)
+      ? (meta.calibrationRuns as Array<CalibrationRunRecord>).map((run) => ({
+        id: typeof run.id === "string" ? run.id : randomId("cal"),
+        graderId: run.graderId,
+        graderPath: run.graderPath,
+        graderLabel: run.graderLabel,
+        status: run.status,
+        runAt: run.runAt,
+        result: run.result,
+        error: run.error,
+      }))
+      : undefined;
+    const sessionDir = typeof meta.sessionDir === "string"
+      ? meta.sessionDir
+      : path.join(sessionsRoot, sessionId);
+    const statePath = typeof (meta as { sessionStatePath?: string })
+        .sessionStatePath === "string"
+      ? (meta as { sessionStatePath?: string }).sessionStatePath
+      : path.join(sessionDir, "state.json");
+    return {
+      id: sessionId,
+      deck,
+      deckSlug,
+      createdAt,
+      calibrationRuns,
+      sessionDir,
+      statePath,
+    };
+  };
+
   const stringifyContent = (value: unknown): string => {
     if (value === null || value === undefined) return "";
     if (typeof value === "string") return value;
@@ -801,90 +607,160 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
-  const generateTestBotUserMessage = async (
-    cfg: TestBotConfig,
-    scenario: string | undefined,
-    history: Array<ModelMessage>,
-    streamOpts?: { onStreamText?: (chunk: string) => void },
-  ): Promise<string> => {
-    const recent = history
-      .filter((m) => m && (m.role === "assistant" || m.role === "user"))
-      .slice(-8)
-      .map((m) =>
-        `${m.role.toUpperCase()}: ${stringifyContent(m.content ?? "")}`
-      )
-      .join("\n");
-    const systemPrompt = [
-      "You are a QA test user talking to an assistant. Generate the next user turn.",
-      "Persona / goals:",
-      cfg.body.trim(),
-      scenario ? "Scenario:" : undefined,
-      scenario ? scenario.trim() : undefined,
-      "Rules:",
-      "- Keep the message concise and natural.",
-      "- Return only the user message text. No analysis or role labels.",
-    ].filter((line): line is string =>
-      typeof line === "string" && line.trim().length > 0
-    )
-      .join("\n\n");
-    const messages: Array<ModelMessage> = [
-      { role: "system", content: systemPrompt },
-    ];
-    if (recent) {
-      messages.push({
-        role: "user",
-        content:
-          `Conversation so far:\n${recent}\n\nRespond with the next user message.`,
-      });
-    } else {
-      messages.push({
-        role: "user",
-        content: "Start the conversation with an opening question or request.",
-      });
+  const updateTestDeckRegistry = (list: Array<AvailableTestDeck>) => {
+    testDeckByPath.clear();
+    testDeckById.clear();
+    for (const entry of list) {
+      testDeckByPath.set(entry.path, entry);
+      testDeckById.set(entry.id, entry);
     }
-
-    const result = await opts.modelProvider.chat({
-      model: cfg.model,
-      messages,
-      stream: Boolean(streamOpts?.onStreamText),
-      onStreamText: streamOpts?.onStreamText,
-    });
-    const text = stringifyContent(result.message?.content ?? "");
-    return text.trim();
+  };
+  const updateGraderDeckRegistry = (list: Array<AvailableGraderDeck>) => {
+    graderDeckByPath.clear();
+    graderDeckById.clear();
+    for (const entry of list) {
+      graderDeckByPath.set(entry.path, entry);
+      graderDeckById.set(entry.id, entry);
+    }
   };
 
-  const buildTestBotMessages = (
+  const resolveTestDeck = (
+    identifier: string,
+  ): AvailableTestDeck | undefined => {
+    if (!identifier) return undefined;
+    const byId = testDeckById.get(identifier);
+    if (byId) return byId;
+    const byPath = testDeckByPath.get(path.resolve(identifier));
+    return byPath;
+  };
+  const resolveGraderDeck = (
+    identifier: string,
+  ): AvailableGraderDeck | undefined => {
+    if (!identifier) return undefined;
+    const byId = graderDeckById.get(identifier);
+    if (byId) return byId;
+    const byPath = graderDeckByPath.get(path.resolve(identifier));
+    return byPath;
+  };
+
+  const slugify = (label: string): string => {
+    return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
+      /(^-|-$)+/g,
+      "",
+    );
+  };
+
+  const toDeckLabel = (filePath: string): string => {
+    const base = path.basename(filePath);
+    return base
+      .replace(/\.deck\.(md|ts)$/i, "")
+      .replace(/[-_]+/g, " ")
+      .trim() || base;
+  };
+
+  const buildTestBotSnapshot = (
     state: SavedState,
-  ): TestBotRunStatus["messages"] => {
-    const messages = state.messages ?? [];
+  ): {
+    messages: TestBotRunStatus["messages"];
+    toolInserts: NonNullable<TestBotRunStatus["toolInserts"]>;
+  } => {
+    const rawMessages = state.messages ?? [];
     const refs = state.messageRefs ?? [];
     const feedbackByRef = new Map(
       state.feedback?.map((entry) => [entry.messageRefId, entry]) ?? [],
     );
-    const next: TestBotRunStatus["messages"] = [];
-    for (let i = 0; i < messages.length; i++) {
-      const msg = messages[i];
-      if (msg?.role !== "assistant" && msg?.role !== "user") continue;
-      const refId = refs[i]?.id;
-      next.push({
-        role: msg.role,
-        content: stringifyContent(msg.content),
-        messageRefId: refId,
-        feedback: refId ? feedbackByRef.get(refId) : undefined,
-      });
+    const messages: TestBotRunStatus["messages"] = [];
+    const fallbackToolInserts: NonNullable<TestBotRunStatus["toolInserts"]> =
+      [];
+    for (let i = 0; i < rawMessages.length; i++) {
+      const msg = rawMessages[i];
+      if (msg?.role === "assistant" || msg?.role === "user") {
+        const content = stringifyContent(msg.content).trim();
+        if (!content) continue;
+        const refId = refs[i]?.id;
+        messages.push({
+          role: msg.role,
+          content,
+          messageRefId: refId,
+          feedback: refId ? feedbackByRef.get(refId) : undefined,
+        });
+        continue;
+      }
+      if (msg?.role === "tool") {
+        const actionCallId =
+          typeof (msg as { tool_call_id?: unknown }).tool_call_id === "string"
+            ? (msg as { tool_call_id?: string }).tool_call_id
+            : undefined;
+        const name = typeof msg.name === "string" ? msg.name : undefined;
+        fallbackToolInserts.push({
+          actionCallId,
+          name,
+          index: messages.length,
+        });
+      }
     }
-    return next;
+    const traceToolInserts = deriveToolInsertsFromTraces(
+      state,
+      messages.length,
+    );
+    return {
+      messages,
+      toolInserts: traceToolInserts.length > 0
+        ? traceToolInserts
+        : fallbackToolInserts,
+    };
+  };
+
+  const deriveToolInsertsFromTraces = (
+    state: SavedState,
+    messageCount: number,
+  ): NonNullable<TestBotRunStatus["toolInserts"]> => {
+    const traces = Array.isArray(state.traces) ? state.traces : [];
+    if (!traces.length) return [];
+    const inserts: NonNullable<TestBotRunStatus["toolInserts"]> = [];
+    let messageIndex = 0;
+    for (const trace of traces as Array<TraceEvent>) {
+      if (!trace || typeof trace !== "object") continue;
+      const traceRecord = trace as Record<string, unknown>;
+      const type = typeof traceRecord.type === "string" ? traceRecord.type : "";
+      if (type === "message.user" || type === "model.result") {
+        messageIndex++;
+        continue;
+      }
+      if (type === "tool.call") {
+        const actionCallId = typeof traceRecord.actionCallId === "string"
+          ? traceRecord.actionCallId
+          : undefined;
+        const parentActionCallId =
+          typeof traceRecord.parentActionCallId === "string"
+            ? traceRecord.parentActionCallId
+            : undefined;
+        const name = typeof traceRecord.name === "string"
+          ? traceRecord.name
+          : undefined;
+        inserts.push({
+          actionCallId,
+          parentActionCallId,
+          name,
+          index: Math.min(messageIndex, messageCount),
+        });
+      }
+    }
+    return inserts;
   };
 
   const syncTestBotRunFromState = (
     run: TestBotRunStatus,
     state: SavedState,
   ) => {
-    run.messages = buildTestBotMessages(state);
+    const snapshot = buildTestBotSnapshot(state);
+    run.messages = snapshot.messages;
+    run.toolInserts = snapshot.toolInserts;
     const sessionId = typeof state.meta?.sessionId === "string"
       ? state.meta.sessionId
       : undefined;
     if (sessionId) run.sessionId = sessionId;
+    run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
   };
 
   const startTestBotRun = (runOpts: {
@@ -892,24 +768,29 @@ export function startWebSocketSimulator(opts: {
     deckInput?: unknown;
     botInput?: unknown;
     initialUserMessage?: string;
+    botDeckPath?: string;
   } = {}): TestBotRunStatus => {
-    const cfg = loadTestBotConfig({
-      autoCreate: true,
-      path: opts.testBotPath,
-    });
+    const botDeckPath = typeof runOpts.botDeckPath === "string"
+      ? runOpts.botDeckPath
+      : undefined;
+    if (!botDeckPath) {
+      throw new Error("Missing test bot deck path");
+    }
+    const defaultMaxTurns = 12;
     const maxTurns = Math.round(
       sanitizeNumber(
-        runOpts.maxTurnsOverride ?? cfg.maxTurns,
-        cfg.maxTurns,
+        runOpts.maxTurnsOverride ?? defaultMaxTurns,
+        defaultMaxTurns,
         { min: 1, max: 200 },
       ),
     );
     const deckInput = runOpts.deckInput;
     const hasDeckInput = deckInput !== undefined;
-    let botInput: unknown = runOpts.botInput ?? cfg.input;
+    const botInput: unknown = runOpts.botInput;
     const initialUserMessage = typeof runOpts.initialUserMessage === "string"
       ? runOpts.initialUserMessage.trim()
       : "";
+    const botConfigPath = botDeckPath;
     const runId = randomId("testbot");
     const startedAt = new Date().toISOString();
     const controller = new AbortController();
@@ -920,6 +801,8 @@ export function startWebSocketSimulator(opts: {
         startedAt,
         maxTurns,
         messages: [],
+        traces: [],
+        toolInserts: [],
       },
       promise: null,
       abort: controller,
@@ -938,26 +821,17 @@ export function startWebSocketSimulator(opts: {
     };
 
     const appendFromState = (state: SavedState) => {
-      const msgs = state.messages ?? [];
-      const feedbackByRef = new Map(
-        state.feedback?.map((entry) => [entry.messageRefId, entry]) ?? [],
-      );
-      let appended = 0;
-      for (let i = lastCount; i < msgs.length; i++) {
-        const m = msgs[i];
-        if (m?.role !== "assistant" && m?.role !== "user") continue;
-        const refId = state.messageRefs?.[i]?.id;
-        run.messages.push({
-          role: m.role,
-          content: stringifyContent(m.content),
-          messageRefId: refId,
-          feedback: refId ? feedbackByRef.get(refId) : undefined,
-        });
-        appended++;
-      }
-      lastCount = msgs.length;
+      const snapshot = buildTestBotSnapshot(state);
+      const rawLength = state.messages?.length ?? 0;
+      const toolCount = snapshot.toolInserts.length;
+      const shouldBroadcast = rawLength !== lastCount ||
+        (run.toolInserts?.length ?? 0) !== toolCount;
+      run.messages = snapshot.messages;
+      run.toolInserts = snapshot.toolInserts;
+      lastCount = rawLength;
       setSessionId(state);
-      if (appended > 0) {
+      run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
+      if (shouldBroadcast) {
         broadcastTestBot({ type: "testBotStatus", run });
       }
     };
@@ -967,36 +841,46 @@ export function startWebSocketSimulator(opts: {
       consoleTracer?.(event);
     };
 
-    const loadBotInputFromSchema = async () => {
-      if (botInput !== undefined) return;
-      if (!cfg.inputSchemaPath) return;
-      const desc = await describeSchemaFromPath(
-        cfg.inputSchemaPath,
-        cfg.path,
-      );
-      if (desc?.defaults !== undefined) {
-        botInput = desc.defaults;
-      } else if (desc?.error) {
-        logger.warn(
-          `[test-bot] failed to load bot input schema ${cfg.inputSchemaPath}: ${desc.error}`,
-        );
+    let deckBotState: SavedState | undefined = undefined;
+
+    const getLastAssistantMessage = (
+      history: Array<ModelMessage | null | undefined>,
+    ): string | undefined => {
+      for (let i = history.length - 1; i >= 0; i--) {
+        const msg = history[i];
+        if (msg?.role === "assistant") {
+          return stringifyContent(msg.content);
+        }
       }
+      return undefined;
     };
 
-    const readScenario = (): string | undefined => {
-      if (typeof botInput === "string") return botInput;
-      if (!botInput || typeof botInput !== "object") return undefined;
-      const scenario = (botInput as { scenario?: unknown }).scenario;
-      return typeof scenario === "string" && scenario.trim()
-        ? scenario
-        : undefined;
+    const generateDeckBotUserMessage = async (
+      history: Array<ModelMessage | null | undefined>,
+      streamOpts?: { onStreamText?: (chunk: string) => void },
+    ): Promise<string> => {
+      const assistantMessage = getLastAssistantMessage(history);
+      if (!assistantMessage) return "";
+      const result = await runDeckWithFallback({
+        path: botDeckPath,
+        input: botInput,
+        inputProvided: botInput !== undefined,
+        modelProvider: opts.modelProvider,
+        state: deckBotState,
+        allowRootStringInput: true,
+        initialUserMessage: assistantMessage,
+        onStateUpdate: (state) => {
+          deckBotState = state;
+        },
+        stream: Boolean(streamOpts?.onStreamText),
+        onStreamText: streamOpts?.onStreamText,
+      });
+      const text = stringifyOutput(result);
+      return text.trim();
     };
 
     const loop = async () => {
       try {
-        await loadBotInputFromSchema();
-        const scenario = readScenario();
-
         if (!controller.signal.aborted) {
           await runDeck({
             path: resolvedDeckPath,
@@ -1017,7 +901,7 @@ export function startWebSocketSimulator(opts: {
                   ...(state.meta ?? {}),
                   testBot: true,
                   testBotRunId: runId,
-                  testBotConfigPath: cfg.path,
+                  testBotConfigPath: botConfigPath,
                 },
                 traces: capturedTraces,
               });
@@ -1028,21 +912,17 @@ export function startWebSocketSimulator(opts: {
         }
         for (let turn = 0; turn < maxTurns; turn++) {
           if (controller.signal.aborted) break;
-          const userMessage = await generateTestBotUserMessage(
-            cfg,
-            scenario,
-            savedState?.messages ?? [],
-            {
-              onStreamText: (chunk) =>
-                broadcastTestBot({
-                  type: "testBotStream",
-                  runId,
-                  role: "user",
-                  chunk,
-                  turn,
-                }),
-            },
-          );
+          const history = savedState?.messages ?? [];
+          const userMessage = await generateDeckBotUserMessage(history, {
+            onStreamText: (chunk) =>
+              broadcastTestBot({
+                type: "testBotStream",
+                runId,
+                role: "user",
+                chunk,
+                turn,
+              }),
+          });
           broadcastTestBot({
             type: "testBotStreamEnd",
             runId,
@@ -1069,7 +949,7 @@ export function startWebSocketSimulator(opts: {
                   ...(state.meta ?? {}),
                   testBot: true,
                   testBotRunId: runId,
-                  testBotConfigPath: cfg.path,
+                  testBotConfigPath: botConfigPath,
                 },
                 traces: capturedTraces,
               });
@@ -1100,9 +980,14 @@ export function startWebSocketSimulator(opts: {
         broadcastTestBot({ type: "testBotStatus", run });
       } finally {
         if (savedState?.messages) {
-          run.messages = buildTestBotMessages(savedState);
+          const snapshot = buildTestBotSnapshot(savedState);
+          run.messages = snapshot.messages;
+          run.toolInserts = snapshot.toolInserts;
         }
         setSessionId(savedState);
+        run.traces = Array.isArray(savedState?.traces)
+          ? [...(savedState?.traces ?? [])]
+          : undefined;
         run.finishedAt = new Date().toISOString();
         entry.abort = null;
         entry.promise = null;
@@ -1115,12 +1000,66 @@ export function startWebSocketSimulator(opts: {
     return run;
   };
 
-  const schemaPromise: Promise<SchemaDescription> = loadDeck(resolvedDeckPath)
+  const deckLoadPromise: Promise<LoadedDeck | null> = loadDeck(
+    resolvedDeckPath,
+  )
     .then((deck) => {
       resolvedDeckPath = deck.path;
       deckSlug = deckSlugFromPath(resolvedDeckPath);
-      return describeZodSchema(deck.inputSchema);
+      availableTestDecks = (deck.testDecks ?? []).map((testDeck, index) => {
+        const label = testDeck.label && typeof testDeck.label === "string"
+          ? testDeck.label
+          : toDeckLabel(testDeck.path);
+        const id = testDeck.id && typeof testDeck.id === "string"
+          ? testDeck.id
+          : slugify(`${label || "test-deck"}-${index}`);
+        return {
+          id,
+          label: label || id,
+          description: typeof testDeck.description === "string"
+            ? testDeck.description
+            : undefined,
+          path: testDeck.path,
+        };
+      });
+      updateTestDeckRegistry(availableTestDecks);
+      availableGraderDecks = (deck.graderDecks ?? []).map(
+        (graderDeck, index) => {
+          const label = graderDeck.label && typeof graderDeck.label === "string"
+            ? graderDeck.label
+            : toDeckLabel(graderDeck.path);
+          const id = graderDeck.id && typeof graderDeck.id === "string"
+            ? graderDeck.id
+            : slugify(`${label || "grader-deck"}-${index}`);
+          return {
+            id,
+            label: label || id,
+            description: typeof graderDeck.description === "string"
+              ? graderDeck.description
+              : undefined,
+            path: graderDeck.path,
+          };
+        },
+      );
+      updateGraderDeckRegistry(availableGraderDecks);
+      return deck;
     })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(`[sim] failed to load deck: ${message}`);
+      availableTestDecks = [];
+      updateTestDeckRegistry(availableTestDecks);
+      availableGraderDecks = [];
+      updateGraderDeckRegistry(availableGraderDecks);
+      return null;
+    });
+
+  const schemaPromise: Promise<SchemaDescription> = deckLoadPromise
+    .then((deck) =>
+      deck ? describeZodSchema(deck.inputSchema) : {
+        error: "Deck failed to load",
+      }
+    )
     .catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
       logger.warn(`[sim] failed to load deck schema: ${message}`);
@@ -1157,444 +1096,161 @@ export function startWebSocketSimulator(opts: {
     { port, signal: opts.signal, onListen: () => {} },
     async (req) => {
       const url = new URL(req.url);
-      if (url.pathname === "/api/config") {
-        if (req.method === "GET") {
-          const data = readJsonFile<Record<string, unknown>>(configPath) ?? {};
-          return new Response(JSON.stringify(data), {
-            headers: { "content-type": "application/json" },
-          });
-        }
-        if (req.method === "POST") {
-          try {
-            const body = await req.json() as {
-              activeDeckPath?: string;
-              rootPath?: string;
-            };
-            const next = {
-              activeDeckPath: typeof body.activeDeckPath === "string"
-                ? body.activeDeckPath
-                : undefined,
-              rootPath: typeof body.rootPath === "string"
-                ? body.rootPath
-                : undefined,
-            };
-            writeJsonFile(configPath, next);
-            return new Response(JSON.stringify(next), {
-              headers: { "content-type": "application/json" },
-            });
-          } catch (err) {
-            return new Response(
-              JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
-              }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-        }
+      if (url.pathname.startsWith("/api/durable-streams/stream/")) {
+        return handleDurableStreamRequest(req);
       }
-
-      if (url.pathname === "/api/files") {
+      if (url.pathname === "/api/calibrate") {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
         }
-        const root = resolveRoot(url.searchParams.get("root"));
-        let limit = Number(url.searchParams.get("limit") ?? "500");
-        if (!Number.isFinite(limit) || limit <= 0) limit = 500;
-        let count = 0;
-        const files: Array<{ path: string; relative: string; kind: string }> =
-          [];
-        try {
-          const maxDepth = Number(url.searchParams.get("maxDepth") ?? "10");
-          for await (
-            const entry of walk(root, {
-              includeDirs: true,
-              followSymlinks: false,
-              maxDepth: Number.isFinite(maxDepth) && maxDepth > 0
-                ? maxDepth
-                : 10,
-            })
-          ) {
-            if (!entry.isFile && !entry.isDirectory) continue;
-            const relative = path.relative(root, entry.path);
-            if (!relative) continue;
-            files.push({
-              path: entry.path,
-              relative,
-              kind: entry.isDirectory ? "dir" : "file",
-            });
-            count++;
-            if (count >= limit) break;
-          }
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        return new Response(JSON.stringify({ root, files }), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      if (url.pathname === "/api/files/create") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            root?: string;
-            relative?: string;
-            kind?: "file" | "dir";
-            content?: string;
-          };
-          if (!body.relative || typeof body.relative !== "string") {
-            throw new Error("Missing relative path");
-          }
-          const root = resolveRoot(body.root);
-          const target = resolveWithin(root, body.relative);
-          if (body.kind === "dir") {
-            ensureDir(target);
-            return new Response(
-              JSON.stringify({ path: target, created: true }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          ensureDir(path.dirname(target));
-          await Deno.writeTextFile(target, body.content ?? "");
-          return new Response(
-            JSON.stringify({ path: target, created: true }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/files/delete") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            root?: string;
-            relative?: string;
-          };
-          if (!body.relative || typeof body.relative !== "string") {
-            throw new Error("Missing relative path");
-          }
-          const root = resolveRoot(body.root);
-          const target = resolveWithin(root, body.relative);
-          const info = await Deno.stat(target);
-          if (info.isDirectory) {
-            await Deno.remove(target, { recursive: true });
-          } else {
-            await Deno.remove(target);
-          }
-          return new Response(JSON.stringify({ deleted: true }), {
-            headers: { "content-type": "application/json" },
-          });
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/files/rename") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            root?: string;
-            from?: string;
-            to?: string;
-          };
-          if (!body.from || typeof body.from !== "string") {
-            throw new Error("Missing source path");
-          }
-          if (!body.to || typeof body.to !== "string") {
-            throw new Error("Missing destination path");
-          }
-          const root = resolveRoot(body.root);
-          const source = resolveWithin(root, body.from);
-          const dest = resolveWithin(root, body.to);
-          ensureDir(path.dirname(dest));
-          await Deno.rename(source, dest);
-          return new Response(
-            JSON.stringify({ path: dest, renamed: true }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/file") {
-        if (req.method === "GET") {
-          const target = url.searchParams.get("path");
-          if (!target) {
-            return new Response(
-              JSON.stringify({ error: "Missing path" }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-          try {
-            const content = await Deno.readTextFile(target);
-            return new Response(JSON.stringify({ path: target, content }), {
-              headers: { "content-type": "application/json" },
-            });
-          } catch (err) {
-            return new Response(
-              JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
-              }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-        }
-        if (req.method === "PUT") {
-          try {
-            const body = await req.json() as {
-              path?: string;
-              content?: string;
-            };
-            if (!body.path || typeof body.path !== "string") {
-              throw new Error("Missing path");
-            }
-            const content = typeof body.content === "string"
-              ? body.content
-              : "";
-            ensureDir(path.dirname(body.path));
-            await Deno.writeTextFile(body.path, content);
-            return new Response(
-              JSON.stringify({ path: body.path, saved: true }),
-              { headers: { "content-type": "application/json" } },
-            );
-          } catch (err) {
-            return new Response(
-              JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
-              }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-        }
-      }
-
-      if (url.pathname === "/api/deck-notes") {
-        if (req.method === "GET") {
-          const deckPathParam = url.searchParams.get("deckPath");
-          if (!deckPathParam) {
-            return new Response(
-              JSON.stringify({ error: "Missing deckPath" }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-          const filePath = notesFileForDeck(deckPathParam);
-          try {
-            const content = await Deno.readTextFile(filePath);
-            return new Response(
-              JSON.stringify({ path: filePath, content }),
-              { headers: { "content-type": "application/json" } },
-            );
-          } catch {
-            return new Response(
-              JSON.stringify({ path: filePath, content: "" }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-        }
-        if (req.method === "PUT") {
-          try {
-            const body = await req.json() as {
-              deckPath?: string;
-              content?: string;
-            };
-            if (!body.deckPath || typeof body.deckPath !== "string") {
-              throw new Error("Missing deckPath");
-            }
-            const filePath = notesFileForDeck(body.deckPath);
-            ensureDir(path.dirname(filePath));
-            await Deno.writeTextFile(filePath, body.content ?? "");
-            return new Response(
-              JSON.stringify({ path: filePath, saved: true }),
-              { headers: { "content-type": "application/json" } },
-            );
-          } catch (err) {
-            return new Response(
-              JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
-              }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-        }
-      }
-
-      if (url.pathname === "/api/editor-assistant/run") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let body: unknown;
-        try {
-          body = await req.json();
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(
-            JSON.stringify({ error: message }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        const payload = (body ?? {}) as {
-          message?: unknown;
-          messages?: unknown;
-          content?: unknown;
-        };
-        const explicitMessage = typeof payload.message === "string"
-          ? payload.message
-          : undefined;
-        const history = Array.isArray(payload.messages) ? payload.messages : [];
-        const lastUserMessage = explicitMessage ??
-          [...history].reverse().find((m) =>
-            m?.role === "user" && typeof m.content === "string"
-          )?.content;
-        const contentLength = typeof payload.content === "string"
-          ? payload.content.length
-          : undefined;
-
-        let capturedState: SavedState | undefined;
-        let runOutput: unknown;
-        try {
-          runOutput = await runDeck({
-            path: editorAssistantDeckPath,
-            input: undefined,
-            inputProvided: false,
-            modelProvider: opts.modelProvider,
-            defaultModel: opts.model,
-            modelOverride: opts.modelForce,
-            trace: opts.verbose ? consoleTracer : undefined,
-            stream: false,
-            state: undefined,
-            onStateUpdate: (state) => {
-              capturedState = state;
-            },
-            initialUserMessage: lastUserMessage,
-            allowRootStringInput: false,
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(
-            JSON.stringify({
-              messages: [{
-                role: "assistant",
-                content: `Assistant run failed: ${message}`,
-              }],
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        }
-
-        let assistantMessages = assistantMessagesFromState(capturedState);
-        if (assistantMessages.length === 0 && typeof runOutput === "string") {
-          assistantMessages = [{ role: "assistant", content: runOutput }];
-        }
-        const { patch, error: patchError } = extractPatchProposalFromState({
-          state: capturedState,
-          contentLength: contentLength ?? 0,
-          actionName: EDITOR_ASSISTANT_PATCH_ACTION,
-        });
-        if (assistantMessages.length === 0) {
-          assistantMessages = [{
-            role: "assistant",
-            content: "No assistant response produced.",
-          }];
-        }
-        if (!patch && patchError && contentLength !== undefined) {
-          assistantMessages = [
-            ...assistantMessages,
-            {
-              role: "assistant",
-              content: `Patch proposal invalid: ${patchError}`,
-            },
-          ];
-        }
+        await deckLoadPromise.catch(() => null);
+        const sessions = listSessions();
         return new Response(
-          JSON.stringify({ messages: assistantMessages, patch }),
+          JSON.stringify({
+            graderDecks: availableGraderDecks,
+            sessions,
+          }),
           { headers: { "content-type": "application/json" } },
         );
       }
 
-      if (url.pathname === "/api/test-bot") {
-        if (req.method === "GET") {
-          const cfg = loadTestBotConfig({
-            autoCreate: true,
-            path: opts.testBotPath,
+      if (url.pathname === "/api/calibrate/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            graderId?: string;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          await deckLoadPromise.catch(() => null);
+          const grader = body.graderId
+            ? resolveGraderDeck(body.graderId)
+            : availableGraderDecks[0];
+          if (!grader) {
+            throw new Error("Unknown grader deck selection");
+          }
+          const sessionState = readSessionState(body.sessionId);
+          if (!sessionState) {
+            throw new Error("Session not found");
+          }
+          const startedAt = new Date().toISOString();
+          const runId = randomId("cal");
+          let entry: CalibrationRunRecord;
+          try {
+            const result = await runDeckWithFallback({
+              path: grader.path,
+              input: { session: sessionState },
+              inputProvided: true,
+              modelProvider: opts.modelProvider,
+              allowRootStringInput: false,
+              initialUserMessage: undefined,
+              stream: false,
+            });
+            entry = {
+              id: runId,
+              graderId: grader.id,
+              graderPath: grader.path,
+              graderLabel: grader.label,
+              status: "completed",
+              runAt: startedAt,
+              result,
+            };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            entry = {
+              id: runId,
+              graderId: grader.id,
+              graderPath: grader.path,
+              graderLabel: grader.label,
+              status: "error",
+              runAt: startedAt,
+              error: message,
+            };
+          }
+          const previousRuns = Array.isArray(sessionState.meta?.calibrationRuns)
+            ? (sessionState.meta?.calibrationRuns as Array<
+              CalibrationRunRecord
+            >)
+            : [];
+          const nextState = persistSessionState({
+            ...sessionState,
+            meta: {
+              ...(sessionState.meta ?? {}),
+              calibrationRuns: [...previousRuns, entry],
+            },
           });
-          const schemaDesc = await describeSchemaFromPath(
-            cfg.inputSchemaPath,
-            cfg.path,
-          );
-          const inputDefault = cfg.input !== undefined
-            ? cfg.input
-            : schemaDesc?.defaults;
+          const sessionMeta = buildSessionMeta(body.sessionId, nextState);
           return new Response(
             JSON.stringify({
-              path: cfg.path,
-              content: cfg.content,
-              attrs: cfg.attrs,
-              inputSchemaPath: cfg.inputSchemaPath,
-              inputSchema: schemaDesc?.schema,
-              inputSchemaError: schemaDesc?.error,
-              defaults: {
-                model: cfg.model,
-                temperature: cfg.temperature,
-                maxTurns: cfg.maxTurns,
-                input: inputDefault,
-              },
+              sessionId: body.sessionId,
+              run: entry,
+              session: sessionMeta,
             }),
             { headers: { "content-type": "application/json" } },
           );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
         }
-        if (req.method === "PUT") {
-          try {
-            const body = await req.json() as { content?: string };
-            const content = typeof body.content === "string"
-              ? body.content
-              : DEFAULT_TEST_BOT;
-            const targetPath = opts.testBotPath
-              ? path.resolve(opts.testBotPath)
-              : TEST_BOT_DEFAULT_PATH;
-            ensureDir(path.dirname(targetPath));
-            await Deno.writeTextFile(targetPath, content);
-            return new Response(
-              JSON.stringify({ path: targetPath, saved: true }),
-              { headers: { "content-type": "application/json" } },
-            );
-          } catch (err) {
+      }
+
+      if (url.pathname === "/api/test-bot") {
+        if (req.method === "GET") {
+          await deckLoadPromise.catch(() => null);
+          const requestedDeck = url.searchParams.get("deckPath");
+          const selection = requestedDeck
+            ? resolveTestDeck(requestedDeck)
+            : availableTestDecks[0];
+          if (requestedDeck && !selection) {
             return new Response(
               JSON.stringify({
-                error: err instanceof Error ? err.message : String(err),
+                error: "Unknown test deck selection",
               }),
-              { status: 400, headers: { "content-type": "application/json" } },
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              },
             );
           }
+          if (selection) {
+            const schemaDesc = await describeDeckInputSchemaFromPath(
+              selection.path,
+            );
+            return new Response(
+              JSON.stringify({
+                botPath: selection.path,
+                botLabel: selection.label,
+                botDescription: selection.description,
+                selectedDeckId: selection.id,
+                inputSchema: schemaDesc.schema,
+                inputSchemaError: schemaDesc.error,
+                defaults: { input: schemaDesc.defaults },
+                testDecks: availableTestDecks,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              botPath: null,
+              botLabel: null,
+              botDescription: null,
+              selectedDeckId: null,
+              inputSchema: null,
+              inputSchemaError: null,
+              defaults: {},
+              testDecks: availableTestDecks,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
         }
         return new Response("Method not allowed", { status: 405 });
       }
@@ -1607,12 +1263,14 @@ export function startWebSocketSimulator(opts: {
         let deckInput: unknown = undefined;
         let botInput: unknown = undefined;
         let initialUserMessage: string | undefined = undefined;
+        let botDeckSelection: AvailableTestDeck | undefined;
         try {
           const body = await req.json() as {
             maxTurns?: number;
             init?: unknown;
             botInput?: unknown;
             initialUserMessage?: unknown;
+            botDeckPath?: string;
           };
           if (
             typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
@@ -1621,6 +1279,22 @@ export function startWebSocketSimulator(opts: {
           }
           deckInput = body.init;
           botInput = body.botInput;
+          await deckLoadPromise.catch(() => null);
+          if (typeof body.botDeckPath === "string") {
+            const resolved = resolveTestDeck(body.botDeckPath);
+            if (!resolved) {
+              return new Response(
+                JSON.stringify({ error: "Unknown test deck selection" }),
+                {
+                  status: 400,
+                  headers: { "content-type": "application/json" },
+                },
+              );
+            }
+            botDeckSelection = resolved;
+          } else if (!body.botDeckPath && availableTestDecks.length > 0) {
+            botDeckSelection = availableTestDecks[0];
+          }
           if (
             typeof body.initialUserMessage === "string" &&
             body.initialUserMessage.trim().length > 0
@@ -1640,11 +1314,18 @@ export function startWebSocketSimulator(opts: {
             // ignore; keep undefined
           }
         }
+        if (!botDeckSelection) {
+          return new Response(
+            JSON.stringify({ error: "No test decks configured" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
         const run = startTestBotRun({
           maxTurnsOverride,
           deckInput,
           botInput,
           initialUserMessage,
+          botDeckPath: botDeckSelection.path,
         });
         return new Response(
           JSON.stringify({ run }),
@@ -1659,6 +1340,8 @@ export function startWebSocketSimulator(opts: {
           id: runId ?? "",
           status: "idle",
           messages: [],
+          traces: [],
+          toolInserts: [],
         };
         if (run.sessionId) {
           const state = readSessionState(run.sessionId);
@@ -1666,29 +1349,53 @@ export function startWebSocketSimulator(opts: {
             syncTestBotRunFromState(run, state);
           }
         }
-        const cfg = loadTestBotConfig({
-          autoCreate: false,
-          path: opts.testBotPath,
-        });
-        const schemaDesc = await describeSchemaFromPath(
-          cfg.inputSchemaPath,
-          cfg.path,
-        );
-        const inputDefault = cfg.input !== undefined
-          ? cfg.input
-          : schemaDesc?.defaults;
+        await deckLoadPromise.catch(() => null);
+        const requestedDeck = url.searchParams.get("deckPath");
+        const selection = requestedDeck
+          ? resolveTestDeck(requestedDeck)
+          : availableTestDecks[0];
+        if (requestedDeck && !selection) {
+          return new Response(
+            JSON.stringify({
+              error: "Unknown test deck selection",
+            }),
+            {
+              status: 400,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        }
+        if (selection) {
+          const schemaDesc = await describeDeckInputSchemaFromPath(
+            selection.path,
+          );
+          return new Response(
+            JSON.stringify({
+              run,
+              botPath: selection.path,
+              botLabel: selection.label,
+              botDescription: selection.description,
+              selectedDeckId: selection.id,
+              inputSchema: schemaDesc.schema,
+              inputSchemaError: schemaDesc.error,
+              defaults: { input: schemaDesc.defaults },
+              testDecks: availableTestDecks,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+
         return new Response(
           JSON.stringify({
             run,
-            inputSchemaPath: cfg.inputSchemaPath,
-            inputSchema: schemaDesc?.schema,
-            inputSchemaError: schemaDesc?.error,
-            defaults: {
-              model: cfg.model,
-              temperature: cfg.temperature,
-              maxTurns: cfg.maxTurns,
-              input: inputDefault,
-            },
+            botPath: null,
+            botLabel: null,
+            botDescription: null,
+            selectedDeckId: null,
+            inputSchema: null,
+            inputSchemaError: null,
+            defaults: {},
+            testDecks: availableTestDecks,
           }),
           { headers: { "content-type": "application/json" } },
         );
@@ -1717,10 +1424,342 @@ export function startWebSocketSimulator(opts: {
               id: runId ?? "",
               status: "idle",
               messages: [],
+              traces: [],
+              toolInserts: [],
             },
           }),
           { headers: { "content-type": "application/json" } },
         );
+      }
+
+      if (url.pathname === "/api/simulator/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        if (simulatorRunning) {
+          emitSimulator({ type: "error", message: "Run already in progress" });
+          return new Response(
+            JSON.stringify({ error: "Run already in progress" }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          );
+        }
+        let payload: {
+          input?: unknown;
+          message?: unknown;
+          trace?: boolean;
+          resetState?: boolean;
+          stream?: boolean;
+          model?: string;
+          modelForce?: string;
+          sessionId?: string;
+        } = {};
+        try {
+          payload = await req.json();
+        } catch {
+          // ignore parse errors
+        }
+        if (payload.resetState) {
+          simulatorSavedState = undefined;
+          simulatorCapturedTraces = [];
+          simulatorCurrentRunId = undefined;
+        }
+        if (payload.sessionId) {
+          const loaded = readSessionState(payload.sessionId);
+          if (loaded) {
+            simulatorSavedState = loaded;
+            simulatorCapturedTraces = Array.isArray(loaded.traces)
+              ? cloneTraces(loaded.traces)
+              : [];
+          }
+        }
+        simulatorCurrentRunId = undefined;
+        const stream = payload.stream ?? true;
+        const forwardTrace = payload.trace ?? true;
+        const tracer = (event: TraceEvent) => {
+          if (event.type === "run.start") simulatorCurrentRunId = event.runId;
+          simulatorCapturedTraces.push(event);
+          consoleTracer?.(event);
+          if (forwardTrace) emitSimulator({ type: "trace", event });
+        };
+        let initialUserMessage: unknown = typeof payload.message === "string"
+          ? payload.message
+          : undefined;
+        let input = payload.input;
+        let inputProvided = payload.input !== undefined;
+        const hasSavedMessages =
+          (simulatorSavedState?.messages?.length ?? 0) > 0;
+        if (
+          initialUserMessage === undefined &&
+          input !== undefined &&
+          hasSavedMessages
+        ) {
+          initialUserMessage = input;
+          input = undefined;
+          inputProvided = false;
+        }
+        if (opts.verbose) {
+          logger.log(
+            `[sim] starting run runId=${
+              simulatorSavedState?.runId ?? "(new)"
+            } messages=${
+              simulatorSavedState?.messages?.length ?? 0
+            } stream=${stream}`,
+          );
+        }
+        simulatorRunning = true;
+        try {
+          const result = await runDeck({
+            path: resolvedDeckPath,
+            input,
+            inputProvided,
+            modelProvider: opts.modelProvider,
+            isRoot: true,
+            allowRootStringInput: true,
+            defaultModel: payload.model ?? opts.model,
+            modelOverride: payload.modelForce ?? opts.modelForce,
+            trace: tracer,
+            stream,
+            state: simulatorSavedState,
+            onStateUpdate: (state) => {
+              const enrichedState = persistSessionState({
+                ...state,
+                notes: state.notes ?? simulatorSavedState?.notes,
+                conversationScore: state.conversationScore ??
+                  simulatorSavedState?.conversationScore,
+                traces: simulatorCapturedTraces,
+              });
+              simulatorSavedState = enrichedState;
+              emitSimulator({ type: "state", state: enrichedState });
+            },
+            initialUserMessage,
+            onStreamText: (chunk) =>
+              emitSimulator({
+                type: "stream",
+                chunk,
+                runId: simulatorCurrentRunId,
+              }),
+          });
+          emitSimulator({
+            type: "result",
+            result,
+            runId: simulatorCurrentRunId,
+            streamed: stream,
+          });
+          return new Response(
+            JSON.stringify({
+              runId: simulatorCurrentRunId,
+              sessionId: simulatorSavedState?.meta?.sessionId,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          emitSimulator({
+            type: "error",
+            message,
+            runId: simulatorCurrentRunId,
+          });
+          return new Response(
+            JSON.stringify({ error: message }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        } finally {
+          simulatorRunning = false;
+        }
+      }
+
+      if (url.pathname === "/api/simulator/feedback") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            messageRefId?: string;
+            score?: number;
+            reason?: string;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          if (!body.messageRefId) {
+            throw new Error("Missing messageRefId");
+          }
+          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
+            throw new Error("Invalid score");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) throw new Error("Session not found");
+          simulatorSavedState = state;
+          simulatorCapturedTraces = Array.isArray(state.traces)
+            ? cloneTraces(state.traces)
+            : [];
+          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+          const reason = typeof body.reason === "string"
+            ? body.reason
+            : undefined;
+          const runId = typeof state.runId === "string" ? state.runId : "run";
+          const existing = state.feedback ?? [];
+          const idx = existing.findIndex((f) =>
+            f.messageRefId === body.messageRefId
+          );
+          const now = new Date().toISOString();
+          const entry = idx >= 0
+            ? {
+              ...existing[idx],
+              score: clamped,
+              reason,
+              runId: existing[idx].runId ?? runId,
+            }
+            : {
+              id: randomId("fb"),
+              runId,
+              messageRefId: body.messageRefId,
+              score: clamped,
+              reason,
+              createdAt: now,
+            };
+          const feedback = idx >= 0
+            ? existing.map((f, i) => i === idx ? entry : f)
+            : [...existing, entry];
+          const enriched = persistSessionState({
+            ...state,
+            feedback,
+            traces: simulatorCapturedTraces,
+          });
+          simulatorSavedState = enriched;
+          emitSimulator({ type: "state", state: enriched });
+          return new Response(
+            JSON.stringify({ feedback: entry }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/simulator/notes") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            text?: string;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) throw new Error("Session not found");
+          simulatorSavedState = state;
+          simulatorCapturedTraces = Array.isArray(state.traces)
+            ? cloneTraces(state.traces)
+            : [];
+          const now = new Date().toISOString();
+          const enriched = persistSessionState({
+            ...state,
+            notes: { text: body.text ?? "", updatedAt: now },
+            traces: simulatorCapturedTraces,
+          });
+          simulatorSavedState = enriched;
+          emitSimulator({ type: "state", state: enriched });
+          return new Response(
+            JSON.stringify({ notes: enriched.notes, saved: true }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/simulator/conversation-score") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            score?: number;
+          };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
+            throw new Error("Invalid score");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) throw new Error("Session not found");
+          simulatorSavedState = state;
+          simulatorCapturedTraces = Array.isArray(state.traces)
+            ? cloneTraces(state.traces)
+            : [];
+          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+          const now = new Date().toISOString();
+          const enriched = persistSessionState({
+            ...state,
+            conversationScore: { score: clamped, updatedAt: now },
+            traces: simulatorCapturedTraces,
+          });
+          simulatorSavedState = enriched;
+          emitSimulator({ type: "state", state: enriched });
+          return new Response(
+            JSON.stringify({
+              conversationScore: enriched.conversationScore,
+              saved: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/simulator/load-session") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as { sessionId?: string };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) {
+            throw new Error("Session not found");
+          }
+          simulatorSavedState = state;
+          simulatorCapturedTraces = Array.isArray(state.traces)
+            ? cloneTraces(state.traces)
+            : [];
+          emitSimulator({ type: "state", state });
+          return new Response(
+            JSON.stringify({ state }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
       }
 
       if (url.pathname === "/api/session") {
@@ -1746,6 +1785,7 @@ export function startWebSocketSimulator(opts: {
             sessionId,
             messages: state.messages,
             messageRefs: state.messageRefs,
+            traces: state.traces,
             notes: state.notes,
             meta: state.meta,
           }),
@@ -2008,7 +2048,8 @@ export function startWebSocketSimulator(opts: {
         url.pathname.startsWith("/simulate") ||
         url.pathname.startsWith("/debug") ||
         url.pathname.startsWith("/editor") ||
-        url.pathname.startsWith("/test-bot")
+        url.pathname.startsWith("/test-bot") ||
+        url.pathname.startsWith("/calibrate")
       ) {
         const body = hasReactBundle()
           ? simulatorReactHtml(resolvedDeckPath)
@@ -2089,349 +2130,15 @@ export function startWebSocketSimulator(opts: {
           headers: { "content-type": "application/json; charset=utf-8" },
         });
       }
-
-      if (url.pathname !== "/websocket") {
-        return new Response("Not found", { status: 404 });
-      }
-
-      if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-        return new Response("WebSocket endpoint", { status: 400 });
-      }
-
-      const { socket, response } = Deno.upgradeWebSocket(req);
-      const decoder = new TextDecoder();
-
-      let running = false;
-      let currentRunId: string | undefined;
-      let savedState: SavedState | undefined;
-      let capturedTraces: Array<TraceEvent> = [];
-      let lastMessageCount = 0;
-
-      const safeSend = (payload: OutgoingMessage) => {
-        try {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify(payload));
-          }
-        } catch {
-          // ignore send failures
-        }
-      };
-
-      const traceHandler = (forward: boolean) => (event: TraceEvent) => {
-        if (event.type === "run.start") currentRunId = event.runId;
-        capturedTraces.push(event);
-        consoleTracer?.(event);
-        if (forward) safeSend({ type: "trace", event });
-      };
-
-      socket.onopen = () => {
-        schemaPromise.then((desc) => {
-          safeSend({
-            type: "ready",
-            deck: resolvedDeckPath,
-            port: listenPort,
-            schema: desc.schema,
-            defaults: desc.defaults,
-            schemaError: desc.error,
-          });
-        }).catch(() => {
-          safeSend({ type: "ready", deck: resolvedDeckPath, port: listenPort });
-        });
-      };
-
-      socket.onmessage = async (ev) => {
-        const msg = parseIncoming(ev.data, decoder);
-
-        if (!msg) {
-          safeSend({ type: "error", message: "Invalid message" });
-          return;
-        }
-
-        if (msg.type === "testBotSubscribe") {
-          testBotSubscribers.add(socket);
-          return;
-        }
-
-        if (msg.type === "feedback") {
-          if (!msg.messageRefId || typeof msg.messageRefId !== "string") {
-            safeSend({ type: "error", message: "Missing messageRefId" });
-            return;
-          }
-          if (typeof msg.score !== "number" || Number.isNaN(msg.score)) {
-            safeSend({ type: "error", message: "Invalid score" });
-            return;
-          }
-          const clamped = Math.max(-3, Math.min(3, Math.round(msg.score)));
-          const reason = typeof msg.reason === "string"
-            ? msg.reason
-            : undefined;
-          const runId = typeof msg.runId === "string"
-            ? msg.runId
-            : (savedState?.runId ?? currentRunId ?? "session");
-          if (!savedState) {
-            safeSend({
-              type: "error",
-              message: "No run state to attach feedback",
-            });
-            return;
-          }
-          const existing = savedState.feedback ?? [];
-          const idx = existing.findIndex((f) =>
-            f.messageRefId === msg.messageRefId
-          );
-          const now = new Date().toISOString();
-          const entry = idx >= 0
-            ? {
-              ...existing[idx],
-              score: clamped,
-              reason,
-              runId: existing[idx].runId ?? runId,
-            }
-            : {
-              id: randomId("fb"),
-              runId,
-              messageRefId: msg.messageRefId,
-              score: clamped,
-              reason,
-              createdAt: now,
-            };
-          const feedback = idx >= 0
-            ? existing.map((f, i) => i === idx ? entry : f)
-            : [...existing, entry];
-          const enriched = persistSessionState({
-            ...savedState,
-            feedback,
-            traces: capturedTraces,
-          });
-          savedState = enriched;
-          safeSend({ type: "state", state: savedState });
-          return;
-        }
-
-        if (msg.type === "notes") {
-          const text = typeof msg.text === "string" ? msg.text : "";
-          const now = new Date().toISOString();
-          if (!savedState) {
-            savedState = {
-              runId: randomId("run"),
-              messages: [],
-              messageRefs: [],
-              feedback: [],
-              traces: [],
-            };
-          }
-          const enriched = persistSessionState({
-            ...savedState,
-            notes: { text, updatedAt: now },
-            traces: capturedTraces,
-          });
-          savedState = enriched;
-          safeSend({ type: "state", state: savedState });
-          return;
-        }
-
-        if (msg.type === "conversationScore") {
-          if (typeof msg.score !== "number" || Number.isNaN(msg.score)) {
-            safeSend({ type: "error", message: "Invalid score" });
-            return;
-          }
-          const clamped = Math.max(-3, Math.min(3, Math.round(msg.score)));
-          const now = new Date().toISOString();
-          if (!savedState) {
-            savedState = {
-              runId: randomId("run"),
-              messages: [],
-              messageRefs: [],
-              feedback: [],
-              traces: [],
-            };
-          }
-          const enriched = persistSessionState({
-            ...savedState,
-            conversationScore: { score: clamped, updatedAt: now },
-            traces: capturedTraces,
-          });
-          savedState = enriched;
-          safeSend({ type: "state", state: savedState });
-          return;
-        }
-
-        if (msg.type === "loadSession") {
-          if (!msg.sessionId || typeof msg.sessionId !== "string") {
-            safeSend({ type: "error", message: "Missing sessionId" });
-            return;
-          }
-          const sessionState = readSessionState(msg.sessionId);
-          if (!sessionState) {
-            safeSend({ type: "error", message: "Session not found" });
-            return;
-          }
-          savedState = sessionState;
-          capturedTraces = sessionState.traces
-            ? (() => {
-              try {
-                return structuredClone(sessionState.traces);
-              } catch {
-                try {
-                  return JSON.parse(JSON.stringify(sessionState.traces));
-                } catch {
-                  return [...sessionState.traces];
-                }
-              }
-            })()
-            : [];
-          lastMessageCount = sessionState.messages?.length ?? 0;
-          safeSend({ type: "state", state: savedState });
-          return;
-        }
-
-        if (msg.type === "ping") {
-          safeSend({ type: "pong" });
-          return;
-        }
-
-        if (msg.resetState) {
-          savedState = undefined;
-          capturedTraces = [];
-          lastMessageCount = 0;
-        }
-
-        if (running) {
-          safeSend({ type: "error", message: "Run already in progress" });
-          return;
-        }
-
-        running = true;
-        currentRunId = undefined;
-        lastMessageCount = savedState?.messages?.length ?? 0;
-        capturedTraces = savedState?.traces
-          ? (() => {
-            try {
-              return structuredClone(savedState.traces);
-            } catch {
-              try {
-                return JSON.parse(JSON.stringify(savedState.traces));
-              } catch {
-                return [...savedState.traces];
-              }
-            }
-          })()
-          : [];
-
-        const stream = msg.stream ?? true;
-        const forwardTrace = Boolean(msg.trace);
-        const tracer = traceHandler(forwardTrace);
-        const initialUserMessage = msg.message ??
-          (savedState ? msg.input : undefined);
-        if (opts.verbose) {
-          logger.log(
-            `[sim] starting run runId=${
-              savedState?.runId ?? "(new)"
-            } messages=${savedState?.messages?.length ?? 0} stream=${stream}`,
-          );
-        }
-
-        try {
-          const result = await runDeck({
-            path: resolvedDeckPath,
-            input: msg.input,
-            inputProvided: msg.input !== undefined,
-            modelProvider: opts.modelProvider,
-            isRoot: true,
-            allowRootStringInput: true,
-            defaultModel: msg.model ?? opts.model,
-            modelOverride: msg.modelForce ?? opts.modelForce,
-            trace: tracer,
-            stream,
-            state: savedState,
-            onStateUpdate: (state) => {
-              const previousCount = savedState?.messages?.length ??
-                lastMessageCount;
-              const existingNotes = savedState?.notes;
-              const existingScore = savedState?.conversationScore;
-              const enrichedState = persistSessionState({
-                ...state,
-                notes: state.notes ?? existingNotes,
-                conversationScore: state.conversationScore ?? existingScore,
-                traces: capturedTraces,
-              });
-              savedState = enrichedState;
-              const newMessages =
-                (savedState.messageRefs && savedState.messages)
-                  ? savedState.messageRefs
-                    .map((ref, idx) => ({
-                      index: idx,
-                      role: savedState?.messages?.[idx]?.role ?? "",
-                      messageRefId: ref.id,
-                      content: savedState?.messages?.[idx]?.content,
-                    }))
-                    .slice(previousCount)
-                  : undefined;
-              lastMessageCount = savedState.messages?.length ?? previousCount;
-              safeSend({ type: "state", state: savedState, newMessages });
-            },
-            initialUserMessage,
-            onStreamText: (chunk) =>
-              safeSend({ type: "stream", chunk, runId: currentRunId }),
-          });
-
-          safeSend({
-            type: "result",
-            result,
-            runId: currentRunId,
-            streamed: stream,
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          safeSend({ type: "error", message, runId: currentRunId });
-        } finally {
-          running = false;
-        }
-      };
-
-      socket.onclose = () => {
-        running = false;
-        testBotSubscribers.delete(socket);
-      };
-      socket.onerror = () => {
-        running = false;
-        testBotSubscribers.delete(socket);
-      };
-
-      return response;
+      return new Response("Not found", { status: 404 });
     },
   );
 
   const listenPort = (server.addr as Deno.NetAddr).port;
   logger.log(
-    `WebSocket simulator listening on ws://localhost:${listenPort}/websocket (deck=${resolvedDeckPath})`,
+    `Simulator listening on http://localhost:${listenPort} (deck=${resolvedDeckPath})`,
   );
   return server;
-}
-
-function parseIncoming(
-  data: unknown,
-  decoder: TextDecoder,
-): IncomingMessage | null {
-  try {
-    const raw = typeof data === "string"
-      ? data
-      : decoder.decode(data as ArrayBuffer);
-    const parsed = JSON.parse(raw) as { type?: unknown };
-    if (parsed && typeof parsed === "object") {
-      if (
-        parsed.type === "run" || parsed.type === "ping" ||
-        parsed.type === "feedback" || parsed.type === "loadSession" ||
-        parsed.type === "notes" || parsed.type === "conversationScore" ||
-        parsed.type === "testBotSubscribe"
-      ) {
-        return parsed as IncomingMessage;
-      }
-    }
-  } catch {
-    // ignore parse errors
-  }
-  return null;
 }
 
 function hasReactBundle(): boolean {
@@ -2479,7 +2186,7 @@ function simulatorReactHtml(deckPath: string): string {
 </head>
 <body>
   <div id="root"></div>
-  <span style="display:none">Gambit WebSocket Debug</span>
+  <span style="display:none">Gambit Simulator Debug</span>
   <script>
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(deckLabel)};
   </script>
@@ -2488,12 +2195,81 @@ function simulatorReactHtml(deckPath: string): string {
 </html>`;
 }
 
+function stringifyOutput(output: unknown): string {
+  if (output === null || output === undefined) return "";
+  if (
+    output &&
+    typeof output === "object" &&
+    "payload" in (output as Record<string, unknown>)
+  ) {
+    return stringifyOutput((output as { payload?: unknown }).payload);
+  }
+  if (typeof output === "string") return output;
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
+}
+
+function shouldRetryWithStringInput(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof Error) {
+    return error.message.includes("Schema validation failed");
+  }
+  return false;
+}
+
+async function runDeckWithFallback(args: {
+  path: string;
+  input?: unknown;
+  inputProvided?: boolean;
+  modelProvider: ModelProvider;
+  state?: SavedState;
+  allowRootStringInput?: boolean;
+  initialUserMessage?: string;
+  onStateUpdate?: (state: SavedState) => void;
+  stream?: boolean;
+  onStreamText?: (chunk: string) => void;
+}): Promise<unknown> {
+  try {
+    return await runDeck({
+      path: args.path,
+      input: args.input,
+      inputProvided: args.inputProvided,
+      modelProvider: args.modelProvider,
+      state: args.state,
+      allowRootStringInput: args.allowRootStringInput,
+      initialUserMessage: args.initialUserMessage,
+      onStateUpdate: args.onStateUpdate,
+      stream: args.stream,
+      onStreamText: args.onStreamText,
+    });
+  } catch (error) {
+    if (args.input === undefined && shouldRetryWithStringInput(error)) {
+      return await runDeck({
+        path: args.path,
+        input: "",
+        inputProvided: true,
+        modelProvider: args.modelProvider,
+        state: args.state,
+        allowRootStringInput: args.allowRootStringInput,
+        initialUserMessage: args.initialUserMessage,
+        onStateUpdate: args.onStateUpdate,
+        stream: args.stream,
+        onStreamText: args.onStreamText,
+      });
+    }
+    throw error;
+  }
+}
+
 function simulatorHtml(deckPath: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Gambit WebSocket Debug</title>
+  <title>Gambit Simulator Debug</title>
   <style>
     body { font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: linear-gradient(135deg, #eaf2ff, #f7f9ff); color: #0f172a; }
     .shell { max-width: 1080px; margin: 24px auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
@@ -2588,8 +2364,8 @@ function simulatorHtml(deckPath: string): string {
     <div class="card">
       <header>
         <div>
-          <h1>Gambit WebSocket Debug</h1>
-          <div class="meta">Deck: <code>${deckPath}</code> · Socket: <code>/websocket</code></div>
+          <h1>Gambit Simulator Debug</h1>
+          <div class="meta">Deck: <code>${deckPath}</code> · Stream: <code>/api/durable-streams/stream/gambit-simulator</code></div>
         </div>
         <div class="header-actions">
           <button type="button" id="sessionsBtn" class="ghost-btn">Sessions</button>
@@ -2705,8 +2481,33 @@ function simulatorHtml(deckPath: string): string {
       let connectionAttempt = 0;
       const traceParents = new Map();
 
-      const wsUrl = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websocket";
-      let ws = null;
+      const streamId = "gambit-simulator";
+      const streamStorageKey = "gambit.durable-streams.offset.gambit-simulator";
+      const streamBase = "/api/durable-streams/stream/" + encodeURIComponent(streamId);
+      let eventSource = null;
+
+      function getStreamOffset() {
+        try {
+          const raw = localStorage.getItem(streamStorageKey);
+          const parsed = raw ? Number(raw) : 0;
+          return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+        } catch {
+          return 0;
+        }
+      }
+
+      function setStreamOffset(offset) {
+        try {
+          localStorage.setItem(streamStorageKey, String(offset));
+        } catch {
+          // ignore
+        }
+      }
+
+      function buildStreamUrl() {
+        const offset = getStreamOffset();
+        return streamBase + "?live=sse&offset=" + offset;
+      }
 
       function scrollBottom(el) {
         el.scrollTop = el.scrollHeight;
@@ -2772,16 +2573,25 @@ function simulatorHtml(deckPath: string): string {
             item.type = "button";
             item.className = "sessions-item";
             item.textContent = formatSessionLabel(session);
-            item.addEventListener("click", () => {
-              if (!ws || ws.readyState !== WebSocket.OPEN) {
-                addEvent("error", "Socket not connected; reconnect first.");
-                return;
+            item.addEventListener("click", async () => {
+              try {
+                const res = await fetch("/api/simulator/load-session", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ sessionId: session.id }),
+                });
+                if (!res.ok) {
+                  throw new Error(res.status + " " + res.statusText);
+                }
+                const payload = await res.json();
+                if (payload && payload.state) {
+                  setLatestState(payload.state);
+                  refreshFeedbackMap(payload.state);
+                }
+                closeSessionsModal();
+              } catch (err) {
+                addEvent("error", "Failed to load session: " + String(err));
               }
-              ws.send(JSON.stringify({
-                type: "loadSession",
-                sessionId: session.id,
-              }));
-              closeSessionsModal();
             });
             sessionsList.appendChild(item);
           });
@@ -2900,16 +2710,17 @@ function simulatorHtml(deckPath: string): string {
       }
 
       function sendFeedback(messageRefId, score, reason) {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const sessionId = latestState?.meta?.sessionId;
+        if (!sessionId) return;
         clearPendingFeedbackSave(messageRefId);
         markFeedbackSaving(messageRefId);
-        ws.send(JSON.stringify({
-          type: "feedback",
-          messageRefId,
-          score,
-          reason,
-          runId: latestState?.runId,
-        }));
+        fetch("/api/simulator/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, messageRefId, score, reason }),
+        }).catch((err) => {
+          addEvent("error", "Failed to save feedback: " + String(err));
+        });
       }
 
       function nextPendingBubble(role) {
@@ -3513,6 +3324,7 @@ function simulatorHtml(deckPath: string): string {
       }
 
       function handleMessage(msg) {
+        if (!msg || typeof msg !== "object") return;
         switch (msg.type) {
           case "ready": {
             status.textContent = "ready";
@@ -3622,36 +3434,33 @@ function simulatorHtml(deckPath: string): string {
 
       function connect(reason = "connect") {
         connectionAttempt += 1;
-        if (ws) {
-          ws.close();
+        if (eventSource) {
+          eventSource.close();
         }
         status.textContent = "connecting...";
         traceParents.clear();
-        ws = new WebSocket(wsUrl);
-        ws.onopen = () => {
+        eventSource = new EventSource(buildStreamUrl());
+        eventSource.onopen = () => {
           status.textContent = "connected";
           addEvent("system", reason === "reconnect" ? "Reconnected." : "Connected.");
         };
-        ws.onclose = () => {
-          status.textContent = "closed";
-          currentAssistant = null;
-          statusBubble = null;
-          logStatus = null;
-          streamMode = "assistant";
-          clearWaitTimer();
-          clearNextAssistantWait();
-          setLatestState(null);
-        };
-        ws.onerror = () => {
+        eventSource.onerror = () => {
           status.textContent = "error";
           clearWaitTimer();
           clearNextAssistantWait();
           setLatestState(null);
         };
-        ws.onmessage = (ev) => {
+        eventSource.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data);
-            handleMessage(msg);
+            const envelope = JSON.parse(ev.data);
+            if (
+              envelope &&
+              typeof envelope.offset === "number" &&
+              Number.isFinite(envelope.offset)
+            ) {
+              setStreamOffset(envelope.offset + 1);
+            }
+            handleMessage(envelope?.data);
           } catch {
             addEvent("system", String(ev.data));
           }
@@ -3696,13 +3505,8 @@ function simulatorHtml(deckPath: string): string {
 
       composer.addEventListener("submit", (e) => {
         e.preventDefault();
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          addEvent("system", "Socket not connected.");
-          return;
-        }
         const shouldResetState = resetState.checked;
         const payload = {
-          type: "run",
           stream: streamToggle.checked,
           trace: traceToggle.checked,
           resetState: shouldResetState,
@@ -3751,7 +3555,24 @@ function simulatorHtml(deckPath: string): string {
         logStatus = null;
         streamMode = "assistant";
         clearNextAssistantWait();
-        ws.send(JSON.stringify(payload));
+        if (!shouldResetState && latestState?.meta?.sessionId) {
+          payload.sessionId = latestState.meta.sessionId;
+        }
+        fetch("/api/simulator/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then(async (res) => {
+          if (res.ok) return;
+          const info = await res.json().catch(() => ({}));
+          addEvent(
+            "error",
+            "Run failed: " +
+              (info?.error || res.status + " " + res.statusText),
+          );
+        }).catch((err) => {
+          addEvent("error", "Run failed: " + String(err));
+        });
         if (shouldResetState) {
           setLatestState(null);
         }

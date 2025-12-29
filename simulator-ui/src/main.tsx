@@ -6,8 +6,6 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
-import { FeedbackList } from "./components/FeedbackList.tsx";
-import { SessionDrawer } from "./components/SessionDrawer.tsx";
 import { globalStyles } from "./styles.ts";
 import { classNames, formatTimestamp } from "./utils.ts";
 
@@ -111,6 +109,35 @@ type SessionMeta = {
   deck?: string;
   deckSlug?: string;
   createdAt?: string;
+  sessionDir?: string;
+  statePath?: string;
+};
+
+type GraderDeckMeta = {
+  id: string;
+  label: string;
+  description?: string;
+  path: string;
+};
+
+type CalibrationRun = {
+  id: string;
+  graderId: string;
+  graderPath: string;
+  graderLabel?: string;
+  status: "completed" | "error";
+  runAt?: string;
+  result?: unknown;
+  error?: string;
+};
+
+type CalibrateSession = SessionMeta & {
+  calibrationRuns?: Array<CalibrationRun>;
+};
+
+type CalibrateResponse = {
+  graderDecks?: Array<GraderDeckMeta>;
+  sessions?: Array<CalibrateSession>;
 };
 
 type TestBotRun = {
@@ -126,6 +153,13 @@ type TestBotRun = {
     content: string;
     messageRefId?: string;
     feedback?: FeedbackEntry;
+  }>;
+  traces?: TraceEvent[];
+  toolInserts?: Array<{
+    actionCallId?: string;
+    parentActionCallId?: string;
+    name?: string;
+    index: number;
   }>;
 };
 
@@ -160,11 +194,22 @@ type TestBotSocketMessage =
   | TestBotStreamEndEvent
   | TestBotStatusEvent;
 
-type TestBotDefaults = {
-  model?: string;
-  temperature?: number;
-  maxTurns?: number;
-  input?: unknown;
+type TestDeckMeta = {
+  id: string;
+  label: string;
+  description?: string;
+  path: string;
+};
+
+type TestBotConfigResponse = {
+  botPath?: string | null;
+  botLabel?: string | null;
+  botDescription?: string | null;
+  selectedDeckId?: string | null;
+  testDecks?: Array<TestDeckMeta>;
+  inputSchema?: NormalizedSchema | null;
+  inputSchemaError?: string | null;
+  defaults?: { input?: unknown } | null;
 };
 
 type AssistantChatMessage = {
@@ -209,6 +254,51 @@ const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
 
 const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
   .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
+const normalizedDeckPath = normalizeFsPath(deckPath);
+const repoRootPath = guessRepoRoot(normalizedDeckPath);
+const deckDisplayPath = toRelativePath(normalizedDeckPath, repoRootPath) ??
+  normalizedDeckPath;
+const SESSIONS_BASE_PATH = "/sessions";
+const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new`;
+const DEFAULT_HOME_PATH = "/test-bot";
+const CALIBRATE_PATH_SUFFIX = "/calibrate";
+const buildCalibratePath = (sessionId: string) =>
+  `${SESSIONS_BASE_PATH}/${
+    encodeURIComponent(sessionId)
+  }${CALIBRATE_PATH_SUFFIX}`;
+const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
+const SIMULATOR_STREAM_ID = "gambit-simulator";
+const TEST_BOT_STREAM_ID = "gambit-test-bot";
+
+function getDurableStreamOffset(streamId: string): number {
+  try {
+    const raw = window.localStorage.getItem(
+      `gambit.durable-streams.offset.${streamId}`,
+    );
+    const parsed = raw ? Number(raw) : 0;
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function setDurableStreamOffset(streamId: string, offset: number) {
+  try {
+    window.localStorage.setItem(
+      `gambit.durable-streams.offset.${streamId}`,
+      String(offset),
+    );
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function buildDurableStreamUrl(streamId: string, offset: number) {
+  const params = new URLSearchParams({ live: "sse", offset: String(offset) });
+  return `${DURABLE_STREAM_PREFIX}${
+    encodeURIComponent(streamId)
+  }?${params.toString()}`;
+}
 
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
@@ -223,91 +313,87 @@ function useSimulator() {
   const [errors, setErrors] = useState<string[]>([]);
   const [streamText, setStreamText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
   const [connectSeq, setConnectSeq] = useState(0);
-  const [readySeq, setReadySeq] = useState(0);
-  const [schemaResponse, setSchemaResponse] = useState<SchemaResponse | null>(
-    null,
-  );
-
-  const wsUrl = useMemo(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${protocol}://${window.location.host}/websocket`;
-  }, []);
 
   useEffect(() => {
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    const streamId = SIMULATOR_STREAM_ID;
+    const streamUrl = buildDurableStreamUrl(
+      streamId,
+      getDurableStreamOffset(streamId),
+    );
+    const source = new EventSource(streamUrl);
     setConnectionStatus("connecting");
 
-    ws.onopen = () => {
+    source.onopen = () => {
       setConnectionStatus("connected");
       setErrors([]);
     };
 
-    ws.onclose = () => {
-      setConnectionStatus("closed");
-      setIsRunning(false);
-      setStreamText("");
-    };
-
-    ws.onerror = () => {
+    source.onerror = () => {
       setConnectionStatus("error");
-      setErrors((prev) => [...prev, "WebSocket connection error"]);
+      setErrors((prev) =>
+        prev.includes("Stream connection error")
+          ? prev
+          : [...prev, "Stream connection error"]
+      );
       setIsRunning(false);
       setStreamText("");
     };
 
-    ws.onmessage = (event) => {
+    source.onmessage = (event) => {
+      let envelope: { offset?: unknown; data?: unknown } | null = null;
       try {
-        const msg = JSON.parse(event.data) as SimulatorMessage;
-        if (msg.type === "ready") {
-          setReadySeq((prev) => prev + 1);
-          setSchemaResponse({
-            deck: msg.deck,
-            schema: msg.schema,
-            defaults: msg.defaults,
-            error: msg.schemaError,
-          });
-        } else if (msg.type === "state") {
-          setSavedState(msg.state);
-          if (Array.isArray(msg.state.traces)) {
-            setTraceEvents(msg.state.traces as TraceEvent[]);
-          }
-        } else if (msg.type === "stream") {
-          if (typeof msg.chunk === "string" && msg.chunk.length > 0) {
-            setStreamText((prev) => prev + msg.chunk);
-          }
-        } else if (msg.type === "result") {
-          setIsRunning(false);
-          setStreamText("");
-        } else if (msg.type === "trace" && msg.event) {
-          setTraceEvents((prev) => [...prev, msg.event].slice(-200));
-        } else if (msg.type === "error") {
-          setErrors((prev) => [...prev, msg.message ?? "Unknown error"]);
-          if (msg.runId || msg.message !== "Run already in progress") {
-            setIsRunning(false);
-          }
-          setStreamText("");
-        }
+        envelope = JSON.parse(event.data) as {
+          offset?: unknown;
+          data?: unknown;
+        };
       } catch (err) {
-        console.error("[sim] failed to parse message", err);
+        console.error("[sim] failed to parse stream envelope", err);
+        return;
+      }
+      if (
+        envelope &&
+        typeof envelope.offset === "number" &&
+        Number.isFinite(envelope.offset)
+      ) {
+        setDurableStreamOffset(streamId, envelope.offset + 1);
+      }
+      const msg = envelope?.data as SimulatorMessage | undefined;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "state") {
+        setSavedState(msg.state);
+        if (Array.isArray(msg.state.traces)) {
+          setTraceEvents(msg.state.traces as TraceEvent[]);
+        }
+      } else if (msg.type === "stream") {
+        if (typeof msg.chunk === "string" && msg.chunk.length > 0) {
+          setStreamText((prev) => prev + msg.chunk);
+        }
+      } else if (msg.type === "result") {
+        setIsRunning(false);
+        setStreamText("");
+      } else if (msg.type === "trace" && msg.event) {
+        setTraceEvents((prev) => [...prev, msg.event].slice(-200));
+      } else if (msg.type === "error") {
+        const message = msg.message ?? "Unknown error";
+        setErrors((prev) => [...prev, message]);
+        if (msg.runId || message !== "Run already in progress") {
+          setIsRunning(false);
+        }
+        setStreamText("");
       }
     };
 
     return () => {
-      ws.close();
+      source.close();
+      setConnectionStatus("closed");
+      setIsRunning(false);
+      setStreamText("");
     };
-  }, [wsUrl, connectSeq]);
-
-  const send = useCallback((payload: unknown) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(payload));
-  }, []);
+  }, [connectSeq]);
 
   const run = useCallback(
-    (opts: {
+    async (opts: {
       input?: unknown;
       message?: string;
       resetState?: boolean;
@@ -315,40 +401,121 @@ function useSimulator() {
     }) => {
       setIsRunning(true);
       setStreamText("");
-      send({
-        type: "run",
-        stream: true,
-        trace: opts.trace ?? true,
-        input: opts.input,
-        message: opts.message,
-        resetState: opts.resetState ?? false,
-      });
+      const sessionId = opts.resetState
+        ? undefined
+        : savedState?.meta?.sessionId;
+      try {
+        const res = await fetch("/api/simulator/run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            input: opts.input,
+            message: opts.message,
+            resetState: opts.resetState ?? false,
+            trace: opts.trace ?? true,
+            stream: true,
+            sessionId,
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            typeof payload?.error === "string" ? payload.error : res.statusText,
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setErrors((prev) => [...prev, message]);
+        setIsRunning(false);
+        setStreamText("");
+      }
     },
-    [send],
+    [savedState?.meta?.sessionId],
   );
 
   const sendFeedback = useCallback(
-    (messageRefId: string, score: number, reason?: string) => {
-      send({ type: "feedback", messageRefId, score, reason });
+    async (messageRefId: string, score: number, reason?: string) => {
+      const sessionId = savedState?.meta?.sessionId;
+      if (!sessionId) return;
+      try {
+        const res = await fetch("/api/simulator/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, messageRefId, score, reason }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setErrors((prev) => [...prev, message]);
+      }
     },
-    [send],
+    [savedState?.meta?.sessionId],
   );
 
-  const loadSession = useCallback((sessionId: string) => {
-    send({ type: "loadSession", sessionId });
-  }, [send]);
+  const loadSession = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch("/api/simulator/load-session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          typeof payload?.error === "string" ? payload.error : res.statusText,
+        );
+      }
+      if (payload?.state) {
+        setSavedState(payload.state as SavedState);
+        if (Array.isArray(payload.state.traces)) {
+          setTraceEvents(payload.state.traces as TraceEvent[]);
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setErrors((prev) => [...prev, message]);
+    }
+  }, []);
 
-  const saveNotes = useCallback((text: string) => {
-    send({ type: "notes", text });
-  }, [send]);
+  const saveNotes = useCallback(
+    async (text: string) => {
+      const sessionId = savedState?.meta?.sessionId;
+      if (!sessionId) return;
+      try {
+        const res = await fetch("/api/simulator/notes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, text }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setErrors((prev) => [...prev, message]);
+      }
+    },
+    [savedState?.meta?.sessionId],
+  );
 
-  const saveSessionScore = useCallback((score: number) => {
-    send({ type: "conversationScore", score });
-  }, [send]);
+  const saveSessionScore = useCallback(
+    async (score: number) => {
+      const sessionId = savedState?.meta?.sessionId;
+      if (!sessionId) return;
+      try {
+        const res = await fetch("/api/simulator/conversation-score", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sessionId, score }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setErrors((prev) => [...prev, message]);
+      }
+    },
+    [savedState?.meta?.sessionId],
+  );
 
   const reconnect = useCallback(() => {
-    const ws = wsRef.current;
-    ws?.close();
     setConnectSeq((prev) => prev + 1);
   }, []);
 
@@ -364,8 +531,6 @@ function useSimulator() {
     savedState,
     traceEvents,
     errors,
-    schemaResponse,
-    readySeq,
     isRunning,
     streamText,
     run,
@@ -426,21 +591,35 @@ function normalizeBasePath(basePath: string): string {
 
 function getSessionIdFromPath(
   pathname?: string,
-  basePath = "/debug",
+  basePath = SESSIONS_BASE_PATH,
 ): string | null {
   const target = typeof pathname === "string"
     ? pathname
     : window.location.pathname;
-  const bases = [basePath, "/simulate", ""];
+  const normalizedTarget = target.replace(/\/+$/, "");
+  const canonical = normalizedTarget.match(
+    /^\/sessions\/([^/]+)(?:\/(debug|calibrate))?$/,
+  );
+  if (canonical) {
+    const id = canonical[1];
+    if (id && id !== "new") return decodeURIComponent(id);
+    return null;
+  }
+  const bases = [basePath, "/debug", "/simulate", ""];
   for (const base of bases) {
+    if (typeof base !== "string") continue;
     const normalized = normalizeBasePath(base);
     const prefix = `${normalized}/sessions/`.replace(/^\/\//, "/");
-    if (normalized === "" && !target.startsWith("/sessions/")) continue;
-    if (normalized !== "" && !target.startsWith(prefix)) continue;
+    if (normalized === "" && !normalizedTarget.startsWith("/sessions/")) {
+      continue;
+    }
+    if (normalized !== "" && !normalizedTarget.startsWith(prefix)) {
+      continue;
+    }
     const remainder = normalized === ""
-      ? target.slice("/sessions/".length)
-      : target.slice(prefix.length);
-    if (remainder.length > 0) {
+      ? normalizedTarget.slice("/sessions/".length)
+      : normalizedTarget.slice(prefix.length);
+    if (remainder.length > 0 && remainder !== "new") {
       return decodeURIComponent(remainder);
     }
   }
@@ -458,6 +637,105 @@ function cloneValue<T>(value: T): T {
       return value;
     }
   }
+}
+
+function normalizeFsPath(input?: string | null): string {
+  if (!input) return "";
+  return input.replace(/\\/g, "/");
+}
+
+function guessRepoRoot(path: string): string | null {
+  const normalized = normalizeFsPath(path);
+  const marker = "/bfmono";
+  const idx = normalized.indexOf(marker);
+  if (idx === -1) return null;
+  return normalized.slice(0, idx + marker.length);
+}
+
+function toRelativePath(
+  path?: string | null,
+  repoRoot?: string | null,
+): string | null {
+  if (!path) return null;
+  const target = normalizeFsPath(path);
+  if (repoRoot) {
+    const normalizedRoot = normalizeFsPath(repoRoot);
+    if (target === normalizedRoot) return "";
+    if (target.startsWith(`${normalizedRoot}/`)) {
+      return target.slice(normalizedRoot.length + 1);
+    }
+  }
+  return target;
+}
+
+function getCalibrateSessionIdFromLocation(): string | null {
+  const pathMatch = window.location.pathname.match(
+    /^\/sessions\/([^/]+)\/calibrate/,
+  );
+  if (pathMatch) return decodeURIComponent(pathMatch[1]);
+  const legacyMatch = window.location.pathname.match(
+    /^\/calibrate\/sessions\/([^/]+)/,
+  );
+  if (legacyMatch) return decodeURIComponent(legacyMatch[1]);
+  const params = new URLSearchParams(window.location.search);
+  const param = params.get("sessionId");
+  return param ? decodeURIComponent(param) : null;
+}
+
+function CopyBadge(props: {
+  label: string;
+  displayValue?: string | null;
+  copyValue?: string | null;
+  className?: string;
+}) {
+  const { label, displayValue, copyValue, className } = props;
+  const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const copyTarget = copyValue ?? displayValue;
+  if (!copyTarget) return null;
+  const text = displayValue ?? copyTarget;
+
+  const handleCopy = useCallback(async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(copyTarget);
+      } else {
+        const temp = document.createElement("textarea");
+        temp.value = copyTarget;
+        temp.style.position = "fixed";
+        temp.style.opacity = "0";
+        document.body.appendChild(temp);
+        temp.select();
+        document.execCommand("copy");
+        document.body.removeChild(temp);
+      }
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore copy failures silently
+    }
+  }, [copyTarget]);
+
+  return (
+    <button
+      type="button"
+      className={classNames("copy-badge", className, copied && "copied")}
+      onClick={handleCopy}
+      title={copied ? "Copied!" : `Click to copy ${label}`}
+    >
+      <span className="copy-label">{label}:</span>
+      <code>{text}</code>
+      {copied && <span className="copy-feedback">Copied</span>}
+    </button>
+  );
 }
 
 function normalizePatchProposal(
@@ -976,6 +1254,170 @@ function TraceList(props: { traces: TraceEvent[] }) {
   );
 }
 
+type ToolCallSummary = {
+  id: string;
+  name?: string;
+  status: "pending" | "running" | "completed" | "error";
+  args?: unknown;
+  result?: unknown;
+  error?: unknown;
+  parentActionCallId?: string;
+  depth?: number;
+};
+
+function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
+  const order: ToolCallSummary[] = [];
+  const byId = new Map<string, ToolCallSummary>();
+  const depthMap = new Map<string, number>();
+  for (const trace of traces) {
+    if (!trace || typeof trace !== "object") continue;
+    const type = typeof trace.type === "string" ? trace.type : "";
+    const actionCallId = typeof (trace as { actionCallId?: unknown })
+        .actionCallId === "string"
+      ? (trace as { actionCallId?: string }).actionCallId
+      : undefined;
+    const parentActionCallId = typeof (trace as {
+        parentActionCallId?: unknown;
+      }).parentActionCallId === "string"
+      ? (trace as { parentActionCallId?: string }).parentActionCallId
+      : undefined;
+    if (
+      (type === "deck.start" || type === "action.start") && actionCallId
+    ) {
+      const parentDepth = parentActionCallId && depthMap.has(parentActionCallId)
+        ? depthMap.get(parentActionCallId)!
+        : -1;
+      depthMap.set(actionCallId, parentDepth + 1);
+      continue;
+    }
+    if (!type.startsWith("tool.") || !actionCallId) continue;
+    let summary = byId.get(actionCallId);
+    if (!summary) {
+      summary = {
+        id: actionCallId,
+        name: typeof trace.name === "string" ? trace.name : undefined,
+        status: "pending",
+      };
+      byId.set(actionCallId, summary);
+      order.push(summary);
+    }
+    if (typeof trace.name === "string") summary.name = trace.name;
+    if (type === "tool.call") {
+      if ("args" in trace) {
+        summary.args = (trace as { args?: unknown }).args;
+      }
+      summary.status = "running";
+      summary.parentActionCallId = parentActionCallId;
+      if (summary.depth === undefined) {
+        const parentDepth =
+          parentActionCallId && depthMap.has(parentActionCallId)
+            ? depthMap.get(parentActionCallId)!
+            : -1;
+        summary.depth = parentDepth + 1;
+      }
+    } else if (type === "tool.result") {
+      if ("result" in trace) {
+        summary.result = (trace as { result?: unknown }).result;
+      }
+      summary.status = "completed";
+    } else if (type === "tool.error") {
+      if ("error" in trace) {
+        summary.error = (trace as { error?: unknown }).error;
+      }
+      summary.status = "error";
+    }
+  }
+  return order;
+}
+
+function ToolCallField(props: {
+  label: string;
+  value: unknown;
+  isError?: boolean;
+}) {
+  const { label, value, isError } = props;
+  let text: string;
+  if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value, null, 2);
+    } catch {
+      text = String(value);
+    }
+  }
+  return (
+    <div className="tool-call-field">
+      <div className="tool-call-field-label">{label}</div>
+      <pre
+        className={classNames(
+          "trace-json",
+          isError && "tool-call-error",
+        )}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
+function ToolCallBubble(props: { call: ToolCallSummary }) {
+  const { call } = props;
+  const [open, setOpen] = useState(false);
+  const statusLabel = call.status === "completed"
+    ? "Completed"
+    : call.status === "error"
+    ? "Error"
+    : call.status === "running"
+    ? "Running"
+    : "Pending";
+  const indentStyle = call.depth && call.depth > 0
+    ? { marginLeft: call.depth * 12 }
+    : undefined;
+  return (
+    <div className="imessage-row left tool-call-row" style={indentStyle}>
+      <div className="imessage-bubble left tool-call-bubble">
+        <button
+          type="button"
+          className="tool-call-collapse"
+          onClick={() => setOpen((prev) => !prev)}
+        >
+          <div className="tool-call-header">
+            <div className="tool-call-title">
+              Tool call: <strong>{call.name ?? call.id}</strong>
+            </div>
+            <div
+              className={classNames(
+                "tool-call-status",
+                `status-${call.status}`,
+              )}
+            >
+              {statusLabel}
+            </div>
+          </div>
+          <div className="tool-call-id">{call.id}</div>
+          <div className="tool-call-expand">
+            {open ? "Hide details" : "Show details"}
+          </div>
+        </button>
+        {open && (
+          <div className="tool-call-detail">
+            {call.args !== undefined && (
+              <ToolCallField label="Arguments" value={call.args} />
+            )}
+            {call.result !== undefined && (
+              <ToolCallField label="Result" value={call.result} />
+            )}
+            {call.error !== undefined && (
+              <ToolCallField label="Error" value={call.error} isError />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SessionModal(props: {
   open: boolean;
   sessions: SessionMeta[];
@@ -1436,8 +1878,20 @@ function SimulatorApp({ basePath }: { basePath: string }) {
   const httpSchema = useHttpSchema();
   const { sessions, loading: sessionsLoading, error: sessionsError, refresh } =
     useSessions();
-  const normalizedBase = normalizeBasePath(basePath || "/debug");
+  const normalizedBase = normalizeBasePath(basePath || SESSIONS_BASE_PATH);
   const rootPath = normalizedBase === "" ? "/" : normalizedBase;
+  const sessionBasePath = rootPath === "/" ? SESSIONS_BASE_PATH : rootPath;
+  const normalizedSessionBase = normalizeBasePath(sessionBasePath);
+  const newSessionPath = `${
+    normalizedSessionBase === "" ? "/sessions" : normalizedSessionBase
+  }/new`.replace(/\/{2,}/g, "/");
+  const buildSessionUrl = useCallback(
+    (sessionId: string) =>
+      `${normalizedSessionBase === "" ? "/sessions" : normalizedSessionBase}/${
+        encodeURIComponent(sessionId)
+      }/debug`.replace(/\/{2,}/g, "/"),
+    [normalizedSessionBase],
+  );
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pendingReset, setPendingReset] = useState(false);
@@ -1477,12 +1931,9 @@ function SimulatorApp({ basePath }: { basePath: string }) {
     if (sessionsOpen) refresh();
   }, [sessionsOpen, refresh]);
 
-  const schema = simulator.schemaResponse?.schema ??
-    httpSchema.schemaResponse?.schema;
-  const schemaDefaults = simulator.schemaResponse?.defaults ??
-    httpSchema.schemaResponse?.defaults;
-  const schemaError = simulator.schemaResponse?.error ??
-    httpSchema.schemaResponse?.error ??
+  const schema = httpSchema.schemaResponse?.schema;
+  const schemaDefaults = httpSchema.schemaResponse?.defaults;
+  const schemaError = httpSchema.schemaResponse?.error ??
     httpSchema.error ??
     undefined;
 
@@ -1572,11 +2023,10 @@ function SimulatorApp({ basePath }: { basePath: string }) {
     (opts?: { pushHistory?: boolean; replace?: boolean }) => {
       const shouldPush = opts?.pushHistory ?? true;
       if (shouldPush) {
-        const target = rootPath || "/";
         if (opts?.replace) {
-          window.history.replaceState({}, "", target);
+          window.history.replaceState({}, "", newSessionPath);
         } else {
-          window.history.pushState({}, "", target);
+          window.history.pushState({}, "", newSessionPath);
         }
       }
       setPendingSessionId(null);
@@ -1595,7 +2045,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
       pendingScoreRef.current = null;
       setScoreStatus("idle");
     },
-    [schema, simulator, resetInitValue],
+    [schema, simulator, resetInitValue, newSessionPath],
   );
 
   const adoptSessionFromPath = useCallback((sessionId: string) => {
@@ -1608,11 +2058,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
 
   const navigateToSession = useCallback(
     (sessionId: string, opts?: { replace?: boolean }) => {
-      const prefix = rootPath === "/" ? "" : rootPath;
-      const url = `${prefix}/sessions/${encodeURIComponent(sessionId)}`.replace(
-        /^\/\//,
-        "/",
-      );
+      const url = buildSessionUrl(sessionId);
       if (opts?.replace) {
         window.history.replaceState({}, "", url);
       } else {
@@ -1620,25 +2066,26 @@ function SimulatorApp({ basePath }: { basePath: string }) {
       }
       adoptSessionFromPath(sessionId);
     },
-    [adoptSessionFromPath],
+    [adoptSessionFromPath, buildSessionUrl],
   );
 
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
-    const initialSession = getSessionIdFromPath(undefined, rootPath) ??
+    const initialSession = getSessionIdFromPath(undefined, sessionBasePath) ??
       getSessionIdFromPath();
     if (initialSession) {
       navigateToSession(initialSession, { replace: true });
       return;
     }
     startNewChat({ pushHistory: false });
-  }, [navigateToSession, startNewChat, rootPath]);
+  }, [navigateToSession, startNewChat, sessionBasePath]);
 
   useEffect(() => {
     const handler = () => {
-      const sessionFromPath = getSessionIdFromPath(undefined, rootPath) ??
-        getSessionIdFromPath();
+      const sessionFromPath =
+        getSessionIdFromPath(undefined, sessionBasePath) ??
+          getSessionIdFromPath();
       if (sessionFromPath) {
         adoptSessionFromPath(sessionFromPath);
       } else {
@@ -1647,7 +2094,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
-  }, [adoptSessionFromPath, startNewChat, rootPath]);
+  }, [adoptSessionFromPath, startNewChat, sessionBasePath]);
 
   useEffect(() => {
     if (!pendingSessionId) return;
@@ -1659,7 +2106,6 @@ function SimulatorApp({ basePath }: { basePath: string }) {
     pendingSessionId,
     simulator.connectionStatus,
     simulator.loadSession,
-    simulator.readySeq,
   ]);
 
   const serverNotesText = simulator.savedState?.notes?.text ?? "";
@@ -1758,6 +2204,13 @@ function SimulatorApp({ basePath }: { basePath: string }) {
   const sessionId = typeof runMeta.sessionId === "string"
     ? runMeta.sessionId
     : undefined;
+  const sessionPermalink = sessionId ? buildSessionUrl(sessionId) : null;
+  const sessionStatePath = typeof (runMeta as { sessionStatePath?: string })
+      .sessionStatePath === "string"
+    ? (runMeta as { sessionStatePath?: string }).sessionStatePath
+    : typeof runMeta.sessionDir === "string"
+    ? `${runMeta.sessionDir}/state.json`
+    : undefined;
   const currentSessionScore = pendingScoreRef.current !== null
     ? pendingScoreRef.current
     : serverScore;
@@ -1791,6 +2244,15 @@ function SimulatorApp({ basePath }: { basePath: string }) {
           <div className="deck-path">{deckPath}</div>
         </div>
         <div className="header-actions">
+          {sessionId && (
+            <a
+              href={buildCalibratePath(sessionId)}
+              className="ghost-btn"
+              title="Open Calibrate tab for this session"
+            >
+              Calibrate session
+            </a>
+          )}
           <button type="button" onClick={() => setSessionsOpen(true)}>
             Sessions
           </button>
@@ -1976,7 +2438,22 @@ function SimulatorApp({ basePath }: { basePath: string }) {
         ))}
         {sessionId && (
           <div className="session-meta">
-            Session: <code>{sessionId}</code>
+            Session: {sessionPermalink
+              ? (
+                <a
+                  href={sessionPermalink}
+                  className="session-link"
+                  title="Open session permalink"
+                >
+                  <code>{sessionId}</code>
+                </a>
+              )
+              : <code>{sessionId}</code>}
+          </div>
+        )}
+        {sessionStatePath && (
+          <div className="session-meta session-path">
+            State file: <code>{sessionStatePath}</code>
           </div>
         )}
       </footer>
@@ -1996,1827 +2473,397 @@ function SimulatorApp({ basePath }: { basePath: string }) {
   );
 }
 
-type EditorFile = {
-  path: string;
-  relative: string;
-  kind: "file" | "dir";
-};
-
-type FileTreeNode = {
-  name: string;
-  relative: string;
-  kind: "file" | "dir";
-  path?: string;
-  children: FileTreeNode[];
-};
-
-function normalizeRelativePath(relative: string) {
-  return relative.replace(/\\/g, "/");
-}
-
-function sortFileNodes(nodes: FileTreeNode[]) {
-  nodes.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-  nodes.forEach((node) => {
-    if (node.children.length) sortFileNodes(node.children);
-  });
-  return nodes;
-}
-
-function buildFileTree(entries: EditorFile[]) {
-  const root: FileTreeNode = {
-    name: "",
-    relative: "",
-    kind: "dir",
-    children: [],
-  };
-  const nodeByRelative = new Map<string, FileTreeNode>();
-  nodeByRelative.set("", root);
-  const entryByRelative = new Map<string, EditorFile>();
-  for (const entry of entries) {
-    const normalized = normalizeRelativePath(entry.relative);
-    if (!normalized) continue;
-    entryByRelative.set(normalized, { ...entry, relative: normalized });
-  }
-  const rels = Array.from(entryByRelative.keys()).sort((a, b) =>
-    a.localeCompare(b)
-  );
-  for (const rel of rels) {
-    const entry = entryByRelative.get(rel);
-    if (!entry) continue;
-    const parts = rel.split("/");
-    let currentRel = "";
-    let parent = root;
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      currentRel = currentRel ? `${currentRel}/${part}` : part;
-      let node = nodeByRelative.get(currentRel);
-      if (!node) {
-        const existing = entryByRelative.get(currentRel);
-        const kind = existing?.kind ??
-          (i === parts.length - 1 ? entry.kind : "dir");
-        node = {
-          name: part,
-          relative: currentRel,
-          kind,
-          path: existing?.path,
-          children: [],
-        };
-        nodeByRelative.set(currentRel, node);
-        parent.children.push(node);
-      }
-      parent = node;
-    }
-    const target = nodeByRelative.get(rel);
-    if (target) {
-      target.path = entry.path;
-      target.kind = entry.kind;
-    }
-  }
-  return sortFileNodes(root.children);
-}
-
-function filterFileTree(nodes: FileTreeNode[], query: string) {
-  const trimmed = query.trim().toLowerCase();
-  if (!trimmed) return nodes;
-  const matches = (node: FileTreeNode) =>
-    node.name.toLowerCase().includes(trimmed) ||
-    node.relative.toLowerCase().includes(trimmed);
-  const filterNode = (node: FileTreeNode): FileTreeNode | null => {
-    const nextChildren = node.children
-      .map(filterNode)
-      .filter((child): child is FileTreeNode => Boolean(child));
-    if (matches(node) || nextChildren.length > 0) {
-      return { ...node, children: nextChildren };
-    }
-    return null;
-  };
-  return nodes
-    .map(filterNode)
-    .filter((node): node is FileTreeNode => Boolean(node));
-}
-
-function EditorApp() {
-  const allowedExtensions = useMemo(
-    () => [".md", ".ts", ".tsx"],
-    [],
-  );
-  const [config, setConfig] = useState<
-    { activeDeckPath?: string; rootPath?: string }
-  >({});
-  const [loadingConfig, setLoadingConfig] = useState(true);
-  const [files, setFiles] = useState<EditorFile[]>([]);
-  const [filesError, setFilesError] = useState<string | null>(null);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [filesBusy, setFilesBusy] = useState(false);
-  const [rootInput, setRootInput] = useState("");
-  const [fileQuery, setFileQuery] = useState("");
-  const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState<string>("");
-  const [fileStatus, setFileStatus] = useState<
-    "idle" | "dirty" | "saving" | "saved" | "error"
-  >("idle");
-  const [notesContent, setNotesContent] = useState<string>("");
-  const [notesStatus, setNotesStatus] = useState<
-    "idle" | "dirty" | "saving" | "saved" | "error"
-  >("idle");
-  const [assistantMessages, setAssistantMessages] = useState<
-    AssistantChatMessage[]
-  >([]);
-  const [assistantInput, setAssistantInput] = useState("");
-  const [assistantPendingPatch, setAssistantPendingPatch] = useState<
-    PatchProposal | null
-  >(null);
-  const [assistantRunning, setAssistantRunning] = useState(false);
-  const [assistantError, setAssistantError] = useState<string | null>(null);
-  const [assistantRejectReason, setAssistantRejectReason] = useState("");
-  const [assistantApplyError, setAssistantApplyError] = useState<
-    string | null
-  >(null);
-  const [leftTab, setLeftTab] = useState<"files" | "iteration">("files");
-  const [rightTab, setRightTab] = useState<"assistant" | "quick-chat">(
-    "quick-chat",
-  );
-  const quickSimulator = useSimulator();
-  const quickSchema = useHttpSchema();
-  const [quickMessage, setQuickMessage] = useState("");
-  const [quickInitValue, setQuickInitValue] = useState<unknown>(undefined);
-  const [quickInitDirty, setQuickInitDirty] = useState(false);
-  const [quickInitMode, setQuickInitMode] = useState<"form" | "json">("form");
-  const [quickInitJsonText, setQuickInitJsonText] = useState("");
-  const [quickInitJsonError, setQuickInitJsonError] = useState<string | null>(
+function CalibrateApp() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [graders, setGraders] = useState<GraderDeckMeta[]>([]);
+  const [sessions, setSessions] = useState<CalibrateSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null,
   );
-  const [quickJsonErrors, setQuickJsonErrors] = useState<
-    Record<string, string | null>
-  >({});
-  const [quickPendingReset, setQuickPendingReset] = useState(false);
-  const [quickExpanded, setQuickExpanded] = useState<Record<string, boolean>>(
-    {},
+  const [selectedGraderId, setSelectedGraderId] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const initialCalibrateSessionRef = useRef<string | null>(
+    getCalibrateSessionIdFromLocation(),
   );
-  const quickThreadRef = useRef<HTMLDivElement | null>(null);
-  const [feedback, setFeedback] = useState<
-    Array<{
-      sessionId: string;
-      messageRefId: string;
-      score?: number;
-      reason?: string;
-      createdAt?: string;
-      archivedAt?: string;
-      messageContent?: unknown;
-      sessionCreatedAt?: string;
-    }>
-  >([]);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
-  const [archiving, setArchiving] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerLoading, setDrawerLoading] = useState(false);
-  const [drawerError, setDrawerError] = useState<string | null>(null);
-  const [drawerSession, setDrawerSession] = useState<SessionState | null>(null);
-  const [drawerContext, setDrawerContext] = useState<
-    SessionContextWindow | null
-  >(null);
-  const [drawerShowFull, setDrawerShowFull] = useState(false);
-  const [drawerNotesStatus, setDrawerNotesStatus] = useState<
-    "idle" | "saving" | "error"
-  >("idle");
-  const drawerTargetRef = useRef<
-    { sessionId: string; messageRefId: string } | null
-  >(null);
-  const assistantThreadRef = useRef<HTMLDivElement | null>(null);
-  const saveTimeoutRef = useRef<number | null>(null);
-  const saveNotesTimeoutRef = useRef<number | null>(null);
-  const initialFileRef = useRef<string | null>(null);
-  const autoLoadedActiveRef = useRef(false);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const fileParam = params.get("file");
-    if (fileParam) {
-      try {
-        initialFileRef.current = decodeURIComponent(fileParam);
-      } catch {
-        initialFileRef.current = fileParam;
-      }
+  const updateCalibratePath = useCallback((sessionId: string | null) => {
+    const targetPath = sessionId ? buildCalibratePath(sessionId) : "/calibrate";
+    if (window.location.pathname === targetPath) return;
+    const url = new URL(window.location.href);
+    url.pathname = targetPath;
+    if (!sessionId) {
+      url.searchParams.delete("sessionId");
     }
+    window.history.replaceState({}, "", url.toString());
   }, []);
 
-  const loadConfig = useCallback(async () => {
-    setLoadingConfig(true);
+  const loadCalibrateData = useCallback(async () => {
     try {
-      const res = await fetch("/api/config");
-      const data = await res.json();
-      setConfig(data ?? {});
-      const nextRoot = (data?.rootPath as string) ||
-        (data?.activeDeckPath
-          ? pathDirname(data.activeDeckPath as string)
-          : "");
-      setRootInput(nextRoot);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingConfig(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
-
-  const isAllowedFile = useCallback(
-    (p: string) => {
-      const lower = p.toLowerCase();
-      return allowedExtensions.some((ext) => lower.endsWith(ext));
-    },
-    [allowedExtensions],
-  );
-
-  const updateConfig = useCallback(
-    async (next: { activeDeckPath?: string; rootPath?: string }) => {
-      try {
-        const res = await fetch("/api/config", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(next),
-        });
-        const data = await res.json();
-        setConfig(data ?? next);
-        if (data?.rootPath) setRootInput(data.rootPath);
-      } catch (err) {
-        console.error(err);
-      }
-    },
-    [],
-  );
-
-  const loadFiles = useCallback(
-    async (root: string) => {
-      setFilesLoading(true);
-      setFilesError(null);
-      try {
-        const res = await fetch(
-          `/api/files?root=${encodeURIComponent(root || "")}`,
-        );
-        if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json() as { files?: EditorFile[] };
-        setFiles(data.files ?? []);
-      } catch (err) {
-        setFilesError(
-          err instanceof Error ? err.message : "Failed to list files",
-        );
-        setFiles([]);
-      } finally {
-        setFilesLoading(false);
-      }
-    },
-    [],
-  );
-
-  const loadFile = useCallback(async (target: string) => {
-    try {
-      const res = await fetch(`/api/file?path=${encodeURIComponent(target)}`);
+      setLoading(true);
+      const res = await fetch("/api/calibrate");
       if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as { content?: string };
-      setSelectedFile(target);
-      setFileContent(data.content ?? "");
-      setFileStatus("idle");
-      const url = new URL(window.location.href);
-      url.searchParams.set("file", encodeURIComponent(target));
-      window.history.replaceState({}, "", url.toString());
-    } catch (err) {
-      setSelectedFile(target);
-      setFileContent("");
-      setFileStatus("error");
-      console.error(err);
-    }
-  }, []);
-
-  const fileByPath = useMemo(() => {
-    const map = new Map<string, EditorFile>();
-    files.forEach((entry) => map.set(entry.path, entry));
-    return map;
-  }, [files]);
-
-  const fileTree = useMemo(() => buildFileTree(files), [files]);
-  const filteredFileTree = useMemo(
-    () => filterFileTree(fileTree, fileQuery),
-    [fileTree, fileQuery],
-  );
-
-  const refreshFiles = useCallback(() => {
-    loadFiles(rootInput || ".");
-  }, [loadFiles, rootInput]);
-
-  const runFilesAction = useCallback(
-    async (endpoint: string, body: Record<string, unknown>) => {
-      setFilesBusy(true);
-      setFilesError(null);
-      try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(
-            typeof data?.error === "string" ? data.error : res.statusText,
-          );
-        }
-        return data;
-      } catch (err) {
-        setFilesError(
-          err instanceof Error ? err.message : "File operation failed",
-        );
-        return null;
-      } finally {
-        setFilesBusy(false);
-      }
-    },
-    [],
-  );
-
-  const handleCreateEntry = useCallback(
-    async (kind: "file" | "dir") => {
-      const label = kind === "file" ? "file" : "folder";
-      const relative = window.prompt(`New ${label} path (relative to root):`);
-      if (!relative) return;
-      const data = await runFilesAction("/api/files/create", {
-        root: rootInput || ".",
-        relative,
-        kind,
-        content: "",
-      });
-      await refreshFiles();
-      if (kind === "file" && data?.path && isAllowedFile(String(data.path))) {
-        await loadFile(String(data.path));
-      }
-    },
-    [runFilesAction, refreshFiles, rootInput, isAllowedFile, loadFile],
-  );
-
-  const handleRenameEntry = useCallback(
-    async (relative: string) => {
-      const next = window.prompt("Rename to (relative to root):", relative);
-      if (!next || next === relative) return;
-      const data = await runFilesAction("/api/files/rename", {
-        root: rootInput || ".",
-        from: relative,
-        to: next,
-      });
-      await refreshFiles();
-      if (data?.path && selectedFile) {
-        const prevEntry = fileByPath.get(selectedFile);
+      const data = await res.json() as CalibrateResponse;
+      const nextGraders = Array.isArray(data.graderDecks)
+        ? data.graderDecks
+        : [];
+      const nextSessions = Array.isArray(data.sessions) ? data.sessions : [];
+      setGraders(nextGraders);
+      setSessions(nextSessions);
+      setSelectedSessionId((prev) => {
+        const requested = initialCalibrateSessionRef.current;
         if (
-          prevEntry && normalizeRelativePath(prevEntry.relative) === relative
+          requested && nextSessions.some((session) => session.id === requested)
         ) {
-          setSelectedFile(String(data.path));
-          loadFile(String(data.path));
+          initialCalibrateSessionRef.current = null;
+          return requested;
         }
-      }
-    },
-    [
-      runFilesAction,
-      refreshFiles,
-      rootInput,
-      selectedFile,
-      fileByPath,
-      loadFile,
-    ],
-  );
-
-  const handleDeleteEntry = useCallback(
-    async (relative: string, kind: "file" | "dir") => {
-      const message = kind === "dir"
-        ? `Delete folder "${relative}" and all of its contents?`
-        : `Delete file "${relative}"?`;
-      if (!window.confirm(message)) return;
-      await runFilesAction("/api/files/delete", {
-        root: rootInput || ".",
-        relative,
-      });
-      if (selectedFile) {
-        const entry = fileByPath.get(selectedFile);
-        if (entry && normalizeRelativePath(entry.relative) === relative) {
-          setSelectedFile(null);
-          setFileContent("");
-          setFileStatus("idle");
+        if (prev && nextSessions.some((session) => session.id === prev)) {
+          return prev;
         }
-      }
-      await refreshFiles();
-    },
-    [runFilesAction, refreshFiles, rootInput, selectedFile, fileByPath],
-  );
-
-  useEffect(() => {
-    const root = config.rootPath ||
-      (config.activeDeckPath ? pathDirname(config.activeDeckPath) : "") || "";
-    if (!loadingConfig) {
-      setRootInput(root);
-      loadFiles(root || ".");
-    }
-  }, [config.rootPath, config.activeDeckPath, loadFiles, loadingConfig]);
-  useEffect(() => {
-    if (loadingConfig) return;
-    if (!initialFileRef.current) return;
-    const target = initialFileRef.current;
-    initialFileRef.current = null;
-    loadFile(target);
-  }, [loadingConfig, loadFile]);
-  useEffect(() => {
-    if (loadingConfig) return;
-    if (autoLoadedActiveRef.current) return;
-    if (initialFileRef.current) return;
-    if (!config.activeDeckPath) return;
-    autoLoadedActiveRef.current = true;
-    loadFile(config.activeDeckPath);
-  }, [config.activeDeckPath, loadingConfig, loadFile]);
-
-  useEffect(() => {
-    if (!selectedFile) return;
-    const entry = fileByPath.get(selectedFile);
-    if (!entry) return;
-    const parts = normalizeRelativePath(entry.relative).split("/");
-    setExpandedDirs((prev) => {
-      const next = { ...prev };
-      let rel = "";
-      for (let i = 0; i < parts.length - 1; i++) {
-        rel = rel ? `${rel}/${parts[i]}` : parts[i];
-        next[rel] = true;
-      }
-      return next;
-    });
-  }, [selectedFile, fileByPath]);
-
-  useEffect(() => {
-    setAssistantMessages([]);
-    setAssistantPendingPatch(null);
-    setAssistantInput("");
-    setAssistantError(null);
-    setAssistantRejectReason("");
-    setAssistantApplyError(null);
-    setAssistantRunning(false);
-  }, [selectedFile]);
-
-  const quickSchemaShape = quickSimulator.schemaResponse?.schema ??
-    quickSchema.schemaResponse?.schema;
-  const quickSchemaDefaults = quickSimulator.schemaResponse?.defaults ??
-    quickSchema.schemaResponse?.defaults;
-  const quickSchemaError = quickSimulator.schemaResponse?.error ??
-    quickSchema.schemaResponse?.error ??
-    quickSchema.error ??
-    undefined;
-  const quickHasState = Boolean(quickSimulator.savedState) &&
-    !quickPendingReset;
-  const quickSessionId = typeof quickSimulator.savedState?.meta?.sessionId ===
-      "string"
-    ? quickSimulator.savedState.meta.sessionId
-    : undefined;
-  const quickMessages = useMemo(() => {
-    if (!quickSimulator.savedState) return [];
-    const feedbackByRef = new Map(
-      quickSimulator.savedState.feedback?.map((f) => [f.messageRefId, f]) ?? [],
-    );
-    return quickSimulator.savedState.messages.map((message, idx) => {
-      const ref = quickSimulator.savedState?.messageRefs?.[idx];
-      return {
-        id: ref?.id,
-        message,
-        feedback: ref ? feedbackByRef.get(ref.id) : undefined,
-      };
-    });
-  }, [quickSimulator.savedState]);
-
-  useEffect(() => {
-    setQuickExpanded({});
-  }, [quickSessionId]);
-
-  useEffect(() => {
-    if (!quickSchemaShape) return;
-    if (quickInitDirty) return;
-    if (quickSchemaDefaults !== undefined) {
-      setQuickInitValue(cloneValue(quickSchemaDefaults));
-      return;
-    }
-    setQuickInitValue(deriveInitialFromSchema(quickSchemaShape));
-  }, [quickSchemaShape, quickSchemaDefaults, quickInitDirty]);
-
-  useEffect(() => {
-    if (quickInitMode !== "json") return;
-    if (quickInitDirty) return;
-    try {
-      setQuickInitJsonText(
-        quickInitValue === undefined
-          ? ""
-          : JSON.stringify(quickInitValue, null, 2),
-      );
-    } catch {
-      setQuickInitJsonText(quickInitValue ? String(quickInitValue) : "");
-    }
-  }, [quickInitMode, quickInitValue, quickInitDirty]);
-
-  const quickMissingRequired = useMemo(() => {
-    if (!quickSchemaShape) return [];
-    return findMissingRequiredFields(quickSchemaShape, quickInitValue);
-  }, [quickSchemaShape, quickInitValue]);
-
-  const quickJsonErrorCount = useMemo(() => {
-    return Object.values(quickJsonErrors).filter((v) =>
-      typeof v === "string" && v
-    )
-      .length;
-  }, [quickJsonErrors]);
-
-  const quickIncludeInit = Boolean(quickSchemaShape) &&
-    (!quickHasState || quickInitDirty);
-  const quickCanStartWithInit = !quickIncludeInit ||
-    (quickMissingRequired.length === 0 && quickJsonErrorCount === 0);
-  const quickTrimmedMessage = quickMessage.trim();
-  const quickCanSend = quickCanStartWithInit &&
-    (quickIncludeInit || quickTrimmedMessage.length > 0 || !quickHasState);
-  const quickCanSendNow = quickCanSend && !quickSimulator.isRunning;
-
-  const handleQuickSend = useCallback(() => {
-    if (!quickCanSendNow) return;
-    const trimmed = quickTrimmedMessage;
-    const payload: {
-      input?: unknown;
-      message?: string;
-      resetState?: boolean;
-      trace?: boolean;
-    } = { resetState: quickPendingReset, trace: true };
-    if (quickIncludeInit) {
-      payload.input = quickInitValue === undefined ? {} : quickInitValue;
-    }
-    if (trimmed) {
-      payload.message = trimmed;
-    }
-    quickSimulator.run(payload);
-    setQuickMessage("");
-    setQuickPendingReset(false);
-    if (quickIncludeInit) setQuickInitDirty(true);
-  }, [
-    quickCanSendNow,
-    quickIncludeInit,
-    quickTrimmedMessage,
-    quickPendingReset,
-    quickInitValue,
-    quickHasState,
-    quickSimulator,
-  ]);
-
-  const handleQuickScore = useCallback(
-    (refId: string, score: number) => {
-      quickSimulator.sendFeedback(refId, score);
-    },
-    [quickSimulator],
-  );
-
-  const handleQuickReason = useCallback(
-    (refId: string, score: number, reason: string) => {
-      quickSimulator.sendFeedback(refId, score, reason);
-    },
-    [quickSimulator],
-  );
-
-  useEffect(() => {
-    const el = quickThreadRef.current;
-    if (!el) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [quickMessages.length, quickSimulator.streamText]);
-
-  const saveFile = useCallback(async (target: string, content: string) => {
-    setFileStatus("saving");
-    try {
-      await fetch("/api/file", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: target, content }),
+        return nextSessions[0]?.id ?? null;
       });
-      setFileStatus("saved");
+      setSelectedGraderId((prev) => {
+        if (prev && nextGraders.some((grader) => grader.id === prev)) {
+          return prev;
+        }
+        return nextGraders[0]?.id ?? null;
+      });
+      setError(null);
     } catch (err) {
-      setFileStatus("error");
-      console.error(err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (fileStatus !== "dirty" || !selectedFile) return;
-    if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = window.setTimeout(() => {
-      saveFile(selectedFile, fileContent);
-    }, 600);
-    return () => {
-      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-    };
-  }, [fileStatus, selectedFile, fileContent, saveFile]);
-
-  useEffect(() => {
-    if (notesStatus !== "dirty" || !config.activeDeckPath) return;
-    if (saveNotesTimeoutRef.current) {
-      window.clearTimeout(saveNotesTimeoutRef.current);
-    }
-    saveNotesTimeoutRef.current = window.setTimeout(async () => {
-      setNotesStatus("saving");
-      try {
-        await fetch("/api/deck-notes", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            deckPath: config.activeDeckPath,
-            content: notesContent,
-          }),
-        });
-        setNotesStatus("saved");
-      } catch (err) {
-        setNotesStatus("error");
-        console.error(err);
-      }
-    }, 600);
-    return () => {
-      if (saveNotesTimeoutRef.current) {
-        window.clearTimeout(saveNotesTimeoutRef.current);
-      }
-    };
-  }, [notesStatus, notesContent, config.activeDeckPath]);
-
-  const loadNotes = useCallback(async (deckPath?: string) => {
-    if (!deckPath) {
-      setNotesContent("");
-      setNotesStatus("idle");
-      return;
-    }
-    try {
-      const res = await fetch(
-        `/api/deck-notes?deckPath=${encodeURIComponent(deckPath)}`,
+      setError(
+        err instanceof Error ? err.message : "Failed to load calibration data",
       );
-      const data = await res.json() as { content?: string };
-      setNotesContent(data.content ?? "");
-      setNotesStatus(data.content ? "saved" : "idle");
-    } catch (err) {
-      console.error(err);
-      setNotesContent("");
-      setNotesStatus("error");
-    }
-  }, []);
-
-  useEffect(() => {
-    loadNotes(config.activeDeckPath);
-  }, [config.activeDeckPath, loadNotes]);
-
-  const loadFeedback = useCallback(async (deckPath?: string) => {
-    if (!deckPath) {
-      setFeedback([]);
-      setFeedbackError(null);
-      return;
-    }
-    setFeedbackLoading(true);
-    setFeedbackError(null);
-    try {
-      const res = await fetch(
-        `/api/feedback?deckPath=${encodeURIComponent(deckPath)}`,
-      );
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as { items?: typeof feedback };
-      setFeedback(data.items ?? []);
-    } catch (err) {
-      setFeedbackError(
-        err instanceof Error ? err.message : "Failed to load feedback",
-      );
-      setFeedback([]);
     } finally {
-      setFeedbackLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadFeedback(config.activeDeckPath);
-  }, [config.activeDeckPath, loadFeedback]);
+    loadCalibrateData();
+  }, [loadCalibrateData]);
 
-  const archiveFeedback = useCallback(
-    async (sessionId: string, messageRefId: string, archived: boolean) => {
-      setArchiving(`${sessionId}:${messageRefId}`);
-      try {
-        const res = await fetch("/api/feedback/archive", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, messageRefId, archived }),
-        });
-        if (!res.ok) throw new Error(res.statusText);
-        setFeedback((prev) =>
-          prev.map((f) =>
-            f.sessionId === sessionId && f.messageRefId === messageRefId
-              ? {
-                ...f,
-                archivedAt: archived ? new Date().toISOString() : undefined,
-              }
-              : f
-          )
-        );
-      } catch (err) {
-        setFeedbackError(
-          err instanceof Error ? err.message : "Failed to update feedback",
-        );
-      } finally {
-        setArchiving(null);
-      }
-    },
-    [],
-  );
-
-  const buildContextWindow = (
-    sessionId: string,
-    messageRefId: string,
-    state: SessionState,
-    showFull: boolean,
-  ): SessionContextWindow | null => {
-    if (!state.messages || !state.messageRefs) return null;
-    const idx = state.messageRefs.findIndex((ref) => ref?.id === messageRefId);
-    if (idx === -1) return null;
-    const windowSize = 5;
-    const start = showFull ? 0 : Math.max(0, idx - windowSize);
-    const end = showFull
-      ? state.messages.length
-      : Math.min(state.messages.length, idx + windowSize + 1);
-    const slice = state.messages.slice(start, end).map((m, i) => ({
-      role: m.role,
-      content: m.content ?? "",
-      id: state.messageRefs?.[start + i]?.id,
-    }));
-    return {
-      sessionId,
-      targetIndex: idx,
-      start,
-      end,
-      messages: slice,
-    };
-  };
-
-  const openSessionDrawer = useCallback(
-    async (sessionId: string, messageRefId: string) => {
-      drawerTargetRef.current = { sessionId, messageRefId };
-      setDrawerOpen(true);
-      setDrawerLoading(true);
-      setDrawerError(null);
-      setDrawerSession(null);
-      setDrawerContext(null);
-      try {
-        const res = await fetch(
-          `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
-        );
-        if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json() as SessionState;
-        setDrawerSession(data);
-        const context = buildContextWindow(
-          sessionId,
-          messageRefId,
-          data,
-          drawerShowFull,
-        );
-        setDrawerContext(context);
-      } catch (err) {
-        setDrawerError(
-          err instanceof Error ? err.message : "Failed to load session",
-        );
-      } finally {
-        setDrawerLoading(false);
-      }
-    },
-    [drawerShowFull],
-  );
-
-  const saveDrawerNotes = useCallback(
-    async (sessionId: string, text: string) => {
-      setDrawerNotesStatus("saving");
-      try {
-        const res = await fetch("/api/session/notes", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, text }),
-        });
-        if (!res.ok) throw new Error(res.statusText);
-        setDrawerNotesStatus("idle");
-      } catch (err) {
-        setDrawerNotesStatus("error");
-        console.error(err);
-      }
-    },
-    [],
-  );
-
-  const handleToggleDrawerShowFull = useCallback(() => {
-    const next = !drawerShowFull;
-    setDrawerShowFull(next);
-    const target = drawerTargetRef.current;
-    if (target && drawerSession) {
-      setDrawerContext(
-        buildContextWindow(
-          target.sessionId,
-          target.messageRefId,
-          drawerSession,
-          next,
-        ),
-      );
+  useEffect(() => {
+    if (selectedSessionId) {
+      updateCalibratePath(selectedSessionId);
+    } else {
+      updateCalibratePath(null);
     }
-  }, [drawerShowFull, drawerSession]);
+  }, [selectedSessionId, updateCalibratePath]);
 
-  const runAssistant = useCallback(
-    async (transcript: AssistantChatMessage[]) => {
-      if (!selectedFile) {
-        setAssistantError("Select a file to start.");
-        return;
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [sessions, selectedSessionId],
+  );
+  const selectedGrader = useMemo(
+    () => graders.find((grader) => grader.id === selectedGraderId) ?? null,
+    [graders, selectedGraderId],
+  );
+  const sessionDeckDisplay = useMemo(() => {
+    if (!selectedSession?.deck) return null;
+    return toRelativePath(selectedSession.deck, repoRootPath) ??
+      normalizeFsPath(selectedSession.deck);
+  }, [selectedSession]);
+  const sessionDirDisplay = useMemo(() => {
+    if (!selectedSession?.sessionDir) return null;
+    return toRelativePath(selectedSession.sessionDir, repoRootPath) ??
+      normalizeFsPath(selectedSession.sessionDir);
+  }, [selectedSession]);
+  const sessionStateDisplay = useMemo(() => {
+    if (!selectedSession?.statePath) return null;
+    return toRelativePath(selectedSession.statePath, repoRootPath) ??
+      normalizeFsPath(selectedSession.statePath);
+  }, [selectedSession]);
+  const sessionCreatedLabel = useMemo(() => {
+    return selectedSession?.createdAt
+      ? formatTimestamp(selectedSession.createdAt)
+      : null;
+  }, [selectedSession]);
+  const sessionDebugHref = selectedSession
+    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(selectedSession.id)}/debug`
+    : null;
+  const sessionRuns = useMemo(() => {
+    if (!selectedSession?.calibrationRuns) return [];
+    return [...selectedSession.calibrationRuns].reverse();
+  }, [selectedSession]);
+
+  const runGrader = useCallback(async () => {
+    if (!selectedSessionId || !selectedGraderId) return;
+    try {
+      setRunning(true);
+      const res = await fetch("/api/calibrate/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: selectedSessionId,
+          graderId: selectedGraderId,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
       }
-      setAssistantRunning(true);
-      setAssistantError(null);
-      setAssistantPendingPatch(null);
-      try {
-        const res = await fetch("/api/editor-assistant/run", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            filePath: selectedFile,
-            content: fileContent,
-            messages: transcript,
-          }),
-        });
-        const data = await res.json() as EditorAssistantResponse;
-        if (!res.ok) {
-          throw new Error(
-            data?.error ?? `${res.status} ${res.statusText}`,
-          );
-        }
-        const replies = Array.isArray(data.messages)
-          ? data.messages
-            .filter((m) =>
-              m?.role === "assistant" && typeof m.content === "string" &&
-              m.content.trim().length > 0
-            )
-            .map((m) => ({
-              role: "assistant" as const,
-              content: (m.content ?? "") as string,
-            }))
-          : [];
-        const nextTranscript = [...transcript, ...replies];
-        if (data.patch !== undefined) {
-          const normalized = normalizePatchProposal(data.patch);
-          if (normalized.patch) {
-            setAssistantPendingPatch(normalized.patch);
-            setAssistantApplyError(null);
-          } else if (normalized.error) {
-            setAssistantPendingPatch(null);
-            nextTranscript.push({
-              role: "assistant",
-              content: `Patch proposal invalid: ${normalized.error}`,
-            });
+      const data = await res.json() as {
+        session?: CalibrateSession;
+      };
+      if (data.session) {
+        setSessions((prev) => {
+          const index = prev.findIndex((sess) => sess.id === data.session!.id);
+          if (index >= 0) {
+            const next = [...prev];
+            next[index] = data.session!;
+            return next;
           }
-        } else {
-          setAssistantPendingPatch(null);
-        }
-        setAssistantMessages(nextTranscript);
-      } catch (err) {
-        setAssistantError(
-          err instanceof Error ? err.message : "Assistant request failed",
-        );
-      } finally {
-        setAssistantRunning(false);
+          return [data.session!, ...prev];
+        });
       }
-    },
-    [fileContent, selectedFile],
-  );
-
-  const handleSendAssistant = useCallback(async () => {
-    const text = assistantInput.trim();
-    if (!text || assistantRunning) return;
-    if (!selectedFile) {
-      setAssistantError("Select a file to start.");
-      return;
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run grader");
+    } finally {
+      setRunning(false);
     }
-    const userMessage: AssistantChatMessage = { role: "user", content: text };
-    const transcript = [...assistantMessages, userMessage];
-    setAssistantMessages(transcript);
-    setAssistantPendingPatch(null);
-    setAssistantApplyError(null);
-    setAssistantInput("");
-    await runAssistant(transcript);
-  }, [
-    assistantInput,
-    assistantMessages,
-    assistantRunning,
-    runAssistant,
-    selectedFile,
-  ]);
+  }, [selectedSessionId, selectedGraderId]);
 
-  const handleAcceptPatch = useCallback(() => {
-    if (!assistantPendingPatch) return;
-    const applied = applyPatchProposal(fileContent, assistantPendingPatch);
-    if (!applied.ok) {
-      setAssistantApplyError(applied.error);
-      return;
-    }
-    setAssistantApplyError(null);
-    setFileContent(applied.next);
-    setFileStatus("dirty");
-    setAssistantPendingPatch(null);
-    setAssistantMessages((prev) => [
-      ...prev,
-      { role: "system", content: "Applied patch." },
-    ]);
-  }, [assistantPendingPatch, fileContent]);
+  const canRun = Boolean(selectedSessionId && selectedGraderId && !running);
 
-  const handleRejectPatch = useCallback(async () => {
-    if (!assistantPendingPatch || assistantRunning) return;
-    const reason = assistantRejectReason.trim();
-    const rejection: AssistantChatMessage = {
-      role: "user",
-      content: reason ? `Rejected patch: ${reason}` : "Rejected patch.",
-    };
-    const transcript = [...assistantMessages, rejection];
-    setAssistantMessages(transcript);
-    setAssistantPendingPatch(null);
-    setAssistantRejectReason("");
-    setAssistantApplyError(null);
-    await runAssistant(transcript);
-  }, [
-    assistantPendingPatch,
-    assistantRejectReason,
-    assistantMessages,
-    assistantRunning,
-    runAssistant,
-  ]);
-
-  useEffect(() => {
-    const el = assistantThreadRef.current;
-    if (!el) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [assistantMessages.length]);
-
-  const toggleDir = useCallback((relative: string) => {
-    setExpandedDirs((prev) => ({
-      ...prev,
-      [relative]: !prev[relative],
-    }));
-  }, []);
-
-  const renderFileNode = useCallback(
-    (node: FileTreeNode, depth: number) => {
-      const isDir = node.kind === "dir";
-      const expanded = fileQuery
-        ? true
-        : expandedDirs[node.relative] ?? depth < 1;
-      const canOpen = !isDir && node.path && isAllowedFile(node.path);
-      const isSelected = !isDir && node.path === selectedFile;
-      return (
-        <div key={node.relative}>
+  return (
+    <div className="app-shell calibrate-shell">
+      <header className="app-header">
+        <div>
+          <h1>Gambit Calibrate</h1>
+          <div className="deck-path">
+            Run deck-defined graders against saved sessions.
+          </div>
+        </div>
+      </header>
+      <main className="calibrate-layout">
+        <div className="chat-column calibrate-main-column">
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "4px 6px",
-              borderRadius: 8,
-              background: isSelected ? "#e0f2fe" : "transparent",
-              marginBottom: 2,
-              paddingLeft: 6 + depth * 12,
-            }}
+            className="header-actions"
+            style={{ justifyContent: "flex-end" }}
           >
             <button
               type="button"
-              onClick={() => {
-                if (isDir) return toggleDir(node.relative);
-                if (!canOpen || !node.path) return;
-                loadFile(node.path);
-              }}
-              disabled={isDir ? false : !canOpen}
-              title={node.relative}
-              style={{
-                flex: 1,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                textAlign: "left",
-                border: "none",
-                background: "transparent",
-                padding: "2px 6px",
-                cursor: isDir || canOpen ? "pointer" : "not-allowed",
-                opacity: isDir || canOpen ? 1 : 0.5,
-                fontWeight: isDir ? 700 : 500,
-                color: isDir ? "#0f172a" : "#1f2937",
-              }}
+              className="ghost-btn"
+              onClick={loadCalibrateData}
+              disabled={loading}
             >
-              <span
-                style={{
-                  width: 14,
-                  textAlign: "center",
-                  color: "#94a3b8",
-                  fontSize: 12,
-                }}
-              >
-                {isDir ? (expanded ? "▾" : "▸") : "•"}
-              </span>
-              {node.name}
+              Refresh data
             </button>
-            <select
-              value=""
-              onChange={(e) => {
-                const value = e.target.value as "" | "rename" | "delete";
-                if (!value) return;
-                if (value === "rename") {
-                  handleRenameEntry(node.relative);
-                } else {
-                  handleDeleteEntry(node.relative, node.kind);
-                }
-                e.currentTarget.value = "";
-              }}
-              disabled={filesBusy}
-              title="Actions"
-              style={{
-                border: "1px solid #cbd5e1",
-                borderRadius: 6,
-                padding: "2px 6px",
-                fontSize: 11,
-                background: "white",
-                cursor: "pointer",
-              }}
-            >
-              <option value="">Actions</option>
-              <option value="rename">Rename</option>
-              <option value="delete">Delete</option>
-            </select>
           </div>
-          {isDir && expanded && node.children.length > 0 && (
-            <div>
-              {node.children.map((child) => renderFileNode(child, depth + 1))}
-            </div>
+          {error && <div className="error">{error}</div>}
+          {loading && (
+            <div className="editor-status">Loading calibration data…</div>
           )}
-          {isDir && expanded && node.children.length === 0 && (
-            <div
-              style={{
-                paddingLeft: 22 + depth * 12,
-                fontSize: 12,
-                color: "#94a3b8",
-                marginBottom: 4,
-              }}
-            >
-              Empty folder
-            </div>
-          )}
-        </div>
-      );
-    },
-    [
-      expandedDirs,
-      fileQuery,
-      filesBusy,
-      handleDeleteEntry,
-      handleRenameEntry,
-      isAllowedFile,
-      loadFile,
-      selectedFile,
-      toggleDir,
-    ],
-  );
-
-  return (
-    <div className="editor-shell">
-      <div className="editor-header">
-        <div>
-          <h1 className="editor-title">Gambit Editor</h1>
-          <div className="editor-status">
-            Active deck: {config.activeDeckPath
-              ? <code>{config.activeDeckPath}</code>
-              : "not set"}
-          </div>
-        </div>
-      </div>
-      <div className="editor-main">
-        <div
-          className="editor-panel"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <div className="panel-tabs">
-            <button
-              type="button"
-              className={classNames(
-                "panel-tab",
-                leftTab === "files" && "active",
-              )}
-              onClick={() => setLeftTab("files")}
-            >
-              Files
-            </button>
-            <button
-              type="button"
-              className={classNames(
-                "panel-tab",
-                leftTab === "iteration" && "active",
-              )}
-              onClick={() => setLeftTab("iteration")}
-            >
-              Iteration
-            </button>
-          </div>
-          {leftTab === "files"
-            ? (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 8,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
-                    <strong>Files</strong>
-                    <span className="editor-status">
-                      {filesLoading ? "Loading..." : `${files.length} items`}
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <input
-                      value={rootInput}
-                      onChange={(e) => setRootInput(e.target.value)}
-                      placeholder="Root path (default: CWD)"
-                      style={{
-                        flex: 1,
-                        minWidth: 180,
-                        padding: 8,
-                        borderRadius: 8,
-                        border: "1px solid #cbd5e1",
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateConfig({ ...config, rootPath: rootInput })}
-                      disabled={filesBusy}
-                    >
-                      Save root
-                    </button>
-                    <button
-                      type="button"
-                      onClick={refreshFiles}
-                      disabled={filesBusy}
-                    >
-                      Refresh
-                    </button>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 8,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <input
-                      value={fileQuery}
-                      onChange={(e) => setFileQuery(e.target.value)}
-                      placeholder="Search files and folders"
-                      style={{
-                        flex: 1,
-                        minWidth: 180,
-                        padding: 8,
-                        borderRadius: 8,
-                        border: "1px solid #cbd5e1",
-                      }}
-                    />
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        const value = e.target.value as
-                          | ""
-                          | "file"
-                          | "dir";
-                        if (!value) return;
-                        handleCreateEntry(value);
-                        e.currentTarget.value = "";
-                      }}
-                      disabled={filesBusy}
-                      style={{
-                        border: "1px solid #cbd5e1",
-                        borderRadius: 8,
-                        padding: "6px 10px",
-                        background: "white",
-                        cursor: "pointer",
-                        fontWeight: 600,
-                      }}
-                    >
-                      <option value="">New…</option>
-                      <option value="file">File</option>
-                      <option value="dir">Folder</option>
-                    </select>
-                  </div>
+          {!loading && (
+            <>
+              {sessions.length === 0 && (
+                <div className="placeholder">
+                  No sessions found. Run the Test Bot to capture a session
+                  before calibrating.
                 </div>
-                {filesLoading && (
-                  <div className="placeholder">Loading files…</div>
-                )}
-                {filesError && <div className="error">{filesError}</div>}
-                <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                  {filteredFileTree.map((node) => renderFileNode(node, 0))}
-                  {!filesLoading && filteredFileTree.length === 0 && (
-                    <div className="placeholder">
-                      {fileQuery.trim()
-                        ? "No matches."
-                        : "No files under this root."}
-                    </div>
-                  )}
-                </div>
-              </>
-            )
-            : (
-              config.activeDeckPath
-                ? (
-                  <>
-                    <label style={{ fontSize: 13, fontWeight: 600 }}>
-                      Deck notes (.gambit/notes)
-                    </label>
-                    <textarea
-                      value={notesContent}
-                      onChange={(e) => {
-                        setNotesContent(e.target.value);
-                        setNotesStatus("dirty");
-                      }}
-                      style={{
-                        width: "100%",
-                        height: 160,
-                        resize: "vertical",
-                        padding: 10,
-                        borderRadius: 10,
-                        border: "1px solid #cbd5e1",
-                        fontFamily:
-                          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                      }}
-                      placeholder="Deck-level notes (local only)"
-                    />
-                    <div className="editor-status">
-                      {notesStatus === "saving"
-                        ? "Saving…"
-                        : notesStatus === "dirty"
-                        ? "Unsaved changes"
-                        : notesStatus === "saved"
-                        ? "Saved"
-                        : notesStatus === "error"
-                        ? "Save failed"
-                        : "Idle"}
-                    </div>
-                    <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-                      <FeedbackList
-                        items={feedback}
-                        showArchived={showArchived}
-                        archivingKey={archiving}
-                        loading={feedbackLoading}
-                        error={feedbackError}
-                        onToggleShowArchived={(next) => setShowArchived(next)}
-                        onView={(sessionId, messageRefId) =>
-                          openSessionDrawer(sessionId, messageRefId)}
-                        onArchive={(sessionId, messageRefId, archived) =>
-                          archiveFeedback(sessionId, messageRefId, archived)}
-                      />
-                    </div>
-                  </>
-                )
-                : (
-                  <p className="placeholder">
-                    Set an active deck to edit notes and view feedback.
-                  </p>
-                )
-            )}
-        </div>
-        <div
-          className="editor-panel"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <strong>Editor</strong>
-          {selectedFile
-            ? (
-              <>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#475569",
-                    wordBreak: "break-all",
-                  }}
-                >
-                  {selectedFile}
-                </div>
-                <textarea
-                  value={fileContent}
-                  onChange={(e) => {
-                    setFileContent(e.target.value);
-                    setFileStatus("dirty");
-                  }}
-                  style={{
-                    width: "100%",
-                    flex: 1,
-                    minHeight: 0,
-                    resize: "none",
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #cbd5e1",
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                  }}
-                />
-                <div className="editor-status">
-                  {fileStatus === "saving"
-                    ? "Saving…"
-                    : fileStatus === "dirty"
-                    ? "Unsaved changes"
-                    : fileStatus === "saved"
-                    ? "Saved"
-                    : fileStatus === "error"
-                    ? "Save failed"
-                    : "Idle"}
-                </div>
-              </>
-            )
-            : <p className="placeholder">Select a file to edit.</p>}
-        </div>
-        <div
-          className="editor-panel"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <div className="panel-tabs">
-            <button
-              type="button"
-              className={classNames(
-                "panel-tab",
-                rightTab === "quick-chat" && "active",
               )}
-              onClick={() => setRightTab("quick-chat")}
-            >
-              Quick Chat
-            </button>
-            <button
-              type="button"
-              className={classNames(
-                "panel-tab",
-                rightTab === "assistant" && "active",
+              {graders.length === 0 && (
+                <div className="placeholder">
+                  No grader decks found. Add <code>[[graderDecks]]</code>{" "}
+                  to your deck front matter to surface graders here.
+                </div>
               )}
-              onClick={() => setRightTab("assistant")}
-            >
-              Editor Assistant
-            </button>
-          </div>
-          {rightTab === "assistant"
-            ? selectedFile
-              ? (
+              {sessions.length > 0 && graders.length > 0 && (
                 <>
-                  <div className="editor-status" style={{ gap: 4 }}>
-                    Editor assistant target: <code>{selectedFile}</code>
-                  </div>
-                  {assistantPendingPatch && (
-                    <div className="patch-card">
-                      <div className="patch-summary">
-                        {assistantPendingPatch.summary}
-                      </div>
-                      <div className="patch-meta">
-                        Proposed changes ready ·{" "}
-                        {assistantPendingPatch.edits.length} edit
-                        {assistantPendingPatch.edits.length === 1 ? "" : "s"}
-                      </div>
-                      {assistantApplyError && (
-                        <div className="error">{assistantApplyError}</div>
-                      )}
-                      <input
-                        className="patch-reason-input"
-                        value={assistantRejectReason}
-                        onChange={(e) =>
-                          setAssistantRejectReason(e.target.value)}
-                        placeholder="Short reason to share (optional)"
-                      />
-                      <div className="patch-actions">
-                        <button type="button" onClick={handleAcceptPatch}>
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          className="ghost-btn"
-                          onClick={handleRejectPatch}
-                          disabled={assistantRunning}
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <div
-                    className="imessage-thread assistant-thread"
-                    ref={assistantThreadRef}
+                    className="editor-panel"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
                   >
-                    {assistantMessages.length === 0 && (
+                    <strong>Run a grader</strong>
+                    <label style={{ fontWeight: 600 }}>
+                      Session
+                      <select
+                        value={selectedSessionId ?? ""}
+                        onChange={(e) =>
+                          setSelectedSessionId(
+                            e.target.value.length ? e.target.value : null,
+                          )}
+                        style={{
+                          width: "100%",
+                          borderRadius: 10,
+                          border: "1px solid #cbd5e1",
+                          padding: 8,
+                          fontFamily: "inherit",
+                          marginTop: 4,
+                        }}
+                      >
+                        {sessions.map((session) => (
+                          <option key={session.id} value={session.id}>
+                            {session.id}
+                            {session.createdAt
+                              ? ` · ${formatTimestamp(session.createdAt)}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ fontWeight: 600 }}>
+                      Grader
+                      <select
+                        value={selectedGraderId ?? ""}
+                        onChange={(e) =>
+                          setSelectedGraderId(
+                            e.target.value.length ? e.target.value : null,
+                          )}
+                        style={{
+                          width: "100%",
+                          borderRadius: 10,
+                          border: "1px solid #cbd5e1",
+                          padding: 8,
+                          fontFamily: "inherit",
+                          marginTop: 4,
+                        }}
+                      >
+                        {graders.map((grader) => (
+                          <option key={grader.id} value={grader.id}>
+                            {grader.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedGrader?.description && (
                       <div className="placeholder">
-                        Ask for changes to get started.
+                        {selectedGrader.description}
                       </div>
                     )}
-                    {assistantMessages.map((m, idx) => (
-                      <div
-                        key={`${m.role}-${idx}-${m.content.slice(0, 12)}`}
-                        className={`imessage-row ${
-                          m.role === "user" ? "right" : "left"
-                        }`}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={runGrader}
+                        disabled={!canRun}
                       >
-                        <div
-                          className={`imessage-bubble ${
-                            m.role === "user" ? "right" : "left"
-                          }`}
-                          title={m.role}
-                        >
-                          {m.content}
+                        {running ? "Running…" : "Run grader"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={loadCalibrateData}
+                        disabled={loading}
+                      >
+                        Refresh sessions
+                      </button>
+                    </div>
+                  </div>
+                  <div
+                    className="editor-panel"
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <strong>
+                      Recent results {selectedSession &&
+                        `(Session ${selectedSession.id})`}
+                    </strong>
+                    {sessionRuns.length === 0 && (
+                      <div className="placeholder">
+                        No grader runs for this session yet.
+                      </div>
+                    )}
+                    {sessionRuns.map((run) => (
+                      <div key={run.id} className="trace-row">
+                        <div style={{ fontWeight: 700 }}>
+                          {run.graderLabel ?? run.graderId} · {run.status}
                         </div>
+                        <div className="trace-json">
+                          {run.runAt
+                            ? formatTimestamp(run.runAt)
+                            : "Unknown time"}
+                        </div>
+                        {run.error && <div className="error">{run.error}</div>}
+                        {run.result !== undefined && (
+                          <pre className="trace-json">
+                            {JSON.stringify(run.result, null, 2)}
+                          </pre>
+                        )}
                       </div>
                     ))}
                   </div>
-                  {assistantError && (
-                    <div className="error">{assistantError}</div>
-                  )}
-                  <textarea
-                    value={assistantInput}
-                    onChange={(e) => setAssistantInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter" || e.shiftKey) return;
-                      if (!assistantInput.trim().length || assistantRunning) {
-                        return;
-                      }
-                      e.preventDefault();
-                      handleSendAssistant();
-                    }}
-                    style={{
-                      width: "100%",
-                      minHeight: 96,
-                      resize: "vertical",
-                      padding: 10,
-                      borderRadius: 10,
-                      border: "1px solid #cbd5e1",
-                      fontFamily:
-                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                    }}
-                    placeholder="Ask the assistant to update this file"
+                </>
+              )}
+            </>
+          )}
+        </div>
+        <aside className="calibrate-drawer">
+          <h3>Deck & session</h3>
+          <div className="drawer-section">
+            <strong>Deck reference</strong>
+            <CopyBadge
+              label="Deck path"
+              displayValue={deckDisplayPath}
+              copyValue={normalizedDeckPath}
+            />
+          </div>
+          <div className="drawer-section">
+            <strong>Selected session</strong>
+            {selectedSession
+              ? (
+                <>
+                  <CopyBadge
+                    label="Session ID"
+                    displayValue={selectedSession.id}
                   />
-                  <div className="assistant-actions">
-                    <button
-                      type="button"
-                      onClick={handleSendAssistant}
-                      disabled={!assistantInput.trim().length ||
-                        assistantRunning}
-                    >
-                      {assistantRunning ? "Sending…" : "Send"}
-                    </button>
-                    <div className="editor-status">
-                      {assistantRunning ? "Waiting for assistant…" : "Idle"}
+                  {sessionDeckDisplay && (
+                    <CopyBadge
+                      label="Session deck"
+                      displayValue={sessionDeckDisplay}
+                      copyValue={selectedSession.deck ?? sessionDeckDisplay}
+                    />
+                  )}
+                  {sessionDirDisplay && (
+                    <CopyBadge
+                      label="Session folder"
+                      displayValue={sessionDirDisplay}
+                      copyValue={selectedSession.sessionDir ??
+                        sessionDirDisplay}
+                    />
+                  )}
+                  {sessionStateDisplay && (
+                    <CopyBadge
+                      label="State file"
+                      displayValue={sessionStateDisplay}
+                      copyValue={selectedSession.statePath ??
+                        sessionStateDisplay}
+                    />
+                  )}
+                  {sessionCreatedLabel && (
+                    <div className="drawer-meta">
+                      Created {sessionCreatedLabel}
                     </div>
-                  </div>
+                  )}
+                  {sessionDebugHref && (
+                    <a
+                      className="ghost-btn"
+                      href={sessionDebugHref}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open session debug
+                    </a>
+                  )}
                 </>
               )
-              : <p className="placeholder">Select a file to start.</p>
-            : (
-              <>
-                <div className="editor-status">
-                  Status: {quickSimulator.connectionStatus}
+              : (
+                <div className="placeholder">
+                  Select a session to view file paths and metadata.
                 </div>
-                {quickSessionId && (
-                  <div className="editor-status">
-                    Session: <code>{quickSessionId}</code>
-                  </div>
-                )}
-                {quickSchemaError && (
-                  <div className="error">{quickSchemaError}</div>
-                )}
-                {quickSchemaShape && (
-                  <details className="init-panel" open={!quickHasState}>
-                    <summary>Init (gambit_init)</summary>
-                    <div className="hint">
-                      Provide input for the active deck. Use form fields or raw
-                      JSON; leave blank to skip.
-                    </div>
-                    <div className="panel-tabs" style={{ marginTop: 6 }}>
-                      <button
-                        type="button"
-                        className={classNames(
-                          "panel-tab",
-                          quickInitMode === "form" && "active",
-                        )}
-                        onClick={() => {
-                          setQuickInitMode("form");
-                          setQuickInitJsonError(null);
-                          setQuickJsonErrors((prev) => ({
-                            ...prev,
-                            __root__: null,
-                          }));
-                        }}
-                      >
-                        Form
-                      </button>
-                      <button
-                        type="button"
-                        className={classNames(
-                          "panel-tab",
-                          quickInitMode === "json" && "active",
-                        )}
-                        onClick={() => {
-                          setQuickInitMode("json");
-                          try {
-                            setQuickInitJsonText(
-                              quickInitValue === undefined
-                                ? ""
-                                : JSON.stringify(quickInitValue, null, 2),
-                            );
-                          } catch {
-                            setQuickInitJsonText(
-                              quickInitValue ? String(quickInitValue) : "",
-                            );
-                          }
-                        }}
-                      >
-                        JSON
-                      </button>
-                    </div>
-                    {quickInitMode === "form"
-                      ? (
-                        <InitForm
-                          schema={quickSchemaShape}
-                          value={quickInitValue}
-                          onChange={(next) => {
-                            setQuickInitValue(next);
-                            setQuickInitDirty(true);
-                          }}
-                          onJsonErrorChange={(pathKey, err) =>
-                            setQuickJsonErrors((prev) =>
-                              prev[pathKey] === err
-                                ? prev
-                                : { ...prev, [pathKey]: err }
-                            )}
-                        />
-                      )
-                      : (
-                        <div className="init-field">
-                          <label>
-                            <span>Init JSON</span>
-                            <span className="badge">root</span>
-                          </label>
-                          <textarea
-                            className="json-input"
-                            value={quickInitJsonText}
-                            placeholder="Paste full init JSON payload"
-                            onChange={(e) => {
-                              const text = e.target.value;
-                              let error: string | null = null;
-                              let parsed: unknown = undefined;
-                              if (text.trim() === "") {
-                                parsed = undefined;
-                              } else {
-                                try {
-                                  parsed = JSON.parse(text);
-                                } catch (err) {
-                                  error = err instanceof Error
-                                    ? err.message
-                                    : "Invalid JSON";
-                                }
-                              }
-                              setQuickInitMode("json");
-                              setQuickInitJsonText(text);
-                              setQuickInitJsonError(error);
-                              setQuickInitDirty(true);
-                              if (!error) {
-                                setQuickInitValue(parsed);
-                                setQuickJsonErrors((prev) => ({
-                                  ...prev,
-                                  __root__: null,
-                                }));
-                              } else {
-                                setQuickJsonErrors((prev) => ({
-                                  ...prev,
-                                  __root__: error,
-                                }));
-                              }
-                            }}
-                            style={{ minHeight: 140 }}
-                          />
-                          {quickInitJsonError && (
-                            <div className="error">{quickInitJsonError}</div>
-                          )}
-                          {!quickInitJsonError && (
-                            <div className="secondary-note">
-                              Leave blank to unset init. Parsed JSON replaces
-                              the form.
-                            </div>
-                          )}
-                        </div>
-                      )}
-                  </details>
-                )}
-                {!quickSchemaShape && !quickSchema.loading && (
-                  <div className="placeholder">
-                    No input schema; you can start with a blank message.
-                  </div>
-                )}
-                <div
-                  className="imessage-thread"
-                  ref={quickThreadRef}
-                >
-                  {quickMessages.length === 0 && (
-                    <div className="placeholder">
-                      No messages yet. Send a message or start a blank run.
-                    </div>
-                  )}
-                  {quickMessages.map((entry, idx) => (
-                    (() => {
-                      const role = entry.message.role ?? "assistant";
-                      const isUser = role === "user";
-                      const isCollapsible = role === "system" ||
-                        role === "tool";
-                      const isMuted = role === "system" || role === "tool";
-                      const messageRefId = entry.id;
-                      const expandKey = `${
-                        quickSessionId ?? "local"
-                      }-${idx}-${role}`;
-                      const isCollapsed = isCollapsible &&
-                        !quickExpanded[expandKey];
-                      const content = String(entry.message.content ?? "");
-                      if (!content.trim()) return null;
-                      const preview = content.trim().slice(0, 160);
-                      const collapsedText = `${role} message (click to expand)${
-                        preview
-                          ? ` - ${preview}${content.length > 160 ? "..." : ""}`
-                          : ""
-                      }`;
-                      const toggleCollapsed = () => {
-                        if (!isCollapsible) return;
-                        setQuickExpanded((prev) => ({
-                          ...prev,
-                          [expandKey]: !prev[expandKey],
-                        }));
-                      };
-                      return (
-                        <div
-                          key={`${role}-${idx}`}
-                          className={`imessage-row ${
-                            isUser ? "right" : "left"
-                          }`}
-                        >
-                          <div
-                            className={classNames(
-                              "imessage-bubble",
-                              isUser ? "right" : "left",
-                              isCollapsible && "imessage-bubble-collapsible",
-                              isCollapsed && "imessage-bubble-collapsed",
-                              isMuted && "imessage-bubble-muted",
-                            )}
-                            title={role}
-                            role={isCollapsible ? "button" : undefined}
-                            tabIndex={isCollapsible ? 0 : -1}
-                            onClick={toggleCollapsed}
-                            onKeyDown={(e) => {
-                              if (!isCollapsible) return;
-                              if (e.key !== "Enter" && e.key !== " ") return;
-                              e.preventDefault();
-                              toggleCollapsed();
-                            }}
-                          >
-                            {isCollapsed ? collapsedText : content}
-                            {messageRefId && !isCollapsible && !isUser && (
-                              <FeedbackControls
-                                messageRefId={messageRefId}
-                                feedback={entry.feedback}
-                                onScore={handleQuickScore}
-                                onReasonChange={handleQuickReason}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ))}
-                  {quickSimulator.streamText.length > 0 && (
-                    <div className="imessage-row left">
-                      <div className="imessage-bubble left" title="assistant">
-                        {quickSimulator.streamText}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <textarea
-                  value={quickMessage}
-                  onChange={(e) => setQuickMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" || e.shiftKey) return;
-                    if (!quickCanSendNow) return;
-                    e.preventDefault();
-                    handleQuickSend();
-                  }}
-                  style={{
-                    width: "100%",
-                    minHeight: 96,
-                    resize: "vertical",
-                    padding: 10,
-                    borderRadius: 10,
-                    border: "1px solid #cbd5e1",
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-                  }}
-                  placeholder="Optional message (assistant can start)"
-                />
-                {quickMissingRequired.length > 0 && quickIncludeInit && (
-                  <div className="error">
-                    Missing required init fields:{" "}
-                    {quickMissingRequired.slice(0, 6).join(", ")}
-                    {quickMissingRequired.length > 6 ? "…" : ""}
-                  </div>
-                )}
-                {quickJsonErrorCount > 0 && (
-                  <div className="error">Fix invalid init fields to run.</div>
-                )}
-                {quickPendingReset && (
-                  <div className="reset-note">
-                    Next message will start a new chat.
-                  </div>
-                )}
-                <div className="assistant-actions">
-                  <button
-                    type="button"
-                    onClick={handleQuickSend}
-                    disabled={!quickCanSendNow}
-                  >
-                    Send
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => {
-                      if (!quickSessionId) return;
-                      window.location.assign(
-                        `/debug/sessions/${encodeURIComponent(quickSessionId)}`,
-                      );
-                    }}
-                    disabled={!quickSessionId}
-                    title={quickSessionId
-                      ? "Open this session in the debugger"
-                      : "No active session yet"}
-                  >
-                    Open debug
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-btn"
-                    onClick={() => {
-                      setQuickPendingReset(true);
-                      quickSimulator.resetLocal();
-                      setQuickInitDirty(false);
-                      setQuickInitMode("form");
-                      setQuickInitJsonText("");
-                      setQuickInitJsonError(null);
-                      setQuickJsonErrors({});
-                    }}
-                  >
-                    New chat
-                  </button>
-                </div>
-                {quickSimulator.errors.map((err, idx) => (
-                  <div key={idx} className="error">
-                    {err}
-                  </div>
-                ))}
-              </>
-            )}
-        </div>
-      </div>
-      <SessionDrawer
-        open={drawerOpen}
-        loading={drawerLoading}
-        error={drawerError}
-        context={drawerContext}
-        session={drawerSession}
-        showFull={drawerShowFull}
-        notesStatus={drawerNotesStatus}
-        onToggleShowFull={handleToggleDrawerShowFull}
-        onClose={() => setDrawerOpen(false)}
-        onSaveNotes={(sessionId, text) => saveDrawerNotes(sessionId, text)}
-      />
+              )}
+          </div>
+        </aside>
+      </main>
     </div>
   );
 }
@@ -3826,12 +2873,10 @@ function TestBotApp(props: {
   onNavigateToSession: (sessionId: string) => void;
 }) {
   const { onNavigateToSimulator, onNavigateToSession } = props;
-  const [config, setConfig] = useState<
-    { activeDeckPath?: string; rootPath?: string }
-  >({});
-  const [loadingConfig, setLoadingConfig] = useState(true);
-  const [botContent, setBotContent] = useState("");
-  const [botDefaults, setBotDefaults] = useState<TestBotDefaults>({});
+  const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [botLabel, setBotLabel] = useState<string | null>(null);
+  const [botDescription, setBotDescription] = useState<string | null>(null);
   const [botInputSchema, setBotInputSchema] = useState<NormalizedSchema | null>(
     null,
   );
@@ -3843,17 +2888,19 @@ function TestBotApp(props: {
   const [botInputJsonErrors, setBotInputJsonErrors] = useState<
     Record<string, string | null>
   >({});
-  const [botStatus, setBotStatus] = useState<
-    "loading" | "dirty" | "saving" | "saved" | "error"
-  >("loading");
+  const [botInputDefaults, setBotInputDefaults] = useState<unknown>(undefined);
   const [initialUserMessage, setInitialUserMessage] = useState("");
   const [run, setRun] = useState<TestBotRun>({
     status: "idle",
     messages: [],
+    traces: [],
+    toolInserts: [],
   });
   const runRef = useRef<TestBotRun>({
     status: "idle",
     messages: [],
+    traces: [],
+    toolInserts: [],
   });
   const [streamingUser, setStreamingUser] = useState<
     {
@@ -3882,61 +2929,45 @@ function TestBotApp(props: {
     Record<string, string | null>
   >({});
   const [botPath, setBotPath] = useState<string | null>(null);
-  const saveTimeoutRef = useRef<number | null>(null);
   const pollRef = useRef<number | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const runIdRef = useRef<string | undefined>(undefined);
-  const wsUrl = useMemo(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    return `${protocol}://${window.location.host}/websocket`;
-  }, []);
 
-  const loadConfig = useCallback(async () => {
-    setLoadingConfig(true);
+  const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
     try {
-      const res = await fetch("/api/config");
-      const data = await res.json();
-      setConfig(data ?? {});
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingConfig(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
-
-  const loadTestBot = useCallback(async () => {
-    setBotStatus("loading");
-    try {
-      const res = await fetch("/api/test-bot");
+      const params = new URLSearchParams();
+      if (opts?.deckId) params.set("deckPath", opts.deckId);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/test-bot${query}`);
       if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as {
-        path?: string;
-        content?: string;
-        defaults?: TestBotDefaults;
-        inputSchema?: NormalizedSchema;
-        inputSchemaError?: string;
-      };
-      setBotContent(data.content ?? "");
-      setBotDefaults(data.defaults ?? {});
+      const data = await res.json() as TestBotConfigResponse;
+      const decks = Array.isArray(data.testDecks) ? data.testDecks : [];
+      setTestDecks(decks);
+      setBotLabel(typeof data.botLabel === "string" ? data.botLabel : null);
+      setBotDescription(
+        typeof data.botDescription === "string" ? data.botDescription : null,
+      );
+      setBotPath(typeof data.botPath === "string" ? data.botPath : null);
+      const nextDeckId = (() => {
+        if (!decks.length) return null;
+        const requested = data.selectedDeckId ?? null;
+        if (requested && decks.some((deck) => deck.id === requested)) {
+          return requested;
+        }
+        return decks[0]?.id ?? null;
+      })();
+      setSelectedDeckId(nextDeckId ?? null);
       setBotInputSchema(data.inputSchema ?? null);
       setBotInputSchemaError(
         typeof data.inputSchemaError === "string"
           ? data.inputSchemaError
           : null,
       );
-      setBotPath(typeof data.path === "string" ? data.path : null);
       setBotInputDirty(false);
       setBotInputJsonErrors({});
+      setBotInputDefaults(data.defaults?.input);
       setBotInputValue(data.defaults?.input);
-      setBotStatus("saved");
     } catch (err) {
-      setBotContent("");
-      setBotStatus("error");
       console.error(err);
     }
   }, []);
@@ -3957,20 +2988,35 @@ function TestBotApp(props: {
   }, [run]);
 
   useEffect(() => {
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    const streamId = TEST_BOT_STREAM_ID;
+    const streamUrl = buildDurableStreamUrl(
+      streamId,
+      getDurableStreamOffset(streamId),
+    );
+    const source = new EventSource(streamUrl);
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "testBotSubscribe" }));
+    source.onopen = () => {
+      console.info("[test-bot] stream open", streamUrl);
     };
 
-    ws.onmessage = (event) => {
-      let msg: TestBotSocketMessage | null = null;
+    source.onmessage = (event) => {
+      let envelope: { offset?: unknown; data?: unknown } | null = null;
       try {
-        msg = JSON.parse(event.data) as TestBotSocketMessage;
+        envelope = JSON.parse(event.data) as {
+          offset?: unknown;
+          data?: unknown;
+        };
       } catch {
         return;
       }
+      if (
+        envelope &&
+        typeof envelope.offset === "number" &&
+        Number.isFinite(envelope.offset)
+      ) {
+        setDurableStreamOffset(streamId, envelope.offset + 1);
+      }
+      const msg = envelope?.data as TestBotSocketMessage | undefined;
       if (!msg) return;
       const activeRunId = runIdRef.current;
       if (msg.type === "testBotStatus" && msg.run) {
@@ -3978,6 +3024,8 @@ function TestBotApp(props: {
           setRun({
             ...msg.run,
             messages: msg.run.messages ?? [],
+            traces: msg.run.traces ?? [],
+            toolInserts: msg.run.toolInserts ?? [],
           });
         }
         return;
@@ -4033,81 +3081,46 @@ function TestBotApp(props: {
       }
     };
 
-    ws.onclose = () => {
-      wsRef.current = null;
-    };
-
-    ws.onerror = () => {
-      wsRef.current = null;
+    source.onerror = (err) => {
+      console.warn("[test-bot] stream error", err);
     };
 
     return () => {
-      ws.close();
+      console.info("[test-bot] stream cleanup");
+      source.close();
     };
-  }, [wsUrl]);
-
-  useEffect(() => {
-    if (botStatus !== "dirty") return;
-    if (saveTimeoutRef.current) {
-      window.clearTimeout(saveTimeoutRef.current);
-    }
-    saveTimeoutRef.current = window.setTimeout(async () => {
-      setBotStatus("saving");
-      try {
-        await fetch("/api/test-bot", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ content: botContent }),
-        });
-        setBotStatus("saved");
-      } catch (err) {
-        setBotStatus("error");
-        console.error(err);
-      }
-    }, 700);
-    return () => {
-      if (saveTimeoutRef.current) {
-        window.clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [botStatus, botContent]);
+  }, []);
 
   const refreshStatus = useCallback(async (runIdOverride?: string) => {
     try {
       const runId = runIdOverride ?? run.id;
-      const res = await fetch(
-        runId
-          ? `/api/test-bot/status?runId=${encodeURIComponent(runId)}`
-          : "/api/test-bot/status",
-      );
+      const params = new URLSearchParams();
+      if (runId) params.set("runId", runId);
+      const deckParam = testDecks.length
+        ? (selectedDeckId || testDecks[0]?.id || "")
+        : "";
+      if (deckParam) params.set("deckPath", deckParam);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/test-bot/status${query}`);
       if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as {
+      const data = await res.json() as TestBotConfigResponse & {
         run?: TestBotRun;
-        defaults?: TestBotDefaults;
       };
-      if (data.defaults) setBotDefaults(data.defaults);
       const nextRun = data.run ?? { status: "idle", messages: [] };
       setRun({
         ...nextRun,
         messages: nextRun.messages ?? [],
+        traces: nextRun.traces ?? [],
+        toolInserts: nextRun.toolInserts ?? [],
       });
     } catch (err) {
       console.error(err);
     }
-  }, [run.id]);
+  }, [run.id, selectedDeckId, testDecks]);
 
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
-
-  useEffect(() => {
-    if (!botInputSchema) return;
-    if (botInputDirty) return;
-    const nextBotInput = botDefaults.input !== undefined
-      ? cloneValue(botDefaults.input)
-      : deriveInitialFromSchema(botInputSchema);
-    setBotInputValue(nextBotInput);
-  }, [botInputSchema, botInputDirty, botDefaults.input]);
 
   useEffect(() => {
     if (!deckInputSchema) return;
@@ -4117,6 +3130,15 @@ function TestBotApp(props: {
       : deriveInitialFromSchema(deckInputSchema);
     setDeckInitValue(nextInit);
   }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
+
+  useEffect(() => {
+    if (!botInputSchema) return;
+    if (botInputDirty) return;
+    const nextBotInput = botInputDefaults !== undefined
+      ? cloneValue(botInputDefaults)
+      : deriveInitialFromSchema(botInputSchema);
+    setBotInputValue(nextBotInput);
+  }, [botInputSchema, botInputDirty, botInputDefaults]);
 
   const missingBotInput = useMemo(() => {
     if (!botInputSchema) return [];
@@ -4142,7 +3164,56 @@ function TestBotApp(props: {
       .length;
   }, [deckJsonErrors]);
 
-  const canStart = (!botInputSchema || missingBotInput.length === 0) &&
+  const toolCallSummaries = useMemo(
+    () => summarizeToolCalls(run.traces ?? []),
+    [run.traces],
+  );
+
+  const toolBuckets = useMemo(() => {
+    const map = new Map<number, ToolCallSummary[]>();
+    if (!toolCallSummaries.length) return map;
+    const insertMap = new Map<
+      string,
+      { index: number; name?: string; parentActionCallId?: string }
+    >();
+    (run.toolInserts ?? []).forEach((insert) => {
+      if (
+        typeof insert?.index === "number" &&
+        insert.index >= 0 &&
+        insert.actionCallId
+      ) {
+        insertMap.set(insert.actionCallId, {
+          index: insert.index,
+          name: insert.name ?? undefined,
+          parentActionCallId: insert.parentActionCallId ?? undefined,
+        });
+      }
+    });
+    for (const call of toolCallSummaries) {
+      const insert = call.id ? insertMap.get(call.id) : undefined;
+      const index = insert?.index ?? run.messages.length;
+      const enriched = insert
+        ? {
+          ...call,
+          name: call.name ?? insert.name,
+          parentActionCallId: call.parentActionCallId ??
+            insert.parentActionCallId,
+        }
+        : call;
+      const bucket = map.get(index);
+      if (bucket) {
+        bucket.push(enriched);
+      } else {
+        map.set(index, [enriched]);
+      }
+    }
+    return map;
+  }, [toolCallSummaries, run.toolInserts, run.messages.length]);
+
+  const canRunPersona = testDecks.length > 0;
+  const hasPersonaSelection = canRunPersona && Boolean(selectedDeckId);
+  const canStart = hasPersonaSelection &&
+    (!botInputSchema || missingBotInput.length === 0) &&
     (!deckInputSchema || missingDeckInit.length === 0) &&
     botJsonErrorCount === 0 &&
     deckJsonErrorCount === 0;
@@ -4194,19 +3265,36 @@ function TestBotApp(props: {
           init: deckInitValue,
           botInput: botInputValue,
           initialUserMessage,
+          botDeckPath: selectedDeckId ?? undefined,
         }),
       });
       const data = await res.json() as { run?: TestBotRun };
       if (data.run) {
-        setRun({ ...data.run, messages: data.run.messages ?? [] });
+        setRun({
+          ...data.run,
+          messages: data.run.messages ?? [],
+          traces: data.run.traces ?? [],
+          toolInserts: data.run.toolInserts ?? [],
+        });
       } else {
-        setRun({ status: "running", messages: [] });
+        setRun({
+          status: "running",
+          messages: [],
+          traces: [],
+          toolInserts: [],
+        });
       }
       refreshStatus(data.run?.id);
     } catch (err) {
       console.error(err);
     }
-  }, [deckInitValue, botInputValue, initialUserMessage, refreshStatus]);
+  }, [
+    deckInitValue,
+    botInputValue,
+    initialUserMessage,
+    refreshStatus,
+    selectedDeckId,
+  ]);
 
   const stopRun = useCallback(async () => {
     if (!run.id) return;
@@ -4270,6 +3358,12 @@ function TestBotApp(props: {
     [saveTestBotFeedback],
   );
 
+  const handleDeckSelection = useCallback((nextId: string) => {
+    if (!nextId) return;
+    setSelectedDeckId(nextId);
+    loadTestBot({ deckId: nextId });
+  }, [loadTestBot]);
+
   const runStatusLabel = run.status === "running"
     ? "Running test bot…"
     : run.status === "completed"
@@ -4286,11 +3380,7 @@ function TestBotApp(props: {
         <div>
           <h1 className="editor-title">Test Bot</h1>
           <div className="editor-status">
-            Active deck: {loadingConfig
-              ? "Loading…"
-              : config.activeDeckPath
-              ? <code>{config.activeDeckPath}</code>
-              : "not set"}
+            Active deck: <code>{deckPath}</code>
           </div>
         </div>
         <div className="header-actions">
@@ -4304,6 +3394,38 @@ function TestBotApp(props: {
           className="editor-panel"
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
         >
+          <strong>Persona deck</strong>
+          {testDecks.length > 0 && (
+            <select
+              value={selectedDeckId ?? ""}
+              onChange={(e) => handleDeckSelection(e.target.value)}
+              style={{
+                width: "100%",
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                padding: 8,
+                fontFamily: "inherit",
+              }}
+            >
+              {testDecks.map((deck) => (
+                <option key={deck.id} value={deck.id}>
+                  {deck.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {testDecks.length === 0 && (
+            <div className="placeholder">
+              No deck-defined personas found. Add <code>[[testDecks]]</code>
+              {" "}
+              to your deck front matter to drive the Test Bot.
+            </div>
+          )}
+          <div className="editor-status">
+            {botLabel ?? "Persona"} · <code>{botPath ?? "unknown path"}</code>
+          </div>
+          {botDescription && <div className="placeholder">{botDescription}
+          </div>}
           <strong>Scenario (Test Bot input)</strong>
           {botInputSchemaError && (
             <div className="error">{botInputSchemaError}</div>
@@ -4342,43 +3464,10 @@ function TestBotApp(props: {
             }}
             placeholder="If provided, this is sent as the first user message."
           />
-          <strong>
-            Test bot deck ({botPath ?? ".gambit/test-bot.md"})
-          </strong>
-          <textarea
-            value={botContent}
-            onChange={(e) => {
-              setBotContent(e.target.value);
-              setBotStatus("dirty");
-            }}
-            style={{
-              width: "100%",
-              flex: 1,
-              minHeight: 0,
-              resize: "none",
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #cbd5e1",
-              fontFamily:
-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-            }}
-            placeholder="Define the QA bot persona and model params (TOML front matter)."
-          />
-          <div className="editor-status">
-            {botStatus === "saving"
-              ? "Saving…"
-              : botStatus === "dirty"
-              ? "Unsaved changes"
-              : botStatus === "saved"
-              ? "Saved"
-              : botStatus === "error"
-              ? "Save failed"
-              : "Loading…"}
-          </div>
-          <div style={{ fontSize: 12, color: "#475569" }}>
-            Defaults: model {botDefaults.model ?? "gpt-4o"}, temperature{" "}
-            {botDefaults.temperature ?? 0.2}, max turns{" "}
-            {botDefaults.maxTurns ?? 20}
+          <div className="placeholder">
+            Persona content is managed by the selected deck. Edit{" "}
+            <code>{botPath ?? "the referenced deck"}</code>{" "}
+            to change its behavior.
           </div>
         </div>
         <div
@@ -4422,9 +3511,11 @@ function TestBotApp(props: {
               Open in debug
             </button>
           )}
-          {!canStart && (
+          {!canStart && canRunPersona && (
             <div className="error">
-              {botJsonErrorCount > 0 || deckJsonErrorCount > 0
+              {!hasPersonaSelection
+                ? "Select a persona deck to run."
+                : botJsonErrorCount > 0 || deckJsonErrorCount > 0
                 ? "Fix invalid JSON fields to run."
                 : missingBotInput.length > 0
                 ? `Missing required bot inputs: ${
@@ -4444,31 +3535,53 @@ function TestBotApp(props: {
             {run.messages.length === 0 && (
               <div className="placeholder">No messages yet.</div>
             )}
-            {run.messages.map((m, idx) => (
-              <div
-                key={`${m.role}-${idx}`}
-                className={`imessage-row ${
-                  m.role === "user" ? "right" : "left"
-                }`}
-              >
-                <div
-                  className={`imessage-bubble ${
-                    m.role === "user" ? "right" : "left"
-                  }`}
-                  title={m.role}
-                >
-                  {m.content}
-                  {m.messageRefId && m.role !== "user" && run.sessionId && (
-                    <FeedbackControls
-                      messageRefId={m.messageRefId}
-                      feedback={m.feedback}
-                      onScore={handleTestBotScore}
-                      onReasonChange={handleTestBotReason}
-                    />
-                  )}
-                </div>
-              </div>
-            ))}
+            {(() => {
+              const rows: React.ReactNode[] = [];
+              const pushBucket = (index: number) => {
+                const bucket = toolBuckets.get(index);
+                if (!bucket) return;
+                bucket.forEach((call, callIdx) => {
+                  rows.push(
+                    <ToolCallBubble
+                      key={`tool-${call.id}-${index}-${callIdx}`}
+                      call={call}
+                    />,
+                  );
+                });
+              };
+              pushBucket(0);
+              let renderedCount = 0;
+              run.messages.forEach((m, idx) => {
+                rows.push(
+                  <div
+                    key={`${m.role}-${idx}`}
+                    className={`imessage-row ${
+                      m.role === "user" ? "right" : "left"
+                    }`}
+                  >
+                    <div
+                      className={`imessage-bubble ${
+                        m.role === "user" ? "right" : "left"
+                      }`}
+                      title={m.role}
+                    >
+                      {m.content}
+                      {m.messageRefId && m.role !== "user" && run.sessionId && (
+                        <FeedbackControls
+                          messageRefId={m.messageRefId}
+                          feedback={m.feedback}
+                          onScore={handleTestBotScore}
+                          onReasonChange={handleTestBotReason}
+                        />
+                      )}
+                    </div>
+                  </div>,
+                );
+                renderedCount++;
+                pushBucket(renderedCount);
+              });
+              return rows;
+            })()}
             {streamingUser?.text && streamingUser.runId === run.id &&
               (streamingUser.expectedUserCount === undefined ||
                 countUserMessages(run.messages) <
@@ -4559,13 +3672,57 @@ function TestBotApp(props: {
   );
 }
 
+function normalizeAppPath(input: string): string {
+  const trimmed = input.replace(/\/+$/, "") || "/";
+  if (trimmed === "/" || trimmed === "") {
+    if (window.location.pathname !== DEFAULT_HOME_PATH) {
+      window.history.replaceState({}, "", DEFAULT_HOME_PATH);
+    }
+    return DEFAULT_HOME_PATH;
+  }
+  if (
+    trimmed === "/debug" || trimmed === "/simulate" ||
+    trimmed === SESSIONS_BASE_PATH
+  ) {
+    if (window.location.pathname !== DEFAULT_SESSION_PATH) {
+      window.history.replaceState({}, "", DEFAULT_SESSION_PATH);
+    }
+    return DEFAULT_SESSION_PATH;
+  }
+  if (/^\/sessions\/[^/]+\/calibrate/.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.startsWith("/debug/sessions/")) {
+    const raw = trimmed.slice("/debug/sessions/".length);
+    const decoded = decodeURIComponent(raw);
+    const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
+    window.history.replaceState({}, "", next);
+    return next;
+  }
+  if (
+    trimmed.startsWith("/sessions/") && !trimmed.includes("/debug") &&
+    trimmed !== DEFAULT_SESSION_PATH
+  ) {
+    const remainder = trimmed.slice("/sessions/".length);
+    if (remainder && remainder !== "new") {
+      const decoded = decodeURIComponent(remainder);
+      const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
+      window.history.replaceState({}, "", next);
+      return next;
+    }
+  }
+  return trimmed || DEFAULT_SESSION_PATH;
+}
+
 function App() {
-  const [path, setPath] = useState(() => window.location.pathname);
+  const simulatorBasePath = SESSIONS_BASE_PATH;
+  const [path, setPath] = useState(() =>
+    normalizeAppPath(window.location.pathname)
+  );
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
-  const basePath = "/debug";
 
   useEffect(() => {
-    const handler = () => setPath(window.location.pathname);
+    const handler = () => setPath(normalizeAppPath(window.location.pathname));
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
@@ -4594,55 +3751,67 @@ function App() {
     setPath(next);
   }, [path]);
 
-  const isSimulator = path.startsWith("/debug") ||
-    path.startsWith("/simulate") ||
-    path.startsWith("/sessions");
   const isTestBot = path.startsWith("/test-bot");
-  const currentPage = isSimulator ? "debug" : isTestBot ? "test-bot" : "editor";
+  const isCalibrate = path.startsWith("/calibrate") ||
+    /^\/sessions\/[^/]+\/calibrate/.test(path);
+  const isSimulator = !isTestBot && !isCalibrate;
+  const currentPage = isSimulator
+    ? "debug"
+    : isTestBot
+    ? "test-bot"
+    : isCalibrate
+    ? "calibrate"
+    : "debug";
 
   return (
     <>
       <div className="app-root">
         <div className="top-nav">
-          <button
-            type="button"
-            className={currentPage === "editor" ? "active" : ""}
-            onClick={() => navigate("/")}
-          >
-            Editor
-          </button>
-          <button
-            type="button"
-            className={currentPage === "debug" ? "active" : ""}
-            onClick={() => navigate(basePath)}
-          >
-            Debug
-          </button>
-          <button
-            type="button"
-            className={currentPage === "test-bot" ? "active" : ""}
-            onClick={() => navigate("/test-bot")}
-          >
-            Test Bot
-          </button>
-          {bundleStamp && (
-            <span className="bundle-stamp">Bundle: {bundleStamp}</span>
-          )}
+          <div className="top-nav-buttons">
+            <button
+              type="button"
+              className={currentPage === "test-bot" ? "active" : ""}
+              onClick={() => navigate(DEFAULT_HOME_PATH)}
+            >
+              Test Bot
+            </button>
+            <button
+              type="button"
+              className={currentPage === "debug" ? "active" : ""}
+              onClick={() => navigate(DEFAULT_SESSION_PATH)}
+            >
+              Debug
+            </button>
+            <button
+              type="button"
+              className={currentPage === "calibrate" ? "active" : ""}
+              onClick={() => navigate("/calibrate")}
+            >
+              Calibrate
+            </button>
+          </div>
+          <div className="top-nav-info">
+            {bundleStamp && (
+              <span className="bundle-stamp">Bundle: {bundleStamp}</span>
+            )}
+          </div>
         </div>
         <div className="page-shell">
           {currentPage === "debug"
-            ? <SimulatorApp basePath={basePath} />
+            ? <SimulatorApp basePath={simulatorBasePath} />
             : currentPage === "test-bot"
             ? (
               <TestBotApp
-                onNavigateToSimulator={() => navigate(basePath)}
+                onNavigateToSimulator={() => navigate(DEFAULT_SESSION_PATH)}
                 onNavigateToSession={(sessionId) =>
                   navigate(
-                    `${basePath}/sessions/${encodeURIComponent(sessionId)}`,
+                    `${simulatorBasePath}/${
+                      encodeURIComponent(sessionId)
+                    }/debug`,
                   )}
               />
             )
-            : <EditorApp />}
+            : <CalibrateApp />}
         </div>
       </div>
     </>

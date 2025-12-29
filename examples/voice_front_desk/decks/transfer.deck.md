@@ -1,11 +1,15 @@
 +++
 label = "transfer_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "transfer_request", path = "../actions/transfer_request.deck.ts", description = "Produce transfer instructions when automation is blocked." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "transfer_request"
+path = "../actions/transfer_request.deck.ts"
+description = "Produce transfer instructions when automation is blocked."
 +++
 
 ![transfer_rules](../cards/transfer_rules.card.md)

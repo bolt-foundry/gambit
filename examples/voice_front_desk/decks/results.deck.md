@@ -1,11 +1,15 @@
 +++
 label = "results_service"
 inputSchema = "../schemas/service_request.zod.ts"
-modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "results_lookup", path = "../actions/results_lookup.deck.ts", description = "Summarize available test results and follow-up instructions." },
-]
 outputSchema = "../schemas/service_response.zod.ts"
+[modelParams]
+model = "openai/gpt-4o"
+temperature = 0
+
+[[actionDecks]]
+name = "results_lookup"
+path = "../actions/results_lookup.deck.ts"
+description = "Summarize available test results and follow-up instructions."
 +++
 
 ![results_behavior](../cards/results_behavior.card.md)
