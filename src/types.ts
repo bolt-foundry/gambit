@@ -235,115 +235,120 @@ export type ToolCallResult = {
 };
 
 export type TraceEvent =
-  | {
-    type: "run.start";
-    runId: string;
-    deckPath?: string;
-    input?: JSONValue;
-    initialUserMessage?: JSONValue;
+  & {
+    ts?: number;
   }
-  | {
-    type: "message.user";
-    runId: string;
-    actionCallId: string;
-    deckPath: string;
-    message: ModelMessage;
-    parentActionCallId?: string;
-  }
-  | { type: "run.end"; runId: string }
-  | {
-    type: "deck.start";
-    runId: string;
-    deckPath: string;
-    actionCallId: string;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "deck.end";
-    runId: string;
-    deckPath: string;
-    actionCallId: string;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "action.start";
-    runId: string;
-    actionCallId: string;
-    name: string;
-    path: string;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "action.end";
-    runId: string;
-    actionCallId: string;
-    name: string;
-    path: string;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "tool.call";
-    runId: string;
-    actionCallId: string;
-    name: string;
-    args: JSONValue;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "tool.result";
-    runId: string;
-    actionCallId: string;
-    name: string;
-    result: JSONValue;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "model.call";
-    runId: string;
-    actionCallId: string;
-    deckPath: string;
-    model?: string;
-    stream?: boolean;
-    messageCount?: number;
-    toolCount?: number;
-    messages: Array<ModelMessage>;
-    tools?: Array<ToolDefinition>;
-    stateMessages?: number;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "model.result";
-    runId: string;
-    actionCallId: string;
-    deckPath: string;
-    model?: string;
-    finishReason: "stop" | "tool_calls" | "length";
-    message: ModelMessage;
-    toolCalls?: Array<{
-      id: string;
+  & (
+    | {
+      type: "run.start";
+      runId: string;
+      deckPath?: string;
+      input?: JSONValue;
+      initialUserMessage?: JSONValue;
+    }
+    | {
+      type: "message.user";
+      runId: string;
+      actionCallId: string;
+      deckPath: string;
+      message: ModelMessage;
+      parentActionCallId?: string;
+    }
+    | { type: "run.end"; runId: string }
+    | {
+      type: "deck.start";
+      runId: string;
+      deckPath: string;
+      actionCallId: string;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "deck.end";
+      runId: string;
+      deckPath: string;
+      actionCallId: string;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "action.start";
+      runId: string;
+      actionCallId: string;
+      name: string;
+      path: string;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "action.end";
+      runId: string;
+      actionCallId: string;
+      name: string;
+      path: string;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "tool.call";
+      runId: string;
+      actionCallId: string;
       name: string;
       args: JSONValue;
-    }>;
-    stateMessages?: number;
-    parentActionCallId?: string;
-  }
-  | {
-    type: "log";
-    runId: string;
-    deckPath: string;
-    actionCallId: string;
-    parentActionCallId?: string;
-    level?: LogLevel;
-    title?: string;
-    message: string;
-    body?: unknown;
-    meta?: unknown;
-  }
-  | {
-    type: "monolog";
-    runId: string;
-    deckPath: string;
-    actionCallId: string;
-    parentActionCallId?: string;
-    content: JSONValue;
-  };
+      parentActionCallId?: string;
+    }
+    | {
+      type: "tool.result";
+      runId: string;
+      actionCallId: string;
+      name: string;
+      result: JSONValue;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "model.call";
+      runId: string;
+      actionCallId: string;
+      deckPath: string;
+      model?: string;
+      stream?: boolean;
+      messageCount?: number;
+      toolCount?: number;
+      messages: Array<ModelMessage>;
+      tools?: Array<ToolDefinition>;
+      stateMessages?: number;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "model.result";
+      runId: string;
+      actionCallId: string;
+      deckPath: string;
+      model?: string;
+      finishReason: "stop" | "tool_calls" | "length";
+      message: ModelMessage;
+      toolCalls?: Array<{
+        id: string;
+        name: string;
+        args: JSONValue;
+      }>;
+      stateMessages?: number;
+      parentActionCallId?: string;
+    }
+    | {
+      type: "log";
+      runId: string;
+      deckPath: string;
+      actionCallId: string;
+      parentActionCallId?: string;
+      level?: LogLevel;
+      title?: string;
+      message: string;
+      body?: unknown;
+      meta?: unknown;
+    }
+    | {
+      type: "monolog";
+      runId: string;
+      deckPath: string;
+      actionCallId: string;
+      parentActionCallId?: string;
+      content: JSONValue;
+    }
+  );

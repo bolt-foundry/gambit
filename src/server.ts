@@ -34,6 +34,7 @@ const simulatorBundleSourceMapPath = path.resolve(
 );
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
+const CALIBRATE_STREAM_ID = "gambit-calibrate";
 type AvailableTestDeck = {
   id: string;
   label: string;
@@ -83,18 +84,24 @@ type SessionMeta = {
   deck?: string;
   deckSlug?: string;
   createdAt?: string;
-  calibrationRuns?: Array<CalibrationRunRecord>;
+  gradingRuns?: Array<GradingRunRecord>;
   sessionDir?: string;
   statePath?: string;
 };
 
-type CalibrationRunRecord = {
+type GradingRunRecord = {
   id: string;
   graderId: string;
   graderPath: string;
   graderLabel?: string;
-  status: "completed" | "error";
+  status: "running" | "completed" | "error";
   runAt?: string;
+  referenceSample?: {
+    score: number;
+    reason: string;
+    evidence?: Array<string>;
+  };
+  input?: unknown;
   result?: unknown;
   error?: string;
 };
@@ -148,7 +155,7 @@ async function describeDeckInputSchemaFromPath(
     return describeZodSchema(deck.inputSchema);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(`[sim] failed to load test deck schema: ${message}`);
+    logger.warn(`[sim] failed to load deck schema: ${message}`);
     return { error: message };
   }
 }
@@ -162,6 +169,14 @@ function describeZodSchema(schema?: ZodTypeAny): SchemaDescription {
     const message = err instanceof Error ? err.message : String(err);
     return { error: message };
   }
+}
+
+function schemaHasField(
+  schema: NormalizedSchema | undefined,
+  field: string,
+): boolean {
+  return schema?.kind === "object" &&
+    Boolean(schema.fields && schema.fields[field]);
 }
 
 function normalizeSchema(schema?: ZodTypeAny): NormalizedSchema | undefined {
@@ -567,14 +582,33 @@ export function startWebSocketSimulator(opts: {
     const deckSlug = typeof meta.deckSlug === "string"
       ? meta.deckSlug
       : undefined;
-    const calibrationRuns = Array.isArray(meta.calibrationRuns)
-      ? (meta.calibrationRuns as Array<CalibrationRunRecord>).map((run) => ({
+    const gradingRuns = Array.isArray(
+        (meta as { gradingRuns?: unknown }).gradingRuns,
+      )
+      ? (meta as { gradingRuns: Array<GradingRunRecord> }).gradingRuns.map(
+        (run) => ({
+          id: typeof run.id === "string" ? run.id : randomId("cal"),
+          graderId: run.graderId,
+          graderPath: run.graderPath,
+          graderLabel: run.graderLabel,
+          status: run.status,
+          runAt: run.runAt,
+          referenceSample: run.referenceSample,
+          input: run.input,
+          result: run.result,
+          error: run.error,
+        }),
+      )
+      : Array.isArray(meta.calibrationRuns)
+      ? (meta.calibrationRuns as Array<GradingRunRecord>).map((run) => ({
         id: typeof run.id === "string" ? run.id : randomId("cal"),
         graderId: run.graderId,
         graderPath: run.graderPath,
         graderLabel: run.graderLabel,
         status: run.status,
         runAt: run.runAt,
+        referenceSample: run.referenceSample,
+        input: run.input,
         result: run.result,
         error: run.error,
       }))
@@ -591,7 +625,7 @@ export function startWebSocketSimulator(opts: {
       deck,
       deckSlug,
       createdAt,
-      calibrationRuns,
+      gradingRuns,
       sessionDir,
       statePath,
     };
@@ -837,8 +871,9 @@ export function startWebSocketSimulator(opts: {
     };
 
     const tracer = (event: TraceEvent) => {
-      capturedTraces.push(event);
-      consoleTracer?.(event);
+      const stamped = event.ts ? event : { ...event, ts: Date.now() };
+      capturedTraces.push(stamped);
+      consoleTracer?.(stamped);
     };
 
     let deckBotState: SavedState | undefined = undefined;
@@ -921,6 +956,7 @@ export function startWebSocketSimulator(opts: {
                 role: "user",
                 chunk,
                 turn,
+                ts: Date.now(),
               }),
           });
           broadcastTestBot({
@@ -928,6 +964,7 @@ export function startWebSocketSimulator(opts: {
             runId,
             role: "user",
             turn,
+            ts: Date.now(),
           });
           if (!userMessage) break;
           await runDeck({
@@ -963,6 +1000,7 @@ export function startWebSocketSimulator(opts: {
                 role: "assistant",
                 chunk,
                 turn,
+                ts: Date.now(),
               }),
           });
           broadcastTestBot({
@@ -970,6 +1008,7 @@ export function startWebSocketSimulator(opts: {
             runId,
             role: "assistant",
             turn,
+            ts: Date.now(),
           });
         }
         run.status = controller.signal.aborted ? "canceled" : "completed";
@@ -1126,6 +1165,7 @@ export function startWebSocketSimulator(opts: {
           if (!body.sessionId) {
             throw new Error("Missing sessionId");
           }
+          const sessionId = body.sessionId;
           await deckLoadPromise.catch(() => null);
           const grader = body.graderId
             ? resolveGraderDeck(body.graderId)
@@ -1133,23 +1173,146 @@ export function startWebSocketSimulator(opts: {
           if (!grader) {
             throw new Error("Unknown grader deck selection");
           }
-          const sessionState = readSessionState(body.sessionId);
+          const sessionState = readSessionState(sessionId);
           if (!sessionState) {
             throw new Error("Session not found");
           }
+          const graderSchema = await describeDeckInputSchemaFromPath(
+            grader.path,
+          );
+          const runMode = schemaHasField(graderSchema.schema, "messageToGrade")
+            ? "turns"
+            : "conversation";
+          const metaForGrading = (() => {
+            const rawMeta = sessionState.meta;
+            if (!rawMeta || typeof rawMeta !== "object") return undefined;
+            const next = { ...(rawMeta as Record<string, unknown>) };
+            delete next.calibrationRuns;
+            delete next.gradingRuns;
+            return next;
+          })();
+          const sessionPayload = {
+            messages: Array.isArray(sessionState.messages)
+              ? sessionState.messages.map((msg) => ({
+                role: msg.role,
+                content: msg.content,
+                name: msg.name,
+              }))
+              : undefined,
+            meta: metaForGrading,
+            notes: sessionState.notes
+              ? { text: sessionState.notes.text }
+              : undefined,
+          };
           const startedAt = new Date().toISOString();
           const runId = randomId("cal");
-          let entry: CalibrationRunRecord;
-          try {
-            const result = await runDeckWithFallback({
-              path: grader.path,
-              input: { session: sessionState },
-              inputProvided: true,
-              modelProvider: opts.modelProvider,
-              allowRootStringInput: false,
-              initialUserMessage: undefined,
-              stream: false,
+          let entry: GradingRunRecord;
+          const upsertCalibrationRun = (
+            state: SavedState,
+            nextEntry: GradingRunRecord,
+          ): SavedState => {
+            const previousRuns = Array.isArray(
+                (state.meta as { gradingRuns?: unknown })?.gradingRuns,
+              )
+              ? ((state.meta as { gradingRuns: Array<GradingRunRecord> })
+                .gradingRuns)
+              : Array.isArray(state.meta?.calibrationRuns)
+              ? (state.meta?.calibrationRuns as Array<GradingRunRecord>)
+              : [];
+            const index = previousRuns.findIndex((run) =>
+              run.id === nextEntry.id
+            );
+            const nextRuns = index >= 0
+              ? previousRuns.map((run, i) => (i === index ? nextEntry : run))
+              : [...previousRuns, nextEntry];
+            const nextState = persistSessionState({
+              ...state,
+              meta: {
+                ...(state.meta ?? {}),
+                gradingRuns: nextRuns,
+              },
             });
+            const sessionMeta = buildSessionMeta(sessionId, nextState);
+            appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+              type: "calibrateSession",
+              sessionId,
+              run: nextEntry,
+              session: sessionMeta,
+            });
+            return nextState;
+          };
+          let currentState = sessionState;
+          try {
+            const result = await (async () => {
+              if (runMode !== "turns") {
+                return await runDeckWithFallback({
+                  path: grader.path,
+                  input: { session: sessionPayload },
+                  inputProvided: true,
+                  modelProvider: opts.modelProvider,
+                  allowRootStringInput: false,
+                  initialUserMessage: undefined,
+                  stream: false,
+                });
+              }
+              const messages = sessionPayload.messages ?? [];
+              const assistantTurns = messages
+                .map((msg, idx) => ({ msg, idx }))
+                .filter(({ msg }) =>
+                  msg.role === "assistant" &&
+                  typeof msg.content === "string" &&
+                  msg.content.trim().length > 0
+                );
+              const turns: Array<{
+                index: number;
+                message: unknown;
+                input: unknown;
+                result: unknown;
+              }> = [];
+              entry = {
+                id: runId,
+                graderId: grader.id,
+                graderPath: grader.path,
+                graderLabel: grader.label,
+                status: "running",
+                runAt: startedAt,
+                result: { mode: "turns", turns: [] },
+              };
+              currentState = upsertCalibrationRun(currentState, entry);
+              if (assistantTurns.length === 0) {
+                return { mode: "turns", turns: [] };
+              }
+              for (const { msg, idx } of assistantTurns) {
+                const input = {
+                  session: {
+                    ...sessionPayload,
+                    messages: messages.slice(0, idx + 1),
+                  },
+                  messageToGrade: msg,
+                };
+                const turnResult = await runDeckWithFallback({
+                  path: grader.path,
+                  input,
+                  inputProvided: true,
+                  modelProvider: opts.modelProvider,
+                  allowRootStringInput: false,
+                  initialUserMessage: undefined,
+                  stream: false,
+                });
+                turns.push({
+                  index: idx,
+                  message: msg,
+                  input,
+                  result: turnResult,
+                });
+                entry = {
+                  ...entry,
+                  result: { mode: "turns", turns: [...turns] },
+                };
+                currentState = upsertCalibrationRun(currentState, entry);
+              }
+              return { mode: "turns", turns };
+            })();
             entry = {
               id: runId,
               graderId: grader.id,
@@ -1157,6 +1320,7 @@ export function startWebSocketSimulator(opts: {
               graderLabel: grader.label,
               status: "completed",
               runAt: startedAt,
+              input: { session: sessionPayload },
               result,
             };
           } catch (err) {
@@ -1168,26 +1332,127 @@ export function startWebSocketSimulator(opts: {
               graderLabel: grader.label,
               status: "error",
               runAt: startedAt,
+              input: { session: sessionPayload },
               error: message,
             };
           }
-          const previousRuns = Array.isArray(sessionState.meta?.calibrationRuns)
-            ? (sessionState.meta?.calibrationRuns as Array<
-              CalibrationRunRecord
-            >)
-            : [];
-          const nextState = persistSessionState({
-            ...sessionState,
-            meta: {
-              ...(sessionState.meta ?? {}),
-              calibrationRuns: [...previousRuns, entry],
-            },
-          });
+          const nextState = upsertCalibrationRun(currentState, entry);
           const sessionMeta = buildSessionMeta(body.sessionId, nextState);
           return new Response(
             JSON.stringify({
               sessionId: body.sessionId,
               run: entry,
+              session: sessionMeta,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/grading/reference") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            runId?: string;
+            turnIndex?: number;
+            referenceSample?: {
+              score?: number;
+              reason?: string;
+              evidence?: Array<string>;
+            };
+          };
+          if (!body.sessionId) throw new Error("Missing sessionId");
+          if (!body.runId) throw new Error("Missing runId");
+          if (!body.referenceSample) {
+            throw new Error("Missing referenceSample");
+          }
+          const score = body.referenceSample.score;
+          if (typeof score !== "number" || Number.isNaN(score)) {
+            throw new Error("Invalid reference score");
+          }
+          const reason = body.referenceSample.reason;
+          if (typeof reason !== "string" || reason.trim().length === 0) {
+            throw new Error("Missing reference reason");
+          }
+          const evidence = Array.isArray(body.referenceSample.evidence)
+            ? body.referenceSample.evidence.filter((e) =>
+              typeof e === "string" && e.trim().length > 0
+            )
+            : undefined;
+          const state = readSessionState(body.sessionId);
+          if (!state) throw new Error("Session not found");
+          const previousRuns = Array.isArray(
+              (state.meta as { gradingRuns?: unknown })?.gradingRuns,
+            )
+            ? ((state.meta as { gradingRuns: Array<GradingRunRecord> })
+              .gradingRuns)
+            : Array.isArray(state.meta?.calibrationRuns)
+            ? (state.meta?.calibrationRuns as Array<GradingRunRecord>)
+            : [];
+          const index = previousRuns.findIndex((run) => run.id === body.runId);
+          if (index < 0) throw new Error("Run not found");
+          const run = previousRuns[index];
+          const nextRun: GradingRunRecord = {
+            ...run,
+          };
+          if (typeof body.turnIndex === "number") {
+            const result = run.result;
+            const turnIndex = body.turnIndex;
+            if (
+              !result || typeof result !== "object" ||
+              (result as { mode?: unknown }).mode !== "turns" ||
+              !Array.isArray((result as { turns?: unknown }).turns)
+            ) {
+              throw new Error("Run does not support turn references");
+            }
+            const turns = (result as {
+              turns: Array<Record<string, unknown>>;
+            }).turns.map((turn) => ({ ...turn }));
+            const targetIndex = turns.findIndex((turn) =>
+              turn.index === turnIndex
+            );
+            if (targetIndex < 0) {
+              throw new Error("Turn not found");
+            }
+            turns[targetIndex] = {
+              ...turns[targetIndex],
+              referenceSample: { score, reason, evidence },
+            };
+            nextRun.result = { ...(result as object), turns };
+          } else {
+            nextRun.referenceSample = { score, reason, evidence };
+          }
+          const nextRuns = previousRuns.map((entry, i) =>
+            i === index ? nextRun : entry
+          );
+          const nextState = persistSessionState({
+            ...state,
+            meta: {
+              ...(state.meta ?? {}),
+              gradingRuns: nextRuns,
+            },
+          });
+          const sessionMeta = buildSessionMeta(body.sessionId, nextState);
+          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+            type: "calibrateSession",
+            sessionId: body.sessionId,
+            run: nextRun,
+            session: sessionMeta,
+          });
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              run: nextRun,
               session: sessionMeta,
             }),
             { headers: { "content-type": "application/json" } },
@@ -1335,14 +1600,32 @@ export function startWebSocketSimulator(opts: {
 
       if (url.pathname === "/api/test-bot/status") {
         const runId = url.searchParams.get("runId") ?? undefined;
-        const entry = runId ? testBotRuns.get(runId) : undefined;
+        const sessionId = url.searchParams.get("sessionId") ?? undefined;
+        let entry = runId ? testBotRuns.get(runId) : undefined;
+        if (!entry && sessionId) {
+          for (const candidate of testBotRuns.values()) {
+            if (candidate.run.sessionId === sessionId) {
+              entry = candidate;
+              break;
+            }
+          }
+        }
         const run = entry?.run ?? {
           id: runId ?? "",
           status: "idle",
           messages: [],
           traces: [],
           toolInserts: [],
+          sessionId,
         };
+        if (!entry && sessionId) {
+          const state = readSessionState(sessionId);
+          if (state) {
+            run.id = typeof state.runId === "string" ? state.runId : run.id;
+            run.status = "completed";
+            syncTestBotRunFromState(run, state);
+          }
+        }
         if (run.sessionId) {
           const state = readSessionState(run.sessionId);
           if (state) {
@@ -1476,10 +1759,13 @@ export function startWebSocketSimulator(opts: {
         const stream = payload.stream ?? true;
         const forwardTrace = payload.trace ?? true;
         const tracer = (event: TraceEvent) => {
-          if (event.type === "run.start") simulatorCurrentRunId = event.runId;
-          simulatorCapturedTraces.push(event);
-          consoleTracer?.(event);
-          if (forwardTrace) emitSimulator({ type: "trace", event });
+          const stamped = event.ts ? event : { ...event, ts: Date.now() };
+          if (stamped.type === "run.start") {
+            simulatorCurrentRunId = stamped.runId;
+          }
+          simulatorCapturedTraces.push(stamped);
+          consoleTracer?.(stamped);
+          if (forwardTrace) emitSimulator({ type: "trace", event: stamped });
         };
         let initialUserMessage: unknown = typeof payload.message === "string"
           ? payload.message

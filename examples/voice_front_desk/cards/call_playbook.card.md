@@ -14,5 +14,5 @@ label = "call_playbook"
 5. **Escalate with context** – callback tickets must include who, what, urgency,
    and desired outcome.
 6. **Hard boundaries** – no diagnoses, prescriptions, or lab interpretations.
-7. **Safety** – urgent symptoms → advise emergency services and log message for
-   nursing.
+7. **Safety** – urgent symptoms → advise emergency services and send a message
+   for nursing.
