@@ -6,6 +6,10 @@ name = "identity_orchestrator"
 path = "../decks/identity.deck.md"
 description = "Look up patient identity and return a structured decision."
 [[actionDecks]]
+name = "appointment_orchestrator"
+path = "../decks/appointment.deck.md"
+description = "Resolve an appointment to reschedule and return a structured decision."
+[[actionDecks]]
 name = "routing_orchestrator"
 path = "../decks/routing.deck.md"
 description = "Classify the caller's request and recommend the next service deck."

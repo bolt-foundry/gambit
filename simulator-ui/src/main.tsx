@@ -3775,11 +3775,29 @@ function TestBotApp(props: {
   const runIdRef = useRef<string | undefined>(undefined);
 
   const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
+    let storedDeckId: string | null = null;
     try {
+      storedDeckId = localStorage.getItem(deckStorageKey);
+    } catch {
+      storedDeckId = null;
+    }
+    const requestedDeckId = opts?.deckId ?? storedDeckId ?? undefined;
+    const fetchTestBotConfig = async (deckId?: string) => {
       const params = new URLSearchParams();
-      if (opts?.deckId) params.set("deckPath", opts.deckId);
+      if (deckId) params.set("deckPath", deckId);
       const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/test-bot${query}`);
+      return fetch(`/api/test-bot${query}`);
+    };
+    try {
+      let res = await fetchTestBotConfig(requestedDeckId);
+      if (!res.ok && res.status === 400 && requestedDeckId) {
+        try {
+          localStorage.removeItem(deckStorageKey);
+        } catch {
+          // ignore storage failures
+        }
+        res = await fetchTestBotConfig();
+      }
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as TestBotConfigResponse;
       const decks = Array.isArray(data.testDecks) ? data.testDecks : [];
@@ -3791,16 +3809,7 @@ function TestBotApp(props: {
       setBotPath(typeof data.botPath === "string" ? data.botPath : null);
       const nextDeckId = (() => {
         if (!decks.length) return null;
-        let storedDeckId: string | null = null;
-        try {
-          storedDeckId = localStorage.getItem(deckStorageKey);
-        } catch {
-          storedDeckId = null;
-        }
-        if (storedDeckId && decks.some((deck) => deck.id === storedDeckId)) {
-          return storedDeckId;
-        }
-        const requested = data.selectedDeckId ?? null;
+        const requested = data.selectedDeckId ?? requestedDeckId ?? null;
         if (requested && decks.some((deck) => deck.id === requested)) {
           return requested;
         }
@@ -3820,7 +3829,7 @@ function TestBotApp(props: {
     } catch (err) {
       console.error(err);
     }
-  }, []);
+  }, [deckStorageKey]);
 
   useEffect(() => {
     loadTestBot();
@@ -4577,7 +4586,7 @@ function TestBotApp(props: {
                   <div
                     key={`${m.role}-${idx}`}
                     className={`imessage-row ${
-                      m.role === "user" ? "right" : "left"
+                      m.role === "user" ? "left" : "right"
                     }`}
                   >
                     <div
@@ -4607,7 +4616,7 @@ function TestBotApp(props: {
                 countUserMessages(run.messages) <
                   streamingUser.expectedUserCount) &&
               (
-                <div className="imessage-row right">
+                <div className="imessage-row left">
                   <div
                     className="imessage-bubble right imessage-bubble-muted"
                     title="user"
@@ -4618,7 +4627,7 @@ function TestBotApp(props: {
               )}
             {streamingAssistant?.text && streamingAssistant.runId === run.id &&
               (
-                <div className="imessage-row left">
+                <div className="imessage-row right">
                   <div
                     className="imessage-bubble left imessage-bubble-muted"
                     title="assistant"

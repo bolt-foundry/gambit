@@ -1178,6 +1178,14 @@ button.primary:disabled {
   color: white;
   border-bottom-right-radius: 6px;
 }
+.imessage-row.left .imessage-bubble.right {
+  border-bottom-right-radius: 18px;
+  border-bottom-left-radius: 6px;
+}
+.imessage-row.right .imessage-bubble.left {
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 6px;
+}
 .imessage-bubble-muted {
   opacity: 0.7;
   font-size: 12px;

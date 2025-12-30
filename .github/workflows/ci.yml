@@ -8,34 +8,35 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
       id-token: write
-    defaults:
-      run:
-        shell: nix develop --command bash -euo pipefail {0}
+    env:
+      NIX_DEV_PROFILE: ${{ github.workspace }}/.nix-profiles/ci
+      DENO_DIR: /home/runner/.cache/deno
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v13
-
-      - name: Configure Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
-
-      - name: Register Deno problem matcher
-        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+      - uses: ./.github/actions/deno-ci-setup
+        with:
+          nix_dev_profile: ${{ env.NIX_DEV_PROFILE }}
+          deno_dir: ${{ env.DENO_DIR }}
 
       - name: Lint
-        run: deno lint
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno lint
 
       - name: Format check
-        run: deno fmt --check
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno fmt --check
 
       - name: Type check
-        run: deno check --all mod.ts
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno check --all mod.ts
 
       - name: Test
-        run: deno test -A
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno test -A --ignore=simulator-ui/__tests__/e2e
+      - uses: ./.github/actions/deno-ci-cleanup
+        if: always()

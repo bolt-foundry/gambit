@@ -17,12 +17,16 @@
    each service deck:
 
 - `scheduling_service` expects structured inputs like `visitType`,
-  `preferredDays`, `preferredTimes`, `provider`, `location`, and `urgency`. When
-  the caller selects a slot, immediately call it again with `selectedSlotIso`
-  and wait for `status = "confirmed"` plus a `confirmationId` before telling the
-  caller it is booked. If confirmation fails, explain you could not finalize and
-  offer next steps. It returns slot/options data; summarize it in your own voice
-  for the caller.
+  `preferredDays`, `preferredTimes`, `provider`, `location`, and `urgency`. If
+  the intent is rescheduling and the appointment ID is missing, run
+  `appointment_orchestrator` with the patient details and any known appointment
+  date/provider/location to resolve `appointmentId`, then pass it as
+  `currentAppointment.appointmentId`. When the caller selects a slot,
+  immediately call it again with `selectedSlotIso` and wait for
+  `status = "confirmed"` plus a `confirmationId` before telling the caller it is
+  booked. If confirmation fails, explain you could not finalize and offer next
+  steps. It returns slot/options data; summarize it in your own voice for the
+  caller.
 - `results_service`, `billing_service`, `refill_service` and `insurance_service`
   return structured responses. Read the `spokenResponse` field to the caller and
   follow their suggested next steps.

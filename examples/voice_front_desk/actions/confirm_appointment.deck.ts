@@ -13,6 +13,15 @@ const outputSchema = z.object({
   status: z.enum(["confirmed", "failed"]),
   confirmationId: z.string().optional(),
   message: z.string(),
+  confirmedSlot: z
+    .object({
+      isoStart: z.string(),
+      display: z.string().optional(),
+      provider: z.string().optional(),
+      location: z.string().optional(),
+      type: z.string().optional(),
+    })
+    .optional(),
 });
 
 export default defineDeck({
@@ -26,6 +35,12 @@ export default defineDeck({
       status: "confirmed",
       confirmationId,
       message: `Confirmed appointment for ${display}.`,
+      confirmedSlot: {
+        isoStart: ctx.input.slotIso,
+        display,
+        provider: ctx.input.provider,
+        location: ctx.input.location,
+      },
     };
   },
 });
