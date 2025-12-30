@@ -1,7 +1,7 @@
 +++
 label = "tone_human_likeness_llm"
 inputSchema = "../schemas/calibration_session_input.zod.ts"
-outputSchema = "../schemas/text_output.zod.ts"
+outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0
@@ -18,9 +18,8 @@ Criteria:
 
 Response format:
 
-- Line 1: a single integer from -3 to +3.
-- Line 2: a short reason.
-- Lines 3+: optional short evidence quotes (<= 20 words each), one per line.
+- Return JSON matching the output schema:
+  `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
 
 Scoring rules:
 
@@ -34,3 +33,5 @@ Scoring rules:
 1. Scan assistant messages for tone and phrasing.
 2. Decide the score based on the criteria above.
 3. Provide a short reason and optional evidence quotes.
+
+![respond](gambit://respond)

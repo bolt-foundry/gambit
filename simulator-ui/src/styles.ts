@@ -725,6 +725,17 @@ button.primary:disabled {
 .tool-call-status.status-running {
   color: #0b93f6;
 }
+.tool-call-handled {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b45309;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid #f59e0b;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #fffbeb;
+}
 .tool-call-id {
   font-size: 11px;
   color: #475569;
@@ -742,6 +753,10 @@ button.primary:disabled {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.tool-call-divider {
+  border-top: 1px solid #e2e8f0;
+  margin: 2px 0;
 }
 .tool-call-field {
   display: flex;
@@ -1120,6 +1135,9 @@ button.primary:disabled {
   padding: 12px;
   min-height: 0;
   overflow: hidden;
+}
+.editor-panel.test-bot-sidebar {
+  overflow-y: auto;
 }
 .imessage-thread {
   flex: 1;

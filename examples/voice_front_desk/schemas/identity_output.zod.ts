@@ -1,22 +1,30 @@
 import { z } from "zod";
 
+const candidateSchema = z.object({
+  patientId: z.string(),
+  name: z.string(),
+  dob: z.string().optional(),
+  phone: z.string().optional(),
+});
+
 export default z.object({
-  callerName: z.string().optional().describe(
-    "Full name provided during verification",
-  ),
-  dob: z.string().optional().describe("Date of birth as provided"),
-  callbackNumber: z.string().optional().describe(
-    "Best number to reach the caller",
-  ),
-  patientId: z.string().optional().describe(
-    "Existing patient identifier, if found",
-  ),
-  newPatient: z.boolean().default(false).describe(
-    "True when we created a new chart",
-  ),
-  insuranceStatus: z
-    .enum(["captured", "missing", "on_file"])
-    .default("missing")
-    .describe("Whether insurance is on file, captured, or missing"),
-  summary: z.string().optional().describe("One sentence summary for routing"),
+  status: z.enum(["matched", "ambiguous", "not_found", "needs_more_info"]),
+  patientId: z.string().optional().describe("Existing patient identifier."),
+  candidates: z
+    .array(candidateSchema)
+    .optional()
+    .describe("Potential matches for disambiguation."),
+  missingFields: z
+    .array(z.string())
+    .optional()
+    .describe("Missing details needed to identify the patient."),
+  followUpQuestion: z
+    .string()
+    .optional()
+    .describe("Suggested clarifying question for the caller."),
+  suggestedAction: z
+    .enum(["ask_for_details", "start_new_patient", "leave_callback"])
+    .optional()
+    .describe("Suggested next step for the root deck."),
+  summary: z.string().optional().describe("One sentence identity recap."),
 });

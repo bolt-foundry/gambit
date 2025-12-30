@@ -1,18 +1,18 @@
 +++
 label = "workflow modules"
 
-# [[actionDecks]]
-# name = "identity_orchestrator"
-# path = "../decks/identity.deck.md"
-# description = "Gather caller demographics, run patient lookup or intake, and return context."
-# [[actionDecks]]
-# name = "routing_orchestrator"
-# path = "../decks/routing.deck.md"
-# description = "Classify the caller's request and recommend the next service deck."
-# [[actionDecks]]
-# name = "scheduling_service"
-# path = "../decks/scheduling.deck.md"
-# description = "Handle reschedules, existing visits, and new-patient bookings."
+[[actionDecks]]
+name = "identity_orchestrator"
+path = "../decks/identity.deck.md"
+description = "Look up patient identity and return a structured decision."
+[[actionDecks]]
+name = "routing_orchestrator"
+path = "../decks/routing.deck.md"
+description = "Classify the caller's request and recommend the next service deck."
+[[actionDecks]]
+name = "scheduling_service"
+path = "../decks/scheduling.deck.md"
+description = "Handle reschedules, existing visits, and new-patient bookings."
 # [[actionDecks]]
 # name = "results_service"
 # path = "../decks/results.deck.md"
@@ -33,6 +33,10 @@ label = "workflow modules"
 name = "faq_service"
 path = "../decks/faq.deck.md"
 description = "Answer operational front-desk FAQs (hours, directions, costs)."
+[[actionDecks]]
+name = "error_simulator"
+path = "../decks/error_simulator.deck.ts"
+description = "Always throws to exercise the onError handler."
 # [[actionDecks]]
 # name = "transfer_service"
 # path = "../decks/transfer.deck.md"
