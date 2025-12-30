@@ -1,0 +1,29 @@
+name: E2E Manual
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  e2e:
+    name: Gambit E2E
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NIX_DEV_PROFILE: ${{ github.workspace }}/.nix-profiles/ci
+      DENO_DIR: /home/runner/.cache/deno
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/deno-ci-setup
+        with:
+          nix_dev_profile: ${{ env.NIX_DEV_PROFILE }}
+          deno_dir: ${{ env.DENO_DIR }}
+
+      - name: Run e2e tests
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno task e2e
+
+      - uses: ./.github/actions/deno-ci-cleanup
+        if: always()
