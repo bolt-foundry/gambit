@@ -7,6 +7,8 @@ model = "openai/gpt-4o-mini"
 temperature = 0.4
 +++
 
+![test_bot_hangup](./cards/test_bot_hangup.card.md)
+
 You role-play a prospective patient who wants to ask FAQ-style questions before
 scheduling. If `scenarioDescription` is provided, follow it closely; otherwise
 use the default goals below:

@@ -1,0 +1,189 @@
+name: "Deno CI setup"
+description: "Prepare sticky disks, Nix, and devshell profile for Gambit CI"
+
+inputs:
+  nix_dev_profile:
+    description: "Path to the Nix devshell profile"
+    required: true
+  deno_dir:
+    description: "Deno cache directory"
+    required: true
+  node_modules_path:
+    description: "Path to the node_modules directory"
+    required: false
+    default: "node_modules"
+  nix_profiles_path:
+    description: "Path to the Nix profiles directory"
+    required: false
+    default: ".nix-profiles"
+  flake_dir:
+    description: "Path to the flake directory for nix develop"
+    required: false
+    default: "."
+  matcher_path:
+    description: "Path to the Deno problem matcher file"
+    required: false
+    default: ".github/deno-problem-matcher.json"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve paths
+      id: paths
+      shell: bash
+      env:
+        NODE_MODULES_PATH: ${{ inputs.node_modules_path }}
+        NIX_PROFILES_PATH: ${{ inputs.nix_profiles_path }}
+        FLAKE_DIR: ${{ inputs.flake_dir }}
+        MATCHER_PATH: ${{ inputs.matcher_path }}
+      run: |
+        resolve_path() {
+          local path="$1"
+          if [ -z "$path" ]; then
+            echo ""
+            return 0
+          fi
+          if [ "${path#/}" != "$path" ]; then
+            echo "$path"
+          else
+            echo "$GITHUB_WORKSPACE/$path"
+          fi
+        }
+        echo "node_modules_path=$(resolve_path "$NODE_MODULES_PATH")" >> "$GITHUB_OUTPUT"
+        echo "nix_profiles_path=$(resolve_path "$NIX_PROFILES_PATH")" >> "$GITHUB_OUTPUT"
+        echo "flake_dir=$(resolve_path "$FLAKE_DIR")" >> "$GITHUB_OUTPUT"
+        echo "matcher_path=$(resolve_path "$MATCHER_PATH")" >> "$GITHUB_OUTPUT"
+
+    - name: Mount sticky disk for Nix store
+      uses: useblacksmith/stickydisk@v1
+      with:
+        key: ${{ github.repository }}-nix-store
+        path: /nix
+
+    - name: Ensure /nix has root ownership
+      shell: bash
+      run: |
+        sudo chown root:root /nix
+        sudo chmod 755 /nix
+
+    - name: Mount sticky disk for Deno cache
+      uses: useblacksmith/stickydisk@v1
+      with:
+        key: ${{ github.repository }}-deno-cache
+        path: ${{ inputs.deno_dir }}
+
+    - name: Mount sticky disk for node_modules
+      uses: useblacksmith/stickydisk@v1
+      with:
+        key: ${{ github.repository }}-node-modules
+        path: ${{ steps.paths.outputs.node_modules_path }}
+
+    - name: Ensure ~/.cache is writable
+      shell: bash
+      env:
+        DENO_DIR: ${{ inputs.deno_dir }}
+      run: |
+        sudo chown "$USER":"$USER" "$HOME/.cache"
+        sudo chmod 755 "$HOME/.cache"
+        if [ -d "$DENO_DIR" ]; then
+          sudo chown "$USER":"$USER" "$DENO_DIR"
+        fi
+
+    - name: Ensure node_modules is writable
+      shell: bash
+      env:
+        NODE_MODULES_PATH: ${{ steps.paths.outputs.node_modules_path }}
+      run: |
+        mkdir -p "$NODE_MODULES_PATH"
+        sudo chown "$USER":"$USER" "$NODE_MODULES_PATH"
+        sudo chmod 755 "$NODE_MODULES_PATH"
+
+    - name: Mount sticky disk for devshell profile
+      uses: useblacksmith/stickydisk@v1
+      with:
+        key: ${{ github.repository }}-nix-profile-ci
+        path: ${{ steps.paths.outputs.nix_profiles_path }}
+
+    - name: Ensure .nix-profiles is writable
+      shell: bash
+      env:
+        NIX_PROFILES_PATH: ${{ steps.paths.outputs.nix_profiles_path }}
+      run: |
+        mkdir -p "$NIX_PROFILES_PATH"
+        sudo chown "$USER":"$USER" "$NIX_PROFILES_PATH"
+        sudo chmod 755 "$NIX_PROFILES_PATH"
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@v13
+
+    - name: Disable nixbld requirement when missing
+      shell: bash
+      run: |
+        if ! getent group nixbld >/dev/null 2>&1; then
+          echo "nixbld group missing; disabling build-users-group for this job."
+          if [ -f /etc/nix/nix.conf ]; then
+            sudo sed -i -E 's/^[[:space:]]*build-users-group[[:space:]]*=.*$/build-users-group =/' /etc/nix/nix.conf
+            if ! grep -q '^[[:space:]]*build-users-group[[:space:]]*=' /etc/nix/nix.conf; then
+              echo "build-users-group =" | sudo tee -a /etc/nix/nix.conf >/dev/null
+            fi
+          else
+            sudo mkdir -p /etc/nix
+            echo "build-users-group =" | sudo tee /etc/nix/nix.conf >/dev/null
+          fi
+          {
+            echo 'NIX_CONFIG<<EOF'
+            if [ -n "${NIX_CONFIG:-}" ]; then
+              echo "$NIX_CONFIG"
+            fi
+            echo "build-users-group ="
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
+          if command -v systemctl >/dev/null 2>&1; then
+            if sudo systemctl list-unit-files | grep -q 'nix-daemon'; then
+              sudo systemctl stop nix-daemon.socket >/dev/null 2>&1 || true
+              sudo systemctl stop determinate-nixd.socket >/dev/null 2>&1 || true
+              sudo systemctl stop nix-daemon >/dev/null 2>&1 || true
+            fi
+          fi
+          sudo pkill -f nix-daemon >/dev/null 2>&1 || true
+        fi
+
+    - name: Ensure Nix daemon is running
+      shell: bash
+      run: |
+        set -euo pipefail
+        start_with_systemd() {
+          sudo systemctl start nix-daemon.socket >/dev/null 2>&1 || true
+          sudo systemctl start determinate-nixd.socket >/dev/null 2>&1 || true
+          sudo systemctl start nix-daemon >/dev/null 2>&1 || true
+        }
+        start_manually() {
+          if ! pgrep -f nix-daemon >/dev/null 2>&1; then
+            sudo /nix/var/nix/profiles/default/bin/nix-daemon --daemon >/dev/null 2>&1 &
+            sleep 2
+          fi
+        }
+        if command -v systemctl >/dev/null 2>&1; then
+          if sudo systemctl list-unit-files | grep -q 'nix-daemon'; then
+            start_with_systemd
+          else
+            start_manually
+          fi
+        else
+          start_manually
+        fi
+
+    - name: Register Deno problem matcher
+      shell: bash
+      env:
+        MATCHER_PATH: ${{ steps.paths.outputs.matcher_path }}
+      run: echo "::add-matcher::$MATCHER_PATH"
+
+    - name: Build devshell profile
+      shell: bash
+      env:
+        NIX_DEV_PROFILE: ${{ inputs.nix_dev_profile }}
+        FLAKE_DIR: ${{ steps.paths.outputs.flake_dir }}
+      run: |
+        mkdir -p "$(dirname "$NIX_DEV_PROFILE")"
+        nix develop "$FLAKE_DIR" --profile "$NIX_DEV_PROFILE" --command true

@@ -1,0 +1,22 @@
+name: "Deno CI cleanup"
+description: "Stop Nix processes and free /nix before sticky disk cleanup"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Stop Nix daemon for cleanup
+      shell: bash
+      run: |
+        sudo systemctl stop nix-daemon nix-daemon.socket determinate-nixd.socket || true
+        sudo systemctl kill --kill-who=all nix-daemon || true
+        sudo pkill -f nix-daemon || true
+        sudo pkill -f determinate-nixd || true
+        sudo pkill -f nixd || true
+        sudo pkill -f nix-store || true
+        if command -v fuser >/dev/null 2>&1; then
+          echo "Processes still using /nix:"
+          sudo fuser -vm /nix || true
+          echo "Force-killing remaining /nix users:"
+          sudo fuser -km /nix || true
+          sudo fuser -vm /nix || true
+        fi

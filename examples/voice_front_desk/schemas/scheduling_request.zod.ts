@@ -30,5 +30,14 @@ export default z.object({
   provider: z.string().optional().describe("Preferred clinician"),
   location: z.string().optional().describe("Preferred location"),
   urgency: z.enum(["urgent", "soon", "routine"]).optional(),
+  currentAppointment: z
+    .object({
+      appointmentId: z.string(),
+      scheduledFor: z.string().optional(),
+      provider: z.string().optional(),
+      location: z.string().optional(),
+    })
+    .optional()
+    .describe("Appointment to change if rescheduling"),
   notes: z.string().optional(),
 });

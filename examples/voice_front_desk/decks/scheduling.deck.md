@@ -29,7 +29,8 @@ Use the identity summary plus caller intent to drive scheduling.
    list `missingFields`, and include a single `followUpQuestion` for the root
    deck to ask.
 3. If `selectedSlotIso` is provided, call `confirm_appointment` to finalize the
-   booking. Return `status = "confirmed"` with `confirmationId` and a
+   booking. Include any known `provider`, `location`, and `slotDisplay` in that
+   tool call. Return `status = "confirmed"` with `confirmationId` and a
    `confirmedSlot` object (never a string). Populate at least
    `{ "isoStart": selectedSlotIso, "display": "<friendly time>" }` and include
    `provider`, `location`, `type` when known.
