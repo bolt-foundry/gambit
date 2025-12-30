@@ -193,8 +193,15 @@ function extractScoreAndReason(result: unknown): {
 } {
   if (!result || typeof result !== "object") return {};
   const record = result as Record<string, unknown>;
-  const score = typeof record.score === "number" ? record.score : undefined;
-  const reason = typeof record.reason === "string" ? record.reason : undefined;
+  const payload = record.payload &&
+      typeof record.payload === "object" &&
+      record.payload !== null
+    ? record.payload as Record<string, unknown>
+    : record;
+  const score = typeof payload.score === "number" ? payload.score : undefined;
+  const reason = typeof payload.reason === "string"
+    ? payload.reason
+    : undefined;
   return { score, reason };
 }
 
@@ -1390,9 +1397,38 @@ type ToolCallSummary = {
   args?: unknown;
   result?: unknown;
   error?: unknown;
+  handledError?: string;
   parentActionCallId?: string;
   depth?: number;
 };
+
+function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
+  const handled = new Map<string, string>();
+  for (const trace of traces) {
+    if (!trace || typeof trace !== "object") continue;
+    if (trace.type !== "tool.result") continue;
+    const name = typeof (trace as { name?: unknown }).name === "string"
+      ? (trace as { name?: string }).name
+      : undefined;
+    if (name !== "gambit_init") continue;
+    const result = (trace as { result?: unknown }).result as
+      | Record<string, unknown>
+      | undefined;
+    if (!result || result.kind !== "error") continue;
+    const source = result.source as Record<string, unknown> | undefined;
+    const actionName = typeof source?.actionName === "string"
+      ? source.actionName
+      : undefined;
+    const errorObj = result.error as { message?: unknown } | undefined;
+    const errorMessage = typeof errorObj?.message === "string"
+      ? errorObj.message
+      : undefined;
+    if (actionName && errorMessage) {
+      handled.set(actionName, errorMessage);
+    }
+  }
+  return handled;
+}
 
 function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
   const order: ToolCallSummary[] = [];
@@ -1455,6 +1491,14 @@ function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
       summary.status = "error";
     }
   }
+  const handled = findHandledErrors(traces);
+  order.forEach((summary) => {
+    if (!summary.name) return;
+    const errorMessage = handled.get(summary.name);
+    if (errorMessage) {
+      summary.handledError = errorMessage;
+    }
+  });
   return order;
 }
 
@@ -1522,6 +1566,9 @@ function ToolCallBubble(props: { call: ToolCallSummary }) {
             >
               {statusLabel}
             </div>
+            {call.handledError && (
+              <div className="tool-call-handled">Error handled</div>
+            )}
           </div>
           <div className="tool-call-id">{call.id}</div>
           <div className="tool-call-expand">
@@ -1538,6 +1585,16 @@ function ToolCallBubble(props: { call: ToolCallSummary }) {
             )}
             {call.error !== undefined && (
               <ToolCallField label="Error" value={call.error} isError />
+            )}
+            {call.handledError && (
+              <>
+                <div className="tool-call-divider" />
+                <ToolCallField
+                  label="Handled error"
+                  value={call.handledError}
+                  isError
+                />
+              </>
             )}
           </div>
         )}
@@ -3639,6 +3696,7 @@ function TestBotApp(props: {
     onResetTestBotSession,
     activeSessionId,
   } = props;
+  const deckStorageKey = "gambit:test-bot:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [botLabel, setBotLabel] = useState<string | null>(null);
@@ -3733,6 +3791,15 @@ function TestBotApp(props: {
       setBotPath(typeof data.botPath === "string" ? data.botPath : null);
       const nextDeckId = (() => {
         if (!decks.length) return null;
+        let storedDeckId: string | null = null;
+        try {
+          storedDeckId = localStorage.getItem(deckStorageKey);
+        } catch {
+          storedDeckId = null;
+        }
+        if (storedDeckId && decks.some((deck) => deck.id === storedDeckId)) {
+          return storedDeckId;
+        }
         const requested = data.selectedDeckId ?? null;
         if (requested && decks.some((deck) => deck.id === requested)) {
           return requested;
@@ -3770,6 +3837,15 @@ function TestBotApp(props: {
     if (!run.sessionId) return;
     onReplaceTestBotSession(run.sessionId);
   }, [onReplaceTestBotSession, run.sessionId]);
+
+  useEffect(() => {
+    if (!selectedDeckId) return;
+    try {
+      localStorage.setItem(deckStorageKey, selectedDeckId);
+    } catch {
+      // ignore storage failures
+    }
+  }, [deckStorageKey, selectedDeckId]);
 
   useEffect(() => {
     runRef.current = run;
@@ -4259,11 +4335,13 @@ function TestBotApp(props: {
     [saveTestBotFeedback],
   );
 
-  const handleDeckSelection = useCallback((nextId: string) => {
+  const handleDeckSelection = useCallback(async (nextId: string) => {
     if (!nextId) return;
+    if (nextId === selectedDeckId) return;
+    await handleNewChat();
     setSelectedDeckId(nextId);
     loadTestBot({ deckId: nextId });
-  }, [loadTestBot]);
+  }, [handleNewChat, loadTestBot, selectedDeckId]);
 
   const runStatusLabel = run.status === "running"
     ? "Running test bot…"
@@ -4295,7 +4373,7 @@ function TestBotApp(props: {
       </div>
       <div className="editor-main">
         <div
-          className="editor-panel"
+          className="editor-panel test-bot-sidebar"
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
         >
           <strong>Persona deck</strong>
@@ -4509,7 +4587,7 @@ function TestBotApp(props: {
                       title={m.role}
                     >
                       {m.content}
-                      {m.messageRefId && m.role !== "user" && run.sessionId && (
+                      {m.messageRefId && run.sessionId && (
                         <FeedbackControls
                           messageRefId={m.messageRefId}
                           feedback={m.feedback}

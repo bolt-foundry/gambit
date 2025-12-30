@@ -9,6 +9,10 @@ How to run decks locally, iterate quickly, and observe runs.
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.
+- Test bot (CLI):
+  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--init <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--verbose]`
+- Grade (CLI):
+  `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]`
 - Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` then open
   http://localhost:8000/. This serves a multi-page UI:
 
@@ -30,8 +34,12 @@ How to run decks locally, iterate quickly, and observe runs.
 
 ## State and tracing
 
-- `--state <file>` (run only): load/persist messages so you can continue a
-  conversation; skips `gambit_init` on resume.
+- `--state <file>` (run/test-bot/grade): load/persist messages so you can
+  continue a conversation; skips `gambit_init` on resume. `grade` writes
+  `meta.gradingRuns` back into the session state.
+- `--grade <grader-deck>` (test-bot): can be repeated; graders run in the order
+  provided and append results to `meta.gradingRuns` in the same session state
+  file.
 - `--trace <file>` writes JSONL trace events; `--verbose` prints trace to
   console. Combine with `--stream` to watch live output while capturing traces.
 - `--port <n>` overrides debug UI port (default 8000); `PORT` env is honored

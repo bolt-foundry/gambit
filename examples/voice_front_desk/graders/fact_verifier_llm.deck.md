@@ -1,7 +1,7 @@
 +++
 label = "Fact verifier (conversation) LLM"
 inputSchema = "../schemas/calibration_session_input.zod.ts"
-outputSchema = "../schemas/text_output.zod.ts"
+outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0
@@ -31,9 +31,8 @@ Data supplied:
 
 Response format:
 
-- Line 1: a single integer from -3 to +3.
-- Line 2: a short reason.
-- Lines 3+: optional short evidence quotes (<= 20 words each), one per line.
+- Return JSON matching the output schema:
+  `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
 
 Scoring rules:
 
@@ -46,5 +45,7 @@ Scoring rules:
 1. Scan all assistant messages for factual claims.
 2. Treat refusal statements about access/verification as allowed, not claims.
 3. For each remaining claim, verify a matching explicit tool-call output exists.
-4. If there are no factual claims, output 0.
-5. If any claim lacks proof, output -3 with short quotes; otherwise +3.
+4. If there are no factual claims, output score 0.
+5. If any claim lacks proof, output score -3 with evidence quotes; otherwise +3.
+
+![respond](gambit://respond)

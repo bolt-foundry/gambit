@@ -1,0 +1,31 @@
+import { defineDeck } from "../../../mod.ts";
+import { z } from "zod";
+
+const inputSchema = z.object({
+  patientId: z.string().optional(),
+  slotIso: z.string(),
+  slotDisplay: z.string().optional(),
+  provider: z.string().optional(),
+  location: z.string().optional(),
+});
+
+const outputSchema = z.object({
+  status: z.enum(["confirmed", "failed"]),
+  confirmationId: z.string().optional(),
+  message: z.string(),
+});
+
+export default defineDeck({
+  label: "confirm_appointment",
+  inputSchema,
+  outputSchema,
+  run(ctx) {
+    const confirmationId = `apt-${Math.random().toString(36).slice(2, 8)}`;
+    const display = ctx.input.slotDisplay ?? ctx.input.slotIso;
+    return {
+      status: "confirmed",
+      confirmationId,
+      message: `Confirmed appointment for ${display}.`,
+    };
+  },
+});

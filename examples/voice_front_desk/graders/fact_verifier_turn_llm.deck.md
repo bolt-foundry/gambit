@@ -1,7 +1,7 @@
 +++
 label = "Fact verifier (turn) LLM"
 inputSchema = "../schemas/calibration_turn_input.zod.ts"
-outputSchema = "../schemas/text_output.zod.ts"
+outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0
@@ -35,9 +35,8 @@ Data supplied:
 
 Response format:
 
-- Line 1: a single integer from -3 to +3.
-- Line 2: a short reason.
-- Lines 3+: optional short evidence quotes (<= 20 words each), one per line.
+- Return JSON matching the output schema:
+  `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
 
 Scoring rules:
 
@@ -52,5 +51,7 @@ Scoring rules:
 3. Extract remaining factual claims from that message.
 4. Verify each claim is supported by explicit tool-call output in the
    transcript.
-5. If there are no factual claims, output 0.
-6. If any claim lacks proof, output -3 with short quotes; otherwise +3.
+5. If there are no factual claims, output score 0.
+6. If any claim lacks proof, output score -3 with evidence quotes; otherwise +3.
+
+![respond](gambit://respond)
