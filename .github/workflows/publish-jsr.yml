@@ -36,7 +36,7 @@ jobs:
         run: deno check --all mod.ts
 
       - name: Test
-        run: deno test -A
+        run: deno task ci
 
       - name: Set publish version
         run: |
