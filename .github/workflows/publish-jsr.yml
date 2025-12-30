@@ -32,8 +32,8 @@ jobs:
         id: release
         run: |
           set -euo pipefail
-          version="$(python3 - <<'PY'\nimport json\nwith open('deno.json') as f:\n    data = json.load(f)\nversion = (data.get('version') or '').strip()\nif not version:\n    raise SystemExit('deno.json missing version')\nprint(version)\nPY\n)"
-          package="$(python3 - <<'PY'\nimport json\nwith open('deno.json') as f:\n    data = json.load(f)\nname = (data.get('name') or '').strip()\nif not name:\n    raise SystemExit('deno.json missing name')\nprint(name)\nPY\n)"
+          version="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version);')"
+          package="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const name = (data.name ?? "").trim(); if (!name) throw new Error("deno.json missing name"); console.log(name);')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "package=$package" >> "$GITHUB_OUTPUT"
           if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -70,16 +70,7 @@ jobs:
         if: steps.release.outputs.is_release != 'true'
         run: |
           GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
-          BASE_VERSION="$(python3 - <<'PY'
-          import json
-          with open('deno.json') as f:
-              data = json.load(f)
-          version = (data.get('version') or '').strip()
-          if not version:
-              raise SystemExit('deno.json missing version')
-          print(version.lstrip('v'))
-          PY
-          )"
+          BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
           if [[ "$BASE_VERSION" == *-* ]]; then
             export VERSION="${BASE_VERSION}.main.${GIT_SHORT_HASH}"
           else
