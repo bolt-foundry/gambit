@@ -1,3 +1,0 @@
-# Gambit Memos
-
-Coming soon.
