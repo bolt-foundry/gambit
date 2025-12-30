@@ -11,7 +11,7 @@
     "fmt": "deno fmt",
     "lint": "deno lint",
     "test": "deno test --allow-all",
-    "ci": "deno fmt --check && deno lint && deno test --allow-all",
+    "ci": "deno fmt --check && deno lint && deno test --allow-all --ignore=simulator-ui/__tests__/e2e",
     "fix": "deno fmt && deno lint --fix && deno test --allow-all",
     "compile": "deno compile -A --output dist/gambit src/cli.ts",
     "precommit": "deno fmt && deno lint && deno check && deno test -A",
