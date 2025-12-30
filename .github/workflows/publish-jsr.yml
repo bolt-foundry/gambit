@@ -8,7 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     defaults:
       run:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v13
@@ -25,6 +27,32 @@ jobs:
 
       - name: Register Deno problem matcher
         run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Detect release version
+        id: release
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'\nimport json\nwith open('deno.json') as f:\n    data = json.load(f)\nversion = (data.get('version') or '').strip()\nif not version:\n    raise SystemExit('deno.json missing version')\nprint(version)\nPY\n)"
+          package="$(python3 - <<'PY'\nimport json\nwith open('deno.json') as f:\n    data = json.load(f)\nname = (data.get('name') or '').strip()\nif not name:\n    raise SystemExit('deno.json missing name')\nprint(name)\nPY\n)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            if git rev-parse "v${version}" >/dev/null 2>&1; then
+              echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            fi
+            if deno info "jsr:${package}@${version}" >/dev/null 2>&1; then
+              echo "jsr_published=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "jsr_published=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "jsr_published=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Lint
         run: deno lint
@@ -38,10 +66,25 @@ jobs:
       - name: Test
         run: deno task ci
 
-      - name: Set publish version
+      - name: Set snapshot version
+        if: steps.release.outputs.is_release != 'true'
         run: |
           GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
-          export VERSION="0.0.0-main-${GIT_SHORT_HASH}"
+          BASE_VERSION="$(python3 - <<'PY'
+          import json
+          with open('deno.json') as f:
+              data = json.load(f)
+          version = (data.get('version') or '').strip()
+          if not version:
+              raise SystemExit('deno.json missing version')
+          print(version.lstrip('v'))
+          PY
+          )"
+          if [[ "$BASE_VERSION" == *-* ]]; then
+            export VERSION="${BASE_VERSION}.main.${GIT_SHORT_HASH}"
+          else
+            export VERSION="${BASE_VERSION}-main.${GIT_SHORT_HASH}"
+          fi
           echo "Publishing version ${VERSION}"
           deno eval '
             const version = Deno.env.get("VERSION");
@@ -54,5 +97,19 @@ jobs:
             await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
           '
 
-      - name: Publish package
+      - name: Publish snapshot
+        if: steps.release.outputs.is_release != 'true'
         run: deno publish --allow-dirty
+
+      - name: Tag release
+        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.tag_exists != 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${version}"
+          git push origin "v${version}"
+
+      - name: Publish release
+        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.jsr_published != 'true'
+        run: deno publish
