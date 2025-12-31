@@ -160,6 +160,15 @@ export type E2eContext = {
     epochMs: number;
     headless: boolean;
   };
+  viewportControl: {
+    zoomTo(
+      selector: string,
+      opts?: { padding?: number; maxScale?: number; durationMs?: number },
+    ): Promise<void>;
+    resetZoom(opts?: { durationMs?: number }): Promise<void>;
+    highlight(selector: string): Promise<void>;
+    scrollTo(selector: string): Promise<void>;
+  };
   paths(): {
     root: string;
     latest: string;
@@ -243,11 +252,20 @@ class E2eTestContext {
   videoPath?: string;
   latestVideoPath?: string;
   videoRecordingActive = false;
+  viewportControl: E2eContext["viewportControl"];
   private server?: ServerProcessInfo;
 
   private constructor(slug: string, testName: string) {
     this.slug = slug;
     this.testName = testName;
+    this.viewportControl = {
+      zoomTo: (selector, opts) =>
+        this.callViewportControl("zoomTo", [selector, opts]),
+      resetZoom: (opts) => this.callViewportControl("resetZoom", [opts]),
+      highlight: (selector) =>
+        this.callViewportControl("highlight", [selector]),
+      scrollTo: (selector) => this.callViewportControl("scrollTo", [selector]),
+    };
   }
 
   static async create(
@@ -502,6 +520,28 @@ class E2eTestContext {
     } catch (_) {
       return "";
     }
+  }
+
+  private async callViewportControl(
+    method: string,
+    args: Array<unknown>,
+  ): Promise<void> {
+    if (!this.page) throw new Error("context page not initialized");
+    await this.page.evaluate(
+      (fnName, fnArgs) => {
+        const api = (window as { gambitDemo?: Record<string, unknown> })
+          .gambitDemo;
+        const target = api?.[fnName as keyof typeof api];
+        if (typeof target !== "function") {
+          throw new Error(
+            `viewportControl: ${fnName} unavailable (gambitDemo missing)`,
+          );
+        }
+        return (target as (...args: Array<unknown>) => unknown)(...fnArgs);
+      },
+      method,
+      args,
+    );
   }
 
   private async startServer(
@@ -990,6 +1030,7 @@ export async function createE2eTestContext(
   const api: DisposableE2eContext = {
     meta: () => meta,
     paths: () => paths,
+    viewportControl: impl.viewportControl,
     navigate: (u: string) => impl.navigate(u),
     waitForUrl: (re: RegExp, o?: { quietMs?: number; timeoutMs?: number }) =>
       impl.waitForUrl(re, o),

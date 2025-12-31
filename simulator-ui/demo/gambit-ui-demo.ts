@@ -7,6 +7,7 @@ import type {
   Browser,
   BrowserContext,
   CDPSession,
+  Frame,
   Page,
 } from "npm:playwright-core";
 
@@ -76,6 +77,25 @@ function getHostBridgeUrl(): string {
     "https://host.boltfoundry.bflocal:8017";
 }
 
+async function stopHostBridgeChrome(): Promise<void> {
+  const baseUrl = getHostBridgeUrl();
+  try {
+    const res = await fetch(`${baseUrl}/browser/debugger/stop`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(
+        `[gambit-demo] host bridge stop failed (${res.status}): ${
+          text || res.statusText
+        }`,
+      );
+    }
+  } catch (error) {
+    console.warn("[gambit-demo] failed to stop host bridge chrome:", error);
+  }
+}
+
 function getDemoPort(hostBridge: boolean): number | undefined {
   const raw = Deno.env.get("GAMBIT_DEMO_PORT");
   if (raw) {
@@ -103,6 +123,179 @@ function shouldWaitForExit(): boolean {
   return (Deno.env.get("GAMBIT_DEMO_WAIT") || "")
     .toLowerCase()
     .trim() === "true";
+}
+
+type ViewportSize = {
+  width: number;
+  height: number;
+};
+
+function parseViewport(raw: string): ViewportSize | null {
+  const match = raw.trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function getDemoViewport(): ViewportSize | null {
+  const raw = Deno.env.get("GAMBIT_DEMO_VIEWPORT");
+  if (!raw) return { width: 1920, height: 1080 };
+  const parsed = parseViewport(raw);
+  if (!parsed) {
+    console.warn(`[gambit-demo] invalid GAMBIT_DEMO_VIEWPORT: ${raw}`);
+    return { width: 1920, height: 1080 };
+  }
+  return parsed;
+}
+
+function getDemoContentSize(): ViewportSize | null {
+  const raw = Deno.env.get("GAMBIT_DEMO_CONTENT");
+  if (!raw) return null;
+  const parsed = parseViewport(raw);
+  if (!parsed) {
+    console.warn(`[gambit-demo] invalid GAMBIT_DEMO_CONTENT: ${raw}`);
+    return null;
+  }
+  return parsed;
+}
+
+function getEffectiveDemoContentSize(demoPath: string): ViewportSize | null {
+  const explicit = getDemoContentSize();
+  if (explicit) return explicit;
+  if (demoPath.includes("iframe-shell")) {
+    return { width: 1280, height: 720 };
+  }
+  return null;
+}
+
+function getDemoDurationMs(): number | null {
+  const raw = Deno.env.get("GAMBIT_DEMO_DURATION_SECONDS");
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    console.warn(
+      `[gambit-demo] invalid GAMBIT_DEMO_DURATION_SECONDS: ${raw}`,
+    );
+    return null;
+  }
+  return Math.round(value * 1000);
+}
+
+function getDemoFrameRate(): number | null {
+  const raw = Deno.env.get("GAMBIT_DEMO_FPS");
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    console.warn(`[gambit-demo] invalid GAMBIT_DEMO_FPS: ${raw}`);
+    return null;
+  }
+  return Math.round(value);
+}
+
+function getDemoPath(): string {
+  return Deno.env.get("GAMBIT_DEMO_PATH") || "/";
+}
+
+function resolveDemoQuery(baseUrl: string): string | null {
+  const raw = Deno.env.get("GAMBIT_DEMO_QUERY");
+  if (!raw) return null;
+  return raw
+    .replaceAll("{{BASE_URL}}", encodeURIComponent(baseUrl))
+    .replaceAll("{{BASE_URL_RAW}}", baseUrl);
+}
+
+function buildDemoQuery(
+  baseUrl: string,
+  viewport: ViewportSize | null,
+  content: ViewportSize | null,
+): string | null {
+  const raw = resolveDemoQuery(baseUrl);
+  const params = new URLSearchParams(
+    raw ? (raw.startsWith("?") ? raw.slice(1) : raw) : "",
+  );
+  if (content && !params.has("content")) {
+    params.set("content", `${content.width}x${content.height}`);
+  }
+  if (viewport && !params.has("shell") && !content) {
+    params.set("shell", `${viewport.width}x${viewport.height}`);
+  }
+  const query = params.toString();
+  return query.length ? query : null;
+}
+
+function shouldSkipAutomation(): boolean {
+  return (Deno.env.get("GAMBIT_DEMO_SKIP_AUTOMATION") || "")
+    .toLowerCase()
+    .trim() === "true";
+}
+
+async function getDemoTarget(
+  page: Page,
+  useIframeShell: boolean,
+): Promise<Page | Frame> {
+  if (!useIframeShell) return page;
+  const iframe = await page.waitForSelector("#demo-frame", { timeout: 30_000 });
+  const frame = await iframe?.contentFrame();
+  if (!frame) throw new Error("[gambit-demo] iframe content not available");
+  await frame.waitForLoadState("domcontentloaded");
+  return frame;
+}
+
+function buildDemoUrl(
+  baseUrl: string,
+  demoPath: string,
+  extraQuery?: string | null,
+): string {
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  const resolved = new URL(demoPath, normalizedBase);
+  if (extraQuery) {
+    const query = extraQuery.startsWith("?") ? extraQuery.slice(1) : extraQuery;
+    if (query.length) {
+      if (resolved.search) {
+        resolved.search += `&${query}`;
+      } else {
+        resolved.search = `?${query}`;
+      }
+    }
+  }
+  return resolved.toString();
+}
+
+async function stopBoltfoundryDevServer(): Promise<void> {
+  console.log(
+    "[gambit-demo] ensuring `bft dev boltfoundry-com` is stopped for port 8000...",
+  );
+  try {
+    const result = await new Deno.Command("bft", {
+      args: ["dev", "boltfoundry-com", "--stop"],
+      stdout: "null",
+      stderr: "piped",
+    }).output();
+    if (result.code === 0) {
+      console.log("[gambit-demo] boltfoundry-com dev server stopped.");
+    } else {
+      const stderr = new TextDecoder().decode(result.stderr).trim();
+      console.warn(
+        `[gambit-demo] failed to stop boltfoundry-com dev server (code ${result.code})${
+          stderr ? `: ${stderr}` : ""
+        }`,
+      );
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      console.warn(
+        "[gambit-demo] `bft` command not found; skipping dev server shutdown.",
+      );
+    } else {
+      console.warn(
+        "[gambit-demo] error while stopping boltfoundry-com dev server:",
+        error,
+      );
+    }
+  }
 }
 
 async function writeLogLine(logPath: string, prefix: string, chunk: string) {
@@ -310,11 +503,16 @@ async function stopServer(server: {
 
 async function startHostBridgeChrome(opts: {
   headless: boolean;
+  viewport?: ViewportSize | null;
 }): Promise<string> {
   const baseUrl = getHostBridgeUrl();
   const payload: Record<string, unknown> = {
     headless: opts.headless,
   };
+  if (opts.viewport) {
+    payload.windowWidth = opts.viewport.width;
+    payload.windowHeight = opts.viewport.height;
+  }
   const portRaw = Deno.env.get("GAMBIT_HOST_BRIDGE_PORT");
   if (portRaw) {
     const portNum = Number(portRaw);
@@ -430,6 +628,18 @@ async function main(): Promise<void> {
   const epochMs = Date.now();
   const hostBridge = useHostBridge();
   const demoPort = getDemoPort(hostBridge);
+  const demoViewport = getDemoViewport();
+  const demoPath = getDemoPath();
+  const demoContent = getEffectiveDemoContentSize(demoPath);
+  const demoFrameRate = getDemoFrameRate();
+  const useIframeShell = demoPath.includes("iframe-shell");
+  if (hostBridge && demoPort === 8000) {
+    await stopBoltfoundryDevServer();
+  }
+  if (hostBridge) {
+    await stopHostBridgeChrome();
+  }
+  const skipAutomation = shouldSkipAutomation();
 
   const index = [
     `test_name: gambit-ui-demo`,
@@ -437,6 +647,13 @@ async function main(): Promise<void> {
     `epoch_ms: ${epochMs}`,
     `headless: ${String(headless)}`,
     `executable_path: ${String(executablePath ?? "auto")}`,
+    `viewport: ${
+      demoViewport ? `${demoViewport.width}x${demoViewport.height}` : "auto"
+    }`,
+    `content: ${
+      demoContent ? `${demoContent.width}x${demoContent.height}` : "auto"
+    }`,
+    `fps: ${demoFrameRate ?? "auto"}`,
     `base_dir: ${latestDir}`,
   ].join("\n");
   await Deno.writeTextFile(path.join(latestDir, "index.txt"), index + "\n");
@@ -456,8 +673,14 @@ async function main(): Promise<void> {
   let videoRecordingActive = false;
 
   try {
+    const fallbackViewport = { width: 1920, height: 1080 };
+    const viewport = demoViewport ?? fallbackViewport;
+
     if (hostBridge) {
-      const wsEndpoint = await startHostBridgeChrome({ headless });
+      const wsEndpoint = await startHostBridgeChrome({
+        headless,
+        viewport,
+      });
       console.log("[gambit-demo] host bridge ws:", wsEndpoint);
       browser = await chromium.connectOverCDP(wsEndpoint);
     } else {
@@ -469,19 +692,26 @@ async function main(): Promise<void> {
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-gpu",
-          "--window-size=1280,720",
+          `--window-size=${viewport.width},${viewport.height}`,
         ],
       });
     }
 
     const existingContexts = browser.contexts();
     const ctx = existingContexts[0] ||
-      await browser.newContext({ viewport: { width: 1280, height: 720 } });
+      await browser.newContext({ viewport });
     context = ctx;
 
     const existingPages = ctx.pages();
     const pg = existingPages[0] || await ctx.newPage();
     page = pg;
+    if (demoViewport) {
+      try {
+        await pg.setViewportSize(demoViewport);
+      } catch (error) {
+        console.warn("[gambit-demo] failed to set viewport size:", error);
+      }
+    }
 
     if (recordVideo) {
       videoSession = await ctx.newCDPSession(pg);
@@ -518,11 +748,20 @@ async function main(): Promise<void> {
           }).catch(() => {});
         },
       );
-      await videoSession.send("Page.startScreencast", {
+      const screencastOptions: {
+        format: "png";
+        everyNthFrame: number;
+        quality: number;
+        maxFrameRate?: number;
+      } = {
         format: "png",
         everyNthFrame: 1,
         quality: 80,
-      });
+      };
+      if (demoFrameRate) {
+        screencastOptions.maxFrameRate = demoFrameRate;
+      }
+      await videoSession.send("Page.startScreencast", screencastOptions);
     }
 
     const logPath = path.join(logsDir, "client.log");
@@ -547,85 +786,142 @@ async function main(): Promise<void> {
 
     const hostBaseUrl = getDemoBaseUrl(hostBridge);
     const baseUrl = hostBaseUrl ?? server.baseUrl;
+    const demoQuery = buildDemoQuery(baseUrl, demoViewport, demoContent);
+    const initialUrl = buildDemoUrl(baseUrl, demoPath, demoQuery);
     let sessionId: string | null = null;
 
-    await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".top-nav", { timeout: 30_000 });
+    await page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+    const demoTarget = await getDemoTarget(page, useIframeShell);
+    await demoTarget.waitForSelector(".top-nav", { timeout: 30_000 })
+      .catch(() => {});
     await wait(600);
-    await screenshot(page, screenshotsDir, "01-test-bot");
-
-    const initialMessage = page.locator(
-      '[data-testid="testbot-initial-message"]',
+    await screenshot(
+      page,
+      screenshotsDir,
+      skipAutomation ? "00-shell" : "01-test-bot",
     );
-    if (await initialMessage.count()) {
-      await initialMessage.fill("Hi! Please help me schedule an appointment.");
-    }
 
-    const runButton = page.locator('[data-testid="testbot-run"]');
-    if (await runButton.count()) {
-      await runButton.click();
-      await wait(1200);
-      await screenshot(page, screenshotsDir, "02-test-bot-running");
-
-      const sessionLabel = page.locator(
-        'code[data-testid="testbot-session-id"]',
+    if (!skipAutomation) {
+      const initialMessage = demoTarget.locator(
+        '[data-testid="testbot-initial-message"]',
       );
-      try {
-        await sessionLabel.waitFor({ timeout: 20_000 });
-        sessionId = (await sessionLabel.textContent())?.trim() || null;
-        await screenshot(page, screenshotsDir, "03-test-bot-session-created");
-      } catch (_) {
-        // ignore missing session
+      if (await initialMessage.count()) {
+        await initialMessage.fill(
+          "Hi! Please help me schedule an appointment.",
+        );
       }
 
-      const stopButton = page.locator('[data-testid="testbot-stop"]');
-      if (await stopButton.count()) {
-        await stopButton.click().catch(() => {});
+      const runButton = demoTarget.locator('[data-testid="testbot-run"]');
+      if (await runButton.count()) {
+        await runButton.click();
+        await wait(1200);
+        await screenshot(page, screenshotsDir, "02-test-bot-running");
+
+        const sessionLabel = demoTarget.locator(
+          'code[data-testid="testbot-session-id"]',
+        );
+        try {
+          await sessionLabel.waitFor({ timeout: 20_000 });
+          sessionId = (await sessionLabel.textContent())?.trim() || null;
+          await screenshot(page, screenshotsDir, "03-test-bot-session-created");
+        } catch (_) {
+          // ignore missing session
+        }
+
+        const stopButton = demoTarget.locator('[data-testid="testbot-stop"]');
+        if (await stopButton.count()) {
+          await stopButton.click().catch(() => {});
+        }
       }
-    }
 
-    await page.locator('[data-testid="nav-calibrate"]').click();
-    await page.waitForURL(/\/calibrate(?:$|\/)/, { timeout: 15_000 });
-    await page.waitForSelector(".calibrate-shell h1", { timeout: 10_000 });
-    await wait(800);
-    await screenshot(page, screenshotsDir, "04-calibrate");
+      await demoTarget.locator('[data-testid="nav-calibrate"]').click();
+      await demoTarget.waitForURL(/\/calibrate(?:$|\/)/, { timeout: 15_000 });
+      await demoTarget.waitForSelector(".calibrate-shell h1", {
+        timeout: 10_000,
+      });
+      await wait(800);
+      if (useIframeShell) {
+        try {
+          await page.evaluate(() => {
+            return (window as {
+              gambitDemo?: {
+                zoomTo?: (
+                  sel: string,
+                  opts?: Record<string, unknown>,
+                ) => unknown;
+              };
+            })
+              .gambitDemo?.zoomTo?.('[data-testid="nav-calibrate"]', {
+                padding: 120,
+                maxScale: 2.2,
+                durationMs: 800,
+              });
+          });
+          await wait(600);
+        } catch (error) {
+          console.warn("[gambit-demo] iframe zoom failed:", error);
+        }
+      }
+      await screenshot(page, screenshotsDir, "04-calibrate");
 
-    if (sessionId) {
-      await page.goto(
-        `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/debug`,
+      if (sessionId) {
+        await demoTarget.goto(
+          `${baseUrl}/sessions/${encodeURIComponent(sessionId)}/debug`,
+          {
+            waitUntil: "domcontentloaded",
+          },
+        );
+      } else {
+        await demoTarget.locator('[data-testid="nav-debug"]').click();
+      }
+      await demoTarget.waitForURL(/\/debug$/, { timeout: 15_000 });
+      await demoTarget.waitForSelector(
+        'textarea[data-testid="debug-message-input"]',
         {
-          waitUntil: "domcontentloaded",
+          timeout: 10_000,
         },
       );
-    } else {
-      await page.locator('[data-testid="nav-debug"]').click();
-    }
-    await page.waitForURL(/\/debug$/, { timeout: 15_000 });
-    await page.waitForSelector('textarea[data-testid="debug-message-input"]', {
-      timeout: 10_000,
-    });
-    await wait(500);
-    await screenshot(page, screenshotsDir, "05-debug");
+      await wait(500);
+      await screenshot(page, screenshotsDir, "05-debug");
 
-    const shouldInteract = (Deno.env.get("GAMBIT_DEMO_INTERACT_DEBUG") || "")
-      .toLowerCase().trim() === "true";
-    if (shouldInteract) {
-      try {
-        const debugInput = page.locator(
-          'textarea[data-testid="debug-message-input"]',
-        );
-        await debugInput.fill("Hello! Can you summarize what this deck does?");
-        await wait(300);
-        await page.locator('[data-testid="debug-send"]').click();
-        await wait(1200);
-        await screenshot(page, screenshotsDir, "06-debug-after-send");
-      } catch (error) {
-        console.warn("[gambit-demo] debug interaction failed:", error);
-        await screenshot(page, screenshotsDir, "06-debug-interaction-failed");
+      const shouldInteract = (Deno.env.get("GAMBIT_DEMO_INTERACT_DEBUG") || "")
+        .toLowerCase().trim() === "true";
+      if (shouldInteract) {
+        try {
+          const debugInput = demoTarget.locator(
+            'textarea[data-testid="debug-message-input"]',
+          );
+          await debugInput.fill(
+            "Hello! Can you summarize what this deck does?",
+          );
+          await wait(300);
+          await demoTarget.locator('[data-testid="debug-send"]').click();
+          await wait(1200);
+          await screenshot(page, screenshotsDir, "06-debug-after-send");
+        } catch (error) {
+          console.warn("[gambit-demo] debug interaction failed:", error);
+          await screenshot(page, screenshotsDir, "06-debug-interaction-failed");
+        }
       }
     }
 
-    if (shouldWaitForExit()) {
+    const durationMs = getDemoDurationMs();
+    const waitForExit = shouldWaitForExit();
+    if (durationMs) {
+      const seconds = Math.round(durationMs / 1000);
+      if (waitForExit) {
+        console.log(
+          `[gambit-demo] waiting ${seconds}s or press Enter to finish recording.`,
+        );
+        const buffer = new Uint8Array(1);
+        await Promise.race([wait(durationMs), Deno.stdin.read(buffer)]);
+      } else {
+        console.log(
+          `[gambit-demo] waiting ${seconds}s before finishing recording.`,
+        );
+        await wait(durationMs);
+      }
+    } else if (waitForExit) {
       console.log("[gambit-demo] waiting; press Enter to finish recording.");
       const buffer = new Uint8Array(1);
       await Deno.stdin.read(buffer);
