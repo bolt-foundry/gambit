@@ -44,6 +44,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        transform-origin: top left;
       }
       .browser-shell {
         position: relative;
@@ -180,12 +181,8 @@
         opacity: 0;
         pointer-events: none;
       }
-      .overlay-root.overlay-hidden .overlay-show-button {
-        opacity: 1;
-        pointer-events: auto;
-      }
       .overlay-panel {
-        pointer-events: auto;
+        pointer-events: none;
         position: absolute;
         top: 24px;
         right: 24px;
@@ -203,7 +200,7 @@
         transition: opacity 200ms ease;
       }
       .overlay-panel button {
-        pointer-events: auto;
+        pointer-events: none;
         cursor: pointer;
         background: #0ea5e9;
         border: none;
@@ -231,28 +228,6 @@
         font-size: 12px;
         transition: opacity 200ms ease;
       }
-      .overlay-show-button {
-        position: absolute;
-        bottom: 20px;
-        right: 20px;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.4);
-        background: rgba(15, 23, 42, 0.8);
-        color: #e2e8f0;
-        font-weight: 600;
-        padding: 8px 16px;
-        cursor: pointer;
-        pointer-events: auto;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        opacity: 0;
-        transition: opacity 200ms ease;
-      }
-      .overlay-show-button svg {
-        width: 16px;
-        height: 16px;
-      }
       .highlight-box {
         position: absolute;
         border: 2px solid #38bdf8;
@@ -262,6 +237,52 @@
       }
       .highlight-box.hidden {
         opacity: 0;
+      }
+      .demo-cursor {
+        position: absolute;
+        width: 26px;
+        height: 26px;
+        left: 0;
+        top: 0;
+        transform: translate3d(-9999px, -9999px, 0);
+        pointer-events: none;
+        z-index: 60;
+        opacity: 0;
+        transition: opacity 120ms ease;
+        filter: drop-shadow(0 6px 12px rgba(15, 23, 42, 0.35));
+      }
+      .demo-cursor.visible {
+        opacity: 1;
+      }
+      .demo-cursor svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .cursor-ring {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        border: 2px solid rgba(59, 130, 246, 0.8);
+        transform: translate(-50%, -50%) scale(0.6);
+        opacity: 0;
+        pointer-events: none;
+      }
+      .demo-cursor.clicking .cursor-ring {
+        animation: cursorClick 500ms ease-out;
+      }
+      @keyframes cursorClick {
+        0% {
+          transform: translate(-50%, -50%) scale(0.6);
+          opacity: 0.7;
+        }
+        100% {
+          transform: translate(-50%, -50%) scale(2.4);
+          opacity: 0;
+        }
       }
     </style>
   </head>
@@ -337,17 +358,19 @@
               </button>
             </div>
           </section>
-          <button id="overlay-show" type="button" class="overlay-show-button">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-            Show overlay
-          </button>
+        </div>
+        <div id="demo-cursor" class="demo-cursor" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M4 3.5l14 6.2c.9.4.9 1.7 0 2.1l-5.7 2.7-2.6 5.7c-.4.9-1.7.9-2.1 0L4 3.5z"
+              fill="#0f172a"
+            />
+            <path
+              d="M6.4 6.4l9.6 4.2-4.3 2-2 4.3-3.3-10.5z"
+              fill="#f8fafc"
+            />
+          </svg>
+          <div class="cursor-ring"></div>
         </div>
       </div>
     </div>
@@ -355,10 +378,11 @@
       const frame = document.getElementById("demo-frame");
       const highlight = document.getElementById("highlight");
       const overlayRoot = document.querySelector(".overlay-root");
+      const demoShell = document.querySelector(".demo-shell");
       const browserShell = document.querySelector(".browser-shell");
       const frameStage = document.querySelector(".frame-stage");
       const hideOverlayButton = document.getElementById("overlay-hide");
-      const showOverlayButton = document.getElementById("overlay-show");
+      const cursor = document.getElementById("demo-cursor");
       const zoomState = { x: 0, y: 0, scale: 1 };
       const audioState = {
         recorder: null,
@@ -379,9 +403,6 @@
 
       hideOverlayButton?.addEventListener("click", () => {
         overlayRoot?.classList.add("overlay-hidden");
-      });
-      showOverlayButton?.addEventListener("click", () => {
-        overlayRoot?.classList.remove("overlay-hidden");
       });
 
       const params = new URLSearchParams(window.location.search);
@@ -406,26 +427,90 @@
       if (addressBar) {
         addressBar.textContent = displayUrl;
       }
+      let activeDoc = null;
+      let cursorRaf = 0;
+      let pendingCursor = null;
+
+      function updateCursorPosition(pos) {
+        pendingCursor = pos;
+        if (cursorRaf) return;
+        cursorRaf = requestAnimationFrame(() => {
+          cursorRaf = 0;
+          if (!pendingCursor || !cursor) return;
+          cursor.style.transform =
+            `translate3d(${pendingCursor.x}px, ${pendingCursor.y}px, 0)`;
+          cursor.classList.add("visible");
+          pendingCursor = null;
+        });
+      }
+
+      function triggerCursorClick() {
+        if (!cursor) return;
+        cursor.classList.remove("clicking");
+        void cursor.offsetWidth;
+        cursor.classList.add("clicking");
+      }
+
+      function hideCursor() {
+        if (!cursor) return;
+        cursor.classList.remove("visible");
+      }
+
+      function wireCursorHandlers(doc) {
+        if (!doc) return null;
+        const onMove = (event) => {
+          if (!browserShell) return;
+          const frameRect = frame.getBoundingClientRect();
+          const shellRect = browserShell.getBoundingClientRect();
+          const x = frameRect.left - shellRect.left + event.clientX - 2;
+          const y = frameRect.top - shellRect.top + event.clientY - 2;
+          updateCursorPosition({ x, y });
+        };
+        const onLeave = () => hideCursor();
+        const onClick = () => triggerCursorClick();
+        doc.addEventListener("mousemove", onMove);
+        doc.addEventListener("mouseleave", onLeave);
+        doc.addEventListener("click", onClick);
+        return () => {
+          doc.removeEventListener("mousemove", onMove);
+          doc.removeEventListener("mouseleave", onLeave);
+          doc.removeEventListener("click", onClick);
+        };
+      }
+      frame.addEventListener("load", () => {
+        if (!addressBar) return;
+        const frameUrl = frame.contentWindow?.location?.href;
+        if (frameUrl) {
+          addressBar.textContent = frameUrl;
+        }
+        if (activeDoc?.cleanup) {
+          activeDoc.cleanup();
+        }
+        const doc = frame.contentDocument;
+        if (doc) {
+          activeDoc = { cleanup: wireCursorHandlers(doc) };
+        }
+      });
 
       const easeInOut = (t) =>
         t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
       function applyZoom() {
-        if (!frameStage) return;
-        frameStage.style.transform =
+        if (!demoShell) return;
+        demoShell.style.transform =
           `translate3d(${zoomState.x}px, ${zoomState.y}px, 0) scale(${zoomState.scale})`;
       }
 
       function animateZoom(target, duration = 700) {
         const start = { ...zoomState };
-        if (!frameStage?.animate) {
+        if (!demoShell?.animate) {
           zoomState.x = target.x;
           zoomState.y = target.y;
           zoomState.scale = target.scale;
           applyZoom();
           return Promise.resolve();
         }
-        const animation = frameStage.animate(
+        const animation = demoShell.animate(
           [
             {
               transform:
@@ -585,9 +670,11 @@
       function zoomToSelector(selector, opts = {}) {
         return withDemoDocument((doc) => {
           const rect = getTargetRect(doc, selector);
-          if (!rect || !frameStage) return;
-          const viewportWidth = frame.clientWidth;
-          const viewportHeight = frame.clientHeight;
+          if (!rect || !browserShell) return;
+          const viewportWidth = browserShell.clientWidth ||
+            frame.clientWidth;
+          const viewportHeight = browserShell.clientHeight ||
+            frame.clientHeight;
           const padding = Number.isFinite(opts.padding)
             ? opts.padding
             : 80;
