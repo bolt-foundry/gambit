@@ -8,15 +8,24 @@ import {
   type Page,
 } from "puppeteer-core";
 
+function getErrorMessage(err: unknown): string {
+  const message = (err as { message?: unknown })?.message;
+  const messageStr = typeof message === "string" ? message : "";
+  const stack = (err as { stack?: unknown })?.stack;
+  const stackStr = typeof stack === "string" ? stack : "";
+  const fallback = String(err);
+  return [messageStr, fallback, stackStr].filter(Boolean).join(" ");
+}
+
 function isIgnorableCloseError(err: unknown): boolean {
-  const msg = String((err as { message?: string })?.message ?? err);
+  const msg = getErrorMessage(err);
   return /Protocol error .*Target\.closeTarget|ConnectionClosedError|Connection closed/i
     .test(msg);
 }
 
 function isTransientActionError(err: unknown): boolean {
-  const msg = String((err as { message?: string })?.message ?? err);
-  return /detached|Target closed|Connection closed|Execution context was destroyed|Cannot find context|Frame was detached/i
+  const msg = getErrorMessage(err);
+  return /detached|Target closed|Connection closed|Execution context was destroyed|Cannot find context|Frame was detached|detached Frame|Attempted to use detached Frame/i
     .test(msg);
 }
 
@@ -378,16 +387,27 @@ class E2eTestContext {
     if (!this.page) throw new Error("context page not initialized");
     const quietMs = opts?.quietMs ?? 300;
     const timeoutMs = opts?.timeoutMs ?? 8_000;
-    await this.page.waitForFunction(
-      (pattern: string, flags: string) => {
-        const matcher = new RegExp(pattern, flags);
-        const href = new URL(location.href);
-        return matcher.test(href.pathname);
-      },
-      { timeout: timeoutMs },
-      re.source,
-      re.flags,
-    );
+    const attempt = async () => {
+      await this.page!.waitForFunction(
+        (pattern: string, flags: string) => {
+          const matcher = new RegExp(pattern, flags);
+          const href = new URL(location.href);
+          return matcher.test(href.pathname);
+        },
+        { timeout: timeoutMs },
+        re.source,
+        re.flags,
+      );
+    };
+    for (let tries = 0; tries < 3; tries += 1) {
+      try {
+        await attempt();
+        break;
+      } catch (err) {
+        if (!isTransientActionError(err) || tries === 2) throw err;
+        await wait(400);
+      }
+    }
     if (quietMs > 0) await wait(quietMs);
   }
 
@@ -412,12 +432,14 @@ class E2eTestContext {
       }, selector);
       if (!ok) throw new Error(`Selector ${selector} not found for click`);
     };
-    try {
-      await attempt();
-    } catch (err) {
-      if (!isTransientActionError(err)) throw err;
-      await wait(400);
-      await attempt();
+    for (let tries = 0; tries < 3; tries += 1) {
+      try {
+        await attempt();
+        return;
+      } catch (err) {
+        if (!isTransientActionError(err) || tries === 2) throw err;
+        await wait(400);
+      }
     }
   }
 
@@ -443,12 +465,14 @@ class E2eTestContext {
       }
       await this.page!.type(selector, text);
     };
-    try {
-      await attempt();
-    } catch (err) {
-      if (!isTransientActionError(err)) throw err;
-      await wait(400);
-      await attempt();
+    for (let tries = 0; tries < 3; tries += 1) {
+      try {
+        await attempt();
+        return;
+      } catch (err) {
+        if (!isTransientActionError(err) || tries === 2) throw err;
+        await wait(400);
+      }
     }
   }
 

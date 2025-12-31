@@ -2521,6 +2521,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
         <div className="composer-inputs">
           <textarea
             className="message-input"
+            data-testid="debug-message-input"
             placeholder={schema && initEditable
               ? "Optional first message (init will be sent too)"
               : "Optional message (assistant can start)"}
@@ -2609,6 +2610,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
             type="button"
             onClick={handleSend}
             disabled={schema && initEditable && !canStartWithInit}
+            data-testid="debug-send"
           >
             {schema && initEditable ? "Start chat" : "Send"}
           </button>
@@ -3051,6 +3053,7 @@ function CalibrateApp() {
                     <label style={{ fontWeight: 600 }}>
                       Session
                       <select
+                        data-testid="calibrate-session-select"
                         value={selectedSessionId ?? ""}
                         onChange={(e) =>
                           setSelectedSessionId(
@@ -3078,6 +3081,7 @@ function CalibrateApp() {
                     <label style={{ fontWeight: 600 }}>
                       Grader
                       <select
+                        data-testid="calibrate-grader-select"
                         value={selectedGraderId ?? ""}
                         onChange={(e) =>
                           setSelectedGraderId(
@@ -4442,6 +4446,7 @@ function TestBotApp(props: {
           )}
           <strong>Initial user message (optional)</strong>
           <textarea
+            data-testid="testbot-initial-message"
             value={initialUserMessage}
             onChange={(e) => setInitialUserMessage(e.target.value)}
             style={{
@@ -4473,6 +4478,7 @@ function TestBotApp(props: {
               className="primary"
               onClick={startRun}
               disabled={!canStart}
+              data-testid="testbot-run"
             >
               Run test bot
             </button>
@@ -4481,6 +4487,7 @@ function TestBotApp(props: {
               className="ghost-btn"
               onClick={stopRun}
               disabled={run.status !== "running"}
+              data-testid="testbot-stop"
             >
               Stop
             </button>
@@ -4495,7 +4502,8 @@ function TestBotApp(props: {
           {run.error && <div className="error">{run.error}</div>}
           {run.sessionId && (
             <div className="editor-status">
-              Session: <code>{run.sessionId}</code>
+              Session:{" "}
+              <code data-testid="testbot-session-id">{run.sessionId}</code>
             </div>
           )}
           {run.sessionId && (
@@ -4826,6 +4834,7 @@ function App() {
               type="button"
               className={currentPage === "test-bot" ? "active" : ""}
               onClick={() => navigate(testBotPath)}
+              data-testid="nav-test-bot"
             >
               Test Bot
             </button>
@@ -4833,6 +4842,7 @@ function App() {
               type="button"
               className={currentPage === "debug" ? "active" : ""}
               onClick={() => navigate(debugPath)}
+              data-testid="nav-debug"
             >
               Debug
             </button>
@@ -4840,6 +4850,7 @@ function App() {
               type="button"
               className={currentPage === "calibrate" ? "active" : ""}
               onClick={() => navigate(calibratePath)}
+              data-testid="nav-calibrate"
             >
               Calibrate
             </button>
