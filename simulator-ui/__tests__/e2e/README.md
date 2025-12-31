@@ -13,6 +13,40 @@ From `packages/gambit`:
 deno task e2e
 ```
 
+## Demo Video Runner (Playwright)
+
+The demo runner records a full Gambit UI walkthrough (Test Bot → Calibrate →
+Debug) as a video artifact. It uses Playwright Core with a nix-managed browser.
+
+From `packages/gambit`:
+
+```bash
+GAMBIT_PLAYWRIGHT_EXECUTABLE_PATH=/path/to/chromium \
+  deno task demo:ui-video
+```
+
+Artifacts are written under `../shared/bft-e2e/gambit-ui-demo/__latest__/`
+(including `video.mp4`).
+
+Optional env vars:
+
+- `GAMBIT_E2E_SHOW_BROWSER=true` to run headed.
+- `GAMBIT_E2E_RECORD_VIDEO=false` to skip video output.
+- `GAMBIT_DEMO_INTERACT_DEBUG=true` to send a debug message (can be flaky).
+- `GAMBIT_DEMO_WAIT=true` to keep the browser open and keep recording until you
+  press Enter.
+- `GAMBIT_USE_HOST_BRIDGE=true` to run Chrome on the host via codebot
+  host-bridge.
+- `GAMBIT_HOST_BRIDGE_URL=https://host.boltfoundry.bflocal:8017` to override the
+  host-bridge URL.
+- `GAMBIT_HOST_BRIDGE_PORT=9222` to request a specific remote-debugging port on
+  the host.
+- `GAMBIT_DEMO_BASE_URL=https://<workspace-id>.boltfoundry.bflocal` to override
+  the base URL for host-driven runs (defaults to
+  `https://$WORKSPACE_ID.boltfoundry.bflocal`).
+- `GAMBIT_DEMO_PORT=8000` to override the simulator port (defaults to 8000 when
+  using host bridge).
+
 ## Logs + Artifacts
 
 Artifacts are written under `../shared/bft-e2e/<test-slug>/__latest__/`:
