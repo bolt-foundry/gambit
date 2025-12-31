@@ -34,14 +34,27 @@ Optional env vars:
 - `GAMBIT_E2E_RECORD_VIDEO=false` to skip video output.
 - `GAMBIT_DEMO_INTERACT_DEBUG=true` to send a debug message (can be flaky).
 - `GAMBIT_DEMO_DURATION_SECONDS=300` to keep recording for a fixed duration.
-- Default demo viewport is 1920x1080.
+- Default demo viewport follows the browser window size unless overridden.
 - `GAMBIT_DEMO_VIEWPORT=1920x1080` to override the browser viewport (also sets
   the demo shell size unless `shell=` or `content=` is provided).
-- Default iframe content size for the shell is 1280x720.
 - `GAMBIT_DEMO_CONTENT=1280x720` to override the iframe content size (the shell
   adds chrome height unless `content=` is provided).
-- `GAMBIT_DEMO_FPS=60` to request a CDP screencast frame rate (host/browser may
-  clamp lower).
+- `GAMBIT_DEMO_FPS=60` to request the CDP capture frame rate (default: 60).
+- `GAMBIT_DEMO_OUTPUT_FPS=60` to override the muxed output FPS (defaults to the
+  input FPS).
+- `GAMBIT_DEMO_OUTPUT_FPS=30` to set the muxed MP4 frame rate (default: 30).
+- `GAMBIT_DEMO_INTERPOLATE=mc` to enable motion-compensated frame interpolation
+  during muxing. Leave unset for default (no interpolation).
+- `GAMBIT_DEMO_RECORD_AUDIO=1` to record tab audio (iframe shell only).
+- `GAMBIT_DEMO_RECORD_MIC=1` to record mic audio (iframe shell only).
+- `GAMBIT_DEMO_TRIM_AUDIO_DELAY=1` to trim the leading delay before audio starts
+  (writes `video-trimmed.mp4`, `audio-trimmed.webm`, and
+  `video-with-audio-trimmed.mp4` when possible).
+- `GAMBIT_DEMO_MEDIARECORDER=1` to capture video via MediaRecorder instead of
+  CDP screencast (iframe shell only, writes `mediarecorder.webm`).
+- `GAMBIT_DEMO_MEDIARECORDER_CHUNK_MS=1000` to control MediaRecorder chunking.
+- `GAMBIT_DEMO_MEDIARECORDER_TITLE="Gambit Demo Harness"` to set the tab title
+  used by auto tab capture.
 - When using `/demo/iframe-shell`, the demo runner now drives selectors inside
   the iframe automatically (leave `GAMBIT_DEMO_SKIP_AUTOMATION` unset to run).
 - `GAMBIT_DEMO_WAIT=true` to keep the browser open and keep recording until you
@@ -68,6 +81,7 @@ Artifacts are written under `../shared/bft-e2e/<test-slug>/__latest__/`:
 - `screenshots/`: PNG screenshots
 - `frames/`: PNG frames used to build `video.mp4`
 - `video.mp4`: ffmpeg output (when available)
+- `mediarecorder.webm`: MediaRecorder capture output (when enabled)
 
 Tail logs live:
 

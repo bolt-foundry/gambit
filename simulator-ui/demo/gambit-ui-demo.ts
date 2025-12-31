@@ -52,10 +52,66 @@ function decodeBase64(data: string): Uint8Array {
   return bytes;
 }
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await Deno.stat(filePath);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}
+
 function shouldRecordVideo(): boolean {
   const raw = (Deno.env.get("GAMBIT_E2E_RECORD_VIDEO") || "")
     .toLowerCase()
     .trim();
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  return true;
+}
+
+function shouldUseMediaRecorder(): boolean {
+  const raw = (Deno.env.get("GAMBIT_DEMO_MEDIARECORDER") || "")
+    .toLowerCase()
+    .trim();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+
+function getMediaRecorderChunkMs(): number {
+  const raw = Deno.env.get("GAMBIT_DEMO_MEDIARECORDER_CHUNK_MS");
+  if (!raw) return 1000;
+  const parsed = Number(raw);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  console.warn(
+    `[gambit-demo] invalid GAMBIT_DEMO_MEDIARECORDER_CHUNK_MS: ${raw}`,
+  );
+  return 1000;
+}
+
+function getMediaRecorderTitle(): string {
+  return Deno.env.get("GAMBIT_DEMO_MEDIARECORDER_TITLE") ||
+    "Gambit Demo Harness";
+}
+
+function shouldRecordAudio(): boolean {
+  const raw = (Deno.env.get("GAMBIT_DEMO_RECORD_AUDIO") || "")
+    .toLowerCase()
+    .trim();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+
+function shouldRecordMic(): boolean {
+  const raw = (Deno.env.get("GAMBIT_DEMO_RECORD_MIC") || "")
+    .toLowerCase()
+    .trim();
+  return raw === "true" || raw === "1" || raw === "yes";
+}
+
+function shouldTrimAudioDelay(recordAnyAudio: boolean): boolean {
+  const raw = (Deno.env.get("GAMBIT_DEMO_TRIM_AUDIO_DELAY") || "")
+    .toLowerCase()
+    .trim();
+  if (!raw) return recordAnyAudio;
   if (raw === "false" || raw === "0" || raw === "no") return false;
   return true;
 }
@@ -142,11 +198,11 @@ function parseViewport(raw: string): ViewportSize | null {
 
 function getDemoViewport(): ViewportSize | null {
   const raw = Deno.env.get("GAMBIT_DEMO_VIEWPORT");
-  if (!raw) return { width: 1920, height: 1080 };
+  if (!raw) return null;
   const parsed = parseViewport(raw);
   if (!parsed) {
     console.warn(`[gambit-demo] invalid GAMBIT_DEMO_VIEWPORT: ${raw}`);
-    return { width: 1920, height: 1080 };
+    return null;
   }
   return parsed;
 }
@@ -165,9 +221,6 @@ function getDemoContentSize(): ViewportSize | null {
 function getEffectiveDemoContentSize(demoPath: string): ViewportSize | null {
   const explicit = getDemoContentSize();
   if (explicit) return explicit;
-  if (demoPath.includes("iframe-shell")) {
-    return { width: 1280, height: 720 };
-  }
   return null;
 }
 
@@ -184,15 +237,37 @@ function getDemoDurationMs(): number | null {
   return Math.round(value * 1000);
 }
 
-function getDemoFrameRate(): number | null {
+function getDemoFrameRate(): number {
   const raw = Deno.env.get("GAMBIT_DEMO_FPS");
-  if (!raw) return null;
+  if (!raw) return 60;
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) {
     console.warn(`[gambit-demo] invalid GAMBIT_DEMO_FPS: ${raw}`);
-    return null;
+    return 60;
   }
   return Math.round(value);
+}
+
+function getDemoOutputFrameRate(inputFrameRate: number): number {
+  const raw = Deno.env.get("GAMBIT_DEMO_OUTPUT_FPS");
+  if (!raw) return inputFrameRate;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    console.warn(`[gambit-demo] invalid GAMBIT_DEMO_OUTPUT_FPS: ${raw}`);
+    return inputFrameRate;
+  }
+  return Math.round(value);
+}
+
+function getDemoInterpolationMode(): "mc" | "blend" | null {
+  const raw = (Deno.env.get("GAMBIT_DEMO_INTERPOLATE") || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return null;
+  if (raw === "mc" || raw === "motion") return "mc";
+  if (raw === "blend") return "blend";
+  console.warn(`[gambit-demo] invalid GAMBIT_DEMO_INTERPOLATE: ${raw}`);
+  return null;
 }
 
 function getDemoPath(): string {
@@ -504,6 +579,10 @@ async function stopServer(server: {
 async function startHostBridgeChrome(opts: {
   headless: boolean;
   viewport?: ViewportSize | null;
+  muteAudio?: boolean;
+  autoGrantMedia?: boolean;
+  allowScreenCapture?: boolean;
+  autoSelectTabCaptureSourceByTitle?: string | null;
 }): Promise<string> {
   const baseUrl = getHostBridgeUrl();
   const payload: Record<string, unknown> = {
@@ -512,6 +591,19 @@ async function startHostBridgeChrome(opts: {
   if (opts.viewport) {
     payload.windowWidth = opts.viewport.width;
     payload.windowHeight = opts.viewport.height;
+  }
+  if (typeof opts.muteAudio === "boolean") {
+    payload.muteAudio = opts.muteAudio;
+  }
+  if (opts.autoGrantMedia) {
+    payload.autoGrantMedia = true;
+  }
+  if (opts.allowScreenCapture) {
+    payload.allowScreenCapture = true;
+  }
+  if (opts.autoSelectTabCaptureSourceByTitle) {
+    payload.autoSelectTabCaptureSourceByTitle =
+      opts.autoSelectTabCaptureSourceByTitle;
   }
   const portRaw = Deno.env.get("GAMBIT_HOST_BRIDGE_PORT");
   if (portRaw) {
@@ -555,9 +647,17 @@ async function screenshot(
   return filePath;
 }
 
+async function appendIndexLine(rootDir: string, line: string) {
+  await Deno.writeTextFile(path.join(rootDir, "index.txt"), line + "\n", {
+    append: true,
+  }).catch(() => {});
+}
+
 async function exportVideo(
   framesDir: string,
   latestDir: string,
+  frameRate?: number | null,
+  interpolate?: "mc" | "blend" | null,
 ): Promise<void> {
   let hasFrames = false;
   try {
@@ -573,17 +673,29 @@ async function exportVideo(
   if (!hasFrames) return;
   const mp4Path = path.join(latestDir, "video.mp4");
   try {
+    const fps = frameRate && frameRate > 0 ? Math.round(frameRate) : 30;
+    const filters: Array<string> = [];
+    if (interpolate === "mc") {
+      filters.push(
+        `minterpolate=fps=${fps}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir`,
+      );
+    } else if (interpolate === "blend") {
+      filters.push("tblend=all_mode=average");
+    }
+    filters.push("scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p");
     const command = new Deno.Command("ffmpeg", {
       args: [
         "-y",
         "-loglevel",
         "error",
         "-framerate",
-        "30",
+        String(fps),
         "-i",
         "frame-%06d.png",
+        "-r",
+        String(fps),
         "-vf",
-        "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+        filters.join(","),
         "../video.mp4",
       ],
       cwd: framesDir,
@@ -600,6 +712,107 @@ async function exportVideo(
       console.warn("[gambit-demo] ffmpeg not found; keeping frame PNGs");
     } else {
       console.warn("[gambit-demo] ffmpeg failed:", error);
+    }
+  }
+}
+
+async function trimMediaForAudioDelay(opts: {
+  latestDir: string;
+  trimMs: number;
+  audioPath?: string | null;
+}): Promise<void> {
+  const { latestDir, trimMs, audioPath } = opts;
+  const trimSeconds = (trimMs / 1000).toFixed(3);
+  const videoPath = path.join(latestDir, "video.mp4");
+  const trimmedVideoPath = path.join(latestDir, "video-trimmed.mp4");
+  const hasVideo = await fileExists(videoPath);
+  if (!hasVideo) return;
+
+  try {
+    const args = [
+      "-y",
+      "-ss",
+      trimSeconds,
+      "-i",
+      videoPath,
+      "-c:v",
+      "copy",
+      "-an",
+      trimmedVideoPath,
+    ];
+    const { code, stderr } = await new Deno.Command("ffmpeg", {
+      args,
+      stdout: "null",
+      stderr: "piped",
+    }).output();
+    if (code !== 0) {
+      const message = new TextDecoder().decode(stderr).trim();
+      console.warn("[gambit-demo] video trim failed:", message || code);
+      return;
+    }
+  } catch (error) {
+    console.warn("[gambit-demo] video trim failed:", error);
+    return;
+  }
+
+  let trimmedAudioPath: string | null = null;
+  if (audioPath && await fileExists(audioPath)) {
+    const ext = path.extname(audioPath) || ".webm";
+    trimmedAudioPath = path.join(latestDir, `audio-trimmed${ext}`);
+    try {
+      const args = [
+        "-y",
+        "-ss",
+        trimSeconds,
+        "-i",
+        audioPath,
+        "-c:a",
+        "copy",
+        trimmedAudioPath,
+      ];
+      const { code, stderr } = await new Deno.Command("ffmpeg", {
+        args,
+        stdout: "null",
+        stderr: "piped",
+      }).output();
+      if (code !== 0) {
+        const message = new TextDecoder().decode(stderr).trim();
+        console.warn("[gambit-demo] audio trim failed:", message || code);
+        trimmedAudioPath = null;
+      }
+    } catch (error) {
+      console.warn("[gambit-demo] audio trim failed:", error);
+      trimmedAudioPath = null;
+    }
+  }
+
+  if (trimmedAudioPath) {
+    const muxedPath = path.join(latestDir, "video-with-audio-trimmed.mp4");
+    try {
+      const args = [
+        "-y",
+        "-i",
+        trimmedVideoPath,
+        "-i",
+        trimmedAudioPath,
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-shortest",
+        muxedPath,
+      ];
+      const { code, stderr } = await new Deno.Command("ffmpeg", {
+        args,
+        stdout: "null",
+        stderr: "piped",
+      }).output();
+      if (code !== 0) {
+        const message = new TextDecoder().decode(stderr).trim();
+        console.warn("[gambit-demo] trimmed mux failed:", message || code);
+      }
+    } catch (error) {
+      console.warn("[gambit-demo] trimmed mux failed:", error);
     }
   }
 }
@@ -624,14 +837,23 @@ async function main(): Promise<void> {
 
   const headless = (Deno.env.get("GAMBIT_E2E_SHOW_BROWSER") || "") !== "true";
   const recordVideo = shouldRecordVideo();
+  const recordAudio = shouldRecordAudio();
+  const recordMic = shouldRecordMic();
+  const recordAnyAudio = recordAudio || recordMic;
+  const trimAudioDelay = shouldTrimAudioDelay(recordAnyAudio);
   const executablePath = getExecutablePath();
   const epochMs = Date.now();
   const hostBridge = useHostBridge();
   const demoPort = getDemoPort(hostBridge);
-  const demoViewport = getDemoViewport();
+  const requestedViewport = getDemoViewport();
   const demoPath = getDemoPath();
   const demoContent = getEffectiveDemoContentSize(demoPath);
   const demoFrameRate = getDemoFrameRate();
+  const demoOutputFrameRate = getDemoOutputFrameRate(demoFrameRate);
+  const demoInterpolation = getDemoInterpolationMode();
+  const demoChunkMs = getMediaRecorderChunkMs();
+  const useMediaRecorder = shouldUseMediaRecorder();
+  const mediaRecorderTitle = getMediaRecorderTitle();
   const useIframeShell = demoPath.includes("iframe-shell");
   if (hostBridge && demoPort === 8000) {
     await stopBoltfoundryDevServer();
@@ -640,23 +862,6 @@ async function main(): Promise<void> {
     await stopHostBridgeChrome();
   }
   const skipAutomation = shouldSkipAutomation();
-
-  const index = [
-    `test_name: gambit-ui-demo`,
-    `slug: ${slug}`,
-    `epoch_ms: ${epochMs}`,
-    `headless: ${String(headless)}`,
-    `executable_path: ${String(executablePath ?? "auto")}`,
-    `viewport: ${
-      demoViewport ? `${demoViewport.width}x${demoViewport.height}` : "auto"
-    }`,
-    `content: ${
-      demoContent ? `${demoContent.width}x${demoContent.height}` : "auto"
-    }`,
-    `fps: ${demoFrameRate ?? "auto"}`,
-    `base_dir: ${latestDir}`,
-  ].join("\n");
-  await Deno.writeTextFile(path.join(latestDir, "index.txt"), index + "\n");
 
   const server = await startServer({
     logsDir,
@@ -671,49 +876,105 @@ async function main(): Promise<void> {
   let pendingFrameWrites: Set<Promise<void>> = new Set();
   let frameSeq = 0;
   let videoRecordingActive = false;
+  let videoStartMs: number | null = null;
+  let audioStartMs: number | null = null;
+  let audioDelayMs: number | null = null;
+  let audioFilePath: string | null = null;
+  let mediaRecorderActive = false;
+  let mediaRecorderPath: string | null = null;
+  let mediaRecorderMimeType: string | null = null;
+  let mediaRecorderBytes = 0;
+  let mediaRecorderChunks = 0;
 
   try {
     const fallbackViewport = { width: 1920, height: 1080 };
-    const viewport = demoViewport ?? fallbackViewport;
+    const viewport = requestedViewport ?? null;
 
     if (hostBridge) {
       const wsEndpoint = await startHostBridgeChrome({
         headless,
         viewport,
+        muteAudio: !recordAnyAudio,
+        autoGrantMedia: recordAnyAudio || useMediaRecorder,
+        allowScreenCapture: recordAudio || useMediaRecorder,
+        autoSelectTabCaptureSourceByTitle: useMediaRecorder
+          ? mediaRecorderTitle
+          : null,
       });
       console.log("[gambit-demo] host bridge ws:", wsEndpoint);
       browser = await chromium.connectOverCDP(wsEndpoint);
     } else {
+      const args = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+      ];
+      if (viewport) {
+        args.push(`--window-size=${viewport.width},${viewport.height}`);
+      }
+      if (recordAnyAudio || useMediaRecorder) {
+        args.push(
+          "--autoplay-policy=no-user-gesture-required",
+          "--use-fake-ui-for-media-stream",
+          "--enable-usermedia-screen-capturing",
+        );
+      }
+      if (useMediaRecorder && mediaRecorderTitle) {
+        args.push(
+          `--auto-select-tab-capture-source-by-title=${mediaRecorderTitle}`,
+        );
+      }
       browser = await chromium.launch({
         headless,
         executablePath,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-          `--window-size=${viewport.width},${viewport.height}`,
-        ],
+        args,
       });
     }
 
     const existingContexts = browser.contexts();
     const ctx = existingContexts[0] ||
-      await browser.newContext({ viewport });
+      await browser.newContext(
+        requestedViewport ? { viewport: requestedViewport } : {},
+      );
     context = ctx;
 
     const existingPages = ctx.pages();
     const pg = existingPages[0] || await ctx.newPage();
     page = pg;
-    if (demoViewport) {
+    if (requestedViewport) {
       try {
-        await pg.setViewportSize(demoViewport);
+        await pg.setViewportSize(requestedViewport);
       } catch (error) {
         console.warn("[gambit-demo] failed to set viewport size:", error);
       }
     }
+    const resolvedViewport = requestedViewport ?? pg.viewportSize() ??
+      fallbackViewport;
+    const index = [
+      `test_name: gambit-ui-demo`,
+      `slug: ${slug}`,
+      `epoch_ms: ${epochMs}`,
+      `headless: ${String(headless)}`,
+      `executable_path: ${String(executablePath ?? "auto")}`,
+      `viewport: ${resolvedViewport.width}x${resolvedViewport.height}`,
+      `content: ${
+        demoContent ? `${demoContent.width}x${demoContent.height}` : "auto"
+      }`,
+      `capture: ${useMediaRecorder ? "mediarecorder" : "cdp"}`,
+      `mediarecorder_chunk_ms: ${useMediaRecorder ? demoChunkMs : "n/a"}`,
+      `fps: ${demoFrameRate}`,
+      `output_fps: ${demoOutputFrameRate}`,
+      `interpolate: ${demoInterpolation ?? "off"}`,
+      `audio: ${
+        recordAnyAudio ? `tab=${recordAudio} mic=${recordMic}` : "off"
+      }`,
+      `trim_audio_delay: ${recordAnyAudio ? String(trimAudioDelay) : "n/a"}`,
+      `base_dir: ${latestDir}`,
+    ].join("\n");
+    await Deno.writeTextFile(path.join(latestDir, "index.txt"), index + "\n");
 
-    if (recordVideo) {
+    if (recordVideo && !useMediaRecorder) {
       videoSession = await ctx.newCDPSession(pg);
       await videoSession.send("Page.enable");
       videoRecordingActive = true;
@@ -758,9 +1019,8 @@ async function main(): Promise<void> {
         everyNthFrame: 1,
         quality: 80,
       };
-      if (demoFrameRate) {
-        screencastOptions.maxFrameRate = demoFrameRate;
-      }
+      screencastOptions.maxFrameRate = demoFrameRate;
+      videoStartMs = Date.now();
       await videoSession.send("Page.startScreencast", screencastOptions);
     }
 
@@ -786,11 +1046,167 @@ async function main(): Promise<void> {
 
     const hostBaseUrl = getDemoBaseUrl(hostBridge);
     const baseUrl = hostBaseUrl ?? server.baseUrl;
-    const demoQuery = buildDemoQuery(baseUrl, demoViewport, demoContent);
+    if (recordMic) {
+      try {
+        await context.grantPermissions(["microphone"], { origin: baseUrl });
+      } catch (error) {
+        console.warn("[gambit-demo] failed to grant mic permission:", error);
+      }
+    }
+    const demoQuery = buildDemoQuery(baseUrl, resolvedViewport, demoContent);
     const initialUrl = buildDemoUrl(baseUrl, demoPath, demoQuery);
     let sessionId: string | null = null;
 
     await page.goto(initialUrl, { waitUntil: "domcontentloaded" });
+    const mediaRecorderIncludesAudio = useMediaRecorder &&
+      (recordAudio || recordMic);
+    if (recordVideo && useMediaRecorder) {
+      if (!useIframeShell) {
+        console.warn(
+          "[gambit-demo] media recorder capture requires iframe-shell demo path.",
+        );
+      } else {
+        mediaRecorderPath = path.join(latestDir, "mediarecorder.webm");
+        await Deno.writeFile(mediaRecorderPath, new Uint8Array());
+        await page.exposeFunction(
+          "gambitMediaRecorderChunk",
+          async (
+            payload: { base64?: string; mimeType?: string; size?: number },
+          ) => {
+            if (!payload?.base64 || !mediaRecorderPath) return;
+            const bytes = decodeBase64(payload.base64);
+            await Deno.writeFile(mediaRecorderPath, bytes, { append: true });
+            mediaRecorderMimeType = payload.mimeType || mediaRecorderMimeType;
+            mediaRecorderBytes += payload.size ?? bytes.length;
+            mediaRecorderChunks += 1;
+          },
+        );
+        await page.exposeFunction(
+          "gambitMediaRecorderStop",
+          async (payload: { mimeType?: string; size?: number }) => {
+            if (payload?.mimeType) {
+              mediaRecorderMimeType = payload.mimeType;
+            }
+            if (payload?.size) {
+              mediaRecorderBytes = Math.max(mediaRecorderBytes, payload.size);
+            }
+          },
+        );
+        try {
+          await page.evaluate(
+            ({ chunkMs, frameRate, includeAudio, includeMic }) => {
+              const demo = (window as {
+                gambitDemo?: {
+                  video?: {
+                    startRecording?: (opts: {
+                      chunkMs?: number;
+                      frameRate?: number;
+                      includeAudio?: boolean;
+                      includeMic?: boolean;
+                    }) => Promise<void> | void;
+                    ondata?: (payload: {
+                      base64?: string;
+                      mimeType?: string;
+                      size?: number;
+                    }) => void;
+                    onstop?: (payload: {
+                      mimeType?: string;
+                      size?: number;
+                    }) => void;
+                  };
+                };
+                gambitMediaRecorderChunk?: (
+                  payload: {
+                    base64?: string;
+                    mimeType?: string;
+                    size?: number;
+                  },
+                ) => void;
+                gambitMediaRecorderStop?: (
+                  payload: { mimeType?: string; size?: number },
+                ) => void;
+              }).gambitDemo?.video;
+              if (!demo?.startRecording) {
+                throw new Error("media recorder API unavailable");
+              }
+              demo.ondata = (payload) =>
+                (window as {
+                  gambitMediaRecorderChunk?: (
+                    payload: {
+                      base64?: string;
+                      mimeType?: string;
+                      size?: number;
+                    },
+                  ) => void;
+                }).gambitMediaRecorderChunk?.(payload);
+              demo.onstop = (payload) =>
+                (window as {
+                  gambitMediaRecorderStop?: (
+                    payload: { mimeType?: string; size?: number },
+                  ) => void;
+                }).gambitMediaRecorderStop?.(payload);
+              demo.startRecording({
+                chunkMs,
+                frameRate,
+                includeAudio,
+                includeMic,
+              });
+            },
+            {
+              chunkMs: demoChunkMs,
+              frameRate: demoFrameRate,
+              includeAudio: recordAudio,
+              includeMic: recordMic,
+            },
+          );
+          mediaRecorderActive = true;
+          videoStartMs = Date.now();
+        } catch (error) {
+          console.warn(
+            "[gambit-demo] media recorder capture start failed:",
+            error,
+          );
+        }
+      }
+    }
+    if (recordAnyAudio && useIframeShell && !mediaRecorderIncludesAudio) {
+      try {
+        const startRequestMs = Date.now();
+        await page.evaluate(
+          ({ recordTab, recordMic }) => {
+            return (window as {
+              gambitDemo?: {
+                audio?: {
+                  startRecording?: (
+                    opts: { includeTabAudio?: boolean; includeMic?: boolean },
+                  ) => Promise<void> | void;
+                };
+              };
+            }).gambitDemo?.audio?.startRecording?.({
+              includeTabAudio: recordTab,
+              includeMic: recordMic,
+            });
+          },
+          { recordTab: recordAudio, recordMic },
+        );
+        audioStartMs = Date.now();
+        if (videoStartMs !== null) {
+          audioDelayMs = Math.max(0, audioStartMs - videoStartMs);
+        } else {
+          audioDelayMs = Math.max(0, audioStartMs - startRequestMs);
+        }
+        await appendIndexLine(
+          latestDir,
+          `audio_delay_ms: ${audioDelayMs}`,
+        );
+      } catch (error) {
+        console.warn("[gambit-demo] audio recording start failed:", error);
+      }
+    } else if (recordAnyAudio && !useIframeShell) {
+      console.warn(
+        "[gambit-demo] audio recording requires iframe-shell demo path.",
+      );
+    }
     const demoTarget = await getDemoTarget(page, useIframeShell);
     await demoTarget.waitForSelector(".top-nav", { timeout: 30_000 })
       .catch(() => {});
@@ -927,6 +1343,35 @@ async function main(): Promise<void> {
       await Deno.stdin.read(buffer);
     }
   } finally {
+    if (recordAnyAudio && useIframeShell && page) {
+      try {
+        const result = await page.evaluate(() => {
+          return (window as {
+            gambitDemo?: {
+              audio?: {
+                stopRecording?: () =>
+                  | Promise<
+                    { base64: string; mimeType?: string } | null
+                  >
+                  | { base64: string; mimeType?: string }
+                  | null;
+              };
+            };
+          }).gambitDemo?.audio?.stopRecording?.();
+        });
+        if (result?.base64) {
+          const bytes = decodeBase64(result.base64);
+          const mimeType = result.mimeType || "audio/webm";
+          const ext = mimeType.includes("ogg") ? "ogg" : "webm";
+          const audioPath = path.join(latestDir, `audio.${ext}`);
+          await Deno.writeFile(audioPath, bytes);
+          audioFilePath = audioPath;
+        }
+      } catch (error) {
+        console.warn("[gambit-demo] audio recording stop failed:", error);
+      }
+    }
+
     if (recordVideo && videoSession) {
       try {
         videoRecordingActive = false;
@@ -945,7 +1390,72 @@ async function main(): Promise<void> {
       const pending = [...pendingFrameWrites];
       pendingFrameWrites.clear();
       await Promise.allSettled(pending);
-      await exportVideo(framesDir, latestDir);
+      await exportVideo(
+        framesDir,
+        latestDir,
+        demoOutputFrameRate,
+        demoInterpolation,
+      );
+    }
+    if (recordVideo && mediaRecorderActive && page && useIframeShell) {
+      try {
+        const result = await page.evaluate(() => {
+          return (window as {
+            gambitDemo?: {
+              video?: {
+                stopRecording?: () =>
+                  | Promise<{ base64?: string; mimeType?: string } | null>
+                  | { base64?: string; mimeType?: string }
+                  | null;
+              };
+            };
+          }).gambitDemo?.video?.stopRecording?.();
+        });
+        if (result?.base64 && mediaRecorderPath) {
+          const bytes = decodeBase64(result.base64);
+          await Deno.writeFile(mediaRecorderPath, bytes, { append: true });
+          mediaRecorderMimeType = result.mimeType || mediaRecorderMimeType;
+          mediaRecorderBytes += bytes.length;
+          mediaRecorderChunks += 1;
+        }
+      } catch (error) {
+        console.warn(
+          "[gambit-demo] media recorder capture stop failed:",
+          error,
+        );
+      }
+      if (mediaRecorderPath) {
+        await appendIndexLine(
+          latestDir,
+          `mediarecorder_path: ${mediaRecorderPath}`,
+        );
+        await appendIndexLine(
+          latestDir,
+          `mediarecorder_mime: ${mediaRecorderMimeType ?? "unknown"}`,
+        );
+        await appendIndexLine(
+          latestDir,
+          `mediarecorder_bytes: ${mediaRecorderBytes}`,
+        );
+        await appendIndexLine(
+          latestDir,
+          `mediarecorder_chunks: ${mediaRecorderChunks}`,
+        );
+      }
+    }
+
+    if (
+      recordAnyAudio &&
+      recordVideo &&
+      trimAudioDelay &&
+      audioDelayMs &&
+      audioDelayMs > 0
+    ) {
+      await trimMediaForAudioDelay({
+        latestDir,
+        trimMs: audioDelayMs,
+        audioPath: audioFilePath,
+      });
     }
 
     try {
