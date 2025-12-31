@@ -32,6 +32,13 @@ const simulatorBundleSourceMapPath = path.resolve(
   "dist",
   "bundle.js.map",
 );
+const demoIframeShellPath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "demo",
+  "iframe-shell.html",
+);
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
 const CALIBRATE_STREAM_ID = "gambit-calibrate";
@@ -2415,6 +2422,24 @@ export function startWebSocketSimulator(opts: {
         return new Response(JSON.stringify({ sessions }), {
           headers: { "content-type": "application/json; charset=utf-8" },
         });
+      }
+
+      if (
+        url.pathname === "/demo/iframe-shell" ||
+        url.pathname === "/demo/iframe-shell.html"
+      ) {
+        try {
+          const html = await Deno.readTextFile(demoIframeShellPath);
+          return new Response(html, {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(
+            `Demo harness unavailable: ${message}`,
+            { status: 500 },
+          );
+        }
       }
       return new Response("Not found", { status: 404 });
     },

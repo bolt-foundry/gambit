@@ -33,8 +33,21 @@ Optional env vars:
 - `GAMBIT_E2E_SHOW_BROWSER=true` to run headed.
 - `GAMBIT_E2E_RECORD_VIDEO=false` to skip video output.
 - `GAMBIT_DEMO_INTERACT_DEBUG=true` to send a debug message (can be flaky).
+- `GAMBIT_DEMO_DURATION_SECONDS=300` to keep recording for a fixed duration.
+- Default demo viewport is 1920x1080.
+- `GAMBIT_DEMO_VIEWPORT=1920x1080` to override the browser viewport (also sets
+  the demo shell size unless `shell=` or `content=` is provided).
+- Default iframe content size for the shell is 1280x720.
+- `GAMBIT_DEMO_CONTENT=1280x720` to override the iframe content size (the shell
+  adds chrome height unless `content=` is provided).
+- `GAMBIT_DEMO_FPS=60` to request a CDP screencast frame rate (host/browser may
+  clamp lower).
+- When using `/demo/iframe-shell`, the demo runner now drives selectors inside
+  the iframe automatically (leave `GAMBIT_DEMO_SKIP_AUTOMATION` unset to run).
 - `GAMBIT_DEMO_WAIT=true` to keep the browser open and keep recording until you
   press Enter.
+- When using host bridge + `GAMBIT_DEMO_VIEWPORT`, the runner restarts the host
+  Chrome instance to apply the window size.
 - `GAMBIT_USE_HOST_BRIDGE=true` to run Chrome on the host via codebot
   host-bridge.
 - `GAMBIT_HOST_BRIDGE_URL=https://host.boltfoundry.bflocal:8017` to override the
@@ -86,6 +99,8 @@ deno task e2e-logs gambit-simulator-smoke --errors-only
   ```
 - Prefer `ctx.navigate`, `ctx.click`, `ctx.type`, `ctx.exists`, `ctx.text`, and
   `ctx.screenshot` instead of raw Puppeteer APIs.
+- For iframe-shell demos, use `ctx.viewportControl.zoomTo()` or
+  `ctx.viewportControl.resetZoom()` to drive smooth zooming via the shell API.
 
 ## Updating the Deck Path
 
