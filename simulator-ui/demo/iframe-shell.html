@@ -360,6 +360,22 @@
       const hideOverlayButton = document.getElementById("overlay-hide");
       const showOverlayButton = document.getElementById("overlay-show");
       const zoomState = { x: 0, y: 0, scale: 1 };
+      const audioState = {
+        recorder: null,
+        chunks: [],
+        streams: [],
+        context: null,
+        mimeType: "",
+      };
+      const videoState = {
+        recorder: null,
+        chunks: [],
+        stream: null,
+        sourceStreams: [],
+        audioContext: null,
+        mimeType: "",
+        totalBytes: 0,
+      };
 
       hideOverlayButton?.addEventListener("click", () => {
         overlayRoot?.classList.add("overlay-hidden");
@@ -620,11 +636,296 @@
         return Math.min(Math.max(value, min), max);
       }
 
+      function getPreferredAudioMimeType() {
+        if (!window.MediaRecorder) return "";
+        const candidates = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/ogg;codecs=opus",
+        ];
+        return candidates.find((type) =>
+          window.MediaRecorder.isTypeSupported(type)
+        ) || "";
+      }
+
+      function getPreferredVideoMimeType() {
+        if (!window.MediaRecorder) return "";
+        const candidates = [
+          "video/webm;codecs=vp9",
+          "video/webm;codecs=vp8",
+          "video/webm",
+        ];
+        return candidates.find((type) =>
+          window.MediaRecorder.isTypeSupported(type)
+        ) || "";
+      }
+
+      function bufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        const chunkSize = 0x8000;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(
+            ...bytes.subarray(i, i + chunkSize),
+          );
+        }
+        return btoa(binary);
+      }
+
+      async function emitVideoChunk(blob) {
+        const handler = window.gambitDemo?.video?.ondata;
+        if (typeof handler !== "function") {
+          return false;
+        }
+        const buffer = await blob.arrayBuffer();
+        const base64 = bufferToBase64(buffer);
+        handler({
+          base64,
+          mimeType: videoState.mimeType || blob.type,
+          size: blob.size,
+        });
+        return true;
+      }
+
+      async function startVideoRecording(opts = {}) {
+        if (!window.MediaRecorder) {
+          throw new Error("MediaRecorder not available");
+        }
+        if (videoState.recorder) return;
+        const displayStream = await navigator.mediaDevices
+          .getDisplayMedia({
+            video: {
+              frameRate: Number.isFinite(opts.frameRate)
+                ? opts.frameRate
+                : 60,
+            },
+            audio: opts.includeAudio === true,
+            preferCurrentTab: true,
+            selfBrowserSurface: "include",
+            surfaceSwitching: "exclude",
+            monitorTypeSurfaces: "exclude",
+          });
+        const sourceStreams = [displayStream];
+        let combinedStream = displayStream;
+        if (opts.includeMic === true) {
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          sourceStreams.push(micStream);
+          const context = new AudioContext();
+          await context.resume().catch(() => {});
+          const destination = context.createMediaStreamDestination();
+          const streamsToMix = [
+            displayStream,
+            micStream,
+          ];
+          streamsToMix.forEach((stream) => {
+            if (!stream.getAudioTracks().length) return;
+            const source = context.createMediaStreamSource(stream);
+            source.connect(destination);
+          });
+          combinedStream = new MediaStream([
+            ...displayStream.getVideoTracks(),
+            ...destination.stream.getAudioTracks(),
+          ]);
+          videoState.audioContext = context;
+        }
+        const mimeType = getPreferredVideoMimeType();
+        const recorder = mimeType
+          ? new MediaRecorder(combinedStream, { mimeType })
+          : new MediaRecorder(combinedStream);
+
+        videoState.recorder = recorder;
+        videoState.chunks = [];
+        videoState.stream = combinedStream;
+        videoState.sourceStreams = sourceStreams;
+        videoState.mimeType = mimeType || recorder.mimeType || "";
+        videoState.totalBytes = 0;
+
+        recorder.addEventListener("dataavailable", (event) => {
+          if (!event.data || event.data.size === 0) return;
+          videoState.totalBytes += event.data.size;
+          emitVideoChunk(event.data).then((handled) => {
+            if (!handled) {
+              videoState.chunks.push(event.data);
+            }
+          });
+        });
+
+        const chunkMs = Number.isFinite(opts.chunkMs)
+          ? opts.chunkMs
+          : 1000;
+        const started = new Promise((resolve) => {
+          recorder.addEventListener("start", resolve, { once: true });
+        });
+        recorder.start(chunkMs);
+        await started;
+      }
+
+      async function stopVideoRecording() {
+        const recorder = videoState.recorder;
+        if (!recorder) return null;
+        const stopped = new Promise((resolve) => {
+          recorder.addEventListener("stop", resolve, { once: true });
+        });
+        recorder.stop();
+        await stopped;
+        const handler = window.gambitDemo?.video?.onstop;
+        if (typeof handler === "function") {
+          handler({
+            mimeType: videoState.mimeType || recorder.mimeType ||
+              "video/webm",
+            size: videoState.totalBytes,
+          });
+        }
+        let result = null;
+        if (videoState.chunks.length) {
+          const blob = new Blob(videoState.chunks, {
+            type: videoState.mimeType || "video/webm",
+          });
+          const buffer = await blob.arrayBuffer();
+          result = {
+            mimeType: videoState.mimeType || blob.type,
+            base64: bufferToBase64(buffer),
+          };
+        }
+        videoState.sourceStreams.forEach((stream) => {
+          stream.getTracks().forEach((track) => track.stop());
+        });
+        if (videoState.audioContext) {
+          await videoState.audioContext.close().catch(() => {});
+        }
+        videoState.recorder = null;
+        videoState.chunks = [];
+        videoState.stream = null;
+        videoState.sourceStreams = [];
+        videoState.audioContext = null;
+        videoState.mimeType = "";
+        videoState.totalBytes = 0;
+        return result;
+      }
+
+      async function startAudioRecording(opts = {}) {
+        if (!window.MediaRecorder) {
+          throw new Error("MediaRecorder not available");
+        }
+        if (audioState.recorder) return;
+        const includeTabAudio = opts.includeTabAudio !== false;
+        const includeMic = opts.includeMic === true;
+        const streams = [];
+        if (includeTabAudio) {
+          try {
+            const displayStream = await navigator.mediaDevices
+              .getDisplayMedia({
+                audio: true,
+                video: true,
+              });
+            if (displayStream.getAudioTracks().length) {
+              streams.push(displayStream);
+            } else {
+              displayStream.getTracks().forEach((track) =>
+                track.stop()
+              );
+              console.warn("display capture returned no audio track");
+            }
+          } catch (error) {
+            console.warn("display audio capture failed", error);
+          }
+        }
+        if (includeMic) {
+          try {
+            const micStream = await navigator.mediaDevices.getUserMedia(
+              {
+                audio: true,
+              },
+            );
+            if (micStream.getAudioTracks().length) {
+              streams.push(micStream);
+            } else {
+              micStream.getTracks().forEach((track) => track.stop());
+              console.warn("mic capture returned no audio track");
+            }
+          } catch (error) {
+            console.warn("mic capture failed", error);
+          }
+        }
+        if (!streams.length) {
+          throw new Error("no audio streams available");
+        }
+        const context = new AudioContext();
+        await context.resume().catch(() => {});
+        const destination = context.createMediaStreamDestination();
+        streams.forEach((stream) => {
+          if (!stream.getAudioTracks().length) return;
+          const source = context.createMediaStreamSource(stream);
+          source.connect(destination);
+        });
+
+        const mimeType = getPreferredAudioMimeType();
+        const recorder = mimeType
+          ? new MediaRecorder(destination.stream, { mimeType })
+          : new MediaRecorder(destination.stream);
+
+        audioState.recorder = recorder;
+        audioState.chunks = [];
+        audioState.streams = streams;
+        audioState.context = context;
+        audioState.mimeType = mimeType || recorder.mimeType || "";
+
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data && event.data.size > 0) {
+            audioState.chunks.push(event.data);
+          }
+        });
+        recorder.start(1000);
+      }
+
+      async function stopAudioRecording() {
+        const recorder = audioState.recorder;
+        if (!recorder) return null;
+        const stopped = new Promise((resolve) => {
+          recorder.addEventListener("stop", resolve, { once: true });
+        });
+        recorder.stop();
+        await stopped;
+        const blob = new Blob(audioState.chunks, {
+          type: audioState.mimeType || "audio/webm",
+        });
+        const buffer = await blob.arrayBuffer();
+        const base64 = bufferToBase64(buffer);
+        audioState.streams.forEach((stream) => {
+          stream.getTracks().forEach((track) => track.stop());
+        });
+        if (audioState.context) {
+          await audioState.context.close().catch(() => {});
+        }
+        const result = {
+          mimeType: audioState.mimeType || blob.type,
+          base64,
+        };
+        audioState.recorder = null;
+        audioState.chunks = [];
+        audioState.streams = [];
+        audioState.context = null;
+        audioState.mimeType = "";
+        return result;
+      }
+
       window.gambitDemo = {
         zoomTo: (selector, opts) => zoomToSelector(selector, opts),
         resetZoom: (opts) => resetZoom(opts),
         scrollTo: (selector) => scrollToSelector(selector),
         highlight: (selector) => highlightSelector(selector),
+        audio: {
+          startRecording: (opts) => startAudioRecording(opts),
+          stopRecording: () => stopAudioRecording(),
+        },
+        video: {
+          startRecording: (opts) => startVideoRecording(opts),
+          stopRecording: () => stopVideoRecording(),
+          ondata: null,
+          onstop: null,
+        },
       };
 
       document.addEventListener("click", (event) => {
