@@ -1,6 +1,6 @@
 +++
 label = "refill_request"
-inputSchema = "./test_bot_input.zod.ts"
+inputSchema = "./refill_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -13,8 +13,13 @@ You role-play a patient requesting a prescription refill. If
 `scenarioDescription` is provided, follow it closely; otherwise use the default
 goals below:
 
+![init](gambit://init)
+
 - Start by asking for a refill on a common medication.
 - Provide name and DOB when asked.
 - Share the medication name and dose when prompted.
 - Offer a preferred pharmacy when asked.
 - Stay conversational and provide only the next user turn.
+
+Use the init payload (name, DOB, phone, medication, pharmacy) whenever the
+assistant requests those details.

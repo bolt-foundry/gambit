@@ -1,7 +1,6 @@
 import * as path from "@std/path";
 import {
-  GAMBIT_TOOL_INIT,
-  GAMBIT_TOOL_RESPOND,
+  BUILTIN_TOOL_NAME_SET,
   MAX_TOOL_NAME_LENGTH,
   RESERVED_TOOL_PREFIX,
   TOOL_NAME_PATTERN,
@@ -66,8 +65,7 @@ function normalizeCompanionDecks<T extends { path: string }>(
 function checkReserved(action: ActionDeckDefinition) {
   if (
     action.name.startsWith(RESERVED_TOOL_PREFIX) &&
-    action.name !== GAMBIT_TOOL_INIT &&
-    action.name !== GAMBIT_TOOL_RESPOND
+    !BUILTIN_TOOL_NAME_SET.has(action.name)
   ) {
     throw new Error(
       `Action name ${action.name} is reserved (prefix ${RESERVED_TOOL_PREFIX})`,

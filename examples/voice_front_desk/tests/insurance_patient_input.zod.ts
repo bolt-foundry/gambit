@@ -5,4 +5,6 @@ export default createPatientProfileSchema({
   lastName: "Lee",
   dob: "1992-11-03",
   phone: "555-0122",
+  payerName: "Blue Cross Blue Shield",
+  memberId: "123456789",
 });

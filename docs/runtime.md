@@ -27,6 +27,10 @@ How Gambit runs decks and keeps them safe/observable.
 - `gambit_complete`: emitted automatically for child completions and handled
   errors so the parent can see
   `{ runId, actionCallId, source, status?, payload?, message?, code?, meta? }`.
+- `gambit_end`: enable with `![end](gambit://end)` in Markdown (or
+  `allowEnd: true` in TypeScript decks). Calling it returns a sentinel
+  `{ __gambitEnd: true, payload?, status?, message?, code?, meta? }` so
+  CLI/test-bot loops stop reinjecting the closing assistant turn.
 
 ## State and turn order
 

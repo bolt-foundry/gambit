@@ -1,5 +1,5 @@
 import * as path from "@std/path";
-import { runDeck } from "./runtime.ts";
+import { isGambitEndSignal, runDeck } from "./runtime.ts";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { loadDeck } from "./loader.ts";
@@ -884,6 +884,7 @@ export function startWebSocketSimulator(opts: {
     };
 
     let deckBotState: SavedState | undefined = undefined;
+    let sessionEnded = false;
 
     const getLastAssistantMessage = (
       history: Array<ModelMessage | null | undefined>,
@@ -917,6 +918,10 @@ export function startWebSocketSimulator(opts: {
         stream: Boolean(streamOpts?.onStreamText),
         onStreamText: streamOpts?.onStreamText,
       });
+      if (isGambitEndSignal(result)) {
+        sessionEnded = true;
+        return "";
+      }
       const text = stringifyOutput(result);
       return text.trim();
     };
@@ -924,7 +929,7 @@ export function startWebSocketSimulator(opts: {
     const loop = async () => {
       try {
         if (!controller.signal.aborted) {
-          await runDeck({
+          const initialResult = await runDeck({
             path: resolvedDeckPath,
             input: deckInput,
             inputProvided: hasDeckInput,
@@ -951,8 +956,12 @@ export function startWebSocketSimulator(opts: {
               appendFromState(enriched);
             },
           });
+          if (isGambitEndSignal(initialResult)) {
+            sessionEnded = true;
+          }
         }
         for (let turn = 0; turn < maxTurns; turn++) {
+          if (sessionEnded) break;
           if (controller.signal.aborted) break;
           const history = savedState?.messages ?? [];
           const userMessage = await generateDeckBotUserMessage(history, {
@@ -974,7 +983,7 @@ export function startWebSocketSimulator(opts: {
             ts: Date.now(),
           });
           if (!userMessage) break;
-          await runDeck({
+          const rootResult = await runDeck({
             path: resolvedDeckPath,
             input: deckInput,
             inputProvided: hasDeckInput,
@@ -1010,6 +1019,10 @@ export function startWebSocketSimulator(opts: {
                 ts: Date.now(),
               }),
           });
+          if (isGambitEndSignal(rootResult)) {
+            sessionEnded = true;
+            break;
+          }
           broadcastTestBot({
             type: "testBotStreamEnd",
             runId,

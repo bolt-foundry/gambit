@@ -10,6 +10,13 @@ export const MAX_TOOL_NAME_LENGTH = 64;
 export const GAMBIT_TOOL_INIT = "gambit_init";
 export const GAMBIT_TOOL_RESPOND = "gambit_respond";
 export const GAMBIT_TOOL_COMPLETE = "gambit_complete";
+export const GAMBIT_TOOL_END = "gambit_end";
+export const BUILTIN_TOOL_NAME_SET = new Set([
+  GAMBIT_TOOL_INIT,
+  GAMBIT_TOOL_RESPOND,
+  GAMBIT_TOOL_COMPLETE,
+  GAMBIT_TOOL_END,
+]);
 
 // Default delay for busy/idle handler triggers.
 export const DEFAULT_STATUS_DELAY_MS = 800;

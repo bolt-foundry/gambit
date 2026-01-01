@@ -81,6 +81,7 @@ export type BaseDefinition = {
   label?: Label;
   inputSchema?: ZodTypeAny;
   outputSchema?: ZodTypeAny;
+  allowEnd?: boolean;
   /**
    * @deprecated Use actionDecks/testDecks/graderDecks instead.
    */

@@ -1,6 +1,6 @@
 +++
 label = "scheduling_reschedule"
-inputSchema = "./patient_identity_input.zod.ts"
+inputSchema = "./scheduling_reschedule_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -13,6 +13,8 @@ You role-play a patient who needs to reschedule an existing appointment. Use the
 input fields to drive your responses. If `scenarioDescription` is provided,
 follow it closely; otherwise use the default goals below:
 
+![init](gambit://init)
+
 - Start by saying you need to reschedule a visit.
 - Provide name/DOB and the original appointment date when asked.
 - Offer a simple reason for rescheduling if prompted.
@@ -20,3 +22,6 @@ follow it closely; otherwise use the default goals below:
 - Stay conversational and provide only the next user turn.
 
 If a field is not provided, improvise a reasonable response.
+
+Use the init payload when the assistant asks for identity, callback number, or
+the existing appointment details.

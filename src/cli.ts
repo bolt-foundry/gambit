@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import { parseArgs } from "@std/cli/parse-args";
 import type { ZodTypeAny } from "zod";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
-import { runDeck } from "./runtime.ts";
+import { isGambitEndSignal, runDeck } from "./runtime.ts";
 import { startWebSocketSimulator } from "./server.ts";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startRepl } from "./repl.ts";
@@ -417,11 +417,12 @@ async function runTestBotLoop(opts: {
     rootState = state;
     saveStateToDisk(state);
   };
+  let sessionEnded = false;
 
   const shouldRunRoot = !existingState ||
     opts.initialUserMessage !== undefined;
   if (shouldRunRoot) {
-    await runDeck({
+    const initialResult = await runDeck({
       path: opts.rootDeckPath,
       input: opts.init,
       inputProvided: opts.initProvided,
@@ -435,9 +436,13 @@ async function runTestBotLoop(opts: {
       state: rootState,
       onStateUpdate: updateRootState,
     });
+    if (isGambitEndSignal(initialResult)) {
+      sessionEnded = true;
+    }
   }
 
   for (let turn = 0; turn < opts.maxTurns; turn++) {
+    if (sessionEnded) break;
     const history = rootState?.messages ?? [];
     const assistantMessage = findLastAssistantMessage(history);
     if (!assistantMessage) break;
@@ -457,12 +462,16 @@ async function runTestBotLoop(opts: {
         botState = state;
       },
     });
+    if (isGambitEndSignal(botResult)) {
+      sessionEnded = true;
+      break;
+    }
     const botText = typeof botResult === "string"
       ? botResult
       : JSON.stringify(botResult);
     const userMessage = botText.trim();
     if (!userMessage) break;
-    await runDeck({
+    const rootResult = await runDeck({
       path: opts.rootDeckPath,
       input: opts.init,
       inputProvided: opts.initProvided,
@@ -476,6 +485,10 @@ async function runTestBotLoop(opts: {
       state: rootState,
       onStateUpdate: updateRootState,
     });
+    if (isGambitEndSignal(rootResult)) {
+      sessionEnded = true;
+      break;
+    }
   }
 
   logger.log(`Test bot session saved to ${statePath}`);
@@ -949,7 +962,19 @@ async function main() {
       onStateUpdate,
     });
 
-    if (typeof result === "string") {
+    if (isGambitEndSignal(result)) {
+      if (result.message) {
+        logger.log(result.message);
+      } else if (result.payload !== undefined) {
+        if (typeof result.payload === "string") {
+          logger.log(result.payload);
+        } else {
+          logger.log(JSON.stringify(result.payload, null, 2));
+        }
+      } else {
+        logger.log(JSON.stringify(result, null, 2));
+      }
+    } else if (typeof result === "string") {
       logger.log(result);
     } else {
       logger.log(JSON.stringify(result, null, 2));

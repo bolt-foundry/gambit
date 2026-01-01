@@ -1,6 +1,8 @@
 import { extract } from "@std/front-matter/any";
 import * as path from "@std/path";
 import {
+  BUILTIN_TOOL_NAME_SET,
+  GAMBIT_TOOL_END,
   GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
   MAX_TOOL_NAME_LENGTH,
@@ -25,6 +27,7 @@ const logger = console;
 type ParsedFrontmatter = Record<string, unknown>;
 const RESPOND_MARKER = "gambit://respond";
 const INIT_MARKER = "gambit://init";
+const END_MARKER = "gambit://end";
 
 const INIT_TEXT = `
 You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info.
@@ -32,6 +35,10 @@ You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the star
 
 const RESPOND_TEXT = `
 When you are done, call the \`${GAMBIT_TOOL_RESPOND}\` tool with a JSON object that includes your \`payload\` (validated output) and optional \`status\`/ \`message\`/ \`code\`/ \`meta\`. Do not end with normal assistant text; always finish by calling \`${GAMBIT_TOOL_RESPOND}\`.
+`.trim();
+
+const END_TEXT = `
+If the entire workflow is finished and no further user turns should be sent, call the \`${GAMBIT_TOOL_END}\` tool with optional \`message\` and \`payload\` fields to explicitly end the session.
 `.trim();
 
 function toFileUrl(p: string): string {
@@ -78,6 +85,21 @@ function normalizeDeckRefs<T extends DeckRef>(
     });
 }
 
+function mergeDeckRefs<T extends DeckRef>(
+  ...lists: Array<ReadonlyArray<T>>
+): Array<T> {
+  const merged = new Map<string, T>();
+  for (const list of lists) {
+    for (const entry of list) {
+      if (!entry?.path) continue;
+      if (!merged.has(entry.path)) {
+        merged.set(entry.path, entry);
+      }
+    }
+  }
+  return Array.from(merged.values());
+}
+
 function normalizeActionDecks(
   entries: unknown,
   basePath: string,
@@ -102,12 +124,14 @@ async function expandEmbedsInBody(args: {
   embeds: Array<LoadedCard>;
   respond: boolean;
   initHint: boolean;
+  endHint: boolean;
 }> {
   const { body, resolvedPath, stack } = args;
   const regex = /!\[[^\]]*\]\(([^)]+)\)/g;
   const embeds: Array<LoadedCard> = [];
   let respond = false;
   let initHint = false;
+  let endHint = false;
   let out = "";
   let lastIndex = 0;
 
@@ -121,6 +145,9 @@ async function expandEmbedsInBody(args: {
     } else if (target === INIT_MARKER) {
       initHint = true;
       out += INIT_TEXT;
+    } else if (target === END_MARKER) {
+      endHint = true;
+      out += END_TEXT;
     } else {
       const card = await loadCard(target, resolvedPath, stack);
       embeds.push(card);
@@ -131,7 +158,7 @@ async function expandEmbedsInBody(args: {
 
   out += body.slice(lastIndex);
 
-  return { body: out, embeds, respond, initHint };
+  return { body: out, embeds, respond, initHint, endHint };
 }
 
 export async function loadMarkdownCard(
@@ -182,8 +209,7 @@ export async function loadMarkdownCard(
   actionDecks.forEach((a) => {
     if (
       a.name.startsWith(RESERVED_TOOL_PREFIX) &&
-      a.name !== GAMBIT_TOOL_INIT &&
-      a.name !== GAMBIT_TOOL_RESPOND
+      !BUILTIN_TOOL_NAME_SET.has(a.name)
     ) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
@@ -215,6 +241,7 @@ export async function loadMarkdownCard(
     kind: "gambit.card",
     path: resolved,
     body: cleanedBody.trim(),
+    allowEnd: replaced.endHint,
     actionDecks,
     actions: actionDecks,
     testDecks: normalizeDeckRefs<TestDeckDefinition>(
@@ -270,8 +297,7 @@ export async function loadMarkdownDeck(
   actionDecks.forEach((a) => {
     if (
       a.name.startsWith(RESERVED_TOOL_PREFIX) &&
-      a.name !== GAMBIT_TOOL_INIT &&
-      a.name !== GAMBIT_TOOL_RESPOND
+      !BUILTIN_TOOL_NAME_SET.has(a.name)
     ) {
       throw new Error(`Action name ${a.name} is reserved`);
     }
@@ -302,6 +328,9 @@ export async function loadMarkdownDeck(
 
   const allCards = flattenCards(cards);
   const cleanedBody = replaced.body;
+  const allowEnd = Boolean(deckMeta.allowEnd) ||
+    replaced.endHint ||
+    allCards.some((c) => c.allowEnd);
 
   const mergedActions: Record<string, ActionDeckDefinition> = {};
   for (const card of allCards) {
@@ -375,21 +404,28 @@ export async function loadMarkdownDeck(
     : undefined;
 
   const mergedActionDecks = Object.values(mergedActions);
+  const rootTestDecks = normalizeDeckRefs<TestDeckDefinition>(
+    (deckMeta as { testDecks?: unknown }).testDecks,
+    resolved,
+  );
+  const rootGraderDecks = normalizeDeckRefs<GraderDeckDefinition>(
+    (deckMeta as { graderDecks?: unknown }).graderDecks,
+    resolved,
+  );
+  const embeddedTestDecks = allCards.flatMap((card) => card.testDecks ?? []);
+  const embeddedGraderDecks = allCards.flatMap((card) =>
+    card.graderDecks ?? []
+  );
 
   return {
     kind: "gambit.deck",
     path: resolved,
     body: cleanedBody.trim(),
+    allowEnd,
     actionDecks: mergedActionDecks,
     actions: mergedActionDecks,
-    testDecks: normalizeDeckRefs<TestDeckDefinition>(
-      (deckMeta as { testDecks?: unknown }).testDecks,
-      resolved,
-    ),
-    graderDecks: normalizeDeckRefs<GraderDeckDefinition>(
-      (deckMeta as { graderDecks?: unknown }).graderDecks,
-      resolved,
-    ),
+    testDecks: mergeDeckRefs(rootTestDecks, embeddedTestDecks),
+    graderDecks: mergeDeckRefs(rootGraderDecks, embeddedGraderDecks),
     cards: allCards,
     label: deckMeta.label,
     modelParams: deckMeta.modelParams,

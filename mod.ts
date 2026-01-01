@@ -11,7 +11,8 @@ export type {
   ModelProvider,
   TestDeckDefinition,
 } from "./src/types.ts";
-export { runDeck } from "./src/runtime.ts";
+export { isGambitEndSignal, runDeck } from "./src/runtime.ts";
+export type { GambitEndSignal } from "./src/runtime.ts";
 export { chatCompletionsWithDeck } from "./src/openai_compat.ts";
 export type {
   ChatCompletionsRequest,

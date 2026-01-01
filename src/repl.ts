@@ -1,4 +1,4 @@
-import { runDeck } from "./runtime.ts";
+import { isGambitEndSignal, runDeck } from "./runtime.ts";
 import type { SavedState } from "./state.ts";
 
 const encoder = new TextEncoder();
@@ -67,6 +67,14 @@ export async function startRepl(opts: {
         },
       });
       const formatted = formatResult(result);
+      if (isGambitEndSignal(result)) {
+        const endMessage = result.message ??
+          (typeof result.payload === "string" ? result.payload : formatted);
+        const prefix = opts.verbose ? "[assistant] " : "";
+        write(`${prefix}${endMessage}\n`);
+        closed = true;
+        return;
+      }
       if (streamed) {
         if (!formatted.endsWith("\n")) write("\n");
       } else {
