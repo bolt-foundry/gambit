@@ -238,6 +238,31 @@
       .highlight-box.hidden {
         opacity: 0;
       }
+      .subtitle-banner {
+        position: absolute;
+        left: 50%;
+        bottom: 32px;
+        transform: translate3d(-50%, 16px, 0);
+        max-width: min(980px, calc(100% - 48px));
+        padding: 14px 24px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        color: #f8fafc;
+        font-size: 18px;
+        font-weight: 600;
+        text-align: center;
+        line-height: 1.4;
+        letter-spacing: 0.01em;
+        box-shadow: 0 20px 40px rgba(2, 6, 23, 0.5);
+        opacity: 0;
+        transition: opacity 200ms ease, transform 200ms ease;
+        pointer-events: none;
+      }
+      .subtitle-banner.visible {
+        opacity: 1;
+        transform: translate3d(-50%, 0, 0);
+      }
       .demo-cursor {
         position: absolute;
         width: 26px;
@@ -312,6 +337,7 @@
         <div class="overlay-root overlay-hidden">
           <div class="overlay-badge">Iframe overlay active</div>
           <div id="highlight" class="highlight-box hidden"></div>
+          <div id="demo-subtitle" class="subtitle-banner"></div>
           <section class="overlay-panel">
             <div>
               <div
@@ -377,6 +403,7 @@
     <script>
       const frame = document.getElementById("demo-frame");
       const highlight = document.getElementById("highlight");
+      const subtitleBanner = document.getElementById("demo-subtitle");
       const overlayRoot = document.querySelector(".overlay-root");
       const demoShell = document.querySelector(".demo-shell");
       const browserShell = document.querySelector(".browser-shell");
@@ -399,6 +426,12 @@
         audioContext: null,
         mimeType: "",
         totalBytes: 0,
+      };
+      const subtitleState = {
+        timeoutId: 0,
+      };
+      const voiceState = {
+        queue: Promise.resolve(),
       };
 
       hideOverlayButton?.addEventListener("click", () => {
@@ -747,6 +780,114 @@
         ) || "";
       }
 
+      function showSubtitle(text, opts = {}) {
+        if (!subtitleBanner) return;
+        subtitleBanner.textContent = text || "";
+        if (!text) {
+          subtitleBanner.classList.remove("visible");
+          return;
+        }
+        subtitleBanner.classList.add("visible");
+        if (subtitleState.timeoutId) {
+          clearTimeout(subtitleState.timeoutId);
+          subtitleState.timeoutId = 0;
+        }
+        if (Number.isFinite(opts.forMs)) {
+          subtitleState.timeoutId = setTimeout(() => {
+            subtitleBanner.classList.remove("visible");
+            subtitleState.timeoutId = 0;
+          }, opts.forMs);
+        }
+      }
+
+      function hideSubtitle() {
+        if (!subtitleBanner) return;
+        subtitleBanner.classList.remove("visible");
+        if (subtitleState.timeoutId) {
+          clearTimeout(subtitleState.timeoutId);
+          subtitleState.timeoutId = 0;
+        }
+      }
+
+      function getAvailableVoices() {
+        if (!("speechSynthesis" in window)) return [];
+        const voices = window.speechSynthesis.getVoices();
+        return Array.isArray(voices) ? voices : [];
+      }
+
+      function waitForVoices() {
+        return new Promise((resolve) => {
+          const voices = getAvailableVoices();
+          if (voices.length) {
+            resolve(voices);
+            return;
+          }
+          const handler = () => {
+            window.speechSynthesis.removeEventListener(
+              "voiceschanged",
+              handler,
+            );
+            resolve(getAvailableVoices());
+          };
+          window.speechSynthesis.addEventListener(
+            "voiceschanged",
+            handler,
+          );
+          setTimeout(() => {
+            window.speechSynthesis.removeEventListener(
+              "voiceschanged",
+              handler,
+            );
+            resolve(getAvailableVoices());
+          }, 1500);
+        });
+      }
+
+      function speakVoiceover(opts = {}) {
+        if (!("speechSynthesis" in window)) {
+          console.warn("speechSynthesis not supported");
+          return Promise.resolve();
+        }
+        const text = String(opts.text || "").trim();
+        if (!text) return Promise.resolve();
+        voiceState.queue = voiceState.queue.then(async () => {
+          const utter = new SpeechSynthesisUtterance(text);
+          if (opts.rate) utter.rate = opts.rate;
+          if (opts.pitch) utter.pitch = opts.pitch;
+          if (opts.lang) utter.lang = opts.lang;
+          if (opts.voiceName) {
+            const voices = await waitForVoices();
+            const match = voices.find((voice) =>
+              voice.name === opts.voiceName
+            );
+            if (match) utter.voice = match;
+          }
+          const showSubs = opts.showSubtitles !== false;
+          if (showSubs) {
+            showSubtitle(text);
+          }
+          return new Promise((resolve) => {
+            utter.addEventListener("end", () => {
+              if (showSubs) hideSubtitle();
+              resolve();
+            }, { once: true });
+            utter.addEventListener("error", () => {
+              if (showSubs) hideSubtitle();
+              resolve();
+            }, { once: true });
+            window.speechSynthesis.speak(utter);
+          });
+        });
+        return voiceState.queue;
+      }
+
+      function stopVoiceover() {
+        if ("speechSynthesis" in window) {
+          window.speechSynthesis.cancel();
+        }
+        hideSubtitle();
+      }
+
       function bufferToBase64(buffer) {
         const bytes = new Uint8Array(buffer);
         const chunkSize = 0x8000;
@@ -1003,6 +1144,14 @@
         resetZoom: (opts) => resetZoom(opts),
         scrollTo: (selector) => scrollToSelector(selector),
         highlight: (selector) => highlightSelector(selector),
+        subtitles: {
+          show: (text, opts) => showSubtitle(text, opts),
+          hide: () => hideSubtitle(),
+        },
+        voiceover: {
+          speak: (opts) => speakVoiceover(opts),
+          stop: () => stopVoiceover(),
+        },
         audio: {
           startRecording: (opts) => startAudioRecording(opts),
           stopRecording: () => stopAudioRecording(),
