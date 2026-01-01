@@ -118,7 +118,8 @@ export default defineDeck({
 
 - In Markdown, use image syntax to embed:
   `![behavior](./cards/behavior.card.md)`. Special markers: `gambit://init`
-  hints init tool, `gambit://respond` injects respond instructions.
+  hints init tool, `gambit://respond` injects respond instructions, and
+  `gambit://end` enables the `gambit_end` hang-up tool.
 - Cards can also be TS files exported with `defineCard`. They may contain
   action/test/grader deck references and schema fragments, but no handlers.
 

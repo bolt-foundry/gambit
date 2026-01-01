@@ -39,3 +39,7 @@ set up a callback.
 ## Init workflow
 
 ![init](gambit://init)
+
+## Ending the call
+
+![end](gambit://end)

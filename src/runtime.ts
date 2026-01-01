@@ -3,6 +3,7 @@ import {
   DEFAULT_GUARDRAILS,
   DEFAULT_STATUS_DELAY_MS,
   GAMBIT_TOOL_COMPLETE,
+  GAMBIT_TOOL_END,
   GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
 } from "./constants.ts";
@@ -18,6 +19,23 @@ import type {
   ToolDefinition,
 } from "./types.ts";
 import type { MessageRef, SavedState } from "./state.ts";
+
+export type GambitEndSignal = {
+  __gambitEnd: true;
+  payload?: unknown;
+  status?: number;
+  message?: string;
+  code?: string;
+  meta?: Record<string, unknown>;
+};
+
+export function isGambitEndSignal(value: unknown): value is GambitEndSignal {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      (value as { __gambitEnd?: unknown }).__gambitEnd === true,
+  );
+}
 
 const logger = console;
 
@@ -575,6 +593,7 @@ async function runLlmDeck(
       if (result.toolCalls && result.toolCalls.length > 0) {
         let responded = false;
         let respondValue: unknown;
+        let endSignal: GambitEndSignal | undefined;
         const appendedMessages: Array<ModelMessage> = [];
         if (!streamingCommitted && streamingBuffer) {
           messages.push(
@@ -659,6 +678,67 @@ async function runLlmDeck(
             continue;
           }
 
+          if (deck.allowEnd && call.name === GAMBIT_TOOL_END) {
+            const status = typeof call.args?.status === "number"
+              ? call.args.status
+              : undefined;
+            const messageText = typeof call.args?.message === "string"
+              ? call.args.message
+              : undefined;
+            const code = typeof call.args?.code === "string"
+              ? call.args.code
+              : undefined;
+            const meta = (call.args?.meta &&
+                typeof call.args.meta === "object" &&
+                call.args.meta !== null)
+              ? call.args.meta as Record<string, unknown>
+              : undefined;
+            const payload = call.args?.payload;
+            ctx.trace?.({
+              type: "tool.call",
+              runId,
+              actionCallId: call.id,
+              name: call.name,
+              args: call.args,
+              parentActionCallId: actionCallId,
+            });
+            const toolContent = JSON.stringify(call.args ?? {});
+            appendedMessages.push({
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: call.id,
+                type: "function",
+                function: {
+                  name: call.name,
+                  arguments: JSON.stringify(call.args ?? {}),
+                },
+              }],
+            });
+            appendedMessages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              name: call.name,
+              content: toolContent,
+            });
+            const signal: GambitEndSignal = { __gambitEnd: true };
+            if (status !== undefined) signal.status = status;
+            if (messageText !== undefined) signal.message = messageText;
+            if (code !== undefined) signal.code = code;
+            if (meta !== undefined) signal.meta = meta;
+            if (payload !== undefined) signal.payload = payload;
+            endSignal = signal;
+            ctx.trace?.({
+              type: "tool.result",
+              runId,
+              actionCallId: call.id,
+              name: call.name,
+              result: signal as unknown as import("./types.ts").JSONValue,
+              parentActionCallId: actionCallId,
+            });
+            continue;
+          }
+
           ctx.trace?.({
             type: "action.start",
             runId,
@@ -738,6 +818,16 @@ async function runLlmDeck(
         if (ctx.onStateUpdate) {
           const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
+        }
+        if (endSignal) {
+          ctx.trace?.({
+            type: "deck.end",
+            runId,
+            deckPath: deck.path,
+            actionCallId,
+            parentActionCallId: ctx.parentActionCallId,
+          });
+          return endSignal;
         }
         if (responded) {
           ctx.trace?.({
@@ -1494,6 +1584,26 @@ function sanitizeMessage(msg: ModelMessage): ModelMessage {
 
 async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {
   const defs: Array<ToolDefinition> = [];
+  if (deck.allowEnd) {
+    defs.push({
+      type: "function",
+      function: {
+        name: GAMBIT_TOOL_END,
+        description: "End the current run once all goals are complete.",
+        parameters: {
+          type: "object",
+          properties: {
+            status: { type: "number" },
+            payload: {},
+            message: { type: "string" },
+            code: { type: "string" },
+            meta: { type: "object" },
+          },
+          additionalProperties: true,
+        },
+      },
+    });
+  }
   if (deck.respond) {
     defs.push({
       type: "function",

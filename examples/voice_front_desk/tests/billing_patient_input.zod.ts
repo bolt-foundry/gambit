@@ -1,8 +1,8 @@
 import { createPatientProfileSchema } from "./shared/patientProfile.ts";
 
 export default createPatientProfileSchema({
-  firstName: "Jordan",
-  lastName: "Lee",
-  dob: "1992-11-03",
-  phone: "555-0122",
+  firstName: "Avery",
+  lastName: "Nguyen",
+  dob: "1986-04-12",
+  phone: "555-0101",
 });
