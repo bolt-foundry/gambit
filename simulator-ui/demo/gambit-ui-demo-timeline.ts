@@ -1,4 +1,4 @@
-export type DemoScriptStep =
+export type DemoTimelineStep =
   | {
     type: "subtitle";
     text: string;
@@ -34,16 +34,35 @@ export type DemoScriptStep =
     type: "scroll";
     selector?: string;
     y?: number;
+  }
+  | {
+    type: "zoom";
+    selector: string;
+    durationMs?: number;
+    padding?: number;
+    maxScale?: number;
+  }
+  | {
+    type: "zoom-reset";
+    durationMs?: number;
   };
 
-export const demoScript: DemoScriptStep[] = [
+export const demoTimeline: DemoTimelineStep[] = [
+  { type: "wait", ms: 5_000 },
   {
     type: "voiceover",
     text:
-      "Meet the Gambit intake simulator. The bot handles a new patient call without revealing details too early.",
+      "This docs tab anchors the Gambit Build, Run, Verify story and shows the live deck path.",
     showSubtitles: true,
   },
-  { type: "wait", ms: 600 },
+  {
+    type: "voiceover",
+    text:
+      "We jump to Test Bot from here to see the workflow streaming in real time.",
+    showSubtitles: true,
+  },
+  { type: "click", selector: '[data-testid="nav-test-bot"]' },
+  { type: "wait", ms: 1_000 },
   { type: "click", selector: ".test-bot-sidebar select" },
   {
     type: "type",
@@ -67,6 +86,10 @@ export const demoScript: DemoScriptStep[] = [
     text: "1992-08-12",
   },
   { type: "click", selector: '[data-testid="testbot-run"]' },
+  { type: "wait", ms: 900 },
+  { type: "zoom", selector: '[data-testid="testbot-run"]' },
+  { type: "wait", ms: 900 },
+  { type: "zoom-reset" },
   { type: "wait", ms: 1200 },
   { type: "click", selector: '[data-testid="nav-calibrate"]' },
   { type: "wait", ms: 900 },

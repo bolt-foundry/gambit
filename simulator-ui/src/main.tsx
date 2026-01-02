@@ -372,8 +372,9 @@ const repoRootPath = guessRepoRoot(normalizedDeckPath);
 const deckDisplayPath = toRelativePath(normalizedDeckPath, repoRootPath) ??
   normalizedDeckPath;
 const SESSIONS_BASE_PATH = "/sessions";
+const DOCS_PATH = "/docs";
 const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
-const DEFAULT_HOME_PATH = `${SESSIONS_BASE_PATH}/new/test-bot`;
+const DEFAULT_TEST_BOT_PATH = `${SESSIONS_BASE_PATH}/new/test-bot`;
 const CALIBRATE_PATH_SUFFIX = "/calibrate";
 const buildCalibratePath = (sessionId: string) =>
   `${SESSIONS_BASE_PATH}/${
@@ -383,6 +384,11 @@ const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
 const CALIBRATE_STREAM_ID = "gambit-calibrate";
+const GAMBIT_MESSAGING_SPINE_DOC =
+  "/@fs/bolt-foundry/bfmono/docs/internal/_memos/2-areas/marketing/gambit-messaging/2025-12-31-gambit-messaging-spine.md";
+const GAMBIT_PACKAGE_README =
+  "/@fs/bolt-foundry/bfmono/packages/gambit/README.md";
+const GAMBIT_CLI_DOC = "/@fs/bolt-foundry/bfmono/packages/gambit/docs/cli.md";
 
 function getDurableStreamOffset(streamId: string): number {
   try {
@@ -4712,16 +4718,22 @@ function TestBotApp(props: {
 function normalizeAppPath(input: string): string {
   const trimmed = input.replace(/\/+$/, "") || "/";
   if (trimmed === "/" || trimmed === "") {
-    if (window.location.pathname !== DEFAULT_HOME_PATH) {
-      window.history.replaceState({}, "", DEFAULT_HOME_PATH);
+    if (window.location.pathname !== DOCS_PATH) {
+      window.history.replaceState({}, "", DOCS_PATH);
     }
-    return DEFAULT_HOME_PATH;
+    return DOCS_PATH;
+  }
+  if (trimmed === DOCS_PATH) {
+    if (window.location.pathname !== DOCS_PATH) {
+      window.history.replaceState({}, "", DOCS_PATH);
+    }
+    return DOCS_PATH;
   }
   if (trimmed === "/test-bot") {
-    if (window.location.pathname !== DEFAULT_HOME_PATH) {
-      window.history.replaceState({}, "", DEFAULT_HOME_PATH);
+    if (window.location.pathname !== DEFAULT_TEST_BOT_PATH) {
+      window.history.replaceState({}, "", DEFAULT_TEST_BOT_PATH);
     }
-    return DEFAULT_HOME_PATH;
+    return DEFAULT_TEST_BOT_PATH;
   }
   if (
     trimmed === "/debug" || trimmed === "/simulate" ||
@@ -4758,6 +4770,203 @@ function normalizeAppPath(input: string): string {
     }
   }
   return trimmed || DEFAULT_SESSION_PATH;
+}
+
+type DocsPageProps = {
+  deckDisplayPath: string;
+  deckAbsolutePath: string;
+  onNavigateToTestBot: () => void;
+  onNavigateToDebug: () => void;
+  onNavigateToCalibrate: () => void;
+};
+
+function DocsPage(props: DocsPageProps) {
+  const {
+    deckDisplayPath,
+    deckAbsolutePath,
+    onNavigateToTestBot,
+    onNavigateToDebug,
+    onNavigateToCalibrate,
+  } = props;
+  const [deckSource, setDeckSource] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/deck-source");
+        if (!res.ok) throw new Error(res.statusText);
+        const body = await res.json() as {
+          path?: string;
+          content?: string;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (body.error) {
+          setError(body.error);
+          setDeckSource(body.content ?? null);
+        } else {
+          setDeckSource(body.content ?? "");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load deck");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!copied) return;
+    const handle = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(handle);
+  }, [copied]);
+
+  const runCommand = useMemo(() => {
+    const target = deckDisplayPath || deckAbsolutePath;
+    return `deno run -A src/cli.ts serve "${target}" --port 8000`;
+  }, [deckDisplayPath, deckAbsolutePath]);
+
+  const handleCopyPath = useCallback(async () => {
+    try {
+      await navigator.clipboard?.writeText(deckAbsolutePath);
+      setCopied(true);
+    } catch {
+      setCopied(true);
+    }
+  }, [deckAbsolutePath]);
+
+  return (
+    <div className="docs-shell">
+      <section className="docs-hero">
+        <p>
+          <strong>Gambit makes LLM workflows feel like software.</strong>{" "}
+          Build typed decks, run them locally, and verify the results with test
+          and grader decks.
+        </p>
+        <p>
+          That framing comes straight from{" "}
+          <a
+            href={GAMBIT_MESSAGING_SPINE_DOC}
+            target="_blank"
+            rel="noreferrer"
+          >
+            the Gambit messaging spine
+          </a>{" "}
+          so the simulator, docs, and demos all share the same Build → Run →
+          Verify story.
+        </p>
+      </section>
+      <section className="docs-grid">
+        <article className="docs-card">
+          <h3>Build</h3>
+          <p>
+            Use your editor (VS Code, Cursor, Codex Cloud, etc.) to edit decks
+            directly in the repo. The active deck for this run lives at{" "}
+            <code>{deckDisplayPath}</code>.
+          </p>
+        </article>
+        <article className="docs-card">
+          <h3>Run</h3>
+          <p>
+            Spin up the simulator locally and iterate on Test Bot and Debug
+            loops without leaving your machine.
+          </p>
+        </article>
+        <article className="docs-card">
+          <h3>Verify</h3>
+          <p>
+            Feed saved sessions through grader decks in Calibrate so every demo
+            includes traceability and scores.
+          </p>
+        </article>
+      </section>
+      <section className="docs-run">
+        <h3>Run the simulator</h3>
+        <p>Launch Gambit locally with your current deck:</p>
+        <pre className="docs-command">
+          <code>{runCommand}</code>
+        </pre>
+      </section>
+      <section className="deck-preview-shell">
+        <header>
+          <div>
+            <h3>Deck preview</h3>
+            <p>
+              Edit this file in your editor, then rerun or refresh the
+              simulator.
+            </p>
+          </div>
+          <div className="deck-preview-meta">
+            <span>
+              Path: <code>{deckDisplayPath}</code>
+            </span>
+            <button type="button" onClick={handleCopyPath}>
+              {copied ? "Copied" : "Copy path"}
+            </button>
+          </div>
+        </header>
+        <div className="deck-preview-body">
+          {loading && <div className="placeholder">Loading deck…</div>}
+          {!loading && error && (
+            <div className="error">Failed to read deck: {error}</div>
+          )}
+          {!loading && !error && (
+            <pre className="deck-preview">
+              <code>{deckSource ?? ""}</code>
+            </pre>
+          )}
+        </div>
+      </section>
+      <section className="docs-buttons">
+        <button type="button" onClick={onNavigateToTestBot}>
+          Open Test Bot
+        </button>
+        <button type="button" onClick={onNavigateToDebug}>
+          Inspect in Debug
+        </button>
+        <button type="button" onClick={onNavigateToCalibrate}>
+          Grade in Calibrate
+        </button>
+      </section>
+      <section className="docs-links">
+        <h3>More docs</h3>
+        <ul>
+          <li>
+            <a
+              href={GAMBIT_MESSAGING_SPINE_DOC}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Gambit messaging spine (Build → Run → Verify narrative)
+            </a>
+          </li>
+          <li>
+            <a href={GAMBIT_PACKAGE_README} target="_blank" rel="noreferrer">
+              packages/gambit/README.md
+            </a>{" "}
+            — architecture, concepts, release notes.
+          </li>
+          <li>
+            <a href={GAMBIT_CLI_DOC} target="_blank" rel="noreferrer">
+              packages/gambit/docs/cli.md
+            </a>{" "}
+            — CLI commands, flags, and workflows.
+          </li>
+        </ul>
+      </section>
+    </div>
+  );
 }
 
 function App() {
@@ -4804,12 +5013,14 @@ function App() {
     setPath(next);
   }, [path]);
 
-  const isTestBot = /\/test-bot$/.test(path);
-  const isCalibrate = path.startsWith("/calibrate") ||
-    /^\/sessions\/[^/]+\/calibrate/.test(path);
-  const isSimulator = !isTestBot && !isCalibrate;
-  const currentPage = isSimulator
-    ? "debug"
+  const isDocs = path === DOCS_PATH;
+  const isTestBot = !isDocs && /\/test-bot$/.test(path);
+  const isCalibrate = !isDocs &&
+    (path.startsWith("/calibrate") ||
+      /^\/sessions\/[^/]+\/calibrate/.test(path));
+  const isSimulator = !isDocs && !isTestBot && !isCalibrate;
+  const currentPage = isDocs
+    ? "docs"
     : isTestBot
     ? "test-bot"
     : isCalibrate
@@ -4817,7 +5028,7 @@ function App() {
     : "debug";
   const testBotPath = activeSessionId
     ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/test-bot`
-    : DEFAULT_HOME_PATH;
+    : DEFAULT_TEST_BOT_PATH;
   const debugPath = activeSessionId
     ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/debug`
     : DEFAULT_SESSION_PATH;
@@ -4830,6 +5041,14 @@ function App() {
       <div className="app-root">
         <div className="top-nav">
           <div className="top-nav-buttons">
+            <button
+              type="button"
+              className={currentPage === "docs" ? "active" : ""}
+              onClick={() => navigate(DOCS_PATH)}
+              data-testid="nav-docs"
+            >
+              Docs
+            </button>
             <button
               type="button"
               className={currentPage === "test-bot" ? "active" : ""}
@@ -4862,7 +5081,17 @@ function App() {
           </div>
         </div>
         <div className="page-shell">
-          {currentPage === "debug"
+          {currentPage === "docs"
+            ? (
+              <DocsPage
+                deckDisplayPath={deckDisplayPath}
+                deckAbsolutePath={normalizedDeckPath}
+                onNavigateToTestBot={() => navigate(testBotPath)}
+                onNavigateToDebug={() => navigate(debugPath)}
+                onNavigateToCalibrate={() => navigate(calibratePath)}
+              />
+            )
+            : currentPage === "debug"
             ? <SimulatorApp basePath={simulatorBasePath} />
             : currentPage === "test-bot"
             ? (
@@ -4880,7 +5109,7 @@ function App() {
                       encodeURIComponent(sessionId)
                     }/test-bot`,
                   )}
-                onResetTestBotSession={() => replacePath(DEFAULT_HOME_PATH)}
+                onResetTestBotSession={() => replacePath(DEFAULT_TEST_BOT_PATH)}
                 activeSessionId={activeSessionId}
               />
             )

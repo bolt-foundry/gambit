@@ -45,8 +45,10 @@ Optional env vars:
 - `GAMBIT_DEMO_OUTPUT_FPS=30` to set the muxed MP4 frame rate (default: 30).
 - `GAMBIT_DEMO_INTERPOLATE=mc` to enable motion-compensated frame interpolation
   during muxing. Leave unset for default (no interpolation).
-- `GAMBIT_DEMO_RECORD_AUDIO=1` to record tab audio (iframe shell only).
-- `GAMBIT_DEMO_RECORD_MIC=1` to record mic audio (iframe shell only).
+- `GAMBIT_DEMO_RECORD_AUDIO=0` to disable tab audio (enabled by default, iframe
+  shell only).
+- `GAMBIT_DEMO_RECORD_MIC=1` to record mic audio (off by default, iframe shell
+  only).
 - `GAMBIT_DEMO_TRIM_AUDIO_DELAY=1` to trim the leading delay before audio starts
   (writes `video-trimmed.mp4`, `audio-trimmed.webm`, and
   `video-with-audio-trimmed.mp4` when possible).
