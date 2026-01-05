@@ -39,6 +39,20 @@ body {
   gap: 16px;
   overflow: hidden;
 }
+.docs-shell {
+  padding: 12px 16px;
+}
+pre.deck-preview,
+pre.docs-command {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+code:not(pre *) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 4px;
+  border-radius: 4px;
+}
 .app-header {
   display: flex;
   justify-content: space-between;
