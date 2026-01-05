@@ -14,6 +14,8 @@ Per-example docs:
 
 Notes:
 
+- Examples show how to use Gambit as an agent harness for workflow execution and
+  verification.
 - Routing examples rely on tight action descriptions and schemas so the model
   picks the right tool.
 - Handler examples show how busy/idle status streams and how handled errors

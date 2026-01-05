@@ -1,6 +1,8 @@
 # Authoring Gambit decks
 
 Audience: new deck authors who want to build runnable Gambit assistants quickly.
+Gambit is an agent harness framework, so decks are the unit of execution and
+verification.
 
 ## Mental model
 

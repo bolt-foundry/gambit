@@ -1,6 +1,7 @@
 # Runtime and guardrails
 
-How Gambit runs decks and keeps them safe/observable.
+How Gambit, an agent harness framework, runs decks and keeps them
+safe/observable.
 
 ## Guardrails and flow
 
