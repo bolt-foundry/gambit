@@ -40,9 +40,27 @@ jobs:
             else
               echo "tag_exists=false" >> "$GITHUB_OUTPUT"
             fi
-            if deno info "jsr:${package}@${version}" >/dev/null 2>&1; then
+            meta_url="https://jsr.io/${package}/meta.json"
+            if deno eval -q '
+              const [url, version] = Deno.args;
+              const res = await fetch(url);
+              if (!res.ok) {
+                console.error(`Failed to fetch ${url}: ${res.status}`);
+                Deno.exit(2);
+              }
+              const data = await res.json();
+              const versions = data?.versions ?? {};
+              if (Object.prototype.hasOwnProperty.call(versions, version)) {
+                Deno.exit(0);
+              }
+              Deno.exit(1);
+            ' "$meta_url" "$version"; then
               echo "jsr_published=true" >> "$GITHUB_OUTPUT"
             else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                echo "::warning::Could not verify JSR metadata (exit $status); assuming not published"
+              fi
               echo "jsr_published=false" >> "$GITHUB_OUTPUT"
             fi
           else
