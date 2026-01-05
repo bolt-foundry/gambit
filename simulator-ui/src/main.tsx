@@ -4910,7 +4910,7 @@ function DocsPage(props: DocsPageProps) {
           <div className="deck-preview-meta">
             <span>
               Path: <code>{deckDisplayPath}</code>
-            </span>
+            </span>{" "}
             <button type="button" onClick={handleCopyPath}>
               {copied ? "Copied" : "Copy path"}
             </button>
