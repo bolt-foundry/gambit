@@ -84,12 +84,12 @@ jobs:
       - name: Set snapshot version
         if: steps.release.outputs.is_release != 'true'
         run: |
-          GIT_SHORT_HASH=$(git rev-parse --short "$GITHUB_SHA")
+          SNAPSHOT_TS=$(date -u +%s)
           BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
           if [[ "$BASE_VERSION" == *-* ]]; then
-            export VERSION="${BASE_VERSION}.main.${GIT_SHORT_HASH}"
+            export VERSION="${BASE_VERSION}.main.${SNAPSHOT_TS}"
           else
-            export VERSION="${BASE_VERSION}-main.${GIT_SHORT_HASH}"
+            export VERSION="${BASE_VERSION}-main.${SNAPSHOT_TS}"
           fi
           echo "Publishing version ${VERSION}"
           deno eval '
