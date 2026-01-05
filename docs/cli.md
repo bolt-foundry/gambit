@@ -1,6 +1,6 @@
 # CLI, REPL, and debug UI
 
-How to run decks locally, iterate quickly, and observe runs.
+How to run Gambit, the agent harness framework, locally and observe runs.
 
 ## Commands
 
@@ -13,6 +13,8 @@ How to run decks locally, iterate quickly, and observe runs.
   `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--init <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--verbose]`
 - Grade (CLI):
   `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]`
+- Export bundle (CLI):
+  `deno run -A src/cli.ts export [<deck>] --state <file> --out <bundle.tar.gz>`
 - Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` then open
   http://localhost:8000/. This serves a multi-page UI:
 
@@ -34,9 +36,11 @@ How to run decks locally, iterate quickly, and observe runs.
 
 ## State and tracing
 
-- `--state <file>` (run/test-bot/grade): load/persist messages so you can
+- `--state <file>` (run/test-bot/grade/export): load/persist messages so you can
   continue a conversation; skips `gambit_init` on resume. `grade` writes
-  `meta.gradingRuns` back into the session state.
+  `meta.gradingRuns` back into the session state, while `export` reads the state
+  file to build the bundle.
+- `--out <file>` (export): bundle output path (tar.gz).
 - `--grade <grader-deck>` (test-bot): can be repeated; graders run in the order
   provided and append results to `meta.gradingRuns` in the same session state
   file.

@@ -1,8 +1,8 @@
 # OpenAI Chat Completions compatibility
 
-Gambit can act as a drop-in-ish wrapper around the OpenAI Chat Completions
-request/response shape, while still letting you point at a Gambit deck for
-system prompt + deck-defined action decks.
+Gambit, an agent harness framework, can act as a drop-in-ish wrapper around the
+OpenAI Chat Completions request/response shape, while still letting you point at
+a Gambit deck for system prompt + deck-defined action decks.
 
 This is useful when you already have code that constructs Chat Completions
 requests and you want to:
