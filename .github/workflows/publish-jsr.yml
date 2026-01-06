@@ -103,6 +103,26 @@ jobs:
             await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
           '
 
+      - name: Build simulator bundle
+        run: deno task bundle:sim:web:sourcemap
+
+      - name: Allow simulator bundle for publish
+        run: |
+          cat <<'EOF' >> .gitignore
+
+          # Allow Gambit simulator bundle for JSR publish.
+          !packages/gambit/simulator-ui/dist/
+          !packages/gambit/simulator-ui/dist/bundle.js
+          !packages/gambit/simulator-ui/dist/bundle.js.map
+          EOF
+          cat <<'EOF' >> packages/gambit/.gitignore
+
+          # Allow simulator bundle for JSR publish.
+          !simulator-ui/dist/
+          !simulator-ui/dist/bundle.js
+          !simulator-ui/dist/bundle.js.map
+          EOF
+
       - name: Publish snapshot
         if: steps.release.outputs.is_release != 'true'
         run: deno publish --allow-dirty
@@ -118,4 +138,4 @@ jobs:
 
       - name: Publish release
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.jsr_published != 'true'
-        run: deno publish
+        run: deno publish --allow-dirty
