@@ -81,27 +81,18 @@ jobs:
       - name: Test
         run: deno task ci
 
-      - name: Set snapshot version
-        if: steps.release.outputs.is_release != 'true'
+      - name: Compute canary version
+        id: canary
         run: |
-          SNAPSHOT_TS=$(date -u +%s)
+          CANARY_TS=$(date -u +%s)
           BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
           if [[ "$BASE_VERSION" == *-* ]]; then
-            export VERSION="${BASE_VERSION}.main.${SNAPSHOT_TS}"
+            CANARY_VERSION="${BASE_VERSION}.main.${CANARY_TS}"
           else
-            export VERSION="${BASE_VERSION}-main.${SNAPSHOT_TS}"
+            CANARY_VERSION="${BASE_VERSION}-main.${CANARY_TS}"
           fi
-          echo "Publishing version ${VERSION}"
-          deno eval '
-            const version = Deno.env.get("VERSION");
-            if (!version) {
-              throw new Error("VERSION env var missing");
-            }
-            const path = "deno.json";
-            const data = JSON.parse(await Deno.readTextFile(path));
-            data.version = version;
-            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
-          '
+          echo "version=${CANARY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing canary ${CANARY_VERSION}"
 
       - name: Build simulator bundle
         run: deno task bundle:sim:web:sourcemap
@@ -111,14 +102,16 @@ jobs:
           cat <<'EOF' >> .gitignore
 
           # Allow Gambit simulator bundle for JSR publish.
+          !simulator-ui/dist/
+          !simulator-ui/dist/bundle.js
+          !simulator-ui/dist/bundle.js.map
           !packages/gambit/simulator-ui/dist/
           !packages/gambit/simulator-ui/dist/bundle.js
           !packages/gambit/simulator-ui/dist/bundle.js.map
           EOF
 
-      - name: Publish snapshot
-        if: steps.release.outputs.is_release != 'true'
-        run: deno publish --allow-dirty
+      - name: Publish canary
+        run: deno publish --allow-dirty --set-version "${{ steps.canary.outputs.version }}"
 
       - name: Tag release
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.tag_exists != 'true'
