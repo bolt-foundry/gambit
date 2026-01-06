@@ -1,0 +1,1146 @@
+{
+  "runId": "run-7ef72073f53b44a4bda64b65",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"What are the different plan tiers and their features?\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-45e312d5251f4deab18e95a1",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-45e312d5251f4deab18e95a1",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Pricing starts at $49 per user per month on the Starter plan, with Professional and Enterprise pricing varying based on usage and features. Let me know if you need more details!"
+    },
+    {
+      "role": "user",
+      "content": "Can you explain your refund policy, especially if there's an exception available beyond the standard terms?"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"refund policy exceptions\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-c7c696b97aa64342b46a2e01",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-c7c696b97aa64342b46a2e01",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only. Let me know if you need further assistance!"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-bfaed7456938443b90f9cae6",
+      "role": "system"
+    },
+    {
+      "id": "msg-26644ab938f449eb88b311e1",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-bd565be8461c45d0bc844214",
+      "role": "tool"
+    },
+    {
+      "id": "msg-950583c43efb45d794a22bc7",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-98148a06692f4fec9e85afb5",
+      "role": "tool"
+    },
+    {
+      "id": "msg-c895ae44385c4b65b1c0a33e",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-ee7971de07d34df3a90c8423",
+      "role": "user"
+    },
+    {
+      "id": "msg-a95ed873e58342e9ad432900",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-de9112b42b644c69b28e5b5f",
+      "role": "tool"
+    },
+    {
+      "id": "msg-d6d2ea2d8f8e4f15a5bc9309",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-c5fb911284e2441d8a372447",
+      "role": "tool"
+    },
+    {
+      "id": "msg-b2150b366f244d9bbfd4bd80",
+      "role": "assistant"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "input": ""
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": false,
+      "messageCount": 1,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+            "type": "function",
+            "function": {
+              "name": "search_faq",
+              "arguments": "{\"query\":\"What are the different plan tiers and their features?\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+          "name": "search_faq",
+          "args": {
+            "query": "What are the different plan tiers and their features?"
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB",
+      "name": "search_faq",
+      "args": {
+        "query": "What are the different plan tiers and their features?"
+      },
+      "parentActionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call-7f491e4712514b63ad8df005",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call-7f491e4712514b63ad8df005",
+      "name": "gambit_init",
+      "result": {
+        "query": "What are the different plan tiers and their features?"
+      },
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-6fc1ad5af0b643699c27da0f",
+      "parentActionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-6fc1ad5af0b643699c27da0f",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow FAQ retrieval assistant. Given a user question, read the\nembedded knowledge base and return the best-matching FAQ entries.\n\n# AcmeFlow Official FAQ (Knowledge Base)\n\nUse this knowledge base to answer retrieval requests. Each entry includes a\nstable `id`, exact question/answer text, and official source URL.\n\n## Company Overview\n\n- `company_overview.what_is_acmeflow`\n  - **Question**: What is AcmeFlow?\n  - **Answer**: AcmeFlow is a workflow automation platform that helps mid-sized\n    teams design, automate, and monitor internal business processes without\n    writing code.\n  - **Source**:\n    https://support.acmeflow.com/faq/company-overview#what-is-acmeflow\n- `company_overview.who_is_acmeflow_for`\n  - **Question**: Who is AcmeFlow for?\n  - **Answer**: AcmeFlow is designed for operations, finance, and IT teams at\n    companies with 50-1,000 employees.\n  - **Source**: https://support.acmeflow.com/faq/company-overview#who-is-it-for\n\n## Plans & Pricing\n\n- `plans_pricing.what_plans_are_available`\n  - **Question**: What pricing plans does AcmeFlow offer?\n  - **Answer**: AcmeFlow offers three plans: Starter, Professional, and\n    Enterprise.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\n- `plans_pricing.how_much_does_acmeflow_cost`\n  - **Question**: How much does AcmeFlow cost?\n  - **Answer**: Pricing starts at $49 per user per month on the Starter plan.\n    Professional and Enterprise pricing varies based on usage and features.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#pricing\n- `plans_pricing.annual_billing`\n  - **Question**: Do you offer annual billing?\n  - **Answer**: Yes. Annual billing is available and includes a 10% discount\n    compared to monthly billing.\n  - **Source**:\n    https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\n- `plans_pricing.free_trial`\n  - **Question**: Is there a free trial?\n  - **Answer**: Yes. AcmeFlow offers a 14-day free trial with access to the\n    Starter plan features.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#free-trial\n\n## Billing & Payments\n\n- `billing_payments.payment_methods`\n  - **Question**: What payment methods do you accept?\n  - **Answer**: AcmeFlow accepts major credit cards. ACH payments are available\n    on the Enterprise plan.\n  - **Source**: https://support.acmeflow.com/faq/billing-and-payments#methods\n- `billing_payments.billing_schedule`\n  - **Question**: When am I billed?\n  - **Answer**: Customers on monthly plans are billed at the start of each\n    billing cycle. Annual plans are billed upfront.\n  - **Source**: https://support.acmeflow.com/faq/billing-and-payments#schedule\n- `billing_payments.change_plan`\n  - **Question**: Can I change my plan later?\n  - **Answer**: Yes. You can upgrade or downgrade your plan at any time. Changes\n    take effect at the start of the next billing cycle.\n  - **Source**:\n    https://support.acmeflow.com/faq/billing-and-payments#change-plan\n\n## Refunds & Cancellations\n\n- `refunds_cancellations.refund_policy`\n  - **Question**: What is AcmeFlow's refund policy?\n  - **Answer**: AcmeFlow offers refunds within 30 days of the initial purchase\n    for first-time customers only.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\n- `refunds_cancellations.cancel_subscription`\n  - **Question**: How do I cancel my subscription?\n  - **Answer**: You can cancel your subscription from your account settings.\n    Cancellation takes effect at the end of the current billing period.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#cancel\n- `refunds_cancellations.charges_after_cancel`\n  - **Question**: Will I be charged after I cancel?\n  - **Answer**: No. Once canceled, you will not be charged for subsequent\n    billing periods.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#after-cancel\n\n## Account Management\n\n- `account_management.add_or_remove_users`\n  - **Question**: How do I add or remove users?\n  - **Answer**: Admins can add or remove users from the Admin Dashboard at any\n    time.\n  - **Source**:\n    https://support.acmeflow.com/faq/account-management#add-remove-users\n- `account_management.remove_user_effect`\n  - **Question**: What happens when I remove a user?\n  - **Answer**: Removed users lose access immediately, but their historical\n    activity remains available for audit purposes.\n  - **Source**: https://support.acmeflow.com/faq/account-management#remove-user\n- `account_management.transfer_ownership`\n  - **Question**: Can I transfer account ownership?\n  - **Answer**: Yes. Account ownership can be transferred by an existing admin.\n  - **Source**:\n    https://support.acmeflow.com/faq/account-management#transfer-ownership\n\n## Data & Security\n\n- `data_security.data_retention`\n  - **Question**: How long does AcmeFlow retain customer data?\n  - **Answer**: AcmeFlow retains customer data for the duration of the active\n    subscription.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#retention\n- `data_security.after_cancel`\n  - **Question**: What happens to my data after I cancel?\n  - **Answer**: Data is retained for 30 days after cancellation, after which it\n    is permanently deleted.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#after-cancel\n- `data_security.encryption`\n  - **Question**: Is my data encrypted?\n  - **Answer**: Yes. AcmeFlow encrypts data in transit and at rest using\n    industry-standard encryption.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#encryption\n- `data_security.soc2`\n  - **Question**: Is AcmeFlow SOC 2 compliant?\n  - **Answer**: Yes. AcmeFlow is SOC 2 Type II compliant.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#soc2\n\n## Integrations & Features\n\n- `integrations_features.integrations`\n  - **Question**: What integrations does AcmeFlow support?\n  - **Answer**: AcmeFlow integrates with Slack, Google Workspace, Microsoft\n    Teams, and Zapier.\n  - **Source**:\n    https://support.acmeflow.com/faq/integrations-and-features#integrations\n- `integrations_features.export_data`\n  - **Question**: Can I export my data?\n  - **Answer**: Yes. Admins can export workflow data as CSV files from the\n    dashboard.\n  - **Source**:\n    https://support.acmeflow.com/faq/integrations-and-features#export\n- `integrations_features.api`\n  - **Question**: Does AcmeFlow offer an API?\n  - **Answer**: Yes. API access is available on the Professional and Enterprise\n    plans.\n  - **Source**: https://support.acmeflow.com/faq/integrations-and-features#api\n\n## Support & SLAs\n\n- `support_slas.contact`\n  - **Question**: How do I contact AcmeFlow support?\n  - **Answer**: Support can be contacted via email or in-app chat.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#contact\n- `support_slas.hours`\n  - **Question**: What support hours are available?\n  - **Answer**: Support is available Monday-Friday, 9am-5pm Pacific Time.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#hours\n- `support_slas.response_times`\n  - **Question**: What response times does AcmeFlow guarantee?\n  - **Answer**: Starter: Best-effort support. Professional: 1 business day\n    response time. Enterprise: 4-hour response time during business hours.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#response-times\n\n## Compliance & Legal\n\n- `compliance_legal.gdpr`\n  - **Question**: Is AcmeFlow GDPR compliant?\n  - **Answer**: Yes. AcmeFlow complies with GDPR requirements for data\n    protection and user privacy.\n  - **Source**: https://support.acmeflow.com/faq/compliance-and-legal#gdpr\n- `compliance_legal.hosting`\n  - **Question**: Where is AcmeFlow hosted?\n  - **Answer**: AcmeFlow is hosted on cloud infrastructure located in the United\n    States.\n  - **Source**: https://support.acmeflow.com/faq/compliance-and-legal#hosting\n\nRetrieval rules:\n\n1. Skim the entire knowledge base and identify all entries that answer or\n   meaningfully address the query. Consider synonyms (e.g., \"cost\" → pricing,\n   \"cancel\" → refunds/cancellations).\n2. Score relevance qualitatively:\n   - 0.9: exact question/answer match.\n   - 0.7: closely related wording that clearly covers the ask.\n   - 0.5: partially related; only include if helpful context.\n   - 0.0: not covered; do not output.\n3. Respect `maxResults` (default 4). Sort matches by decreasing confidence.\n4. When nothing is covered, return `{ \"matches\": [] }` and omit `topCategory`.\n5. Always include `question`, `answer`, `id`, `category`, `sourceUrl`, and a\n   one-sentence `summary` (usually the answer itself).\n\n- `topCategory` should mirror the category of the highest-confidence match.\n- Keep confidence values between 0 and 1 with two decimal precision.\n- Do not fabricate IDs or sources; copy them exactly from the FAQ.\n\nResponse format:\n\nCall `gambit_respond` with an object that matches the output schema:\n\n```json\n{\n  \"matches\": [\n    {\n      \"id\": \"plans_pricing.how_much_does_acmeflow_cost\",\n      \"question\": \"How much does AcmeFlow cost?\",\n      \"answer\": \"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\n      \"category\": \"Plans & Pricing\",\n      \"sourceUrl\": \"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\n      \"confidence\": 0.90,\n      \"summary\": \"Pricing starts at $49 per user per month on the Starter plan.\"\n    }\n  ],\n  \"topCategory\": \"Plans & Pricing\"\n}\n```"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-7f491e4712514b63ad8df005",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-7f491e4712514b63ad8df005",
+          "content": "{\"query\":\"What are the different plan tiers and their features?\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "gambit_respond",
+            "description": "Finish the current deck with a structured response.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "number"
+                },
+                "payload": {},
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "parentActionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB"
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-6fc1ad5af0b643699c27da0f",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_Zr24in7QPX2Xftq1LYGL1eLn",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\": [{\"id\": \"plans_pricing.what_plans_are_available\", \"question\": \"What pricing plans does AcmeFlow offer?\", \"answer\": \"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\", \"category\": \"Plans & Pricing\", \"sourceUrl\": \"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\", \"confidence\": 0.9, \"summary\": \"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"}], \"topCategory\": \"Plans & Pricing\"}"
+            }
+          },
+          {
+            "index": 1,
+            "id": "call_fBEEwjJZOkAlihp2p6lAKLJe",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\": [{\"id\": \"plans_pricing.how_much_does_acmeflow_cost\", \"question\": \"How much does AcmeFlow cost?\", \"answer\": \"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\", \"category\": \"Plans & Pricing\", \"sourceUrl\": \"https://support.acmeflow.com/faq/plans-and-pricing#pricing\", \"confidence\": 0.9, \"summary\": \"Pricing starts at $49 per user per month on the Starter plan.\"}], \"topCategory\": \"Plans & Pricing\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_Zr24in7QPX2Xftq1LYGL1eLn",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "plans_pricing.what_plans_are_available",
+                "question": "What pricing plans does AcmeFlow offer?",
+                "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+                "confidence": 0.9,
+                "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+              }
+            ],
+            "topCategory": "Plans & Pricing"
+          }
+        },
+        {
+          "id": "call_fBEEwjJZOkAlihp2p6lAKLJe",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "plans_pricing.how_much_does_acmeflow_cost",
+                "question": "How much does AcmeFlow cost?",
+                "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+                "confidence": 0.9,
+                "summary": "Pricing starts at $49 per user per month on the Starter plan."
+              }
+            ],
+            "topCategory": "Plans & Pricing"
+          }
+        }
+      ],
+      "parentActionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_Zr24in7QPX2Xftq1LYGL1eLn",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "plans_pricing.what_plans_are_available",
+            "question": "What pricing plans does AcmeFlow offer?",
+            "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+            "confidence": 0.9,
+            "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+          }
+        ],
+        "topCategory": "Plans & Pricing"
+      },
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_Zr24in7QPX2Xftq1LYGL1eLn",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "plans_pricing.what_plans_are_available",
+              "question": "What pricing plans does AcmeFlow offer?",
+              "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+              "confidence": 0.9,
+              "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+            }
+          ],
+          "topCategory": "Plans & Pricing"
+        }
+      },
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_fBEEwjJZOkAlihp2p6lAKLJe",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "plans_pricing.how_much_does_acmeflow_cost",
+            "question": "How much does AcmeFlow cost?",
+            "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+            "confidence": 0.9,
+            "summary": "Pricing starts at $49 per user per month on the Starter plan."
+          }
+        ],
+        "topCategory": "Plans & Pricing"
+      },
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_fBEEwjJZOkAlihp2p6lAKLJe",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "plans_pricing.how_much_does_acmeflow_cost",
+              "question": "How much does AcmeFlow cost?",
+              "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+              "confidence": 0.9,
+              "summary": "Pricing starts at $49 per user per month on the Starter plan."
+            }
+          ],
+          "topCategory": "Plans & Pricing"
+        }
+      },
+      "parentActionCallId": "action-6fc1ad5af0b643699c27da0f"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-6fc1ad5af0b643699c27da0f",
+      "parentActionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}",
+      "parentActionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_34vK8LHk8uI1KaLNCHph8nbB",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": false,
+      "messageCount": 5,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"What are the different plan tiers and their features?\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-45e312d5251f4deab18e95a1",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-45e312d5251f4deab18e95a1",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Pricing starts at $49 per user per month on the Starter plan, with Professional and Enterprise pricing varying based on usage and features. Let me know if you need more details!"
+      }
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "actionCallId": "action-190a57cf6d3b4b95aa646d6a"
+    },
+    {
+      "type": "run.end",
+      "runId": "run-7ef72073f53b44a4bda64b65"
+    },
+    {
+      "type": "run.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "input": "",
+      "initialUserMessage": "Can you explain your refund policy, especially if there's an exception available beyond the standard terms?"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "actionCallId": "action-994a6632cdfb4ca69edc9519"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-994a6632cdfb4ca69edc9519",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 7,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"What are the different plan tiers and their features?\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-45e312d5251f4deab18e95a1",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-45e312d5251f4deab18e95a1",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pricing starts at $49 per user per month on the Starter plan, with Professional and Enterprise pricing varying based on usage and features. Let me know if you need more details!"
+        },
+        {
+          "role": "user",
+          "content": "Can you explain your refund policy, especially if there's an exception available beyond the standard terms?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 6
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-994a6632cdfb4ca69edc9519",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+            "type": "function",
+            "function": {
+              "name": "search_faq",
+              "arguments": "{\"query\":\"refund policy exceptions\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+          "name": "search_faq",
+          "args": {
+            "query": "refund policy exceptions"
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-994a6632cdfb4ca69edc9519"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+      "name": "search_faq",
+      "args": {
+        "query": "refund policy exceptions"
+      },
+      "parentActionCallId": "action-994a6632cdfb4ca69edc9519"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call-881e2905242f4fddbe81aa10",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-f6adc3aba80e413abe9a2271"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call-881e2905242f4fddbe81aa10",
+      "name": "gambit_init",
+      "result": {
+        "query": "refund policy exceptions"
+      },
+      "parentActionCallId": "action-f6adc3aba80e413abe9a2271"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-f6adc3aba80e413abe9a2271",
+      "parentActionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-f6adc3aba80e413abe9a2271",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow FAQ retrieval assistant. Given a user question, read the\nembedded knowledge base and return the best-matching FAQ entries.\n\n# AcmeFlow Official FAQ (Knowledge Base)\n\nUse this knowledge base to answer retrieval requests. Each entry includes a\nstable `id`, exact question/answer text, and official source URL.\n\n## Company Overview\n\n- `company_overview.what_is_acmeflow`\n  - **Question**: What is AcmeFlow?\n  - **Answer**: AcmeFlow is a workflow automation platform that helps mid-sized\n    teams design, automate, and monitor internal business processes without\n    writing code.\n  - **Source**:\n    https://support.acmeflow.com/faq/company-overview#what-is-acmeflow\n- `company_overview.who_is_acmeflow_for`\n  - **Question**: Who is AcmeFlow for?\n  - **Answer**: AcmeFlow is designed for operations, finance, and IT teams at\n    companies with 50-1,000 employees.\n  - **Source**: https://support.acmeflow.com/faq/company-overview#who-is-it-for\n\n## Plans & Pricing\n\n- `plans_pricing.what_plans_are_available`\n  - **Question**: What pricing plans does AcmeFlow offer?\n  - **Answer**: AcmeFlow offers three plans: Starter, Professional, and\n    Enterprise.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\n- `plans_pricing.how_much_does_acmeflow_cost`\n  - **Question**: How much does AcmeFlow cost?\n  - **Answer**: Pricing starts at $49 per user per month on the Starter plan.\n    Professional and Enterprise pricing varies based on usage and features.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#pricing\n- `plans_pricing.annual_billing`\n  - **Question**: Do you offer annual billing?\n  - **Answer**: Yes. Annual billing is available and includes a 10% discount\n    compared to monthly billing.\n  - **Source**:\n    https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\n- `plans_pricing.free_trial`\n  - **Question**: Is there a free trial?\n  - **Answer**: Yes. AcmeFlow offers a 14-day free trial with access to the\n    Starter plan features.\n  - **Source**: https://support.acmeflow.com/faq/plans-and-pricing#free-trial\n\n## Billing & Payments\n\n- `billing_payments.payment_methods`\n  - **Question**: What payment methods do you accept?\n  - **Answer**: AcmeFlow accepts major credit cards. ACH payments are available\n    on the Enterprise plan.\n  - **Source**: https://support.acmeflow.com/faq/billing-and-payments#methods\n- `billing_payments.billing_schedule`\n  - **Question**: When am I billed?\n  - **Answer**: Customers on monthly plans are billed at the start of each\n    billing cycle. Annual plans are billed upfront.\n  - **Source**: https://support.acmeflow.com/faq/billing-and-payments#schedule\n- `billing_payments.change_plan`\n  - **Question**: Can I change my plan later?\n  - **Answer**: Yes. You can upgrade or downgrade your plan at any time. Changes\n    take effect at the start of the next billing cycle.\n  - **Source**:\n    https://support.acmeflow.com/faq/billing-and-payments#change-plan\n\n## Refunds & Cancellations\n\n- `refunds_cancellations.refund_policy`\n  - **Question**: What is AcmeFlow's refund policy?\n  - **Answer**: AcmeFlow offers refunds within 30 days of the initial purchase\n    for first-time customers only.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\n- `refunds_cancellations.cancel_subscription`\n  - **Question**: How do I cancel my subscription?\n  - **Answer**: You can cancel your subscription from your account settings.\n    Cancellation takes effect at the end of the current billing period.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#cancel\n- `refunds_cancellations.charges_after_cancel`\n  - **Question**: Will I be charged after I cancel?\n  - **Answer**: No. Once canceled, you will not be charged for subsequent\n    billing periods.\n  - **Source**:\n    https://support.acmeflow.com/faq/refunds-and-cancellations#after-cancel\n\n## Account Management\n\n- `account_management.add_or_remove_users`\n  - **Question**: How do I add or remove users?\n  - **Answer**: Admins can add or remove users from the Admin Dashboard at any\n    time.\n  - **Source**:\n    https://support.acmeflow.com/faq/account-management#add-remove-users\n- `account_management.remove_user_effect`\n  - **Question**: What happens when I remove a user?\n  - **Answer**: Removed users lose access immediately, but their historical\n    activity remains available for audit purposes.\n  - **Source**: https://support.acmeflow.com/faq/account-management#remove-user\n- `account_management.transfer_ownership`\n  - **Question**: Can I transfer account ownership?\n  - **Answer**: Yes. Account ownership can be transferred by an existing admin.\n  - **Source**:\n    https://support.acmeflow.com/faq/account-management#transfer-ownership\n\n## Data & Security\n\n- `data_security.data_retention`\n  - **Question**: How long does AcmeFlow retain customer data?\n  - **Answer**: AcmeFlow retains customer data for the duration of the active\n    subscription.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#retention\n- `data_security.after_cancel`\n  - **Question**: What happens to my data after I cancel?\n  - **Answer**: Data is retained for 30 days after cancellation, after which it\n    is permanently deleted.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#after-cancel\n- `data_security.encryption`\n  - **Question**: Is my data encrypted?\n  - **Answer**: Yes. AcmeFlow encrypts data in transit and at rest using\n    industry-standard encryption.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#encryption\n- `data_security.soc2`\n  - **Question**: Is AcmeFlow SOC 2 compliant?\n  - **Answer**: Yes. AcmeFlow is SOC 2 Type II compliant.\n  - **Source**: https://support.acmeflow.com/faq/data-and-security#soc2\n\n## Integrations & Features\n\n- `integrations_features.integrations`\n  - **Question**: What integrations does AcmeFlow support?\n  - **Answer**: AcmeFlow integrates with Slack, Google Workspace, Microsoft\n    Teams, and Zapier.\n  - **Source**:\n    https://support.acmeflow.com/faq/integrations-and-features#integrations\n- `integrations_features.export_data`\n  - **Question**: Can I export my data?\n  - **Answer**: Yes. Admins can export workflow data as CSV files from the\n    dashboard.\n  - **Source**:\n    https://support.acmeflow.com/faq/integrations-and-features#export\n- `integrations_features.api`\n  - **Question**: Does AcmeFlow offer an API?\n  - **Answer**: Yes. API access is available on the Professional and Enterprise\n    plans.\n  - **Source**: https://support.acmeflow.com/faq/integrations-and-features#api\n\n## Support & SLAs\n\n- `support_slas.contact`\n  - **Question**: How do I contact AcmeFlow support?\n  - **Answer**: Support can be contacted via email or in-app chat.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#contact\n- `support_slas.hours`\n  - **Question**: What support hours are available?\n  - **Answer**: Support is available Monday-Friday, 9am-5pm Pacific Time.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#hours\n- `support_slas.response_times`\n  - **Question**: What response times does AcmeFlow guarantee?\n  - **Answer**: Starter: Best-effort support. Professional: 1 business day\n    response time. Enterprise: 4-hour response time during business hours.\n  - **Source**: https://support.acmeflow.com/faq/support-and-slas#response-times\n\n## Compliance & Legal\n\n- `compliance_legal.gdpr`\n  - **Question**: Is AcmeFlow GDPR compliant?\n  - **Answer**: Yes. AcmeFlow complies with GDPR requirements for data\n    protection and user privacy.\n  - **Source**: https://support.acmeflow.com/faq/compliance-and-legal#gdpr\n- `compliance_legal.hosting`\n  - **Question**: Where is AcmeFlow hosted?\n  - **Answer**: AcmeFlow is hosted on cloud infrastructure located in the United\n    States.\n  - **Source**: https://support.acmeflow.com/faq/compliance-and-legal#hosting\n\nRetrieval rules:\n\n1. Skim the entire knowledge base and identify all entries that answer or\n   meaningfully address the query. Consider synonyms (e.g., \"cost\" → pricing,\n   \"cancel\" → refunds/cancellations).\n2. Score relevance qualitatively:\n   - 0.9: exact question/answer match.\n   - 0.7: closely related wording that clearly covers the ask.\n   - 0.5: partially related; only include if helpful context.\n   - 0.0: not covered; do not output.\n3. Respect `maxResults` (default 4). Sort matches by decreasing confidence.\n4. When nothing is covered, return `{ \"matches\": [] }` and omit `topCategory`.\n5. Always include `question`, `answer`, `id`, `category`, `sourceUrl`, and a\n   one-sentence `summary` (usually the answer itself).\n\n- `topCategory` should mirror the category of the highest-confidence match.\n- Keep confidence values between 0 and 1 with two decimal precision.\n- Do not fabricate IDs or sources; copy them exactly from the FAQ.\n\nResponse format:\n\nCall `gambit_respond` with an object that matches the output schema:\n\n```json\n{\n  \"matches\": [\n    {\n      \"id\": \"plans_pricing.how_much_does_acmeflow_cost\",\n      \"question\": \"How much does AcmeFlow cost?\",\n      \"answer\": \"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\n      \"category\": \"Plans & Pricing\",\n      \"sourceUrl\": \"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\n      \"confidence\": 0.90,\n      \"summary\": \"Pricing starts at $49 per user per month on the Starter plan.\"\n    }\n  ],\n  \"topCategory\": \"Plans & Pricing\"\n}\n```"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-881e2905242f4fddbe81aa10",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-881e2905242f4fddbe81aa10",
+          "content": "{\"query\":\"refund policy exceptions\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "gambit_respond",
+            "description": "Finish the current deck with a structured response.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "number"
+                },
+                "payload": {},
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "parentActionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1"
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-f6adc3aba80e413abe9a2271",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_yEkmnyoCf0rJhloKfuw3k3MV",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\": [{\"id\": \"refunds_cancellations.refund_policy\", \"question\": \"What is AcmeFlow's refund policy?\", \"answer\": \"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\", \"category\": \"Refunds & Cancellations\", \"sourceUrl\": \"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\", \"confidence\": 0.9, \"summary\": \"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}], \"topCategory\": \"Refunds & Cancellations\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_yEkmnyoCf0rJhloKfuw3k3MV",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "refunds_cancellations.refund_policy",
+                "question": "What is AcmeFlow's refund policy?",
+                "answer": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.",
+                "category": "Refunds & Cancellations",
+                "sourceUrl": "https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy",
+                "confidence": 0.9,
+                "summary": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only."
+              }
+            ],
+            "topCategory": "Refunds & Cancellations"
+          }
+        }
+      ],
+      "parentActionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_yEkmnyoCf0rJhloKfuw3k3MV",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "refunds_cancellations.refund_policy",
+            "question": "What is AcmeFlow's refund policy?",
+            "answer": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.",
+            "category": "Refunds & Cancellations",
+            "sourceUrl": "https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy",
+            "confidence": 0.9,
+            "summary": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only."
+          }
+        ],
+        "topCategory": "Refunds & Cancellations"
+      },
+      "parentActionCallId": "action-f6adc3aba80e413abe9a2271"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_yEkmnyoCf0rJhloKfuw3k3MV",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "refunds_cancellations.refund_policy",
+              "question": "What is AcmeFlow's refund policy?",
+              "answer": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.",
+              "category": "Refunds & Cancellations",
+              "sourceUrl": "https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy",
+              "confidence": 0.9,
+              "summary": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only."
+            }
+          ],
+          "topCategory": "Refunds & Cancellations"
+        }
+      },
+      "parentActionCallId": "action-f6adc3aba80e413abe9a2271"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-f6adc3aba80e413abe9a2271",
+      "parentActionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}",
+      "parentActionCallId": "action-994a6632cdfb4ca69edc9519"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-994a6632cdfb4ca69edc9519"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-994a6632cdfb4ca69edc9519",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 11,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"What are the different plan tiers and their features?\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_34vK8LHk8uI1KaLNCHph8nbB",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-45e312d5251f4deab18e95a1",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-45e312d5251f4deab18e95a1",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_34vK8LHk8uI1KaLNCHph8nbB\",\"parentActionCallId\":\"action-190a57cf6d3b4b95aa646d6a\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pricing starts at $49 per user per month on the Starter plan, with Professional and Enterprise pricing varying based on usage and features. Let me know if you need more details!"
+        },
+        {
+          "role": "user",
+          "content": "Can you explain your refund policy, especially if there's an exception available beyond the standard terms?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"refund policy exceptions\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_ka5ouKKYvfLkhTlg1jSbrML1",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-c7c696b97aa64342b46a2e01",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-c7c696b97aa64342b46a2e01",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-7ef72073f53b44a4bda64b65\",\"actionCallId\":\"call_ka5ouKKYvfLkhTlg1jSbrML1\",\"parentActionCallId\":\"action-994a6632cdfb4ca69edc9519\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"refunds_cancellations.refund_policy\",\"question\":\"What is AcmeFlow's refund policy?\",\"answer\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\",\"category\":\"Refunds & Cancellations\",\"sourceUrl\":\"https://support.acmeflow.com/faq/refunds-and-cancellations#refund-policy\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only.\"}],\"topCategory\":\"Refunds & Cancellations\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 6
+    },
+    {
+      "type": "model.result",
+      "runId": "run-7ef72073f53b44a4bda64b65",
+      "actionCallId": "action-994a6632cdfb4ca69edc9519",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "AcmeFlow offers refunds within 30 days of the initial purchase for first-time customers only. Let me know if you need further assistance!"
+      }
+    }
+  ],
+  "meta": {
+    "testBot": true,
+    "testBotRunId": "testbot-b1185ee8596f44e0b4ae5171",
+    "testBotConfigPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/test-bot.md",
+    "sessionId": "policy-support-bot-deck-2025-12-20T19-47-41-033Z",
+    "sessionCreatedAt": "2025-12-20T19:47:41.033Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+    "deckSlug": "policy-support-bot-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/policy-support-bot-deck-2025-12-20T19-47-41-033Z"
+  }
+}

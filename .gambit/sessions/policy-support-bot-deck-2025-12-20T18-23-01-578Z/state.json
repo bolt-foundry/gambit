@@ -1,0 +1,376 @@
+{
+  "runId": "run-20cc853e68c6447e876e2b27",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You will automatically receive a `gambit_init` tool result at the start that provides run/context info.\n\nYou are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\n\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\n\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"plans\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-207d6905dd704115bf242837",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-207d6905dd704115bf242837",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "AcmeFlow offers three plans: Starter, Professional, and Enterprise. If you need more details about any specific plan, feel free to ask!"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-012ff020b2c64390b2ec3fb9",
+      "role": "system"
+    },
+    {
+      "id": "msg-183e03abaabb4562b5b10ae8",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-c41cd61c7d4142b497748382",
+      "role": "tool"
+    },
+    {
+      "id": "msg-a2b8c2d765c44c3280567585",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-f8045303442d41a98d493ee1",
+      "role": "tool"
+    },
+    {
+      "id": "msg-f5d88014a97a499c98fee676",
+      "role": "assistant"
+    }
+  ],
+  "traces": [
+    {
+      "type": "model.result",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "action-b11a85efc72f409286b8e5fb",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_gBnRvtiC727TC5SJClrssr9E",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.90,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.90,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.70,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.70,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_gBnRvtiC727TC5SJClrssr9E",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "plans_pricing.what_plans_are_available",
+                "question": "What pricing plans does AcmeFlow offer?",
+                "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+                "confidence": 0.9,
+                "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+              },
+              {
+                "id": "plans_pricing.how_much_does_acmeflow_cost",
+                "question": "How much does AcmeFlow cost?",
+                "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+                "confidence": 0.9,
+                "summary": "Pricing starts at $49 per user per month on the Starter plan."
+              },
+              {
+                "id": "plans_pricing.annual_billing",
+                "question": "Do you offer annual billing?",
+                "answer": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#annual-billing",
+                "confidence": 0.7,
+                "summary": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing."
+              },
+              {
+                "id": "plans_pricing.free_trial",
+                "question": "Is there a free trial?",
+                "answer": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.",
+                "category": "Plans & Pricing",
+                "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#free-trial",
+                "confidence": 0.7,
+                "summary": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features."
+              }
+            ],
+            "topCategory": "Plans & Pricing"
+          }
+        }
+      ],
+      "parentActionCallId": "call_DVDjRuxRRMZT9fQkihLD4iBm"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "call_gBnRvtiC727TC5SJClrssr9E",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "plans_pricing.what_plans_are_available",
+            "question": "What pricing plans does AcmeFlow offer?",
+            "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+            "confidence": 0.9,
+            "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+          },
+          {
+            "id": "plans_pricing.how_much_does_acmeflow_cost",
+            "question": "How much does AcmeFlow cost?",
+            "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+            "confidence": 0.9,
+            "summary": "Pricing starts at $49 per user per month on the Starter plan."
+          },
+          {
+            "id": "plans_pricing.annual_billing",
+            "question": "Do you offer annual billing?",
+            "answer": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#annual-billing",
+            "confidence": 0.7,
+            "summary": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing."
+          },
+          {
+            "id": "plans_pricing.free_trial",
+            "question": "Is there a free trial?",
+            "answer": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.",
+            "category": "Plans & Pricing",
+            "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#free-trial",
+            "confidence": 0.7,
+            "summary": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features."
+          }
+        ],
+        "topCategory": "Plans & Pricing"
+      },
+      "parentActionCallId": "action-b11a85efc72f409286b8e5fb"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "call_gBnRvtiC727TC5SJClrssr9E",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "plans_pricing.what_plans_are_available",
+              "question": "What pricing plans does AcmeFlow offer?",
+              "answer": "AcmeFlow offers three plans: Starter, Professional, and Enterprise.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#plan-overview",
+              "confidence": 0.9,
+              "summary": "AcmeFlow offers three plans: Starter, Professional, and Enterprise."
+            },
+            {
+              "id": "plans_pricing.how_much_does_acmeflow_cost",
+              "question": "How much does AcmeFlow cost?",
+              "answer": "Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#pricing",
+              "confidence": 0.9,
+              "summary": "Pricing starts at $49 per user per month on the Starter plan."
+            },
+            {
+              "id": "plans_pricing.annual_billing",
+              "question": "Do you offer annual billing?",
+              "answer": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#annual-billing",
+              "confidence": 0.7,
+              "summary": "Yes. Annual billing is available and includes a 10% discount compared to monthly billing."
+            },
+            {
+              "id": "plans_pricing.free_trial",
+              "question": "Is there a free trial?",
+              "answer": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.",
+              "category": "Plans & Pricing",
+              "sourceUrl": "https://support.acmeflow.com/faq/plans-and-pricing#free-trial",
+              "confidence": 0.7,
+              "summary": "Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features."
+            }
+          ],
+          "topCategory": "Plans & Pricing"
+        }
+      },
+      "parentActionCallId": "action-b11a85efc72f409286b8e5fb"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-b11a85efc72f409286b8e5fb",
+      "parentActionCallId": "call_DVDjRuxRRMZT9fQkihLD4iBm"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}",
+      "parentActionCallId": "action-7c83daba41f74570a3e74e96"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-7c83daba41f74570a3e74e96"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "action-7c83daba41f74570a3e74e96",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "stream": true,
+      "messageCount": 5,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You will automatically receive a `gambit_init` tool result at the start that provides run/context info.\n\nYou are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\n\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\n\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"plans\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_DVDjRuxRRMZT9fQkihLD4iBm",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-207d6905dd704115bf242837",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-207d6905dd704115bf242837",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-20cc853e68c6447e876e2b27\",\"actionCallId\":\"call_DVDjRuxRRMZT9fQkihLD4iBm\",\"parentActionCallId\":\"action-7c83daba41f74570a3e74e96\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"plans_pricing.what_plans_are_available\",\"question\":\"What pricing plans does AcmeFlow offer?\",\"answer\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#plan-overview\",\"confidence\":0.9,\"summary\":\"AcmeFlow offers three plans: Starter, Professional, and Enterprise.\"},{\"id\":\"plans_pricing.how_much_does_acmeflow_cost\",\"question\":\"How much does AcmeFlow cost?\",\"answer\":\"Pricing starts at $49 per user per month on the Starter plan. Professional and Enterprise pricing varies based on usage and features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#pricing\",\"confidence\":0.9,\"summary\":\"Pricing starts at $49 per user per month on the Starter plan.\"},{\"id\":\"plans_pricing.annual_billing\",\"question\":\"Do you offer annual billing?\",\"answer\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#annual-billing\",\"confidence\":0.7,\"summary\":\"Yes. Annual billing is available and includes a 10% discount compared to monthly billing.\"},{\"id\":\"plans_pricing.free_trial\",\"question\":\"Is there a free trial?\",\"answer\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\",\"category\":\"Plans & Pricing\",\"sourceUrl\":\"https://support.acmeflow.com/faq/plans-and-pricing#free-trial\",\"confidence\":0.7,\"summary\":\"Yes. AcmeFlow offers a 14-day free trial with access to the Starter plan features.\"}],\"topCategory\":\"Plans & Pricing\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-20cc853e68c6447e876e2b27",
+      "actionCallId": "action-7c83daba41f74570a3e74e96",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "AcmeFlow offers three plans: Starter, Professional, and Enterprise. If you need more details about any specific plan, feel free to ask!"
+      }
+    }
+  ],
+  "meta": {
+    "sessionId": "policy-support-bot-deck-2025-12-20T18-23-01-578Z",
+    "sessionCreatedAt": "2025-12-20T18:23:01.578Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+    "deckSlug": "policy-support-bot-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/policy-support-bot-deck-2025-12-20T18-23-01-578Z"
+  }
+}

@@ -1,0 +1,411 @@
+{
+  "runId": "run-302efa7d8c6b4682906afd99",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence:\n   \"I couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"What is the Pioneer Fund?\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-302efa7d8c6b4682906afd99\",\"actionCallId\":\"call_a8fJXzCv7MGiXtT7Ow4MhYgb\",\"parentActionCallId\":\"action-98b0d963c29445bf9dc24037\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"company_overview.what_is_pioneer_fund\",\"question\":\"What is Pioneer Fund?\",\"answer\":\"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\"category\":\"Company Overview\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"}],\"topCategory\":\"Company Overview\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-0752b025ebbc47868df08cb7",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-302efa7d8c6b4682906afd99\",\"actionCallId\":\"call_a8fJXzCv7MGiXtT7Ow4MhYgb\",\"parentActionCallId\":\"action-98b0d963c29445bf9dc24037\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"company_overview.what_is_pioneer_fund\",\"question\":\"What is Pioneer Fund?\",\"answer\":\"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\"category\":\"Company Overview\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"}],\"topCategory\":\"Company Overview\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-0752b025ebbc47868df08cb7",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-302efa7d8c6b4682906afd99\",\"actionCallId\":\"call_a8fJXzCv7MGiXtT7Ow4MhYgb\",\"parentActionCallId\":\"action-98b0d963c29445bf9dc24037\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"company_overview.what_is_pioneer_fund\",\"question\":\"What is Pioneer Fund?\",\"answer\":\"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\"category\":\"Company Overview\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"}],\"topCategory\":\"Company Overview\"}}"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-661a9e40a5994d95944c1fe3",
+      "role": "system"
+    },
+    {
+      "id": "msg-556c50e85c434a37b2397e2a",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-d26674947afb422782753ed0",
+      "role": "tool"
+    },
+    {
+      "id": "msg-2b74919dc3704ca6abfb6e7f",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-584d2b178e5a4b7586068a59",
+      "role": "tool"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "input": ""
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-98b0d963c29445bf9dc24037"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "action-98b0d963c29445bf9dc24037",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 1,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence:\n   \"I couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "action-98b0d963c29445bf9dc24037",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+            "type": "function",
+            "function": {
+              "name": "search_faq",
+              "arguments": "{\"query\":\"What is the Pioneer Fund?\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+          "name": "search_faq",
+          "args": {
+            "query": "What is the Pioneer Fund?"
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-98b0d963c29445bf9dc24037"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+      "name": "search_faq",
+      "args": {
+        "query": "What is the Pioneer Fund?"
+      },
+      "parentActionCallId": "action-98b0d963c29445bf9dc24037"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call-13e46ba52a6f428d8b2834e2",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-91582dbaa71746668052a4a2"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call-13e46ba52a6f428d8b2834e2",
+      "name": "gambit_init",
+      "result": {
+        "query": "What is the Pioneer Fund?"
+      },
+      "parentActionCallId": "action-91582dbaa71746668052a4a2"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-91582dbaa71746668052a4a2",
+      "parentActionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "action-91582dbaa71746668052a4a2",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund FAQ retrieval assistant. Given a user question, read\nthe embedded knowledge base and return the best-matching FAQ entries.\n\n# Pioneer Fund FAQ (Knowledge Base)\n\nUse this knowledge base to answer retrieval requests. Each entry includes a\nstable `id`, exact question/answer text, and official source URL.\n\n## Company Overview\n\n- `company_overview.what_is_pioneer_fund`\n  - **Question**: What is Pioneer Fund?\n  - **Answer**: Pioneer Fund is an early-stage venture capital fund backed by a\n    collective of hundreds of Y Combinator alumni that invests in and supports\n    exceptional startups, particularly at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.when_was_pioneer_fund_founded`\n  - **Question**: When was Pioneer Fund founded?\n  - **Answer**: Pioneer Fund was founded in 2017.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.where_is_pioneer_fund_based`\n  - **Question**: Where is Pioneer Fund based?\n  - **Answer**: Pioneer Fund is headquartered in San Francisco, California.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Investment Focus\n\n- `investment_focus.stage`\n  - **Question**: What stages does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund primarily invests at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/seed-fund\n- `investment_focus.industries`\n  - **Question**: What industries does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund is industry-agnostic and invests across technology,\n    software, healthcare, biotech, and other high-growth sectors.\n  - **Source**: https://www.pioneerfund.vc/\n- `investment_focus.geography`\n  - **Question**: Does Pioneer Fund invest internationally?\n  - **Answer**: Yes, Pioneer Fund invests globally and is not limited to a\n    specific geography.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Value Proposition\n\n- `value_prop.what_makes_pioneer_fund_different`\n  - **Question**: What makes Pioneer Fund different from other venture funds?\n  - **Answer**: Pioneer Fund is powered by a large network of YC alumni founders\n    who actively support portfolio companies with advice, introductions, and\n    hands-on help, not just capital.\n  - **Source**: https://www.pioneerfund.vc/\n- `value_prop.support_beyond_capital`\n  - **Question**: What support does Pioneer Fund provide beyond funding?\n  - **Answer**: Portfolio companies gain access to founder mentorship,\n    operational guidance, investor introductions, and YC-experienced operators.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Founder Engagement\n\n- `founder_engagement.how_to_connect`\n  - **Question**: How can founders connect with Pioneer Fund?\n  - **Answer**: Founders typically connect with Pioneer Fund through warm\n    introductions, the Y Combinator network, or direct outreach via the Pioneer\n    Fund website.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.yc_relationship`\n  - **Question**: Is Pioneer Fund affiliated with Y Combinator?\n  - **Answer**: Pioneer Fund is independently operated but closely connected to\n    Y Combinator through its alumni-led investor base.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.mock_interviews`\n  - **Question**: Does Pioneer Fund help founders prepare for Y Combinator?\n  - **Answer**: Yes, Pioneer Fund offers mock interview programs to help\n    founders prepare for YC interviews and fundraising.\n  - **Source**: https://www.pioneerfund.vc/mock-interviews\n\n## Specialized Funds\n\n- `specialized_funds.future_of_health`\n  - **Question**: What is Pioneer Future of Health?\n  - **Answer**: Pioneer Future of Health is a specialized fund within Pioneer\n    Fund that invests in early-stage healthcare and biotech startups.\n  - **Source**: https://health.pioneerfund.vc/\n\n## Portfolio & Careers\n\n- `portfolio.where_to_view`\n  - **Question**: Where can I see Pioneer Fund's portfolio?\n  - **Answer**: Pioneer Fund's portfolio companies are listed on their website.\n  - **Source**: https://www.pioneerfund.vc/portfolio\n- `careers.job_opportunities`\n  - **Question**: Does Pioneer Fund hire?\n  - **Answer**: Pioneer Fund occasionally hires for platform, operations, and\n    investment roles, which are listed on their careers page.\n  - **Source**: https://www.pioneerfund.vc/careers\n\nRetrieval rules:\n\n1. Skim the entire knowledge base and identify all entries that answer or\n   meaningfully address the query. Consider synonyms and common rephrasings.\n2. Score relevance qualitatively:\n   - 0.9: exact question/answer match.\n   - 0.7: closely related wording that clearly covers the ask.\n   - 0.5: partially related; only include if helpful context.\n   - 0.0: not covered; do not output.\n3. Respect `maxResults` (default 4). Sort matches by decreasing confidence.\n4. When nothing is covered, return `{ \"matches\": [] }` and omit `topCategory`.\n5. Always include `question`, `answer`, `id`, `category`, `sourceUrl`, and a\n   one-sentence `summary` (usually the answer itself).\n\n- `topCategory` should mirror the category of the highest-confidence match.\n- Keep confidence values between 0 and 1 with two decimal precision.\n- Do not fabricate IDs or sources; copy them exactly from the FAQ.\n\nResponse format:\n\nCall `gambit_respond` with an object that matches the output schema:\n\n```json\n{\n  \"matches\": [\n    {\n      \"id\": \"company_overview.what_is_pioneer_fund\",\n      \"question\": \"What is Pioneer Fund?\",\n      \"answer\": \"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\n      \"category\": \"Company Overview\",\n      \"sourceUrl\": \"https://www.pioneerfund.vc/\",\n      \"confidence\": 0.90,\n      \"summary\": \"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"\n    }\n  ],\n  \"topCategory\": \"Company Overview\"\n}\n```"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-13e46ba52a6f428d8b2834e2",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-13e46ba52a6f428d8b2834e2",
+          "content": "{\"query\":\"What is the Pioneer Fund?\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "gambit_respond",
+            "description": "Finish the current deck with a structured response.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "number"
+                },
+                "payload": {},
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "parentActionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb"
+    },
+    {
+      "type": "model.result",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "action-91582dbaa71746668052a4a2",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_yvtZIrtKPRBkho83CEyL0WnE",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\": [{\"id\": \"company_overview.what_is_pioneer_fund\", \"question\": \"What is Pioneer Fund?\", \"answer\": \"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\", \"category\": \"Company Overview\", \"sourceUrl\": \"https://www.pioneerfund.vc/\", \"confidence\": 0.9, \"summary\": \"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"}], \"topCategory\": \"Company Overview\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_yvtZIrtKPRBkho83CEyL0WnE",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "company_overview.what_is_pioneer_fund",
+                "question": "What is Pioneer Fund?",
+                "answer": "Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.",
+                "category": "Company Overview",
+                "sourceUrl": "https://www.pioneerfund.vc/",
+                "confidence": 0.9,
+                "summary": "Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups."
+              }
+            ],
+            "topCategory": "Company Overview"
+          }
+        }
+      ],
+      "parentActionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_yvtZIrtKPRBkho83CEyL0WnE",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "company_overview.what_is_pioneer_fund",
+            "question": "What is Pioneer Fund?",
+            "answer": "Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.",
+            "category": "Company Overview",
+            "sourceUrl": "https://www.pioneerfund.vc/",
+            "confidence": 0.9,
+            "summary": "Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups."
+          }
+        ],
+        "topCategory": "Company Overview"
+      },
+      "parentActionCallId": "action-91582dbaa71746668052a4a2"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_yvtZIrtKPRBkho83CEyL0WnE",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "company_overview.what_is_pioneer_fund",
+              "question": "What is Pioneer Fund?",
+              "answer": "Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.",
+              "category": "Company Overview",
+              "sourceUrl": "https://www.pioneerfund.vc/",
+              "confidence": 0.9,
+              "summary": "Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups."
+            }
+          ],
+          "topCategory": "Company Overview"
+        }
+      },
+      "parentActionCallId": "action-91582dbaa71746668052a4a2"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-91582dbaa71746668052a4a2",
+      "parentActionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-302efa7d8c6b4682906afd99\",\"actionCallId\":\"call_a8fJXzCv7MGiXtT7Ow4MhYgb\",\"parentActionCallId\":\"action-98b0d963c29445bf9dc24037\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"company_overview.what_is_pioneer_fund\",\"question\":\"What is Pioneer Fund?\",\"answer\":\"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\"category\":\"Company Overview\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"}],\"topCategory\":\"Company Overview\"}}",
+      "parentActionCallId": "action-98b0d963c29445bf9dc24037"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-302efa7d8c6b4682906afd99",
+      "actionCallId": "call_a8fJXzCv7MGiXtT7Ow4MhYgb",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-98b0d963c29445bf9dc24037"
+    }
+  ],
+  "meta": {
+    "sessionId": "pioneer-fund-support-bot-deck-2025-12-20T20-09-01-024Z",
+    "sessionCreatedAt": "2025-12-20T20:09:01.024Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+    "deckSlug": "pioneer-fund-support-bot-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/pioneer-fund-support-bot-deck-2025-12-20T20-09-01-024Z"
+  }
+}

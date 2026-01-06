@@ -32,42 +32,32 @@ type Args = {
   help?: boolean;
 };
 
-function resolveBundledPath(specifier: string): string | null {
-  try {
-    const resolved = import.meta.resolve(specifier);
-    if (resolved.startsWith("file:")) {
-      return path.fromFileUrl(resolved);
-    }
-  } catch {
-    // ignore and fall through
-  }
-  return null;
-}
-
-const DEFAULT_REPL_DECK_PATH = resolveBundledPath(
+const DEFAULT_REPL_DECK_URL = new URL(
   "./decks/gambit-assistant.deck.md",
+  import.meta.url,
 );
 
 export function resolveDefaultReplDeckPath(): string | null {
-  if (!DEFAULT_REPL_DECK_PATH) {
+  if (DEFAULT_REPL_DECK_URL.protocol !== "file:") {
     logger.error(
       "Default REPL deck is unavailable when running from a remote URL. " +
         "Pass a deck path (e.g. src/decks/gambit-assistant.deck.md) or run from a local checkout.",
     );
     return null;
   }
-  return DEFAULT_REPL_DECK_PATH;
+  return path.fromFileUrl(DEFAULT_REPL_DECK_URL);
 }
 
 export function resolveExamplePath(example: string): string {
-  const examplesDir = resolveBundledPath("../examples/");
-  if (!examplesDir) {
+  const examplesUrl = new URL("../examples/", import.meta.url);
+  if (examplesUrl.protocol !== "file:") {
     throw new Error(
       "--example is unavailable when running from a remote URL; pass a deck path instead.",
     );
   }
-  const candidate = path.resolve(examplesDir, example);
-  const rel = path.relative(examplesDir, candidate);
+  const baseDir = path.fromFileUrl(examplesUrl);
+  const candidate = path.resolve(baseDir, example);
+  const rel = path.relative(baseDir, candidate);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
     throw new Error(`Example path must stay within examples/: ${example}`);
   }

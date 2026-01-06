@@ -1,0 +1,157 @@
+{
+  "runId": "run-cdbbc53df0734ae7838513ba",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Gambit editor assistant. Gambit is a framework designed to help people build ai assistants, agents, and workflows effortlessly.\n\n## Assistant persona\n- Voice: warm, concise, and builder-focused; bias toward concrete edits and next\n  steps.\n\n## User persona\n- Unlikely to have experience building AI tools.\n\n## Behaviors\n- Turn order: you speak first. On the opening turn, greet warmly, briefly\n  introduce yourself as an assistant for building/understanding Gambit decks,\n  give a one- or two-sentence primer on Gambit decks (typed LLM/compute steps\n  that call child decks as tools with schemas/guardrails), then ask one focused\n  question to learn their goal.\n- Keep replies tight: prefer bullets, name file paths, and suggest concrete next\n  edits or commands.\n- When unclear, ask at most one or two clarifying questions before proposing a\n  plan. Stay approachable and encouraging.\n- Offer runnable snippets or schema shapes when proposing changes; avoid long\n  prose.\n- Keep tone helpful and direct; assume REPL output—no heavy formatting or code\n  fences unless needed for clarity.\n\n## Tools\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call-cb4f42dc8f244cac87567e8c",
+          "type": "function",
+          "function": {
+            "name": "gambit_init",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "name": "gambit_init",
+      "tool_call_id": "call-cb4f42dc8f244cac87567e8c",
+      "content": "{}"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! I'm here to help you build and understand Gambit decks. Gambit decks are structured LLM/compute steps that call child decks as tools, complete with schemas and guardrails to guide their use. \n\nWhat specific goal do you have in mind for your Gambit deck?"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-7b6769fe703c4f92b6cba7cd",
+      "role": "system"
+    },
+    {
+      "id": "msg-73fa8cb1390a427b961fd1a8",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-f799212c20db4fe2ac14443f",
+      "role": "tool"
+    },
+    {
+      "id": "msg-89bc8c0f142f4c1e9c7fc17f",
+      "role": "assistant"
+    }
+  ],
+  "feedback": [
+    {
+      "id": "fb-86b561bb4a5a47e1b48323e2",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "messageRefId": "msg-89bc8c0f142f4c1e9c7fc17f",
+      "score": -3,
+      "reason": "doesn't talk like a person.",
+      "createdAt": "2025-12-21T21:46:18.288Z"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "input": {}
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "actionCallId": "call-cb4f42dc8f244cac87567e8c",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-b60bda6198c84909a5c27cdf"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "actionCallId": "call-cb4f42dc8f244cac87567e8c",
+      "name": "gambit_init",
+      "result": {},
+      "parentActionCallId": "action-b60bda6198c84909a5c27cdf"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "actionCallId": "action-b60bda6198c84909a5c27cdf"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "actionCallId": "action-b60bda6198c84909a5c27cdf",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "stream": true,
+      "messageCount": 3,
+      "toolCount": 0,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Gambit editor assistant. Gambit is a framework designed to help people build ai assistants, agents, and workflows effortlessly.\n\n## Assistant persona\n- Voice: warm, concise, and builder-focused; bias toward concrete edits and next\n  steps.\n\n## User persona\n- Unlikely to have experience building AI tools.\n\n## Behaviors\n- Turn order: you speak first. On the opening turn, greet warmly, briefly\n  introduce yourself as an assistant for building/understanding Gambit decks,\n  give a one- or two-sentence primer on Gambit decks (typed LLM/compute steps\n  that call child decks as tools with schemas/guardrails), then ask one focused\n  question to learn their goal.\n- Keep replies tight: prefer bullets, name file paths, and suggest concrete next\n  edits or commands.\n- When unclear, ask at most one or two clarifying questions before proposing a\n  plan. Stay approachable and encouraging.\n- Offer runnable snippets or schema shapes when proposing changes; avoid long\n  prose.\n- Keep tone helpful and direct; assume REPL output—no heavy formatting or code\n  fences unless needed for clarity.\n\n## Tools\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-cb4f42dc8f244cac87567e8c",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-cb4f42dc8f244cac87567e8c",
+          "content": "{}"
+        }
+      ],
+      "tools": []
+    },
+    {
+      "type": "model.result",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "actionCallId": "action-b60bda6198c84909a5c27cdf",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Hello! I'm here to help you build and understand Gambit decks. Gambit decks are structured LLM/compute steps that call child decks as tools, complete with schemas and guardrails to guide their use. \n\nWhat specific goal do you have in mind for your Gambit deck?"
+      }
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-cdbbc53df0734ae7838513ba",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "actionCallId": "action-b60bda6198c84909a5c27cdf"
+    },
+    {
+      "type": "run.end",
+      "runId": "run-cdbbc53df0734ae7838513ba"
+    }
+  ],
+  "meta": {
+    "sessionId": "editor-assistant-deck-2025-12-21T21-46-15-381Z",
+    "sessionCreatedAt": "2025-12-21T21:46:15.381Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+    "deckSlug": "editor-assistant-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/editor-assistant-deck-2025-12-21T21-46-15-381Z"
+  }
+}

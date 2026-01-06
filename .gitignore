@@ -65,9 +65,6 @@ web_modules/
 # direnv/nix
 .direnv
 
-# Gambit runtime artifacts
-.gambit/
-
 # Yarn Integrity file
 .yarn-integrity
 

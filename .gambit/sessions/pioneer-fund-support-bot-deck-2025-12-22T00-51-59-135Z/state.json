@@ -1,0 +1,1746 @@
+{
+  "runId": "run-934bd1161e464603933d237c",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "content": "Can you tell me what Pioneer Fund focuses on?"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-479ccc7961664db585264ac2",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-479ccc7961664db585264ac2",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Pioneer Fund primarily invests at the pre-seed and seed stages, is industry-agnostic, and invests globally across various high-growth sectors."
+    },
+    {
+      "role": "user",
+      "content": "What are some companies in Pioneer Fund's portfolio?"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_bDtneXFhra0Buq65vVmmboak",
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "arguments": "{\"query\":\"Pioneer Fund portfolio companies\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_bDtneXFhra0Buq65vVmmboak",
+      "name": "search_faq",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-7c1513ad24b44c5fb639f533",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-7c1513ad24b44c5fb639f533",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+    },
+    {
+      "role": "assistant",
+      "content": "Pioneer Fund's portfolio companies are listed on their website."
+    },
+    {
+      "role": "user",
+      "content": "Can you give me an example of a well-known company they have invested in?"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "arguments": "{\"query\":\"well-known company\",\"maxResults\":1}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+      "name": "lookup_portfolio",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_13xXdSuAB5JdUzGTTj7a8BAU\",\"parentActionCallId\":\"action-ac641e898c514bbd927b209e\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"lookup_portfolio\"},\"payload\":{\"matches\":[]}}"
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "event-343108aa41054a44b2e96543",
+          "type": "function",
+          "function": {
+            "name": "gambit_complete",
+            "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_13xXdSuAB5JdUzGTTj7a8BAU\",\"parentActionCallId\":\"action-ac641e898c514bbd927b209e\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"lookup_portfolio\"},\"payload\":{\"matches\":[]}}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "event-343108aa41054a44b2e96543",
+      "name": "gambit_complete",
+      "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_13xXdSuAB5JdUzGTTj7a8BAU\",\"parentActionCallId\":\"action-ac641e898c514bbd927b209e\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"lookup_portfolio\"},\"payload\":{\"matches\":[]}}"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-dd2eab89cba14bf2854450d3",
+      "role": "system"
+    },
+    {
+      "id": "msg-50524e3a9047426e9a9fcaa7",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-2c543cfe8e48428dbb4ca36e",
+      "role": "user"
+    },
+    {
+      "id": "msg-866240b14ed647d09c1beaf9",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-ad0a916bf29549cfa846f90d",
+      "role": "tool"
+    },
+    {
+      "id": "msg-688a9e1c2110414cb46f53f6",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-7a46cf9f33e14fff9e151ce7",
+      "role": "tool"
+    },
+    {
+      "id": "msg-4d45c1dec3d94184a17a64b7",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-4d6c7de4a4e0491d918ac7f2",
+      "role": "user"
+    },
+    {
+      "id": "msg-cd1962de94f54e979a9fd5fe",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-feaffee7b94342baad76bf67",
+      "role": "tool"
+    },
+    {
+      "id": "msg-97faac4711584bd994ab2ffc",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-3fd27a1f4ef44bc3a07a9e6f",
+      "role": "tool"
+    },
+    {
+      "id": "msg-130889f22ed94e2b8ee7444c",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-aaeefa7eb7814e5d932cac9e",
+      "role": "user"
+    },
+    {
+      "id": "msg-b61148c2c9c6432dae0a0942",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-525cf399ba9e47f4b7c6a80a",
+      "role": "tool"
+    },
+    {
+      "id": "msg-c6f97ed8ebcd43818cbbefcf",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-7510fd9454e143a9be5b0056",
+      "role": "tool"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "input": ""
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-e74136de8acc4fe9b34e14cc"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-e74136de8acc4fe9b34e14cc",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": false,
+      "messageCount": 1,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-e74136de8acc4fe9b34e14cc",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+      }
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-e74136de8acc4fe9b34e14cc"
+    },
+    {
+      "type": "run.end",
+      "runId": "run-934bd1161e464603933d237c"
+    },
+    {
+      "type": "run.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "input": "",
+      "initialUserMessage": "Can you tell me what Pioneer Fund focuses on?"
+    },
+    {
+      "type": "message.user",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-bca5edc91db14d72991d2907",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "message": {
+        "role": "user",
+        "content": "Can you tell me what Pioneer Fund focuses on?"
+      }
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-bca5edc91db14d72991d2907",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 3,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me what Pioneer Fund focuses on?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 2
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-bca5edc91db14d72991d2907",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+            "type": "function",
+            "function": {
+              "name": "search_faq",
+              "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "name": "search_faq",
+          "args": {
+            "query": "Pioneer Fund focus"
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+      "name": "search_faq",
+      "args": {
+        "query": "Pioneer Fund focus"
+      },
+      "parentActionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call-bb2084d941dd4b78bb34db95",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-f41cbac7b52c4f3aa6d67584"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call-bb2084d941dd4b78bb34db95",
+      "name": "gambit_init",
+      "result": {
+        "query": "Pioneer Fund focus"
+      },
+      "parentActionCallId": "action-f41cbac7b52c4f3aa6d67584"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-f41cbac7b52c4f3aa6d67584",
+      "parentActionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-f41cbac7b52c4f3aa6d67584",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund FAQ retrieval assistant. Given a user question, read\nthe embedded knowledge base and return the best-matching FAQ entries.\n\n# Pioneer Fund FAQ (Knowledge Base)\n\nUse this knowledge base to answer retrieval requests. Each entry includes a\nstable `id`, exact question/answer text, and official source URL.\n\n## Company Overview\n\n- `company_overview.what_is_pioneer_fund`\n  - **Question**: What is Pioneer Fund?\n  - **Answer**: Pioneer Fund is an early-stage venture capital fund backed by a\n    collective of hundreds of Y Combinator alumni that invests in and supports\n    exceptional startups, particularly at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.when_was_pioneer_fund_founded`\n  - **Question**: When was Pioneer Fund founded?\n  - **Answer**: Pioneer Fund was founded in 2017.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.where_is_pioneer_fund_based`\n  - **Question**: Where is Pioneer Fund based?\n  - **Answer**: Pioneer Fund is headquartered in San Francisco, California.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Investment Focus\n\n- `investment_focus.stage`\n  - **Question**: What stages does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund primarily invests at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/seed-fund\n- `investment_focus.industries`\n  - **Question**: What industries does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund is industry-agnostic and invests across technology,\n    software, healthcare, biotech, and other high-growth sectors.\n  - **Source**: https://www.pioneerfund.vc/\n- `investment_focus.geography`\n  - **Question**: Does Pioneer Fund invest internationally?\n  - **Answer**: Yes, Pioneer Fund invests globally and is not limited to a\n    specific geography.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Value Proposition\n\n- `value_prop.what_makes_pioneer_fund_different`\n  - **Question**: What makes Pioneer Fund different from other venture funds?\n  - **Answer**: Pioneer Fund is powered by a large network of YC alumni founders\n    who actively support portfolio companies with advice, introductions, and\n    hands-on help, not just capital.\n  - **Source**: https://www.pioneerfund.vc/\n- `value_prop.support_beyond_capital`\n  - **Question**: What support does Pioneer Fund provide beyond funding?\n  - **Answer**: Portfolio companies gain access to founder mentorship,\n    operational guidance, investor introductions, and YC-experienced operators.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Founder Engagement\n\n- `founder_engagement.how_to_connect`\n  - **Question**: How can founders connect with Pioneer Fund?\n  - **Answer**: Founders typically connect with Pioneer Fund through warm\n    introductions, the Y Combinator network, or direct outreach via the Pioneer\n    Fund website.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.yc_relationship`\n  - **Question**: Is Pioneer Fund affiliated with Y Combinator?\n  - **Answer**: Pioneer Fund is independently operated but closely connected to\n    Y Combinator through its alumni-led investor base.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.mock_interviews`\n  - **Question**: Does Pioneer Fund help founders prepare for Y Combinator?\n  - **Answer**: Yes, Pioneer Fund offers mock interview programs to help\n    founders prepare for YC interviews and fundraising.\n  - **Source**: https://www.pioneerfund.vc/mock-interviews\n\n## Specialized Funds\n\n- `specialized_funds.future_of_health`\n  - **Question**: What is Pioneer Future of Health?\n  - **Answer**: Pioneer Future of Health is a specialized fund within Pioneer\n    Fund that invests in early-stage healthcare and biotech startups.\n  - **Source**: https://health.pioneerfund.vc/\n\n## Portfolio & Careers\n\n- `portfolio.where_to_view`\n  - **Question**: Where can I see Pioneer Fund's portfolio?\n  - **Answer**: Pioneer Fund's portfolio companies are listed on their website.\n  - **Source**: https://www.pioneerfund.vc/portfolio\n- `careers.job_opportunities`\n  - **Question**: Does Pioneer Fund hire?\n  - **Answer**: Pioneer Fund occasionally hires for platform, operations, and\n    investment roles, which are listed on their careers page.\n  - **Source**: https://www.pioneerfund.vc/careers\n\nRetrieval rules:\n\n1. Skim the entire knowledge base and identify all entries that answer or\n   meaningfully address the query. Consider synonyms and common rephrasings.\n2. Score relevance qualitatively:\n   - 0.9: exact question/answer match.\n   - 0.7: closely related wording that clearly covers the ask.\n   - 0.5: partially related; only include if helpful context.\n   - 0.0: not covered; do not output.\n3. Respect `maxResults` (default 4). Sort matches by decreasing confidence.\n4. When nothing is covered, return `{ \"matches\": [] }` and omit `topCategory`.\n5. Always include `question`, `answer`, `id`, `category`, `sourceUrl`, and a\n   one-sentence `summary` (usually the answer itself).\n\n- `topCategory` should mirror the category of the highest-confidence match.\n- Keep confidence values between 0 and 1 with two decimal precision.\n- Do not fabricate IDs or sources; copy them exactly from the FAQ.\n\nResponse format:\n\nCall `gambit_respond` with an object that matches the output schema:\n\n```json\n{\n  \"matches\": [\n    {\n      \"id\": \"company_overview.what_is_pioneer_fund\",\n      \"question\": \"What is Pioneer Fund?\",\n      \"answer\": \"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\n      \"category\": \"Company Overview\",\n      \"sourceUrl\": \"https://www.pioneerfund.vc/\",\n      \"confidence\": 0.90,\n      \"summary\": \"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"\n    }\n  ],\n  \"topCategory\": \"Company Overview\"\n}\n```"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-bb2084d941dd4b78bb34db95",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-bb2084d941dd4b78bb34db95",
+          "content": "{\"query\":\"Pioneer Fund focus\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "gambit_respond",
+            "description": "Finish the current deck with a structured response.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "number"
+                },
+                "payload": {},
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "parentActionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM"
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-f41cbac7b52c4f3aa6d67584",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_B20Buj57KpCA8mAxiT4FWVeL",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\": [{\"id\": \"investment_focus.stage\", \"question\": \"What stages does Pioneer Fund invest in?\", \"answer\": \"Pioneer Fund primarily invests at the pre-seed and seed stages.\", \"category\": \"Investment Focus\", \"sourceUrl\": \"https://www.pioneerfund.vc/seed-fund\", \"confidence\": 0.9, \"summary\": \"Pioneer Fund primarily invests at the pre-seed and seed stages.\"}, {\"id\": \"investment_focus.industries\", \"question\": \"What industries does Pioneer Fund invest in?\", \"answer\": \"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\", \"category\": \"Investment Focus\", \"sourceUrl\": \"https://www.pioneerfund.vc/\", \"confidence\": 0.9, \"summary\": \"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"}, {\"id\": \"investment_focus.geography\", \"question\": \"Does Pioneer Fund invest internationally?\", \"answer\": \"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\", \"category\": \"Investment Focus\", \"sourceUrl\": \"https://www.pioneerfund.vc/\", \"confidence\": 0.9, \"summary\": \"Pioneer Fund invests globally and is not limited to a specific geography.\"}], \"topCategory\": \"Investment Focus\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_B20Buj57KpCA8mAxiT4FWVeL",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "investment_focus.stage",
+                "question": "What stages does Pioneer Fund invest in?",
+                "answer": "Pioneer Fund primarily invests at the pre-seed and seed stages.",
+                "category": "Investment Focus",
+                "sourceUrl": "https://www.pioneerfund.vc/seed-fund",
+                "confidence": 0.9,
+                "summary": "Pioneer Fund primarily invests at the pre-seed and seed stages."
+              },
+              {
+                "id": "investment_focus.industries",
+                "question": "What industries does Pioneer Fund invest in?",
+                "answer": "Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.",
+                "category": "Investment Focus",
+                "sourceUrl": "https://www.pioneerfund.vc/",
+                "confidence": 0.9,
+                "summary": "Pioneer Fund is industry-agnostic and invests across various high-growth sectors."
+              },
+              {
+                "id": "investment_focus.geography",
+                "question": "Does Pioneer Fund invest internationally?",
+                "answer": "Yes, Pioneer Fund invests globally and is not limited to a specific geography.",
+                "category": "Investment Focus",
+                "sourceUrl": "https://www.pioneerfund.vc/",
+                "confidence": 0.9,
+                "summary": "Pioneer Fund invests globally and is not limited to a specific geography."
+              }
+            ],
+            "topCategory": "Investment Focus"
+          }
+        }
+      ],
+      "parentActionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_B20Buj57KpCA8mAxiT4FWVeL",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "investment_focus.stage",
+            "question": "What stages does Pioneer Fund invest in?",
+            "answer": "Pioneer Fund primarily invests at the pre-seed and seed stages.",
+            "category": "Investment Focus",
+            "sourceUrl": "https://www.pioneerfund.vc/seed-fund",
+            "confidence": 0.9,
+            "summary": "Pioneer Fund primarily invests at the pre-seed and seed stages."
+          },
+          {
+            "id": "investment_focus.industries",
+            "question": "What industries does Pioneer Fund invest in?",
+            "answer": "Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.",
+            "category": "Investment Focus",
+            "sourceUrl": "https://www.pioneerfund.vc/",
+            "confidence": 0.9,
+            "summary": "Pioneer Fund is industry-agnostic and invests across various high-growth sectors."
+          },
+          {
+            "id": "investment_focus.geography",
+            "question": "Does Pioneer Fund invest internationally?",
+            "answer": "Yes, Pioneer Fund invests globally and is not limited to a specific geography.",
+            "category": "Investment Focus",
+            "sourceUrl": "https://www.pioneerfund.vc/",
+            "confidence": 0.9,
+            "summary": "Pioneer Fund invests globally and is not limited to a specific geography."
+          }
+        ],
+        "topCategory": "Investment Focus"
+      },
+      "parentActionCallId": "action-f41cbac7b52c4f3aa6d67584"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_B20Buj57KpCA8mAxiT4FWVeL",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "investment_focus.stage",
+              "question": "What stages does Pioneer Fund invest in?",
+              "answer": "Pioneer Fund primarily invests at the pre-seed and seed stages.",
+              "category": "Investment Focus",
+              "sourceUrl": "https://www.pioneerfund.vc/seed-fund",
+              "confidence": 0.9,
+              "summary": "Pioneer Fund primarily invests at the pre-seed and seed stages."
+            },
+            {
+              "id": "investment_focus.industries",
+              "question": "What industries does Pioneer Fund invest in?",
+              "answer": "Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.",
+              "category": "Investment Focus",
+              "sourceUrl": "https://www.pioneerfund.vc/",
+              "confidence": 0.9,
+              "summary": "Pioneer Fund is industry-agnostic and invests across various high-growth sectors."
+            },
+            {
+              "id": "investment_focus.geography",
+              "question": "Does Pioneer Fund invest internationally?",
+              "answer": "Yes, Pioneer Fund invests globally and is not limited to a specific geography.",
+              "category": "Investment Focus",
+              "sourceUrl": "https://www.pioneerfund.vc/",
+              "confidence": 0.9,
+              "summary": "Pioneer Fund invests globally and is not limited to a specific geography."
+            }
+          ],
+          "topCategory": "Investment Focus"
+        }
+      },
+      "parentActionCallId": "action-f41cbac7b52c4f3aa6d67584"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-f41cbac7b52c4f3aa6d67584",
+      "parentActionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}",
+      "parentActionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-bca5edc91db14d72991d2907",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 7,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me what Pioneer Fund focuses on?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-479ccc7961664db585264ac2",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-479ccc7961664db585264ac2",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 2
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-bca5edc91db14d72991d2907",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Pioneer Fund primarily invests at the pre-seed and seed stages, is industry-agnostic, and invests globally across various high-growth sectors."
+      }
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-bca5edc91db14d72991d2907"
+    },
+    {
+      "type": "run.end",
+      "runId": "run-934bd1161e464603933d237c"
+    },
+    {
+      "type": "run.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "input": "",
+      "initialUserMessage": "What are some companies in Pioneer Fund's portfolio?"
+    },
+    {
+      "type": "message.user",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-6a17cb299600421d8ced94e6",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "message": {
+        "role": "user",
+        "content": "What are some companies in Pioneer Fund's portfolio?"
+      }
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-6a17cb299600421d8ced94e6",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 9,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me what Pioneer Fund focuses on?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-479ccc7961664db585264ac2",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-479ccc7961664db585264ac2",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pioneer Fund primarily invests at the pre-seed and seed stages, is industry-agnostic, and invests globally across various high-growth sectors."
+        },
+        {
+          "role": "user",
+          "content": "What are some companies in Pioneer Fund's portfolio?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 8
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-6a17cb299600421d8ced94e6",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_bDtneXFhra0Buq65vVmmboak",
+            "type": "function",
+            "function": {
+              "name": "search_faq",
+              "arguments": "{\"query\":\"Pioneer Fund portfolio companies\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_bDtneXFhra0Buq65vVmmboak",
+          "name": "search_faq",
+          "args": {
+            "query": "Pioneer Fund portfolio companies"
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_bDtneXFhra0Buq65vVmmboak",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_bDtneXFhra0Buq65vVmmboak",
+      "name": "search_faq",
+      "args": {
+        "query": "Pioneer Fund portfolio companies"
+      },
+      "parentActionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call-0f10969bcfeb4889a6c9b67d",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-26dd1bfba1f245c0ad11ac84"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call-0f10969bcfeb4889a6c9b67d",
+      "name": "gambit_init",
+      "result": {
+        "query": "Pioneer Fund portfolio companies"
+      },
+      "parentActionCallId": "action-26dd1bfba1f245c0ad11ac84"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-26dd1bfba1f245c0ad11ac84",
+      "parentActionCallId": "call_bDtneXFhra0Buq65vVmmboak"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-26dd1bfba1f245c0ad11ac84",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund FAQ retrieval assistant. Given a user question, read\nthe embedded knowledge base and return the best-matching FAQ entries.\n\n# Pioneer Fund FAQ (Knowledge Base)\n\nUse this knowledge base to answer retrieval requests. Each entry includes a\nstable `id`, exact question/answer text, and official source URL.\n\n## Company Overview\n\n- `company_overview.what_is_pioneer_fund`\n  - **Question**: What is Pioneer Fund?\n  - **Answer**: Pioneer Fund is an early-stage venture capital fund backed by a\n    collective of hundreds of Y Combinator alumni that invests in and supports\n    exceptional startups, particularly at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.when_was_pioneer_fund_founded`\n  - **Question**: When was Pioneer Fund founded?\n  - **Answer**: Pioneer Fund was founded in 2017.\n  - **Source**: https://www.pioneerfund.vc/\n- `company_overview.where_is_pioneer_fund_based`\n  - **Question**: Where is Pioneer Fund based?\n  - **Answer**: Pioneer Fund is headquartered in San Francisco, California.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Investment Focus\n\n- `investment_focus.stage`\n  - **Question**: What stages does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund primarily invests at the pre-seed and seed stages.\n  - **Source**: https://www.pioneerfund.vc/seed-fund\n- `investment_focus.industries`\n  - **Question**: What industries does Pioneer Fund invest in?\n  - **Answer**: Pioneer Fund is industry-agnostic and invests across technology,\n    software, healthcare, biotech, and other high-growth sectors.\n  - **Source**: https://www.pioneerfund.vc/\n- `investment_focus.geography`\n  - **Question**: Does Pioneer Fund invest internationally?\n  - **Answer**: Yes, Pioneer Fund invests globally and is not limited to a\n    specific geography.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Value Proposition\n\n- `value_prop.what_makes_pioneer_fund_different`\n  - **Question**: What makes Pioneer Fund different from other venture funds?\n  - **Answer**: Pioneer Fund is powered by a large network of YC alumni founders\n    who actively support portfolio companies with advice, introductions, and\n    hands-on help, not just capital.\n  - **Source**: https://www.pioneerfund.vc/\n- `value_prop.support_beyond_capital`\n  - **Question**: What support does Pioneer Fund provide beyond funding?\n  - **Answer**: Portfolio companies gain access to founder mentorship,\n    operational guidance, investor introductions, and YC-experienced operators.\n  - **Source**: https://www.pioneerfund.vc/\n\n## Founder Engagement\n\n- `founder_engagement.how_to_connect`\n  - **Question**: How can founders connect with Pioneer Fund?\n  - **Answer**: Founders typically connect with Pioneer Fund through warm\n    introductions, the Y Combinator network, or direct outreach via the Pioneer\n    Fund website.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.yc_relationship`\n  - **Question**: Is Pioneer Fund affiliated with Y Combinator?\n  - **Answer**: Pioneer Fund is independently operated but closely connected to\n    Y Combinator through its alumni-led investor base.\n  - **Source**: https://www.pioneerfund.vc/\n- `founder_engagement.mock_interviews`\n  - **Question**: Does Pioneer Fund help founders prepare for Y Combinator?\n  - **Answer**: Yes, Pioneer Fund offers mock interview programs to help\n    founders prepare for YC interviews and fundraising.\n  - **Source**: https://www.pioneerfund.vc/mock-interviews\n\n## Specialized Funds\n\n- `specialized_funds.future_of_health`\n  - **Question**: What is Pioneer Future of Health?\n  - **Answer**: Pioneer Future of Health is a specialized fund within Pioneer\n    Fund that invests in early-stage healthcare and biotech startups.\n  - **Source**: https://health.pioneerfund.vc/\n\n## Portfolio & Careers\n\n- `portfolio.where_to_view`\n  - **Question**: Where can I see Pioneer Fund's portfolio?\n  - **Answer**: Pioneer Fund's portfolio companies are listed on their website.\n  - **Source**: https://www.pioneerfund.vc/portfolio\n- `careers.job_opportunities`\n  - **Question**: Does Pioneer Fund hire?\n  - **Answer**: Pioneer Fund occasionally hires for platform, operations, and\n    investment roles, which are listed on their careers page.\n  - **Source**: https://www.pioneerfund.vc/careers\n\nRetrieval rules:\n\n1. Skim the entire knowledge base and identify all entries that answer or\n   meaningfully address the query. Consider synonyms and common rephrasings.\n2. Score relevance qualitatively:\n   - 0.9: exact question/answer match.\n   - 0.7: closely related wording that clearly covers the ask.\n   - 0.5: partially related; only include if helpful context.\n   - 0.0: not covered; do not output.\n3. Respect `maxResults` (default 4). Sort matches by decreasing confidence.\n4. When nothing is covered, return `{ \"matches\": [] }` and omit `topCategory`.\n5. Always include `question`, `answer`, `id`, `category`, `sourceUrl`, and a\n   one-sentence `summary` (usually the answer itself).\n\n- `topCategory` should mirror the category of the highest-confidence match.\n- Keep confidence values between 0 and 1 with two decimal precision.\n- Do not fabricate IDs or sources; copy them exactly from the FAQ.\n\nResponse format:\n\nCall `gambit_respond` with an object that matches the output schema:\n\n```json\n{\n  \"matches\": [\n    {\n      \"id\": \"company_overview.what_is_pioneer_fund\",\n      \"question\": \"What is Pioneer Fund?\",\n      \"answer\": \"Pioneer Fund is an early-stage venture capital fund backed by a collective of hundreds of Y Combinator alumni that invests in and supports exceptional startups, particularly at the pre-seed and seed stages.\",\n      \"category\": \"Company Overview\",\n      \"sourceUrl\": \"https://www.pioneerfund.vc/\",\n      \"confidence\": 0.90,\n      \"summary\": \"Pioneer Fund is an early-stage venture capital fund backed by YC alumni that invests in pre-seed and seed startups.\"\n    }\n  ],\n  \"topCategory\": \"Company Overview\"\n}\n```"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-0f10969bcfeb4889a6c9b67d",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-0f10969bcfeb4889a6c9b67d",
+          "content": "{\"query\":\"Pioneer Fund portfolio companies\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "gambit_respond",
+            "description": "Finish the current deck with a structured response.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "number"
+                },
+                "payload": {},
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "meta": {
+                  "type": "object"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      ],
+      "parentActionCallId": "call_bDtneXFhra0Buq65vVmmboak"
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-26dd1bfba1f245c0ad11ac84",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_ADtOIVHjxywomBh3I50epQ8d",
+            "type": "function",
+            "function": {
+              "name": "gambit_respond",
+              "arguments": "{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.90,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_ADtOIVHjxywomBh3I50epQ8d",
+          "name": "gambit_respond",
+          "args": {
+            "matches": [
+              {
+                "id": "portfolio.where_to_view",
+                "question": "Where can I see Pioneer Fund's portfolio?",
+                "answer": "Pioneer Fund's portfolio companies are listed on their website.",
+                "category": "Portfolio & Careers",
+                "sourceUrl": "https://www.pioneerfund.vc/portfolio",
+                "confidence": 0.9,
+                "summary": "Pioneer Fund's portfolio companies are listed on their website."
+              }
+            ],
+            "topCategory": "Portfolio & Careers"
+          }
+        }
+      ],
+      "parentActionCallId": "call_bDtneXFhra0Buq65vVmmboak"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_ADtOIVHjxywomBh3I50epQ8d",
+      "name": "gambit_respond",
+      "args": {
+        "matches": [
+          {
+            "id": "portfolio.where_to_view",
+            "question": "Where can I see Pioneer Fund's portfolio?",
+            "answer": "Pioneer Fund's portfolio companies are listed on their website.",
+            "category": "Portfolio & Careers",
+            "sourceUrl": "https://www.pioneerfund.vc/portfolio",
+            "confidence": 0.9,
+            "summary": "Pioneer Fund's portfolio companies are listed on their website."
+          }
+        ],
+        "topCategory": "Portfolio & Careers"
+      },
+      "parentActionCallId": "action-26dd1bfba1f245c0ad11ac84"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_ADtOIVHjxywomBh3I50epQ8d",
+      "name": "gambit_respond",
+      "result": {
+        "payload": {
+          "matches": [
+            {
+              "id": "portfolio.where_to_view",
+              "question": "Where can I see Pioneer Fund's portfolio?",
+              "answer": "Pioneer Fund's portfolio companies are listed on their website.",
+              "category": "Portfolio & Careers",
+              "sourceUrl": "https://www.pioneerfund.vc/portfolio",
+              "confidence": 0.9,
+              "summary": "Pioneer Fund's portfolio companies are listed on their website."
+            }
+          ],
+          "topCategory": "Portfolio & Careers"
+        }
+      },
+      "parentActionCallId": "action-26dd1bfba1f245c0ad11ac84"
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/actions/search_faq.deck.md",
+      "actionCallId": "action-26dd1bfba1f245c0ad11ac84",
+      "parentActionCallId": "call_bDtneXFhra0Buq65vVmmboak"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_bDtneXFhra0Buq65vVmmboak",
+      "name": "search_faq",
+      "result": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}",
+      "parentActionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_bDtneXFhra0Buq65vVmmboak",
+      "name": "search_faq",
+      "path": "search_faq",
+      "parentActionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-6a17cb299600421d8ced94e6",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 13,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me what Pioneer Fund focuses on?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-479ccc7961664db585264ac2",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-479ccc7961664db585264ac2",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pioneer Fund primarily invests at the pre-seed and seed stages, is industry-agnostic, and invests globally across various high-growth sectors."
+        },
+        {
+          "role": "user",
+          "content": "What are some companies in Pioneer Fund's portfolio?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_bDtneXFhra0Buq65vVmmboak",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund portfolio companies\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_bDtneXFhra0Buq65vVmmboak",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-7c1513ad24b44c5fb639f533",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-7c1513ad24b44c5fb639f533",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 8
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-6a17cb299600421d8ced94e6",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Pioneer Fund's portfolio companies are listed on their website."
+      }
+    },
+    {
+      "type": "deck.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-6a17cb299600421d8ced94e6"
+    },
+    {
+      "type": "run.end",
+      "runId": "run-934bd1161e464603933d237c"
+    },
+    {
+      "type": "run.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "input": "",
+      "initialUserMessage": "Can you give me an example of a well-known company they have invested in?"
+    },
+    {
+      "type": "message.user",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-ac641e898c514bbd927b209e",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "message": {
+        "role": "user",
+        "content": "Can you give me an example of a well-known company they have invested in?"
+      }
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "actionCallId": "action-ac641e898c514bbd927b209e"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-ac641e898c514bbd927b209e",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": true,
+      "messageCount": 15,
+      "toolCount": 2,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the Pioneer Fund support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident.\n- Answer in one sentence.\n- Use only Pioneer Fund FAQ or portfolio data; do not speculate.\n- Prefer direct, concrete phrasing over hedging.\nYou are helping founders and partners who want quick, accurate answers about\nPioneer Fund and its portfolio.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call exactly one action:\n   - Use `lookup_portfolio` when the question asks about a specific company or\n     portfolio membership (company name, alias, website, or YC batch).\n   - Otherwise use `search_faq` with the raw question.\n2. If the selected action returns no matches, reply with one sentence: \"I\n   couldn't find that in the FAQ.\"\n3. If matches return, select the highest-confidence match and answer in one\n   concise sentence using only the returned fields.\n4. Reply with the one-sentence answer as normal assistant text.\n\nstart by introducing yourself"
+        },
+        {
+          "role": "assistant",
+          "content": "Hello, I'm the Pioneer Fund support specialist. How can I assist you today?"
+        },
+        {
+          "role": "user",
+          "content": "Can you tell me what Pioneer Fund focuses on?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund focus\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_BAtZ0DmhxSXwRhE06GSsBZsM",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-479ccc7961664db585264ac2",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-479ccc7961664db585264ac2",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_BAtZ0DmhxSXwRhE06GSsBZsM\",\"parentActionCallId\":\"action-bca5edc91db14d72991d2907\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"investment_focus.stage\",\"question\":\"What stages does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/seed-fund\",\"confidence\":0.9,\"summary\":\"Pioneer Fund primarily invests at the pre-seed and seed stages.\"},{\"id\":\"investment_focus.industries\",\"question\":\"What industries does Pioneer Fund invest in?\",\"answer\":\"Pioneer Fund is industry-agnostic and invests across technology, software, healthcare, biotech, and other high-growth sectors.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund is industry-agnostic and invests across various high-growth sectors.\"},{\"id\":\"investment_focus.geography\",\"question\":\"Does Pioneer Fund invest internationally?\",\"answer\":\"Yes, Pioneer Fund invests globally and is not limited to a specific geography.\",\"category\":\"Investment Focus\",\"sourceUrl\":\"https://www.pioneerfund.vc/\",\"confidence\":0.9,\"summary\":\"Pioneer Fund invests globally and is not limited to a specific geography.\"}],\"topCategory\":\"Investment Focus\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pioneer Fund primarily invests at the pre-seed and seed stages, is industry-agnostic, and invests globally across various high-growth sectors."
+        },
+        {
+          "role": "user",
+          "content": "What are some companies in Pioneer Fund's portfolio?"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_bDtneXFhra0Buq65vVmmboak",
+              "type": "function",
+              "function": {
+                "name": "search_faq",
+                "arguments": "{\"query\":\"Pioneer Fund portfolio companies\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_bDtneXFhra0Buq65vVmmboak",
+          "name": "search_faq",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "event-7c1513ad24b44c5fb639f533",
+              "type": "function",
+              "function": {
+                "name": "gambit_complete",
+                "arguments": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "event-7c1513ad24b44c5fb639f533",
+          "name": "gambit_complete",
+          "content": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_bDtneXFhra0Buq65vVmmboak\",\"parentActionCallId\":\"action-6a17cb299600421d8ced94e6\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"search_faq\"},\"payload\":{\"matches\":[{\"id\":\"portfolio.where_to_view\",\"question\":\"Where can I see Pioneer Fund's portfolio?\",\"answer\":\"Pioneer Fund's portfolio companies are listed on their website.\",\"category\":\"Portfolio & Careers\",\"sourceUrl\":\"https://www.pioneerfund.vc/portfolio\",\"confidence\":0.9,\"summary\":\"Pioneer Fund's portfolio companies are listed on their website.\"}],\"topCategory\":\"Portfolio & Careers\"}}"
+        },
+        {
+          "role": "assistant",
+          "content": "Pioneer Fund's portfolio companies are listed on their website."
+        },
+        {
+          "role": "user",
+          "content": "Can you give me an example of a well-known company they have invested in?"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant Pioneer Fund FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "lookup_portfolio",
+            "description": "Find Pioneer Fund portfolio companies by name, alias, website, or YC batch.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 2
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ],
+      "stateMessages": 14
+    },
+    {
+      "type": "model.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "action-ac641e898c514bbd927b209e",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+            "type": "function",
+            "function": {
+              "name": "lookup_portfolio",
+              "arguments": "{\"query\":\"well-known company\",\"maxResults\":1}"
+            }
+          }
+        ]
+      },
+      "toolCalls": [
+        {
+          "id": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+          "name": "lookup_portfolio",
+          "args": {
+            "query": "well-known company",
+            "maxResults": 1
+          }
+        }
+      ]
+    },
+    {
+      "type": "action.start",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+      "name": "lookup_portfolio",
+      "path": "lookup_portfolio",
+      "parentActionCallId": "action-ac641e898c514bbd927b209e"
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+      "name": "lookup_portfolio",
+      "args": {
+        "query": "well-known company",
+        "maxResults": 1
+      },
+      "parentActionCallId": "action-ac641e898c514bbd927b209e"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+      "name": "lookup_portfolio",
+      "result": "{\"runId\":\"run-934bd1161e464603933d237c\",\"actionCallId\":\"call_13xXdSuAB5JdUzGTTj7a8BAU\",\"parentActionCallId\":\"action-ac641e898c514bbd927b209e\",\"source\":{\"deckPath\":\"/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md\",\"actionName\":\"lookup_portfolio\"},\"payload\":{\"matches\":[]}}",
+      "parentActionCallId": "action-ac641e898c514bbd927b209e"
+    },
+    {
+      "type": "action.end",
+      "runId": "run-934bd1161e464603933d237c",
+      "actionCallId": "call_13xXdSuAB5JdUzGTTj7a8BAU",
+      "name": "lookup_portfolio",
+      "path": "lookup_portfolio",
+      "parentActionCallId": "action-ac641e898c514bbd927b209e"
+    }
+  ],
+  "meta": {
+    "testBot": true,
+    "testBotRunId": "testbot-0b7b9e47e8fc42dd867af71f",
+    "testBotConfigPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/test-bot.md",
+    "sessionId": "pioneer-fund-support-bot-deck-2025-12-22T00-51-59-135Z",
+    "sessionCreatedAt": "2025-12-22T00:51:59.135Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/pioneer_fund_support_bot/pioneer_fund_support_bot.deck.md",
+    "deckSlug": "pioneer-fund-support-bot-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/pioneer-fund-support-bot-deck-2025-12-22T00-51-59-135Z"
+  }
+}

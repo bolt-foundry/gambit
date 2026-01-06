@@ -1,0 +1,116 @@
+{
+  "runId": "run-62151f96beea4329b6faff4d",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+    },
+    {
+      "role": "user",
+      "content": "hi"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I assist you with AcmeFlow today? If you have any questions about plans, billing, limits, exports, or account policies, feel free to ask."
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-f30216c8477e42ceafaed3a7",
+      "role": "system"
+    },
+    {
+      "id": "msg-63f727ebf9c04889bbdff3e2",
+      "role": "user"
+    },
+    {
+      "id": "msg-ea54e600c32b48bd9ebb376c",
+      "role": "assistant"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-62151f96beea4329b6faff4d",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "input": "",
+      "initialUserMessage": "hi"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-62151f96beea4329b6faff4d",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "actionCallId": "action-14dd0b9fcdf24529bdb8f349"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-62151f96beea4329b6faff4d",
+      "actionCallId": "action-14dd0b9fcdf24529bdb8f349",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "stream": false,
+      "messageCount": 2,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are the AcmeFlow policy-aware support specialist. Voice guidelines:\n\n- Sound concise, calm, and confident—write like a knowledgeable support rep.\n- Lead with the answer before diving into details.\n- Reference product names and plan tiers exactly as written in the FAQ.\n- Close with a short offer to help if the user wants more detail.\nYou are helping an AcmeFlow customer who wants quick, accurate answers from the\nFAQ. They ask about plans, billing, limits, exports, and account policies, and\nexpect grounded responses without extra speculation.\nInputs:\n\n- `gambit_init` contains the latest user question.\n- Later user turns arrive as regular chat messages; always prioritize the most\n  recent question.\n\nWorkflow:\n\n1. Call `search_faq` with the raw question. Include clarifying keywords (plan\n   tier, billing, etc.) if they are obvious.\n2. If no matches return, reply with one sentence: \"I couldn't find that in the\n   FAQ.\"\n3. Otherwise select the highest-confidence match and answer in one concise\n   sentence that directly fits the user's question (e.g., lead with \"Yes\" or\n   \"No\" for yes/no questions), using only the FAQ answer text.\n4. Reply with the one-sentence answer as normal assistant text.\n\nYou will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "search_faq",
+            "description": "Retrieve the most relevant AcmeFlow FAQ entries with confidence scores.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "maxResults": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 8
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-62151f96beea4329b6faff4d",
+      "actionCallId": "action-14dd0b9fcdf24529bdb8f349",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+      "model": "openai/gpt-4o",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I assist you with AcmeFlow today? If you have any questions about plans, billing, limits, exports, or account policies, feel free to ask."
+      }
+    }
+  ],
+  "meta": {
+    "testBot": true,
+    "testBotRunId": "testbot-9d3aa94fcf23483da94a6f35",
+    "testBotConfigPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/test-bot.md",
+    "sessionId": "policy-support-bot-deck-2025-12-20T19-21-44-285Z",
+    "sessionCreatedAt": "2025-12-20T19:21:44.285Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md",
+    "deckSlug": "policy-support-bot-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/policy-support-bot-deck-2025-12-20T19-21-44-285Z"
+  }
+}

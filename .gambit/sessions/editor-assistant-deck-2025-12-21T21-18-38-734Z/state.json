@@ -1,0 +1,196 @@
+{
+  "runId": "run-4704c90bbb364b6b95f45479",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+    },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call-6407d123d8704a23a3ce2712",
+          "type": "function",
+          "function": {
+            "name": "gambit_init",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "name": "gambit_init",
+      "tool_call_id": "call-6407d123d8704a23a3ce2712",
+      "content": "{\"idk\":\"hi\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I assist you today?"
+    }
+  ],
+  "messageRefs": [
+    {
+      "id": "msg-24c9dc016ca04280980a88d6",
+      "role": "system"
+    },
+    {
+      "id": "msg-272e56a9316c4633864d3f1a",
+      "role": "assistant"
+    },
+    {
+      "id": "msg-8cd687ce238f4b8a98d40b95",
+      "role": "tool"
+    },
+    {
+      "id": "msg-2a99755ab960431d818d17c1",
+      "role": "assistant"
+    }
+  ],
+  "traces": [
+    {
+      "type": "run.start",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "input": {
+        "idk": "hi"
+      }
+    },
+    {
+      "type": "tool.call",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "actionCallId": "call-6407d123d8704a23a3ce2712",
+      "name": "gambit_init",
+      "args": {},
+      "parentActionCallId": "action-2b1c0191e683430ea55ba7e7"
+    },
+    {
+      "type": "tool.result",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "actionCallId": "call-6407d123d8704a23a3ce2712",
+      "name": "gambit_init",
+      "result": {
+        "idk": "hi"
+      },
+      "parentActionCallId": "action-2b1c0191e683430ea55ba7e7"
+    },
+    {
+      "type": "deck.start",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "actionCallId": "action-2b1c0191e683430ea55ba7e7"
+    },
+    {
+      "type": "model.call",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "actionCallId": "action-2b1c0191e683430ea55ba7e7",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "stream": true,
+      "messageCount": 3,
+      "toolCount": 1,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You will automatically receive a `gambit_init` tool result at the start that provides run/context info."
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call-6407d123d8704a23a3ce2712",
+              "type": "function",
+              "function": {
+                "name": "gambit_init",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "name": "gambit_init",
+          "tool_call_id": "call-6407d123d8704a23a3ce2712",
+          "content": "{\"idk\":\"hi\"}"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "propose_patch",
+            "description": "Propose ordered, non-overlapping edits to the currently open file buffer.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "description": "1–3 sentence summary of the proposed edits"
+                },
+                "edits": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "0-based character offset where the replacement starts"
+                      },
+                      "end": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "0-based, exclusive character offset where the replacement ends"
+                      },
+                      "text": {
+                        "type": "string",
+                        "description": "Replacement text for the range"
+                      }
+                    },
+                    "required": [
+                      "start",
+                      "end",
+                      "text"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "description": "Sorted, non-overlapping replace-range edits to apply in order"
+                }
+              },
+              "required": [
+                "summary",
+                "edits"
+              ],
+              "additionalProperties": false,
+              "$schema": "http://json-schema.org/draft-07/schema#"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "model.result",
+      "runId": "run-4704c90bbb364b6b95f45479",
+      "actionCallId": "action-2b1c0191e683430ea55ba7e7",
+      "deckPath": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+      "model": "openai/gpt-4o-mini",
+      "finishReason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I assist you today?"
+      }
+    }
+  ],
+  "meta": {
+    "sessionId": "editor-assistant-deck-2025-12-21T21-18-38-734Z",
+    "sessionCreatedAt": "2025-12-21T21:18:38.734Z",
+    "deck": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/src/decks/editor-assistant.deck.md",
+    "deckSlug": "editor-assistant-deck",
+    "sessionDir": "/Users/randallb/code/bolt-foundry/bfmono/packages/gambit/.gambit/sessions/editor-assistant-deck-2025-12-21T21-18-38-734Z"
+  }
+}
