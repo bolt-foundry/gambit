@@ -113,16 +113,16 @@ jobs:
       - name: Publish canary
         run: |
           cp deno.json deno.publish-backup.json
+          trap 'mv deno.publish-backup.json deno.json' EXIT
           deno eval '
             const version = Deno.env.get("CANARY_VERSION");
             if (!version) throw new Error("CANARY_VERSION env var missing");
             const path = "deno.json";
             const data = JSON.parse(await Deno.readTextFile(path));
             data.version = version;
-            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\\n");
+            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
           '
           deno publish --allow-dirty
-          mv deno.publish-backup.json deno.json
         env:
           CANARY_VERSION: ${{ steps.canary.outputs.version }}
 
