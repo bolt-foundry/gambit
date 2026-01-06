@@ -111,7 +111,19 @@ jobs:
           EOF
 
       - name: Publish canary
-        run: deno publish --allow-dirty --set-version "${{ steps.canary.outputs.version }}"
+        run: |
+          deno eval '
+            const version = Deno.env.get("CANARY_VERSION");
+            if (!version) throw new Error("CANARY_VERSION env var missing");
+            const path = "deno.json";
+            const data = JSON.parse(await Deno.readTextFile(path));
+            data.version = version;
+            await Deno.writeTextFile("deno.publish-canary.json", JSON.stringify(data, null, 2) + "\\n");
+          '
+          deno publish --allow-dirty --config deno.publish-canary.json
+          rm -f deno.publish-canary.json
+        env:
+          CANARY_VERSION: ${{ steps.canary.outputs.version }}
 
       - name: Tag release
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.tag_exists != 'true'
