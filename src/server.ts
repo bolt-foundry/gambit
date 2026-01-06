@@ -17,7 +17,22 @@ import type {
 import type { ZodTypeAny } from "zod";
 
 const logger = console;
-const moduleDir = path.dirname(path.fromFileUrl(import.meta.url));
+const moduleDir = (() => {
+  const directoryFromUrl = (url?: string): string | undefined => {
+    if (!url || !url.startsWith("file:")) return undefined;
+    return path.dirname(path.fromFileUrl(url));
+  };
+  try {
+    const resolved = import.meta.resolve("./server.ts");
+    const fromResolved = directoryFromUrl(resolved);
+    if (fromResolved) return fromResolved;
+  } catch {
+    // ignore resolution failures and try other strategies
+  }
+  const fromMeta = directoryFromUrl(import.meta.url);
+  if (fromMeta) return fromMeta;
+  return Deno.cwd();
+})();
 const simulatorBundlePath = path.resolve(
   moduleDir,
   "..",
