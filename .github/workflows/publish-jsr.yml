@@ -115,13 +115,6 @@ jobs:
           !packages/gambit/simulator-ui/dist/bundle.js
           !packages/gambit/simulator-ui/dist/bundle.js.map
           EOF
-          cat <<'EOF' >> packages/gambit/.gitignore
-
-          # Allow simulator bundle for JSR publish.
-          !simulator-ui/dist/
-          !simulator-ui/dist/bundle.js
-          !simulator-ui/dist/bundle.js.map
-          EOF
 
       - name: Publish snapshot
         if: steps.release.outputs.is_release != 'true'
