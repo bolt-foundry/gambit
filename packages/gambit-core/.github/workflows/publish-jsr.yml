@@ -1,0 +1,124 @@
+name: Publish
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    defaults:
+      run:
+        shell: nix develop --command bash -euo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Detect release version
+        id: release
+        run: |
+          set -euo pipefail
+          version="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version);')"
+          package="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const name = (data.name ?? "").trim(); if (!name) throw new Error("deno.json missing name"); console.log(name);')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            if git rev-parse "v${version}" >/dev/null 2>&1; then
+              echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            fi
+            meta_url="https://jsr.io/${package}/meta.json"
+            if deno eval -q '
+              const [url, version] = Deno.args;
+              const res = await fetch(url);
+              if (!res.ok) {
+                console.error(`Failed to fetch ${url}: ${res.status}`);
+                Deno.exit(2);
+              }
+              const data = await res.json();
+              const versions = data?.versions ?? {};
+              if (Object.prototype.hasOwnProperty.call(versions, version)) {
+                Deno.exit(0);
+              }
+              Deno.exit(1);
+            ' "$meta_url" "$version"; then
+              echo "jsr_published=true" >> "$GITHUB_OUTPUT"
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                echo "::warning::Could not verify JSR metadata (exit $status); assuming not published"
+              fi
+              echo "jsr_published=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+            echo "jsr_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Lint
+        run: deno lint
+
+      - name: Format check
+        run: deno fmt --check
+
+      - name: Type check
+        run: deno check --all mod.ts
+
+      - name: Test
+        run: deno task test
+
+      - name: Compute canary version
+        id: canary
+        run: |
+          CANARY_TS=$(date -u +%s)
+          BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
+          if [[ "$BASE_VERSION" == *-* ]]; then
+            CANARY_VERSION="${BASE_VERSION}.main.${CANARY_TS}"
+          else
+            CANARY_VERSION="${BASE_VERSION}-main.${CANARY_TS}"
+          fi
+          echo "version=${CANARY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing canary ${CANARY_VERSION}"
+
+      - name: Publish canary
+        run: |
+          cp deno.json deno.publish-backup.json
+          trap 'mv deno.publish-backup.json deno.json' EXIT
+          deno eval '
+            const version = Deno.env.get("CANARY_VERSION");
+            if (!version) throw new Error("CANARY_VERSION env var missing");
+            const path = "deno.json";
+            const data = JSON.parse(await Deno.readTextFile(path));
+            data.version = version;
+            await Deno.writeTextFile(path, JSON.stringify(data, null, 2) + "\n");
+          '
+          deno publish --allow-dirty
+        env:
+          CANARY_VERSION: ${{ steps.canary.outputs.version }}
+
+      - name: Tag release
+        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.tag_exists != 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${version}"
+          git push origin "v${version}"
+
+      - name: Publish release
+        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.jsr_published != 'true'
+        run: deno publish --allow-dirty

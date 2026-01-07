@@ -1,5 +1,8 @@
-import { isGambitEndSignal, runDeck } from "./runtime.ts";
-import type { SavedState } from "./state.ts";
+import {
+  isGambitEndSignal,
+  runDeck,
+} from "@bolt-foundry/gambit-core/internal/runtime";
+import type { SavedState } from "@bolt-foundry/gambit-core/internal/state";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -9,8 +12,11 @@ export async function startRepl(opts: {
   deckPath: string;
   model: string | undefined;
   modelForce: string | undefined;
-  modelProvider: import("./types.ts").ModelProvider;
-  trace?: (event: import("./types.ts").TraceEvent) => void;
+  modelProvider:
+    import("@bolt-foundry/gambit-core/internal/types").ModelProvider;
+  trace?: (
+    event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+  ) => void;
   verbose?: boolean;
   initialInit?: unknown;
   initialMessage?: unknown;

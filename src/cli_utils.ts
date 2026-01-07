@@ -1,7 +1,7 @@
 import * as path from "@std/path";
-import { GAMBIT_TOOL_INIT } from "./constants.ts";
-import type { ModelMessage } from "./types.ts";
-import type { SavedState } from "./state.ts";
+import { GAMBIT_TOOL_INIT } from "@bolt-foundry/gambit-core/internal/constants";
+import type { ModelMessage } from "@bolt-foundry/gambit-core/internal/types";
+import type { SavedState } from "@bolt-foundry/gambit-core/internal/state";
 
 export function parsePortValue(
   value: unknown,

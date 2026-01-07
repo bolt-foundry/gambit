@@ -44,10 +44,65 @@ jobs:
       - name: Register Deno problem matcher
         run: echo '::add-matcher::.github/deno-problem-matcher.json'
 
+      - name: Prepare local gambit-core import map
+        run: |
+          deno eval -q '
+            const exists = async (path) => {
+              try {
+                await Deno.stat(path);
+                return true;
+              } catch (err) {
+                if (err instanceof Deno.errors.NotFound) {
+                  return false;
+                }
+                throw err;
+              }
+            };
+            const findPath = async (candidates, label) => {
+              for (const candidate of candidates) {
+                if (await exists(candidate)) {
+                  return candidate;
+                }
+              }
+              throw new Error(
+                `Unable to find ${label} at: ${candidates.join(", ")}`,
+              );
+            };
+            const gambitPath = await findPath(
+              ["deno.json", "packages/gambit/deno.json"],
+              "gambit deno.json",
+            );
+            const corePath = await findPath(
+              ["packages/gambit-core/deno.json"],
+              "gambit-core deno.json",
+            );
+            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
+            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const exportsMap = core.exports ?? {};
+            const localImports = {};
+            for (const [key, value] of Object.entries(exportsMap)) {
+              if (typeof value !== "string") continue;
+              const suffix = key === "." ? "" : key.startsWith("./")
+                ? key.slice(1)
+                : key;
+              const spec = `@bolt-foundry/gambit-core${suffix}`;
+              const rel = value.startsWith("./") ? value.slice(2) : value;
+              localImports[spec] = `./packages/gambit-core/${rel}`;
+            }
+            gambit.imports = { ...(gambit.imports ?? {}), ...localImports };
+            await Deno.writeTextFile(
+              "deno.ci.json",
+              JSON.stringify(gambit, null, 2) + "\n",
+            );
+          '
+
+      - name: Guard bfmono imports
+        run: deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
+
       - name: Compile
         run: |
           mkdir -p dist
-          deno compile -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
+          deno compile --config deno.ci.json -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "../server.ts";
-import type { ModelProvider } from "../types.ts";
+import type { ModelProvider } from "@bolt-foundry/gambit-core/internal/types";
 import { parsePortValue } from "../cli_utils.ts";
 
 const logger = console;

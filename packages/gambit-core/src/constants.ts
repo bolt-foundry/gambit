@@ -11,7 +11,7 @@ export const GAMBIT_TOOL_INIT = "gambit_init";
 export const GAMBIT_TOOL_RESPOND = "gambit_respond";
 export const GAMBIT_TOOL_COMPLETE = "gambit_complete";
 export const GAMBIT_TOOL_END = "gambit_end";
-export const BUILTIN_TOOL_NAME_SET = new Set([
+export const BUILTIN_TOOL_NAME_SET: ReadonlySet<string> = new Set([
   GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
   GAMBIT_TOOL_COMPLETE,

@@ -1,0 +1,53 @@
+name: ci-gambit-core
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - packages/gambit-core/**
+      - .github/workflows/ci-gambit-core.yml
+  pull_request:
+    branches: ["*"]
+    paths:
+      - packages/gambit-core/**
+      - .github/workflows/ci-gambit-core.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Guard bfmono imports
+        run: deno run -A scripts/guard-bfmono-imports.ts
+        shell: nix develop --command bash -euo pipefail {0}
+
+      - name: Lint
+        run: deno lint
+        shell: nix develop --command bash -euo pipefail {0}
+        working-directory: packages/gambit-core
+
+      - name: Format check
+        run: deno fmt --check
+        shell: nix develop --command bash -euo pipefail {0}
+        working-directory: packages/gambit-core
+
+      - name: Type check
+        run: deno check --all mod.ts
+        shell: nix develop --command bash -euo pipefail {0}
+        working-directory: packages/gambit-core
+
+      - name: Test
+        run: deno task test
+        shell: nix develop --command bash -euo pipefail {0}
+        working-directory: packages/gambit-core

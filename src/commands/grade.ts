@@ -1,8 +1,8 @@
 import * as path from "@std/path";
 import type { ZodTypeAny } from "zod";
-import { loadDeck } from "../loader.ts";
-import { loadState, saveState } from "../state.ts";
-import type { ModelProvider } from "../types.ts";
+import { loadDeck } from "@bolt-foundry/gambit-core/internal/loader";
+import { loadState, saveState } from "@bolt-foundry/gambit-core/internal/state";
+import type { ModelProvider } from "@bolt-foundry/gambit-core/internal/types";
 import { runDeckWithFallback } from "./test_bot.ts";
 
 const logger = console;
@@ -78,7 +78,7 @@ function schemaHasField(
 }
 
 function upsertRun(
-  state: import("../state.ts").SavedState,
+  state: import("@bolt-foundry/gambit-core/internal/state").SavedState,
   entry: GradingRunRecord,
 ) {
   const current = state ?? { runId: randomId("run"), messages: [] };
@@ -108,7 +108,9 @@ export async function runGraderAgainstState(opts: {
   modelProvider: ModelProvider;
   model?: string;
   modelForce?: string;
-  trace?: (event: import("../types.ts").TraceEvent) => void;
+  trace?: (
+    event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+  ) => void;
 }) {
   const state = loadState(opts.statePath);
   if (!state) {
