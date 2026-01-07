@@ -212,6 +212,58 @@ button.primary:disabled {
   min-height: 0;
   overflow-y: auto;
 }
+.calibrate-run-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.calibrate-run-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.calibrate-run-title {
+  font-weight: 700;
+}
+.calibrate-run-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.calibrate-run-subtitle {
+  color: #475569;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+.calibrate-run-turns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.calibrate-run-turn {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  display: inline-block;
+}
+.calibrate-run-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.calibrate-run-section {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+.calibrate-run-section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
 .calibrate-drawer {
   background: #ffffff;
   border-radius: 16px;
@@ -990,7 +1042,12 @@ button.primary:disabled {
   flex-direction: column;
   gap: 8px;
 }
-.sessions-dialog li button {
+.sessions-dialog li {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.session-select-button {
   width: 100%;
   text-align: left;
   border: 1px solid #cbd5e1;
@@ -1002,8 +1059,20 @@ button.primary:disabled {
   flex-direction: column;
   gap: 4px;
 }
-.sessions-dialog li button:hover {
+.session-select-button:hover {
   background: #e2e8f0;
+}
+.session-delete-button {
+  width: 36px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #b91c1c;
+  cursor: pointer;
+  font-weight: 700;
+}
+.session-delete-button:hover {
+  background: #fee2e2;
 }
 .trace-empty, .empty-state {
   padding: 12px;

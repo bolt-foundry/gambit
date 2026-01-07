@@ -108,6 +108,7 @@ type SessionMeta = {
   id: string;
   deck?: string;
   deckSlug?: string;
+  testBotName?: string;
   createdAt?: string;
   sessionDir?: string;
   statePath?: string;
@@ -685,7 +686,27 @@ function useSessions() {
     }
   }, []);
 
-  return { sessions, loading, error, refresh };
+  const deleteSession = useCallback(async (sessionId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/session/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!res.ok) throw new Error(res.statusText);
+      await refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to delete session",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [refresh]);
+
+  return { sessions, loading, error, refresh, deleteSession };
 }
 
 function pathDirname(p: string): string {
@@ -1616,10 +1637,19 @@ function SessionModal(props: {
   error: string | null;
   onRefresh: () => void;
   onSelect: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
   onClose: () => void;
 }) {
-  const { open, sessions, loading, error, onRefresh, onSelect, onClose } =
-    props;
+  const {
+    open,
+    sessions,
+    loading,
+    error,
+    onRefresh,
+    onSelect,
+    onDelete,
+    onClose,
+  } = props;
   if (!open) return null;
   return (
     <div className="sessions-overlay">
@@ -1635,12 +1665,31 @@ function SessionModal(props: {
           <ul>
             {sessions.map((session) => (
               <li key={session.id}>
-                <button type="button" onClick={() => onSelect(session.id)}>
+                <button
+                  type="button"
+                  className="session-select-button"
+                  onClick={() => onSelect(session.id)}
+                >
                   <strong>
-                    {session.deckSlug ?? session.deck ?? "session"}
+                    {session.testBotName ??
+                      session.deckSlug ??
+                      session.deck ??
+                      "session"}
                   </strong>
                   <span>{formatTimestamp(session.createdAt)}</span>
                   <code>{session.id}</code>
+                </button>
+                <button
+                  type="button"
+                  className="session-delete-button"
+                  onClick={() => {
+                    if (!window.confirm("Delete this session?")) return;
+                    onDelete(session.id);
+                  }}
+                  aria-label="Delete session"
+                  title="Delete session"
+                >
+                  X
                 </button>
               </li>
             ))}
@@ -1678,7 +1727,12 @@ function RecentSessionsEmptyState(props: {
               className="recent-session-button"
               onClick={() => onSelect(session.id)}
             >
-              <strong>{session.deckSlug ?? session.deck ?? "session"}</strong>
+              <strong>
+                {session.testBotName ??
+                  session.deckSlug ??
+                  session.deck ??
+                  "session"}
+              </strong>
               <span>{formatTimestamp(session.createdAt)}</span>
               <code>{session.id}</code>
             </button>
@@ -2067,8 +2121,13 @@ function InitPanel(props: {
 function SimulatorApp({ basePath }: { basePath: string }) {
   const simulator = useSimulator();
   const httpSchema = useHttpSchema();
-  const { sessions, loading: sessionsLoading, error: sessionsError, refresh } =
-    useSessions();
+  const {
+    sessions,
+    loading: sessionsLoading,
+    error: sessionsError,
+    refresh,
+    deleteSession,
+  } = useSessions();
   const normalizedBase = normalizeBasePath(basePath || SESSIONS_BASE_PATH);
   const rootPath = normalizedBase === "" ? "/" : normalizedBase;
   const sessionBasePath = rootPath === "/" ? SESSIONS_BASE_PATH : rootPath;
@@ -2660,6 +2719,7 @@ function SimulatorApp({ basePath }: { basePath: string }) {
           navigateToSession(id);
           setSessionsOpen(false);
         }}
+        onDelete={deleteSession}
         onClose={() => setSessionsOpen(false)}
       />
     </div>
@@ -2836,26 +2896,27 @@ function CalibrateApp() {
     if (!selectedSession?.gradingRuns) return [];
     return [...selectedSession.gradingRuns].reverse();
   }, [selectedSession]);
-  const runItems = useMemo(() => {
-    const items: Array<{
-      key: string;
-      label: string;
-      status: CalibrationRun["status"];
-      runAt?: string;
-      error?: string;
-      input?: unknown;
-      result?: unknown;
-      messageIndex?: number;
-      runId: string;
-      turnIndex?: number;
-      refId: string;
-      referenceSample?: {
-        score: number;
-        reason: string;
-        evidence?: string[];
-      };
-    }> = [];
-    for (const run of sessionRuns) {
+  const runSections = useMemo(() => {
+    return sessionRuns.map((run) => {
+      const items: Array<{
+        key: string;
+        label: string;
+        status: CalibrationRun["status"];
+        runAt?: string;
+        error?: string;
+        input?: unknown;
+        result?: unknown;
+        messageIndex?: number;
+        runId: string;
+        turnIndex?: number;
+        turnNumber?: number;
+        refId: string;
+        referenceSample?: {
+          score: number;
+          reason: string;
+          evidence?: string[];
+        };
+      }> = [];
       const result = run.result;
       if (
         result && typeof result === "object" && "mode" in result &&
@@ -2878,9 +2939,7 @@ function CalibrateApp() {
           const assistantTurnNumber = turns.length - idx;
           items.push({
             key: `${run.id}-${turn.index ?? idx}`,
-            label: `${
-              run.graderLabel ?? run.graderId
-            } · assistant turn ${assistantTurnNumber}`,
+            label: `Assistant turn ${assistantTurnNumber}`,
             status: run.status,
             runAt: run.runAt,
             error: run.error,
@@ -2889,6 +2948,7 @@ function CalibrateApp() {
             messageIndex: turn.index ?? idx,
             runId: run.id,
             turnIndex: turn.index ?? idx,
+            turnNumber: assistantTurnNumber,
             refId: `gradingRun:${run.id}#turn:${turn.index ?? idx}`,
             referenceSample: turn.referenceSample,
           });
@@ -2896,7 +2956,7 @@ function CalibrateApp() {
         if (turns.length === 0) {
           items.push({
             key: `${run.id}-empty`,
-            label: `${run.graderLabel ?? run.graderId} · turns`,
+            label: "Turns",
             status: run.status,
             runAt: run.runAt,
             error: run.error,
@@ -2907,32 +2967,32 @@ function CalibrateApp() {
             referenceSample: run.referenceSample,
           });
         }
-        continue;
+      } else {
+        items.push({
+          key: run.id,
+          label: "Result",
+          status: run.status,
+          runAt: run.runAt,
+          error: run.error,
+          input: run.input,
+          result: run.result,
+          runId: run.id,
+          refId: `gradingRun:${run.id}`,
+          referenceSample: run.referenceSample,
+        });
       }
-      items.push({
-        key: run.id,
+      return {
+        run,
         label: run.graderLabel ?? run.graderId,
-        status: run.status,
-        runAt: run.runAt,
-        error: run.error,
-        input: run.input,
-        result: run.result,
-        runId: run.id,
-        refId: `gradingRun:${run.id}`,
-        referenceSample: run.referenceSample,
-      });
-    }
-    const withOrder = items.map((item, index) => ({
-      item,
-      index,
-      runAtMs: item.runAt ? Date.parse(item.runAt) : 0,
-    }));
-    withOrder.sort((a, b) => {
-      if (a.runAtMs !== b.runAtMs) return b.runAtMs - a.runAtMs;
-      return a.index - b.index;
+        items,
+      };
     });
-    return withOrder.map((entry) => entry.item);
   }, [sessionRuns]);
+  const runItems = useMemo(
+    () => runSections.flatMap((section) => section.items),
+    [runSections],
+  );
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedResults, setExpandedResults] = useState<
     Record<string, boolean>
   >({});
@@ -2960,7 +3020,16 @@ function CalibrateApp() {
     if (!match) return;
     setExpandedResults((prev) => ({ ...prev, [match.key]: true }));
     setHighlightedResult(match.key);
+    setExpandedRunId(ref.runId);
   }, [runItems]);
+  useEffect(() => {
+    const latestRunId = runSections[0]?.run.id ?? null;
+    if (!latestRunId) {
+      setExpandedRunId(null);
+      return;
+    }
+    setExpandedRunId((prev) => (prev === latestRunId ? prev : latestRunId));
+  }, [runSections]);
 
   const runGrader = useCallback(async () => {
     if (!selectedSessionId || !selectedGraderId) return;
@@ -3011,22 +3080,19 @@ function CalibrateApp() {
             Run deck-defined graders against saved sessions.
           </div>
         </div>
+        <div className="header-actions">
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={loadCalibrateData}
+            disabled={loading}
+          >
+            Refresh data
+          </button>
+        </div>
       </header>
       <main className="calibrate-layout">
         <div className="chat-column calibrate-main-column">
-          <div
-            className="header-actions"
-            style={{ justifyContent: "flex-end" }}
-          >
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={loadCalibrateData}
-              disabled={loading}
-            >
-              Refresh data
-            </button>
-          </div>
           {error && <div className="error">{error}</div>}
           {loading && (
             <div className="editor-status">Loading calibration data…</div>
@@ -3076,7 +3142,10 @@ function CalibrateApp() {
                       >
                         {sessions.map((session) => (
                           <option key={session.id} value={session.id}>
-                            {session.id}
+                            {session.testBotName ??
+                              session.deckSlug ??
+                              session.deck ??
+                              session.id}
                             {session.createdAt
                               ? ` · ${formatTimestamp(session.createdAt)}`
                               : ""}
@@ -3150,466 +3219,624 @@ function CalibrateApp() {
                         No grader runs for this session yet.
                       </div>
                     )}
-                    {runItems.map((item) => {
-                      const graded = extractScoreAndReason(item.result);
-                      const reference = extractScoreAndReasonFromSample(
-                        item.referenceSample,
-                      );
-                      const displayScore = reference.score ?? graded.score;
-                      const displayReason = reference.reason ?? graded.reason;
-                      const turnContext = extractTurnContext(item.input);
-                      const conversationContext = extractConversationContext(
-                        item.input,
-                      );
-                      const delta = reference.score !== undefined &&
-                          graded.score !== undefined
-                        ? reference.score - graded.score
-                        : undefined;
-                      const polarityFlip = graded.score !== undefined &&
-                        reference.score !== undefined &&
-                        graded.score !== 0 &&
-                        reference.score !== 0 &&
-                        (graded.score > 0) !== (reference.score > 0);
-                      const scoreClass = displayScore === undefined
-                        ? "calibrate-score--neutral"
-                        : displayScore > 0
-                        ? "calibrate-score--positive"
-                        : displayScore < 0
-                        ? "calibrate-score--negative"
-                        : "calibrate-score--neutral";
-                      const isOpen = Boolean(expandedResults[item.key]);
-                      const draft = referenceDrafts[item.key];
+                    {runSections.map((section) => {
+                      const isExpanded = expandedRunId === section.run.id;
+                      const turnBadges = [...section.items]
+                        .sort((a, b) => {
+                          const aNum = a.turnNumber ?? 0;
+                          const bNum = b.turnNumber ?? 0;
+                          return aNum - bNum;
+                        })
+                        .map((item, idx) => {
+                          const graded = extractScoreAndReason(item.result);
+                          const reference = extractScoreAndReasonFromSample(
+                            item.referenceSample,
+                          );
+                          const displayScore = reference.score ?? graded.score;
+                          const turnLabel = item.turnNumber ?? idx + 1;
+                          const scoreClass = displayScore === undefined
+                            ? "calibrate-score--neutral"
+                            : displayScore > 0
+                            ? "calibrate-score--positive"
+                            : displayScore < 0
+                            ? "calibrate-score--negative"
+                            : "calibrate-score--neutral";
+                          return (
+                            <span
+                              key={`${section.run.id}-turn-${turnLabel}`}
+                              className={`calibrate-run-turn ${scoreClass}`}
+                              title={`Turn ${turnLabel}: ${
+                                displayScore ?? "—"
+                              }`}
+                            />
+                          );
+                        });
                       return (
                         <div
-                          key={item.key}
-                          className={`trace-row${
-                            highlightedResult === item.key
-                              ? " trace-row-highlight"
-                              : ""
-                          }`}
+                          key={section.run.id}
+                          className="calibrate-run-card"
                         >
-                          <div className="calibrate-result-header">
-                            <div className="calibrate-result-main">
-                              <div
-                                className={`calibrate-score-badge ${scoreClass}`}
-                              >
-                                {displayScore !== undefined
-                                  ? displayScore
-                                  : "—"}
+                          <div className="calibrate-run-header">
+                            <div>
+                              <div className="calibrate-run-title-row">
+                                <div className="calibrate-run-title">
+                                  {section.label}
+                                </div>
+                                <div className="calibrate-run-turns">
+                                  {turnBadges}
+                                </div>
                               </div>
-                              <div className="calibrate-result-meta">
-                                <div className="calibrate-result-title">
-                                  {item.label}
-                                </div>
-                                <div className="calibrate-result-subtitle">
-                                  {item.status}
-                                  {item.runAt
-                                    ? ` · ${formatTimestampShort(item.runAt)}`
-                                    : ""}
-                                  {reference.score !== undefined && (
-                                    <span className="calibrate-score-chip">
-                                      ref
-                                    </span>
-                                  )}
-                                  {delta !== undefined && (
-                                    <span className="calibrate-delta-chip">
-                                      {delta >= 0 ? `+${delta}` : `${delta}`}
-                                    </span>
-                                  )}
-                                  {polarityFlip && (
-                                    <span className="calibrate-alert-chip">
-                                      !
-                                    </span>
-                                  )}
-                                </div>
-                                {displayReason && (
-                                  <div className="calibrate-result-reason">
-                                    {displayReason}
-                                  </div>
-                                )}
-                                {reference.score !== undefined &&
-                                  graded.score !== undefined && (
-                                  <div className="calibrate-result-secondary">
-                                    Graded score: {graded.score}
-                                  </div>
-                                )}
+                              <div className="calibrate-run-subtitle">
+                                {section.run.status}
+                                {section.run.runAt
+                                  ? ` · ${
+                                    formatTimestampShort(section.run.runAt)
+                                  }`
+                                  : ""}
                               </div>
                             </div>
-                            <div className="calibrate-result-actions">
-                              <button
-                                type="button"
-                                className="ghost-btn calibrate-ref-copy"
-                                onClick={() => {
-                                  const basePath = selectedSession?.statePath ??
-                                    selectedSession?.sessionDir ??
-                                    "";
-                                  const refPath = basePath
-                                    ? `${basePath}#${item.refId}`
-                                    : item.refId;
-                                  navigator.clipboard?.writeText(refPath);
-                                  setCopiedRef(item.key);
-                                  window.setTimeout(
-                                    () =>
-                                      setCopiedRef((prev) =>
-                                        prev === item.key ? null : prev
-                                      ),
-                                    1200,
-                                  );
-                                }}
-                              >
-                                {copiedRef === item.key ? "Copied" : "Copy ref"}
-                              </button>
-                              <button
-                                type="button"
-                                className="ghost-btn calibrate-toggle"
-                                onClick={() =>
-                                  setExpandedResults((prev) => {
-                                    const nextOpen = !isOpen;
-                                    if (
-                                      nextOpen && !referenceDrafts[item.key]
-                                    ) {
-                                      const seedScore = reference.score ?? NaN;
-                                      const seedReason = reference.reason ?? "";
-                                      const seedEvidence = item.referenceSample
-                                          ?.evidence
-                                        ? item.referenceSample.evidence.join(
-                                          "\n",
-                                        )
-                                        : "";
-                                      setReferenceDrafts((drafts) => ({
-                                        ...drafts,
-                                        [item.key]: {
-                                          score: seedScore,
-                                          reason: seedReason,
-                                          evidenceText: seedEvidence,
-                                        },
-                                      }));
-                                    }
-                                    return { ...prev, [item.key]: nextOpen };
-                                  })}
-                              >
-                                {isOpen ? "Hide details" : "Show details"}
-                              </button>
-                            </div>
+                            <button
+                              type="button"
+                              className="ghost-btn calibrate-run-toggle"
+                              onClick={() =>
+                                setExpandedRunId((prev) =>
+                                  prev === section.run.id
+                                    ? null
+                                    : section.run.id
+                                )}
+                            >
+                              {isExpanded ? "Collapse" : "Expand"}
+                            </button>
                           </div>
-                          {item.error && (
-                            <div className="error">{item.error}</div>
-                          )}
-                          {item.turnIndex !== undefined && (
-                            <div className="calibrate-context calibrate-context-compact">
-                              {turnContext.priorUser && (
-                                <div className="calibrate-context-row">
-                                  <div className="calibrate-context-label">
-                                    Prior user
-                                  </div>
-                                  <div className="calibrate-context-bubble calibrate-context-user">
-                                    {turnContext.priorUser}
-                                  </div>
-                                </div>
-                              )}
-                              {turnContext.gradedAssistant && (
-                                <div className="calibrate-context-row">
-                                  <div className="calibrate-context-label">
-                                    Graded assistant
-                                  </div>
-                                  <div className="calibrate-context-bubble calibrate-context-assistant">
-                                    {turnContext.gradedAssistant}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {isOpen && (
-                            <div className="calibrate-result-details">
-                              <div>
-                                <div className="calibrate-section-title">
-                                  Graded sample
-                                </div>
-                                <pre className="trace-json">
-                                  {JSON.stringify(item.result ?? null, null, 2)}
-                                </pre>
-                              </div>
-                              <div>
-                                <div className="calibrate-section-title">
-                                  Input
-                                </div>
-                                {typeof item.messageIndex === "number" && (
-                                  <div className="calibrate-result-meta-line">
-                                    Message index: {item.messageIndex}
-                                  </div>
-                                )}
-                                {item.turnIndex !== undefined
-                                  ? (
-                                    <div className="calibrate-context">
-                                      {turnContext.priorUser && (
-                                        <div className="calibrate-context-row">
-                                          <div className="calibrate-context-label">
-                                            Prior user
-                                          </div>
-                                          <div className="calibrate-context-bubble calibrate-context-user">
-                                            {turnContext.priorUser}
-                                          </div>
-                                        </div>
-                                      )}
-                                      {turnContext.gradedAssistant && (
-                                        <div className="calibrate-context-row">
-                                          <div className="calibrate-context-label">
-                                            Graded assistant
-                                          </div>
-                                          <div className="calibrate-context-bubble calibrate-context-assistant">
-                                            {turnContext.gradedAssistant}
-                                          </div>
-                                        </div>
-                                      )}
-                                      <button
-                                        type="button"
-                                        className="ghost-btn calibrate-toggle"
-                                        onClick={() =>
-                                          setShowRawInputs((prev) => ({
-                                            ...prev,
-                                            [item.key]: !prev[item.key],
-                                          }))}
-                                      >
-                                        {showRawInputs[item.key]
-                                          ? "Hide raw input"
-                                          : "Show raw input"}
-                                      </button>
-                                      {showRawInputs[item.key] && (
-                                        <pre className="trace-json">
-                                        {JSON.stringify(
-                                          item.input ?? null,
-                                          null,
-                                          2,
-                                        )}
-                                        </pre>
-                                      )}
-                                    </div>
-                                  )
-                                  : (
-                                    <div className="calibrate-context">
-                                      {conversationContext.latestUser && (
-                                        <div className="calibrate-context-row">
-                                          <div className="calibrate-context-label">
-                                            Latest user
-                                          </div>
-                                          <div className="calibrate-context-bubble calibrate-context-user">
-                                            {conversationContext.latestUser}
-                                          </div>
-                                        </div>
-                                      )}
-                                      {conversationContext.latestAssistant && (
-                                        <div className="calibrate-context-row">
-                                          <div className="calibrate-context-label">
-                                            Latest assistant
-                                          </div>
-                                          <div className="calibrate-context-bubble calibrate-context-assistant">
-                                            {conversationContext
-                                              .latestAssistant}
-                                          </div>
-                                        </div>
-                                      )}
-                                      <button
-                                        type="button"
-                                        className="ghost-btn calibrate-toggle"
-                                        onClick={() =>
-                                          setShowRawInputs((prev) => ({
-                                            ...prev,
-                                            [item.key]: !prev[item.key],
-                                          }))}
-                                      >
-                                        {showRawInputs[item.key]
-                                          ? "Hide raw input"
-                                          : "Show raw input"}
-                                      </button>
-                                      {showRawInputs[item.key] && (
-                                        <pre className="trace-json">
-                                        {JSON.stringify(
-                                          item.input ?? null,
-                                          null,
-                                          2,
-                                        )}
-                                        </pre>
-                                      )}
-                                    </div>
-                                  )}
-                              </div>
-                              <div>
-                                <div className="calibrate-section-title">
-                                  Reference sample
-                                </div>
-                                {item.referenceSample
-                                  ? (
-                                    <pre className="trace-json">
-                                    {JSON.stringify(
-                                      item.referenceSample,
-                                      null,
-                                      2,
-                                    )}
-                                    </pre>
-                                  )
-                                  : (
-                                    <div className="placeholder">
-                                      No reference sample yet.
-                                    </div>
-                                  )}
-                                {draft && (
-                                  <div className="calibrate-reference-form">
-                                    <div className="calibrate-score-buttons">
-                                      {SCORE_VALUES.map((value) => (
-                                        <button
-                                          key={value}
-                                          type="button"
-                                          className={Number.isNaN(draft.score)
-                                            ? "score-btn"
-                                            : value === draft.score
-                                            ? "score-btn score-btn-active"
-                                            : "score-btn"}
-                                          onClick={() =>
-                                            setReferenceDrafts((prev) => ({
-                                              ...prev,
-                                              [item.key]: {
-                                                ...draft,
-                                                score: value,
-                                              },
-                                            }))}
+                          {isExpanded && (
+                            <div className="calibrate-run-body">
+                              {section.items.map((item) => {
+                                const graded = extractScoreAndReason(
+                                  item.result,
+                                );
+                                const reference =
+                                  extractScoreAndReasonFromSample(
+                                    item.referenceSample,
+                                  );
+                                const displayScore = reference.score ??
+                                  graded.score;
+                                const displayReason = reference.reason ??
+                                  graded.reason;
+                                const turnContext = extractTurnContext(
+                                  item.input,
+                                );
+                                const conversationContext =
+                                  extractConversationContext(item.input);
+                                const delta = reference.score !== undefined &&
+                                    graded.score !== undefined
+                                  ? reference.score - graded.score
+                                  : undefined;
+                                const polarityFlip = graded.score !==
+                                    undefined &&
+                                  reference.score !== undefined &&
+                                  graded.score !== 0 &&
+                                  reference.score !== 0 &&
+                                  (graded.score > 0) !==
+                                    (reference.score > 0);
+                                const scoreClass = displayScore === undefined
+                                  ? "calibrate-score--neutral"
+                                  : displayScore > 0
+                                  ? "calibrate-score--positive"
+                                  : displayScore < 0
+                                  ? "calibrate-score--negative"
+                                  : "calibrate-score--neutral";
+                                const isOpen = Boolean(
+                                  expandedResults[item.key],
+                                );
+                                const draft = referenceDrafts[item.key];
+                                return (
+                                  <div
+                                    key={item.key}
+                                    className={`calibrate-run-section${
+                                      highlightedResult === item.key
+                                        ? " trace-row-highlight"
+                                        : ""
+                                    }`}
+                                  >
+                                    <div className="calibrate-result-header">
+                                      <div className="calibrate-result-main">
+                                        <div
+                                          className={`calibrate-score-badge ${scoreClass}`}
                                         >
-                                          {value}
+                                          {displayScore !== undefined
+                                            ? displayScore
+                                            : "—"}
+                                        </div>
+                                        <div className="calibrate-result-meta">
+                                          <div className="calibrate-result-title">
+                                            {item.label}
+                                          </div>
+                                          <div className="calibrate-result-subtitle">
+                                            {item.status}
+                                            {item.runAt
+                                              ? ` · ${
+                                                formatTimestampShort(item.runAt)
+                                              }`
+                                              : ""}
+                                            {reference.score !== undefined && (
+                                              <span className="calibrate-score-chip">
+                                                ref
+                                              </span>
+                                            )}
+                                            {delta !== undefined && (
+                                              <span className="calibrate-delta-chip">
+                                                {delta >= 0
+                                                  ? `+${delta}`
+                                                  : `${delta}`}
+                                              </span>
+                                            )}
+                                            {polarityFlip && (
+                                              <span className="calibrate-alert-chip">
+                                                !
+                                              </span>
+                                            )}
+                                          </div>
+                                          {displayReason && (
+                                            <div className="calibrate-result-reason">
+                                              {displayReason}
+                                            </div>
+                                          )}
+                                          {reference.score !== undefined &&
+                                            graded.score !== undefined && (
+                                            <div className="calibrate-result-secondary">
+                                              Graded score: {graded.score}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="calibrate-result-actions">
+                                        <button
+                                          type="button"
+                                          className="ghost-btn calibrate-ref-copy"
+                                          onClick={() => {
+                                            const basePath =
+                                              selectedSession?.statePath ??
+                                                selectedSession?.sessionDir ??
+                                                "";
+                                            const refPath = basePath
+                                              ? `${basePath}#${item.refId}`
+                                              : item.refId;
+                                            navigator.clipboard?.writeText(
+                                              refPath,
+                                            );
+                                            setCopiedRef(item.key);
+                                            window.setTimeout(
+                                              () =>
+                                                setCopiedRef((prev) =>
+                                                  prev === item.key
+                                                    ? null
+                                                    : prev
+                                                ),
+                                              1200,
+                                            );
+                                          }}
+                                        >
+                                          {copiedRef === item.key
+                                            ? "Copied"
+                                            : "Copy ref"}
                                         </button>
-                                      ))}
+                                        <button
+                                          type="button"
+                                          className="ghost-btn calibrate-toggle"
+                                          onClick={() =>
+                                            setExpandedResults((prev) => {
+                                              const nextOpen = !isOpen;
+                                              if (
+                                                nextOpen &&
+                                                !referenceDrafts[item.key]
+                                              ) {
+                                                const seedScore =
+                                                  reference.score ?? NaN;
+                                                const seedReason =
+                                                  reference.reason ?? "";
+                                                const seedEvidence =
+                                                  item.referenceSample
+                                                      ?.evidence
+                                                    ? item.referenceSample
+                                                      .evidence.join("\n")
+                                                    : "";
+                                                setReferenceDrafts((
+                                                  drafts,
+                                                ) => ({
+                                                  ...drafts,
+                                                  [item.key]: {
+                                                    score: seedScore,
+                                                    reason: seedReason,
+                                                    evidenceText: seedEvidence,
+                                                  },
+                                                }));
+                                              }
+                                              return {
+                                                ...prev,
+                                                [item.key]: nextOpen,
+                                              };
+                                            })}
+                                        >
+                                          {isOpen
+                                            ? "Hide details"
+                                            : "Show details"}
+                                        </button>
+                                      </div>
                                     </div>
-                                    <label>
-                                      Reason
-                                      <textarea
-                                        value={draft.reason}
-                                        onChange={(e) =>
-                                          setReferenceDrafts((prev) => ({
-                                            ...prev,
-                                            [item.key]: {
-                                              ...draft,
-                                              reason: e.target.value,
-                                            },
-                                          }))}
-                                      />
-                                    </label>
-                                    <label>
-                                      Evidence (one per line)
-                                      <textarea
-                                        value={draft.evidenceText}
-                                        onChange={(e) =>
-                                          setReferenceDrafts((prev) => ({
-                                            ...prev,
-                                            [item.key]: {
-                                              ...draft,
-                                              evidenceText: e.target.value,
-                                            },
-                                          }))}
-                                      />
-                                    </label>
-                                    <div className="calibrate-reference-actions">
-                                      <button
-                                        type="button"
-                                        className="ghost-btn"
-                                        onClick={async () => {
-                                          if (!selectedSessionId) return;
-                                          if (graded.score === undefined) {
-                                            setError(
-                                              "No graded score available to agree with.",
-                                            );
-                                            return;
-                                          }
-                                          const payload = {
-                                            sessionId: selectedSessionId,
-                                            runId: item.runId,
-                                            turnIndex: item.turnIndex,
-                                            referenceSample: {
-                                              score: graded.score,
-                                              reason: graded.reason ?? "",
-                                            },
-                                          };
-                                          setReferenceDrafts((prev) => ({
-                                            ...prev,
-                                            [item.key]: {
-                                              ...draft,
-                                              score: graded.score!,
-                                              reason: graded.reason ?? "",
-                                              evidenceText: "",
-                                            },
-                                          }));
-                                          const res = await fetch(
-                                            "/api/grading/reference",
-                                            {
-                                              method: "POST",
-                                              headers: {
-                                                "content-type":
-                                                  "application/json",
-                                              },
-                                              body: JSON.stringify(payload),
-                                            },
-                                          );
-                                          if (!res.ok) {
-                                            const message = await res.text();
-                                            setError(
-                                              message ||
-                                                "Failed to save reference",
-                                            );
-                                          }
-                                        }}
-                                      >
-                                        Agree with graded
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="primary"
-                                        onClick={async () => {
-                                          if (!selectedSessionId) return;
-                                          const evidence = draft.evidenceText
-                                            .split("\n")
-                                            .map((line) => line.trim())
-                                            .filter(Boolean);
-                                          if (Number.isNaN(draft.score)) {
-                                            setError(
-                                              "Select a reference score.",
-                                            );
-                                            return;
-                                          }
-                                          const payload = {
-                                            sessionId: selectedSessionId,
-                                            runId: item.runId,
-                                            turnIndex: item.turnIndex,
-                                            referenceSample: {
-                                              score: draft.score,
-                                              reason: draft.reason,
-                                              evidence: evidence.length
-                                                ? evidence
-                                                : undefined,
-                                            },
-                                          };
-                                          const res = await fetch(
-                                            "/api/grading/reference",
-                                            {
-                                              method: "POST",
-                                              headers: {
-                                                "content-type":
-                                                  "application/json",
-                                              },
-                                              body: JSON.stringify(payload),
-                                            },
-                                          );
-                                          if (!res.ok) {
-                                            const message = await res.text();
-                                            setError(
-                                              message ||
-                                                "Failed to save reference",
-                                            );
-                                          }
-                                        }}
-                                      >
-                                        Save reference
-                                      </button>
-                                    </div>
+                                    {item.error && (
+                                      <div className="error">{item.error}</div>
+                                    )}
+                                    {item.turnIndex !== undefined && (
+                                      <div className="calibrate-context calibrate-context-compact">
+                                        {turnContext.priorUser && (
+                                          <div className="calibrate-context-row">
+                                            <div className="calibrate-context-label">
+                                              Prior user
+                                            </div>
+                                            <div className="calibrate-context-bubble calibrate-context-user">
+                                              {turnContext.priorUser}
+                                            </div>
+                                          </div>
+                                        )}
+                                        {turnContext.gradedAssistant && (
+                                          <div className="calibrate-context-row">
+                                            <div className="calibrate-context-label">
+                                              Graded assistant
+                                            </div>
+                                            <div className="calibrate-context-bubble calibrate-context-assistant">
+                                              {turnContext.gradedAssistant}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                    {isOpen && (
+                                      <div className="calibrate-result-details">
+                                        <div>
+                                          <div className="calibrate-section-title">
+                                            Graded sample
+                                          </div>
+                                          <pre className="trace-json">
+                                          {JSON.stringify(
+                                            item.result ?? null,
+                                            null,
+                                            2,
+                                          )}
+                                          </pre>
+                                        </div>
+                                        <div>
+                                          <div className="calibrate-section-title">
+                                            Input
+                                          </div>
+                                          {typeof item.messageIndex ===
+                                              "number" && (
+                                            <div className="calibrate-result-meta-line">
+                                              Message index: {item.messageIndex}
+                                            </div>
+                                          )}
+                                          {item.turnIndex !== undefined
+                                            ? (
+                                              <div className="calibrate-context">
+                                                {turnContext.priorUser && (
+                                                  <div className="calibrate-context-row">
+                                                    <div className="calibrate-context-label">
+                                                      Prior user
+                                                    </div>
+                                                    <div className="calibrate-context-bubble calibrate-context-user">
+                                                      {turnContext.priorUser}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                {turnContext.gradedAssistant &&
+                                                  (
+                                                    <div className="calibrate-context-row">
+                                                      <div className="calibrate-context-label">
+                                                        Graded assistant
+                                                      </div>
+                                                      <div className="calibrate-context-bubble calibrate-context-assistant">
+                                                        {turnContext
+                                                          .gradedAssistant}
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                <button
+                                                  type="button"
+                                                  className="ghost-btn calibrate-toggle"
+                                                  onClick={() =>
+                                                    setShowRawInputs((
+                                                      prev,
+                                                    ) => ({
+                                                      ...prev,
+                                                      [item.key]:
+                                                        !prev[item.key],
+                                                    }))}
+                                                >
+                                                  {showRawInputs[item.key]
+                                                    ? "Hide raw input"
+                                                    : "Show raw input"}
+                                                </button>
+                                                {showRawInputs[item.key] && (
+                                                  <pre className="trace-json">
+                                                  {JSON.stringify(
+                                                    item.input ?? null,
+                                                    null,
+                                                    2,
+                                                  )}
+                                                  </pre>
+                                                )}
+                                              </div>
+                                            )
+                                            : (
+                                              <div className="calibrate-context">
+                                                {conversationContext
+                                                  .latestUser && (
+                                                  <div className="calibrate-context-row">
+                                                    <div className="calibrate-context-label">
+                                                      Latest user
+                                                    </div>
+                                                    <div className="calibrate-context-bubble calibrate-context-user">
+                                                      {conversationContext
+                                                        .latestUser}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                {conversationContext
+                                                  .latestAssistant && (
+                                                  <div className="calibrate-context-row">
+                                                    <div className="calibrate-context-label">
+                                                      Latest assistant
+                                                    </div>
+                                                    <div className="calibrate-context-bubble calibrate-context-assistant">
+                                                      {conversationContext
+                                                        .latestAssistant}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                <button
+                                                  type="button"
+                                                  className="ghost-btn calibrate-toggle"
+                                                  onClick={() =>
+                                                    setShowRawInputs((
+                                                      prev,
+                                                    ) => ({
+                                                      ...prev,
+                                                      [item.key]:
+                                                        !prev[item.key],
+                                                    }))}
+                                                >
+                                                  {showRawInputs[item.key]
+                                                    ? "Hide raw input"
+                                                    : "Show raw input"}
+                                                </button>
+                                                {showRawInputs[item.key] && (
+                                                  <pre className="trace-json">
+                                                  {JSON.stringify(
+                                                    item.input ?? null,
+                                                    null,
+                                                    2,
+                                                  )}
+                                                  </pre>
+                                                )}
+                                              </div>
+                                            )}
+                                        </div>
+                                        <div>
+                                          <div className="calibrate-section-title">
+                                            Reference sample
+                                          </div>
+                                          {item.referenceSample
+                                            ? (
+                                              <pre className="trace-json">
+                                              {JSON.stringify(
+                                                item.referenceSample,
+                                                null,
+                                                2,
+                                              )}
+                                              </pre>
+                                            )
+                                            : (
+                                              <div className="placeholder">
+                                                No reference sample yet.
+                                              </div>
+                                            )}
+                                          {draft && (
+                                            <div className="calibrate-reference-form">
+                                              <div className="calibrate-score-buttons">
+                                                {SCORE_VALUES.map((value) => (
+                                                  <button
+                                                    key={value}
+                                                    type="button"
+                                                    className={Number.isNaN(
+                                                        draft.score,
+                                                      )
+                                                      ? "score-btn"
+                                                      : value === draft.score
+                                                      ? "score-btn score-btn-active"
+                                                      : "score-btn"}
+                                                    onClick={() =>
+                                                      setReferenceDrafts(
+                                                        (prev) => ({
+                                                          ...prev,
+                                                          [item.key]: {
+                                                            ...draft,
+                                                            score: value,
+                                                          },
+                                                        }),
+                                                      )}
+                                                  >
+                                                    {value}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                              <label>
+                                                Reason
+                                                <textarea
+                                                  value={draft.reason}
+                                                  onChange={(e) =>
+                                                    setReferenceDrafts(
+                                                      (prev) => ({
+                                                        ...prev,
+                                                        [item.key]: {
+                                                          ...draft,
+                                                          reason: e.target
+                                                            .value,
+                                                        },
+                                                      }),
+                                                    )}
+                                                />
+                                              </label>
+                                              <label>
+                                                Evidence (one per line)
+                                                <textarea
+                                                  value={draft.evidenceText}
+                                                  onChange={(e) =>
+                                                    setReferenceDrafts(
+                                                      (prev) => ({
+                                                        ...prev,
+                                                        [item.key]: {
+                                                          ...draft,
+                                                          evidenceText: e
+                                                            .target.value,
+                                                        },
+                                                      }),
+                                                    )}
+                                                />
+                                              </label>
+                                              <div className="calibrate-reference-actions">
+                                                <button
+                                                  type="button"
+                                                  className="ghost-btn"
+                                                  onClick={async () => {
+                                                    if (!selectedSessionId) {
+                                                      return;
+                                                    }
+                                                    if (
+                                                      graded.score === undefined
+                                                    ) {
+                                                      setError(
+                                                        "No graded score available to agree with.",
+                                                      );
+                                                      return;
+                                                    }
+                                                    const payload = {
+                                                      sessionId:
+                                                        selectedSessionId,
+                                                      runId: item.runId,
+                                                      turnIndex: item.turnIndex,
+                                                      referenceSample: {
+                                                        score: graded.score,
+                                                        reason: graded.reason ??
+                                                          "",
+                                                      },
+                                                    };
+                                                    setReferenceDrafts(
+                                                      (prev) => ({
+                                                        ...prev,
+                                                        [item.key]: {
+                                                          ...draft,
+                                                          score: graded.score!,
+                                                          reason:
+                                                            graded.reason ??
+                                                              "",
+                                                          evidenceText: "",
+                                                        },
+                                                      }),
+                                                    );
+                                                    const res = await fetch(
+                                                      "/api/grading/reference",
+                                                      {
+                                                        method: "POST",
+                                                        headers: {
+                                                          "content-type":
+                                                            "application/json",
+                                                        },
+                                                        body: JSON.stringify(
+                                                          payload,
+                                                        ),
+                                                      },
+                                                    );
+                                                    if (!res.ok) {
+                                                      const message = await res
+                                                        .text();
+                                                      setError(
+                                                        message ||
+                                                          "Failed to save reference",
+                                                      );
+                                                    }
+                                                  }}
+                                                >
+                                                  Agree with graded
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="primary"
+                                                  onClick={async () => {
+                                                    if (!selectedSessionId) {
+                                                      return;
+                                                    }
+                                                    const evidence = draft
+                                                      .evidenceText
+                                                      .split("\n")
+                                                      .map((line) =>
+                                                        line.trim()
+                                                      )
+                                                      .filter(Boolean);
+                                                    if (
+                                                      Number.isNaN(draft.score)
+                                                    ) {
+                                                      setError(
+                                                        "Select a reference score.",
+                                                      );
+                                                      return;
+                                                    }
+                                                    const payload = {
+                                                      sessionId:
+                                                        selectedSessionId,
+                                                      runId: item.runId,
+                                                      turnIndex: item.turnIndex,
+                                                      referenceSample: {
+                                                        score: draft.score,
+                                                        reason: draft.reason,
+                                                        evidence:
+                                                          evidence.length
+                                                            ? evidence
+                                                            : undefined,
+                                                      },
+                                                    };
+                                                    const res = await fetch(
+                                                      "/api/grading/reference",
+                                                      {
+                                                        method: "POST",
+                                                        headers: {
+                                                          "content-type":
+                                                            "application/json",
+                                                        },
+                                                        body: JSON.stringify(
+                                                          payload,
+                                                        ),
+                                                      },
+                                                    );
+                                                    if (!res.ok) {
+                                                      const message = await res
+                                                        .text();
+                                                      setError(
+                                                        message ||
+                                                          "Failed to save reference",
+                                                      );
+                                                    }
+                                                  }}
+                                                >
+                                                  Save reference
+                                                </button>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
+                                );
+                              })}
                             </div>
                           )}
                         </div>
