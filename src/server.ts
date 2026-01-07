@@ -63,6 +63,13 @@ const simulatorBundlePath = path.resolve(
   "dist",
   "bundle.js",
 );
+const simulatorUiEntryPath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "src",
+  "main.tsx",
+);
 const simulatorBundleSourceMapPath = path.resolve(
   moduleDir,
   "..",
@@ -121,6 +128,7 @@ type SessionMeta = {
   id: string;
   deck?: string;
   deckSlug?: string;
+  testBotName?: string;
   createdAt?: string;
   gradingRuns?: Array<GradingRunRecord>;
   sessionDir?: string;
@@ -567,6 +575,30 @@ export function startWebSocketSimulator(opts: {
     }
     return undefined;
   };
+  const deleteSessionState = (sessionId: string): boolean => {
+    if (
+      !sessionId ||
+      sessionId === "." ||
+      sessionId === ".." ||
+      sessionId !== path.basename(sessionId) ||
+      sessionId.includes("/") ||
+      sessionId.includes("\\")
+    ) {
+      return false;
+    }
+    const dir = path.resolve(sessionsRoot, sessionId);
+    if (dir === sessionsRoot) return false;
+    const relative = path.relative(sessionsRoot, dir);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      return false;
+    }
+    try {
+      Deno.removeSync(dir, { recursive: true });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   const cloneTraces = (traces: Array<TraceEvent>): Array<TraceEvent> => {
     try {
@@ -620,6 +652,11 @@ export function startWebSocketSimulator(opts: {
     const deckSlug = typeof meta.deckSlug === "string"
       ? meta.deckSlug
       : undefined;
+    const testBotName =
+      typeof (meta as { testBotName?: unknown }).testBotName ===
+          "string"
+        ? (meta as { testBotName: string }).testBotName
+        : undefined;
     const gradingRuns = Array.isArray(
         (meta as { gradingRuns?: unknown }).gradingRuns,
       )
@@ -663,6 +700,7 @@ export function startWebSocketSimulator(opts: {
       deck,
       deckSlug,
       createdAt,
+      testBotName,
       gradingRuns,
       sessionDir,
       statePath,
@@ -863,6 +901,10 @@ export function startWebSocketSimulator(opts: {
       ? runOpts.initialUserMessage.trim()
       : "";
     const botConfigPath = botDeckPath;
+    const testBotName = path.basename(botConfigPath).replace(
+      /\.deck\.(md|ts)$/i,
+      "",
+    );
     const runId = randomId("testbot");
     const startedAt = new Date().toISOString();
     const controller = new AbortController();
@@ -973,14 +1015,17 @@ export function startWebSocketSimulator(opts: {
             allowRootStringInput: true,
             initialUserMessage: initialUserMessage || undefined,
             onStateUpdate: (state) => {
+              const nextMeta = {
+                ...(savedState?.meta ?? {}),
+                ...(state.meta ?? {}),
+                testBot: true,
+                testBotRunId: runId,
+                testBotConfigPath: botConfigPath,
+                testBotName,
+              };
               const enriched = persistSessionState({
                 ...state,
-                meta: {
-                  ...(state.meta ?? {}),
-                  testBot: true,
-                  testBotRunId: runId,
-                  testBotConfigPath: botConfigPath,
-                },
+                meta: nextMeta,
                 traces: capturedTraces,
               });
               savedState = enriched;
@@ -1027,14 +1072,17 @@ export function startWebSocketSimulator(opts: {
             allowRootStringInput: true,
             initialUserMessage: userMessage,
             onStateUpdate: (state) => {
+              const nextMeta = {
+                ...(savedState?.meta ?? {}),
+                ...(state.meta ?? {}),
+                testBot: true,
+                testBotRunId: runId,
+                testBotConfigPath: botConfigPath,
+                testBotName,
+              };
               const enriched = persistSessionState({
                 ...state,
-                meta: {
-                  ...(state.meta ?? {}),
-                  testBot: true,
-                  testBotRunId: runId,
-                  testBotConfigPath: botConfigPath,
-                },
+                meta: nextMeta,
                 traces: capturedTraces,
               });
               savedState = enriched;
@@ -1160,7 +1208,8 @@ export function startWebSocketSimulator(opts: {
   const bundlePlatform = opts.bundlePlatform ?? "deno";
   const autoBundle = opts.autoBundle ?? true;
   const needsBundle = !hasReactBundle() ||
-    (wantsSourceMap && !hasReactBundleSourceMap());
+    (wantsSourceMap && !hasReactBundleSourceMap()) ||
+    isReactBundleStale();
   const shouldAutoBundle = autoBundle && moduleLocation.isLocal && needsBundle;
   if (autoBundle && !moduleLocation.isLocal && opts.verbose) {
     logger.log(
@@ -1867,8 +1916,13 @@ export function startWebSocketSimulator(opts: {
             stream,
             state: simulatorSavedState,
             onStateUpdate: (state) => {
+              const nextMeta = {
+                ...(simulatorSavedState?.meta ?? {}),
+                ...(state.meta ?? {}),
+              };
               const enrichedState = persistSessionState({
                 ...state,
+                meta: nextMeta,
                 notes: state.notes ?? simulatorSavedState?.notes,
                 conversationScore: state.conversationScore ??
                   simulatorSavedState?.conversationScore,
@@ -2264,6 +2318,36 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
+      if (url.pathname === "/api/session/delete") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as { sessionId?: string };
+          if (!body.sessionId) {
+            throw new Error("Missing sessionId");
+          }
+          const removed = deleteSessionState(body.sessionId);
+          if (!removed) {
+            return new Response(
+              JSON.stringify({ error: "Session not found" }),
+              { status: 404, headers: { "content-type": "application/json" } },
+            );
+          }
+          return new Response(
+            JSON.stringify({ sessionId: body.sessionId, deleted: true }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
       if (url.pathname === "/api/feedback") {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
@@ -2533,6 +2617,22 @@ function hasReactBundleSourceMap(): boolean {
   try {
     const stat = Deno.statSync(simulatorBundleSourceMapPath);
     return stat.isFile;
+  } catch {
+    return false;
+  }
+}
+
+function isReactBundleStale(): boolean {
+  try {
+    const bundleStat = Deno.statSync(simulatorBundlePath);
+    const entryStat = Deno.statSync(simulatorUiEntryPath);
+    if (!bundleStat.isFile || !entryStat.isFile) return false;
+    const bundleTime = bundleStat.mtime?.getTime();
+    const entryTime = entryStat.mtime?.getTime();
+    if (typeof bundleTime !== "number" || typeof entryTime !== "number") {
+      return false;
+    }
+    return entryTime > bundleTime;
   } catch {
     return false;
   }
