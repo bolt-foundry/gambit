@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "npm:zod@^3.23.8";
 
 const candidateSchema = z.object({
   appointmentId: z.string(),

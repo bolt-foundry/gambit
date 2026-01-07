@@ -2,9 +2,13 @@ import * as path from "@std/path";
 import { walk } from "@std/fs";
 import { extract } from "@std/front-matter/any";
 import { TarStream } from "@std/tar/tar-stream";
-import { loadDeck } from "../loader.ts";
-import { loadState } from "../state.ts";
-import type { HandlersConfig, ModelMessage, TraceEvent } from "../types.ts";
+import { loadDeck } from "@bolt-foundry/gambit-core/internal/loader";
+import { loadState } from "@bolt-foundry/gambit-core/internal/state";
+import type {
+  HandlersConfig,
+  ModelMessage,
+  TraceEvent,
+} from "@bolt-foundry/gambit-core/internal/types";
 import {
   extractInitInput,
   findLastAssistantMessage,

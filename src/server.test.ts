@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
-import type { ModelProvider } from "./types.ts";
+import type { ModelProvider } from "@bolt-foundry/gambit-core/internal/types";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -172,8 +172,10 @@ Deno.test("simulator preserves state and user input", async () => {
   );
 
   const calls: Array<{
-    messages: Array<import("./types.ts").ModelMessage>;
-    state?: import("./state.ts").SavedState;
+    messages: Array<
+      import("@bolt-foundry/gambit-core/internal/types").ModelMessage
+    >;
+    state?: import("@bolt-foundry/gambit-core/internal/state").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -261,8 +263,10 @@ Deno.test("simulator treats follow-up input as a user message when state exists"
   );
 
   const calls: Array<{
-    messages: Array<import("./types.ts").ModelMessage>;
-    state?: import("./state.ts").SavedState;
+    messages: Array<
+      import("@bolt-foundry/gambit-core/internal/types").ModelMessage
+    >;
+    state?: import("@bolt-foundry/gambit-core/internal/state").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -379,8 +383,10 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
   );
 
   const calls: Array<{
-    messages: Array<import("./types.ts").ModelMessage>;
-    state?: import("./state.ts").SavedState;
+    messages: Array<
+      import("@bolt-foundry/gambit-core/internal/types").ModelMessage
+    >;
+    state?: import("@bolt-foundry/gambit-core/internal/state").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -395,7 +401,7 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
         // Simulate a provider that returns a minimal state without messages.
         updatedState: {
           runId: input.state?.runId ?? "missing-messages",
-        } as unknown as import("./state.ts").SavedState,
+        } as unknown as import("@bolt-foundry/gambit-core/internal/state").SavedState,
       });
     },
   };

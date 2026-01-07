@@ -21,9 +21,65 @@ jobs:
           nix_dev_profile: ${{ env.NIX_DEV_PROFILE }}
           deno_dir: ${{ env.DENO_DIR }}
 
+      - name: Prepare local gambit-core import map
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno eval -q '
+            const exists = async (path) => {
+              try {
+                await Deno.stat(path);
+                return true;
+              } catch (err) {
+                if (err instanceof Deno.errors.NotFound) {
+                  return false;
+                }
+                throw err;
+              }
+            };
+            const findPath = async (candidates, label) => {
+              for (const candidate of candidates) {
+                if (await exists(candidate)) {
+                  return candidate;
+                }
+              }
+              throw new Error(
+                `Unable to find ${label} at: ${candidates.join(", ")}`,
+              );
+            };
+            const gambitPath = await findPath(
+              ["deno.json", "packages/gambit/deno.json"],
+              "gambit deno.json",
+            );
+            const corePath = await findPath(
+              ["packages/gambit-core/deno.json"],
+              "gambit-core deno.json",
+            );
+            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
+            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const exportsMap = core.exports ?? {};
+            const localImports = {};
+            for (const [key, value] of Object.entries(exportsMap)) {
+              if (typeof value !== "string") continue;
+              const suffix = key === "." ? "" : key.startsWith("./")
+                ? key.slice(1)
+                : key;
+              const spec = `@bolt-foundry/gambit-core${suffix}`;
+              const rel = value.startsWith("./") ? value.slice(2) : value;
+              localImports[spec] = `./packages/gambit-core/${rel}`;
+            }
+            gambit.imports = { ...(gambit.imports ?? {}), ...localImports };
+            await Deno.writeTextFile(
+              "deno.ci.json",
+              JSON.stringify(gambit, null, 2) + "\n",
+            );
+          '
+
+      - name: Guard bfmono imports
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
+
       - name: Run e2e tests
         run: |
-          nix develop --profile "$NIX_DEV_PROFILE" --command deno task e2e
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno test --config deno.ci.json -A simulator-ui/__tests__/e2e/*.e2e.ts
 
       - uses: ./.github/actions/deno-ci-cleanup
         if: always()

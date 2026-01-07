@@ -1,6 +1,9 @@
-import { isGambitEndSignal, runDeck } from "../runtime.ts";
-import { loadState, saveState } from "../state.ts";
-import type { ModelProvider } from "../types.ts";
+import {
+  isGambitEndSignal,
+  runDeck,
+} from "@bolt-foundry/gambit-core/internal/runtime";
+import { loadState, saveState } from "@bolt-foundry/gambit-core/internal/state";
+import type { ModelProvider } from "@bolt-foundry/gambit-core/internal/types";
 import { enrichStateMeta } from "../cli_utils.ts";
 
 const logger = console;
@@ -13,13 +16,15 @@ export async function handleRunCommand(opts: {
   modelProvider: ModelProvider;
   model?: string;
   modelForce?: string;
-  trace?: (event: import("../types.ts").TraceEvent) => void;
+  trace?: (
+    event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+  ) => void;
   stream?: boolean;
   statePath?: string;
 }) {
   const state = opts.statePath ? loadState(opts.statePath) : undefined;
   const onStateUpdate = opts.statePath
-    ? (s: import("../state.ts").SavedState) => {
+    ? (s: import("@bolt-foundry/gambit-core/internal/state").SavedState) => {
       saveState(opts.statePath!, enrichStateMeta(s, opts.deckPath));
     }
     : undefined;

@@ -89,8 +89,6 @@ Tail logs live:
 
 ```bash
 deno task e2e-logs
-deno task e2e-logs gambit-simulator-smoke
-deno task e2e-logs gambit-simulator-smoke --errors-only
 ```
 
 ## Notes

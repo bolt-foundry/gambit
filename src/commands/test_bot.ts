@@ -1,6 +1,12 @@
-import { isGambitEndSignal, runDeck } from "../runtime.ts";
-import { loadState, saveState } from "../state.ts";
-import type { ModelProvider, TraceEvent } from "../types.ts";
+import {
+  isGambitEndSignal,
+  runDeck,
+} from "@bolt-foundry/gambit-core/internal/runtime";
+import { loadState, saveState } from "@bolt-foundry/gambit-core/internal/state";
+import type {
+  ModelProvider,
+  TraceEvent,
+} from "@bolt-foundry/gambit-core/internal/types";
 import {
   defaultTestBotStatePath,
   enrichStateMeta,
@@ -22,13 +28,17 @@ export async function runDeckWithFallback(args: {
   modelProvider: ModelProvider;
   defaultModel?: string;
   modelOverride?: string;
-  state?: import("../state.ts").SavedState;
+  state?: import("@bolt-foundry/gambit-core/internal/state").SavedState;
   allowRootStringInput?: boolean;
   initialUserMessage?: string;
-  onStateUpdate?: (state: import("../state.ts").SavedState) => void;
+  onStateUpdate?: (
+    state: import("@bolt-foundry/gambit-core/internal/state").SavedState,
+  ) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-  trace?: (event: import("../types.ts").TraceEvent) => void;
+  trace?: (
+    event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+  ) => void;
 }): Promise<unknown> {
   try {
     return await runDeck({
@@ -83,16 +93,26 @@ export async function runTestBotLoop(opts: {
   verbose?: boolean;
   statePath?: string;
 }): Promise<string> {
-  let rootState: import("../state.ts").SavedState | undefined = undefined;
-  let botState: import("../state.ts").SavedState | undefined = undefined;
+  let rootState:
+    | import("@bolt-foundry/gambit-core/internal/state").SavedState
+    | undefined = undefined;
+  let botState:
+    | import("@bolt-foundry/gambit-core/internal/state").SavedState
+    | undefined = undefined;
   const statePath = opts.statePath ??
     defaultTestBotStatePath(opts.rootDeckPath);
-  const capturedTraces: Array<import("../types.ts").TraceEvent> = [];
-  const traceWrapper = (event: import("../types.ts").TraceEvent) => {
+  const capturedTraces: Array<
+    import("@bolt-foundry/gambit-core/internal/types").TraceEvent
+  > = [];
+  const traceWrapper = (
+    event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+  ) => {
     capturedTraces.push(event);
     opts.trace?.(event);
   };
-  const saveStateToDisk = (state: import("../state.ts").SavedState) => {
+  const saveStateToDisk = (
+    state: import("@bolt-foundry/gambit-core/internal/state").SavedState,
+  ) => {
     const enriched = enrichStateMeta(
       { ...state, traces: capturedTraces },
       opts.rootDeckPath,
@@ -108,7 +128,9 @@ export async function runTestBotLoop(opts: {
     }
   }
 
-  const updateRootState = (state: import("../state.ts").SavedState) => {
+  const updateRootState = (
+    state: import("@bolt-foundry/gambit-core/internal/state").SavedState,
+  ) => {
     const enriched = enrichStateMeta(state, opts.rootDeckPath);
     rootState = enriched;
     saveStateToDisk(enriched);

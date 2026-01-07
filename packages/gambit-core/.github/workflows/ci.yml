@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["*"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NIX_DEV_PROFILE: ${{ github.workspace }}/.nix-profiles/ci
+      DENO_DIR: /home/runner/.cache/deno
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v13
+
+      - name: Register Deno problem matcher
+        run: echo '::add-matcher::.github/deno-problem-matcher.json'
+
+      - name: Prepare Nix profile directory
+        run: mkdir -p "$(dirname "$NIX_DEV_PROFILE")"
+
+      - name: Lint
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno lint
+
+      - name: Format check
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno fmt --check
+
+      - name: Type check
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno check --all mod.ts
+
+      - name: Test
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno task test
