@@ -1,4 +1,4 @@
-import { defineDeck } from "../../../mod.ts";
+import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import lookupScheduleInput from "../schemas/lookup_schedule_input.zod.ts";
 import lookupScheduleOutput from "../schemas/lookup_schedule_output.zod.ts";
 

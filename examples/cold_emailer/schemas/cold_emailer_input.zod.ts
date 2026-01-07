@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "npm:zod@^3.23.8";
 
 export default z.object({
   name: z.string().min(1).describe("Recipient name"),
