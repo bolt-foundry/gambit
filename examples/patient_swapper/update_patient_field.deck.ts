@@ -1,5 +1,5 @@
-import { defineDeck } from "../../mod.ts";
-import { z } from "zod";
+import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { z } from "npm:zod@^3.23.8";
 
 function escapeSql(value: string): string {
   return value.replace(/'/g, "''");
