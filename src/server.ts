@@ -23,7 +23,7 @@ import type {
 import type { ZodTypeAny } from "zod";
 
 const logger = console;
-const moduleDir = (() => {
+const moduleLocation = (() => {
   const directoryFromUrl = (url?: string): string | undefined => {
     if (!url || !url.startsWith("file:")) return undefined;
     return path.dirname(path.fromFileUrl(url));
@@ -31,14 +31,31 @@ const moduleDir = (() => {
   try {
     const resolved = import.meta.resolve("./server.ts");
     const fromResolved = directoryFromUrl(resolved);
-    if (fromResolved) return fromResolved;
+    if (fromResolved) return { dir: fromResolved, isLocal: true };
   } catch {
     // ignore resolution failures and try other strategies
   }
   const fromMeta = directoryFromUrl(import.meta.url);
-  if (fromMeta) return fromMeta;
-  return Deno.cwd();
+  if (fromMeta) return { dir: fromMeta, isLocal: true };
+  return { dir: Deno.cwd(), isLocal: false };
 })();
+const moduleDir = moduleLocation.dir;
+const simulatorBundleUrl = (() => {
+  try {
+    return import.meta.resolve("../simulator-ui/dist/bundle.js");
+  } catch {
+    return undefined;
+  }
+})();
+const simulatorBundleSourceMapUrl = (() => {
+  try {
+    return import.meta.resolve("../simulator-ui/dist/bundle.js.map");
+  } catch {
+    return undefined;
+  }
+})();
+let cachedRemoteBundle: Uint8Array | null = null;
+let cachedRemoteBundleSourceMap: Uint8Array | null = null;
 const simulatorBundlePath = path.resolve(
   moduleDir,
   "..",
@@ -1141,7 +1158,16 @@ export function startWebSocketSimulator(opts: {
 
   const wantsSourceMap = Boolean(opts.sourceMap);
   const bundlePlatform = opts.bundlePlatform ?? "deno";
-  if (opts.autoBundle) {
+  const autoBundle = opts.autoBundle ?? true;
+  const needsBundle = !hasReactBundle() ||
+    (wantsSourceMap && !hasReactBundleSourceMap());
+  const shouldAutoBundle = autoBundle && moduleLocation.isLocal && needsBundle;
+  if (autoBundle && !moduleLocation.isLocal && opts.verbose) {
+    logger.log(
+      "[sim] auto-bundle disabled for remote package; using packaged bundle.",
+    );
+  }
+  if (shouldAutoBundle) {
     try {
       const p = new Deno.Command("deno", {
         args: [
@@ -2371,10 +2397,14 @@ export function startWebSocketSimulator(opts: {
         url.pathname.startsWith("/test-bot") ||
         url.pathname.startsWith("/calibrate")
       ) {
-        const body = hasReactBundle()
-          ? simulatorReactHtml(resolvedDeckPath)
-          : simulatorHtml(resolvedDeckPath);
-        return new Response(body, {
+        const hasBundle = await canServeReactBundle();
+        if (!hasBundle) {
+          return new Response(
+            "Simulator UI bundle missing. Run `deno task bundle:sim` (or start with `--bundle`).",
+            { status: 500 },
+          );
+        }
+        return new Response(simulatorReactHtml(resolvedDeckPath), {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       }
@@ -2421,23 +2451,23 @@ export function startWebSocketSimulator(opts: {
       }
 
       if (url.pathname === "/ui/bundle.js") {
-        if (!hasReactBundle()) {
+        const data = await readReactBundle();
+        if (!data) {
           return new Response(
             "Bundle missing. Run `deno task bundle:sim` (or start with `--bundle`).",
             { status: 404 },
           );
         }
         try {
-          const data = await Deno.readFile(simulatorBundlePath);
           const headers = new Headers({
             "content-type": "application/javascript; charset=utf-8",
           });
           // Hint the browser about the external source map since Deno's bundle
           // output does not embed a sourceMappingURL comment.
-          if (hasReactBundleSourceMap()) {
+          if (shouldAdvertiseSourceMap()) {
             headers.set("SourceMap", "/ui/bundle.js.map");
           }
-          return new Response(data, { headers });
+          return new Response(data as unknown as BodyInit, { headers });
         } catch (err) {
           return new Response(
             `Failed to read bundle: ${
@@ -2449,15 +2479,15 @@ export function startWebSocketSimulator(opts: {
       }
 
       if (url.pathname === "/ui/bundle.js.map") {
-        if (!hasReactBundleSourceMap()) {
+        const data = await readReactBundleSourceMap();
+        if (!data) {
           return new Response(
             "Source map missing. Run `deno task bundle:sim:sourcemap` (or start with `--bundle --sourcemap`).",
             { status: 404 },
           );
         }
         try {
-          const data = await Deno.readFile(simulatorBundleSourceMapPath);
-          return new Response(data, {
+          return new Response(data as unknown as BodyInit, {
             headers: {
               "content-type": "application/json; charset=utf-8",
             },
@@ -2508,6 +2538,57 @@ function hasReactBundleSourceMap(): boolean {
   }
 }
 
+function shouldAdvertiseSourceMap(): boolean {
+  if (hasReactBundleSourceMap()) return true;
+  if (!simulatorBundleSourceMapUrl) return false;
+  return !simulatorBundleSourceMapUrl.startsWith("file:");
+}
+
+async function readReactBundle(): Promise<Uint8Array | null> {
+  try {
+    return await Deno.readFile(simulatorBundlePath);
+  } catch {
+    return await readRemoteBundle(simulatorBundleUrl, "bundle");
+  }
+}
+
+async function readReactBundleSourceMap(): Promise<Uint8Array | null> {
+  try {
+    return await Deno.readFile(simulatorBundleSourceMapPath);
+  } catch {
+    return await readRemoteBundle(simulatorBundleSourceMapUrl, "map");
+  }
+}
+
+async function canServeReactBundle(): Promise<boolean> {
+  if (hasReactBundle()) return true;
+  return (await readRemoteBundle(simulatorBundleUrl, "bundle")) !== null;
+}
+
+async function readRemoteBundle(
+  url: string | undefined,
+  kind: "bundle" | "map",
+): Promise<Uint8Array | null> {
+  if (!url || url.startsWith("file:")) return null;
+  const cached = kind === "bundle"
+    ? cachedRemoteBundle
+    : cachedRemoteBundleSourceMap;
+  if (cached) return cached;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = new Uint8Array(await res.arrayBuffer());
+    if (kind === "bundle") {
+      cachedRemoteBundle = data;
+    } else {
+      cachedRemoteBundleSourceMap = data;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 function simulatorReactHtml(deckPath: string): string {
   const deckLabel = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const bundleStamp = (() => {
@@ -2535,7 +2616,6 @@ function simulatorReactHtml(deckPath: string): string {
 </head>
 <body>
   <div id="root"></div>
-  <span style="display:none">Gambit Simulator Debug</span>
   <script>
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(deckLabel)};
   </script>
@@ -2611,1332 +2691,4 @@ async function runDeckWithFallback(args: {
     }
     throw error;
   }
-}
-
-function simulatorHtml(deckPath: string): string {
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Gambit Simulator Debug</title>
-  <style>
-    body { font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: linear-gradient(135deg, #eaf2ff, #f7f9ff); color: #0f172a; }
-    .shell { max-width: 1080px; margin: 24px auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-    .card { background: white; border-radius: 16px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06); padding: 16px; }
-    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    header h1 { margin: 0; font-size: 20px; }
-    header .meta { font-size: 12px; color: #475569; }
-    .header-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-    .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
-    .panel-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; color: #1f2937; margin-bottom: 6px; }
-    .transcript { background: #f5f7fb; border-radius: 14px; padding: 12px; height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; }
-    .events { background: #f8fafc; border-radius: 14px; padding: 0; height: 400px; overflow-y: auto; border: 1px solid #e2e8f0; }
-    .event-row { display: grid; grid-template-columns: 96px 1fr auto; align-items: start; gap: 8px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; }
-    .event-row:last-child { border-bottom: none; }
-    .event-type { font-weight: 700; text-transform: uppercase; font-size: 11px; color: #0f172a; }
-    .event-type.assistant { color: #2563eb; }
-    .event-type.user { color: #0ea5e9; }
-    .event-type.trace { color: #475569; }
-    .event-type.monolog { color: #475569; }
-    .event-type.error { color: #b91c1c; }
-    .event-type.system { color: #8a6d3b; }
-    .event-type.status { color: #8a6d3b; }
-    .event-type.handler { color: #0f766e; }
-    .event-summary { white-space: pre-wrap; color: #0f172a; }
-    .event-actions { display: flex; gap: 8px; align-items: center; }
-    .event-details { grid-column: 1 / -1; background: #eef2ff; border-radius: 10px; padding: 8px 10px; font-family: monospace; white-space: pre-wrap; margin: 0; border: 1px solid #cbd5e1; }
-    .event-toggle { border: none; background: #e2e8f0; color: #334155; padding: 4px 8px; border-radius: 8px; cursor: pointer; font-size: 12px; }
-    .event-toggle:hover { background: #cbd5e1; }
-    .row { display: flex; margin: 6px 0; }
-    .row.user { justify-content: flex-end; }
-    .row.assistant, .row.trace, .row.system, .row.error, .row.handler, .row.status { justify-content: flex-start; }
-    .row.meta { justify-content: center; }
-    .bubble { max-width: 70%; padding: 10px 12px; border-radius: 16px; line-height: 1.4; white-space: pre-wrap; position: relative; }
-    .bubble.user { background: #0b93f6; color: white; border-bottom-right-radius: 4px; }
-    .bubble.assistant { background: #e5e5ea; color: #111; border-bottom-left-radius: 4px; }
-    .bubble.system { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
-    .bubble.status { background: #fff3cd; color: #8a6d3b; border-bottom-left-radius: 4px; }
-    .bubble.handler { background: #d1fae5; color: #065f46; border-bottom-left-radius: 4px; }
-    .bubble.trace, .bubble.meta, .bubble.monolog { background: #e2e8f0; color: #475569; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }
-    .bubble.error { background: #fee2e2; color: #b91c1c; border-bottom-left-radius: 4px; }
-    .bubble.collapsible { cursor: pointer; }
-    .bubble .details { display: none; margin-top: 6px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 12px; white-space: pre-wrap; }
-    .bubble .feedback { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; opacity: 0.3; transition: opacity 120ms ease-in-out; }
-    .bubble:hover .feedback, .bubble .feedback.force-visible { opacity: 1; }
-    .feedback-scores { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-    .feedback-scores button { padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: white; color: #0f172a; font-size: 12px; cursor: pointer; }
-    .feedback-scores button:hover { background: #e2e8f0; }
-    .feedback-scores button.active { background: #0b93f6; border-color: #0b93f6; color: white; }
-    .feedback-reason { width: 100%; min-height: 54px; font-size: 12px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 8px; resize: vertical; display: none; box-sizing: border-box; }
-    .feedback-reason.visible { display: block; }
-    .feedback-status { font-size: 11px; color: #94a3b8; }
-    .feedback.saving .feedback-status { color: #0b93f6; }
-    .bubble.open .details { display: block; }
-    .bubble .chevron { position: absolute; right: 10px; top: 10px; font-size: 12px; color: #94a3b8; }
-    form.composer { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
-    .controls { display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
-    button { padding: 10px 14px; border: none; border-radius: 10px; background: #0b93f6; color: white; cursor: pointer; font-weight: 600; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .ghost-btn { background: white; color: #0f172a; border: 1px solid #cbd5e1; }
-    .ghost-btn:hover:not(:disabled) { background: #f8fafc; }
-    label { font-size: 13px; color: #475569; display: inline-flex; align-items: center; gap: 4px; }
-    .mode-switch { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .tabs { display: inline-flex; gap: 6px; align-items: center; }
-    .tab { padding: 8px 10px; border-radius: 10px; border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; cursor: pointer; }
-    .tab.active { background: #0b93f6; color: white; border-color: #0b93f6; }
-    .panel { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #f8fafc; }
-    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-    .field { display: flex; flex-direction: column; gap: 6px; background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px; }
-    .field label { font-weight: 600; color: #111827; }
-    .field .label-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-    .field small { color: #475569; font-weight: 500; }
-    .badge { padding: 2px 8px; border-radius: 999px; background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; text-transform: uppercase; }
-    .input-box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px; width: 100%; }
-    textarea.input-box { min-height: 72px; resize: vertical; font-family: monospace; }
-    textarea.json-input, textarea.message-input { width: 100%; min-height: 120px; border-radius: 10px; border: 1px solid #cbd5e1; padding: 10px; font-family: monospace; resize: vertical; background: white; }
-    .hint { color: #475569; font-size: 12px; }
-    .inline-actions { display: inline-flex; align-items: center; gap: 10px; }
-    .input-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .reset-note { color: #b45309; font-size: 12px; }
-    .sessions-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 1000; }
-    .sessions-modal[hidden] { display: none; }
-    .sessions-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.5); }
-    .sessions-modal-content { position: relative; background: white; border-radius: 16px; padding: 20px; width: min(520px, 90%); max-height: 80vh; overflow: auto; box-shadow: 0 15px 40px rgba(15, 23, 42, 0.2); display: flex; flex-direction: column; gap: 12px; }
-    .sessions-modal-header { display: flex; justify-content: space-between; align-items: center; }
-    .sessions-list { display: flex; flex-direction: column; gap: 8px; }
-    .sessions-item { text-align: left; border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; color: #0f172a; padding: 10px; cursor: pointer; }
-    .sessions-item:hover { background: #e2e8f0; }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <div class="card">
-      <header>
-        <div>
-          <h1>Gambit Simulator Debug</h1>
-          <div class="meta">Deck: <code>${deckPath}</code> · Stream: <code>/api/durable-streams/stream/gambit-simulator</code></div>
-        </div>
-        <div class="header-actions">
-          <button type="button" id="sessionsBtn" class="ghost-btn">Sessions</button>
-          <button type="button" id="reconnect" class="ghost-btn">Reconnect</button>
-          <div id="status">connecting...</div>
-        </div>
-      </header>
-      <div class="layout">
-        <div>
-          <div class="panel-title">
-            <span>Conversation</span>
-          </div>
-          <div id="transcript" class="transcript"></div>
-        </div>
-        <div>
-          <div class="panel-title">
-            <span>Traces & Tools</span>
-          </div>
-          <div id="events" class="events"></div>
-        </div>
-      </div>
-      <form id="composer" class="composer">
-        <div class="panel">
-          <div class="panel-title">User message</div>
-          <textarea id="messageInput" class="message-input" placeholder="Send a user message to the assistant"></textarea>
-          <div class="hint" id="modeHint">Send runs init (if provided) first, then this message in the same run.</div>
-        </div>
-        <div id="initPanel" class="panel" hidden>
-          <div class="panel-title">Init input (from schema)</div>
-          <div class="tabs">
-            <button type="button" data-tab="form" class="tab active">Form</button>
-            <button type="button" data-tab="json" class="tab">Raw JSON</button>
-          </div>
-          <div id="formTab">
-            <div id="formContainer" class="field-grid"></div>
-            <div class="hint" id="formHint">Fields are generated from the deck input schema.</div>
-          </div>
-          <div id="jsonTab" hidden>
-            <textarea id="jsonInput" class="json-input" placeholder='Enter JSON payload for init input'></textarea>
-            <div class="hint">Switch back to the form to edit by field. JSON edits will be preserved.</div>
-          </div>
-        </div>
-        <div class="controls">
-          <div class="inline-actions">
-            <label><input type="checkbox" id="traceToggle" checked /> Trace</label>
-            <label><input type="checkbox" id="streamToggle" checked /> Stream</label>
-            <label id="resetStateRow" hidden><input type="checkbox" id="resetState" /> Start new run (clear saved state)</label>
-          </div>
-          <div class="input-row">
-            <button type="submit" id="send">Send</button>
-          </div>
-        </div>
-      </form>
-    </div>
-    <div class="sessions-modal" id="sessionsModal" hidden>
-      <div class="sessions-modal-backdrop" id="sessionsBackdrop"></div>
-      <div class="sessions-modal-content">
-        <div class="sessions-modal-header">
-          <h2>Saved sessions</h2>
-          <button type="button" id="sessionsClose" class="ghost-btn">Close</button>
-        </div>
-        <div id="sessionsStatus" class="hint"></div>
-        <div id="sessionsList" class="sessions-list"></div>
-      </div>
-    </div>
-  </div>
-  <script>
-    (function() {
-      const transcript = document.getElementById("transcript");
-      const events = document.getElementById("events");
-      const status = document.getElementById("status");
-      const sessionsBtn = document.getElementById("sessionsBtn");
-      const sessionsModal = document.getElementById("sessionsModal");
-      const sessionsList = document.getElementById("sessionsList");
-      const sessionsStatus = document.getElementById("sessionsStatus");
-      const sessionsClose = document.getElementById("sessionsClose");
-      const sessionsBackdrop = document.getElementById("sessionsBackdrop");
-      const reconnectBtn = document.getElementById("reconnect");
-      const composer = document.getElementById("composer");
-      const btn = document.getElementById("send");
-      const modeHint = document.getElementById("modeHint");
-      const formContainer = document.getElementById("formContainer");
-      const jsonInput = document.getElementById("jsonInput");
-      const messageInput = document.getElementById("messageInput");
-      const formTab = document.getElementById("formTab");
-      const jsonTab = document.getElementById("jsonTab");
-      const initPanel = document.getElementById("initPanel");
-      const tabButtons = Array.from(document.querySelectorAll("[data-tab]"));
-      const traceToggle = document.getElementById("traceToggle");
-      const streamToggle = document.getElementById("streamToggle");
-      const resetState = document.getElementById("resetState");
-      const resetStateRow = document.getElementById("resetStateRow");
-      let currentAssistant = null;
-      let statusBubble = null;
-      let streamMode = "assistant"; // assistant | status | handler
-      let logAssistant = null;
-      let logStatus = null;
-      let waitingForAssistant = false;
-      let waitStartedAt = 0;
-      let waitTicker = null;
-      let waitingForNextAssistant = false;
-      let nextAssistantWaitStartedAt = 0;
-      let nextAssistantTicker = null;
-      let latestState = null;
-      const pendingByRole = new Map();
-      const pendingFeedbackSaves = new Map();
-      const feedbackByRef = new Map();
-      let schemaShape = null;
-      let formState = undefined;
-      let formTouched = false;
-      let jsonDirty = false;
-      let activeTab = "form";
-      let connectionAttempt = 0;
-      const traceParents = new Map();
-
-      const streamId = "gambit-simulator";
-      const streamStorageKey = "gambit.durable-streams.offset.gambit-simulator";
-      const streamBase = "/api/durable-streams/stream/" + encodeURIComponent(streamId);
-      let eventSource = null;
-
-      function getStreamOffset() {
-        try {
-          const raw = localStorage.getItem(streamStorageKey);
-          const parsed = raw ? Number(raw) : 0;
-          return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-        } catch {
-          return 0;
-        }
-      }
-
-      function setStreamOffset(offset) {
-        try {
-          localStorage.setItem(streamStorageKey, String(offset));
-        } catch {
-          // ignore
-        }
-      }
-
-      function buildStreamUrl() {
-        const offset = getStreamOffset();
-        return streamBase + "?live=sse&offset=" + offset;
-      }
-
-      function scrollBottom(el) {
-        el.scrollTop = el.scrollHeight;
-      }
-
-      function escapeSelector(value) {
-        if (window.CSS && typeof window.CSS.escape === "function") {
-          return window.CSS.escape(value);
-        }
-        return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
-      }
-
-      function trackBubble(role, bubble, target) {
-        if (target !== transcript) return;
-        const queue = pendingByRole.get(role) ?? [];
-        queue.push(bubble);
-        pendingByRole.set(role, queue);
-      }
-
-      function setLatestState(state) {
-        latestState = state && typeof state === "object"
-          ? JSON.parse(JSON.stringify(state))
-          : null;
-        resetStateRow.hidden = !latestState;
-        if (!latestState) {
-          resetState.checked = false;
-        }
-        updateModeHint();
-      }
-
-      function closeSessionsModal() {
-        if (!sessionsModal) return;
-        sessionsModal.hidden = true;
-      }
-
-      function formatSessionLabel(session) {
-        const deck = session.deckSlug || session.deck || "session";
-        if (session.createdAt) {
-          const date = new Date(session.createdAt);
-          if (!Number.isNaN(date.getTime())) {
-            return date.toLocaleString() + " · " + deck;
-          }
-        }
-        return session.id + " · " + deck;
-      }
-
-      async function loadSessionsList() {
-        if (!sessionsList || !sessionsStatus) return;
-        sessionsStatus.textContent = "Loading sessions...";
-        sessionsList.innerHTML = "";
-        try {
-          const res = await fetch("/sessions");
-          if (!res.ok) throw new Error(res.status + " " + res.statusText);
-          const body = await res.json();
-          const sessions = Array.isArray(body.sessions) ? body.sessions : [];
-          if (!sessions.length) {
-            sessionsStatus.textContent = "No saved sessions yet.";
-            return;
-          }
-          sessionsStatus.textContent = "";
-          sessions.forEach((session) => {
-            const item = document.createElement("button");
-            item.type = "button";
-            item.className = "sessions-item";
-            item.textContent = formatSessionLabel(session);
-            item.addEventListener("click", async () => {
-              try {
-                const res = await fetch("/api/simulator/load-session", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ sessionId: session.id }),
-                });
-                if (!res.ok) {
-                  throw new Error(res.status + " " + res.statusText);
-                }
-                const payload = await res.json();
-                if (payload && payload.state) {
-                  setLatestState(payload.state);
-                  refreshFeedbackMap(payload.state);
-                }
-                closeSessionsModal();
-              } catch (err) {
-                addEvent("error", "Failed to load session: " + String(err));
-              }
-            });
-            sessionsList.appendChild(item);
-          });
-        } catch (err) {
-          sessionsStatus.textContent = "Failed to load sessions.";
-          console.error(err);
-        }
-      }
-
-      function openSessionsModal() {
-        if (!sessionsModal) return;
-        sessionsModal.hidden = false;
-        loadSessionsList();
-      }
-
-      sessionsBtn?.addEventListener("click", () => {
-        openSessionsModal();
-      });
-      sessionsClose?.addEventListener("click", () => closeSessionsModal());
-      sessionsBackdrop?.addEventListener("click", () => closeSessionsModal());
-
-      function addBubble(target, role, text, opts = {}) {
-        const row = document.createElement("div");
-        row.className = "row " + (opts.middle ? "meta" : role);
-        const bubble = document.createElement("div");
-        bubble.className = "bubble " + role;
-        bubble.textContent = text;
-        if (opts.collapsible) {
-          bubble.classList.add("collapsible", "meta");
-          const chev = document.createElement("span");
-          chev.textContent = "▾";
-          chev.className = "chevron";
-          bubble.appendChild(chev);
-          const details = document.createElement("div");
-          details.className = "details";
-          details.textContent = opts.details ?? "";
-          bubble.appendChild(details);
-          bubble.addEventListener("click", () => {
-            const open = bubble.classList.toggle("open");
-            chev.textContent = open ? "▴" : "▾";
-          });
-        }
-        row.appendChild(bubble);
-        target.appendChild(row);
-        scrollBottom(target);
-        trackBubble(role, bubble, target);
-        return bubble;
-      }
-
-      function addEvent(role, text, opts = {}) {
-        const row = document.createElement("div");
-        row.className = "event-row";
-        const depth = typeof opts.depth === "number" ? opts.depth : 0;
-        if (depth > 0) {
-          row.style.marginLeft = (depth * 16) + "px";
-        }
-
-        const type = document.createElement("div");
-        type.className = "event-type " + role;
-        type.textContent = role;
-
-        const summary = document.createElement("div");
-        summary.className = "event-summary";
-        summary.textContent = text;
-
-        row.appendChild(type);
-        row.appendChild(summary);
-
-        if (opts.details) {
-          const actions = document.createElement("div");
-          actions.className = "event-actions";
-          const toggle = document.createElement("button");
-          toggle.type = "button";
-          toggle.className = "event-toggle";
-          toggle.textContent = "Details";
-          const details = document.createElement("pre");
-          details.className = "event-details";
-          details.textContent = opts.details;
-          details.hidden = true;
-          toggle.addEventListener("click", () => {
-            details.hidden = !details.hidden;
-            toggle.textContent = details.hidden ? "Details" : "Hide";
-          });
-          actions.appendChild(toggle);
-          row.appendChild(actions);
-          row.appendChild(details);
-        } else {
-          const spacer = document.createElement("div");
-          spacer.className = "event-actions";
-          row.appendChild(spacer);
-        }
-
-        events.appendChild(row);
-        scrollBottom(events);
-        return summary;
-      }
-
-      function refreshFeedbackMap(state) {
-        feedbackByRef.clear();
-        if (state?.feedback && Array.isArray(state.feedback)) {
-          state.feedback.forEach((f) => {
-            if (f && typeof f === "object" && typeof f.messageRefId === "string") {
-              feedbackByRef.set(f.messageRefId, f);
-            }
-          });
-        }
-        syncAllFeedbackPanels();
-      }
-
-      function syncAllFeedbackPanels() {
-        document.querySelectorAll(".feedback").forEach((panel) => {
-          const refId = panel?.dataset?.messageRefId;
-          if (!refId) return;
-          syncFeedbackPanel(panel, refId);
-        });
-      }
-
-      function sendFeedback(messageRefId, score, reason) {
-        const sessionId = latestState?.meta?.sessionId;
-        if (!sessionId) return;
-        clearPendingFeedbackSave(messageRefId);
-        markFeedbackSaving(messageRefId);
-        fetch("/api/simulator/feedback", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, messageRefId, score, reason }),
-        }).catch((err) => {
-          addEvent("error", "Failed to save feedback: " + String(err));
-        });
-      }
-
-      function nextPendingBubble(role) {
-        const queue = pendingByRole.get(role) ?? [];
-        while (queue.length) {
-          const candidate = queue.shift();
-          if (candidate && !candidate.dataset.messageRefId) {
-            pendingByRole.set(role, queue);
-            return candidate;
-          }
-        }
-        pendingByRole.set(role, queue);
-        return null;
-      }
-
-      function syncFeedbackPanel(panel, messageRefId) {
-        panel.dataset.messageRefId = messageRefId;
-        const current = feedbackByRef.get(messageRefId);
-        const currentScore = typeof current?.score === "number" ? current.score : null;
-        const reasonEl = panel.querySelector(".feedback-reason");
-        const buttons = Array.from(
-          panel.querySelectorAll(".feedback-scores button"),
-        );
-        buttons.forEach((btn) => {
-          const val = Number(btn.dataset.value);
-          const active = currentScore !== null && val === currentScore;
-          btn.classList.toggle("active", active);
-          if (active) panel.dataset.score = String(val);
-        });
-        if (reasonEl) {
-          reasonEl.value = current?.reason ?? reasonEl.value ?? "";
-        }
-        const shouldShowReason = currentScore !== null ||
-          (reasonEl && reasonEl.value && reasonEl.value.trim().length > 0);
-        if (reasonEl) {
-          reasonEl.classList.toggle("visible", shouldShowReason);
-          if (shouldShowReason) panel.classList.add("force-visible");
-        }
-        const statusEl = panel.querySelector(".feedback-status");
-        if (statusEl) {
-          if (currentScore !== null || (current && current.reason)) {
-            statusEl.textContent = "Saved";
-          } else {
-            statusEl.textContent = "Not scored yet";
-          }
-        }
-        panel.classList.remove("saving");
-      }
-
-      function attachFeedbackControls(bubble, messageRefId, role) {
-        if (!messageRefId || role === "user") return;
-        let panel = bubble.querySelector(".feedback");
-        if (!panel) {
-          panel = document.createElement("div");
-          panel.className = "feedback";
-          const scores = document.createElement("div");
-          scores.className = "feedback-scores";
-          for (let i = -3; i <= 3; i++) {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = String(i);
-            btn.dataset.value = String(i);
-            btn.addEventListener("click", () => {
-              const reasonEl = panel.querySelector(".feedback-reason");
-              const reason = reasonEl ? reasonEl.value : "";
-              panel.dataset.score = String(i);
-              scores.querySelectorAll("button").forEach((b) =>
-                b.classList.toggle("active", b === btn)
-              );
-              if (reasonEl) {
-                reasonEl.classList.add("visible");
-                panel.classList.add("force-visible");
-              }
-              sendFeedback(messageRefId, i, reason);
-            });
-            scores.appendChild(btn);
-          }
-          const reason = document.createElement("textarea");
-          reason.className = "feedback-reason";
-          reason.placeholder = "Why did you pick this score?";
-          reason.addEventListener("input", () => {
-            panel.classList.remove("saving");
-            const statusEl = panel.querySelector(".feedback-status");
-            if (statusEl) statusEl.textContent = "Unsaved changes...";
-            const refId = panel.dataset.messageRefId;
-            if (refId) {
-              scheduleFeedbackSave(refId, panel);
-            }
-          });
-          reason.addEventListener("change", () => {
-            const fallbackScore = feedbackByRef.get(messageRefId)?.score;
-            const score = Number(
-              panel.dataset.score ??
-                (typeof fallbackScore === "number" ? fallbackScore : NaN),
-            );
-            if (Number.isNaN(score)) return;
-            sendFeedback(messageRefId, score, reason.value);
-          });
-          panel.appendChild(scores);
-          panel.appendChild(reason);
-          const status = document.createElement("div");
-          status.className = "feedback-status";
-          status.textContent = "Not scored yet";
-          panel.appendChild(status);
-          bubble.appendChild(panel);
-        }
-        syncFeedbackPanel(panel, messageRefId);
-      }
-
-      function markFeedbackSaving(messageRefId) {
-        const panel = document.querySelector(
-          '.feedback[data-message-ref-id="' +
-            escapeSelector(messageRefId) + '"]',
-        );
-        if (panel) {
-          panel.classList.add("saving");
-          const status = panel.querySelector(".feedback-status");
-          if (status) status.textContent = "Saving...";
-        }
-      }
-
-      function clearPendingFeedbackSave(messageRefId) {
-        const timer = pendingFeedbackSaves.get(messageRefId);
-        if (timer) {
-          clearTimeout(timer);
-          pendingFeedbackSaves.delete(messageRefId);
-        }
-      }
-
-      function scheduleFeedbackSave(messageRefId, panel) {
-        clearPendingFeedbackSave(messageRefId);
-        const timer = setTimeout(() => {
-          pendingFeedbackSaves.delete(messageRefId);
-          const reasonEl = panel.querySelector(".feedback-reason");
-          if (!reasonEl) return;
-          const fallbackScore = feedbackByRef.get(messageRefId)?.score;
-          const score = Number(
-            panel.dataset.score ??
-              (typeof fallbackScore === "number" ? fallbackScore : NaN),
-          );
-          if (Number.isNaN(score)) return;
-          sendFeedback(messageRefId, score, reasonEl.value);
-        }, 600);
-        pendingFeedbackSaves.set(messageRefId, timer);
-      }
-
-      function bindMessages(newMessages) {
-        if (!Array.isArray(newMessages)) return;
-        newMessages.forEach((m) => {
-          const role = m?.role || "assistant";
-          const bubble = nextPendingBubble(role);
-          if (!bubble) return;
-          bubble.dataset.messageRefId = m.messageRefId || "";
-          attachFeedbackControls(bubble, m.messageRefId, role);
-        });
-      }
-
-      function formatPayload(p) {
-        if (typeof p === "string") return p;
-        try { return JSON.stringify(p, null, 2); } catch { return String(p); }
-      }
-
-      function formatDuration(ms) {
-        return ms < 1000 ? String(Math.round(ms)) + "ms" : (ms / 1000).toFixed(2) + "s";
-      }
-
-      function updateWaitStatus() {
-        if (!waitingForAssistant) return;
-        const elapsed = performance.now() - waitStartedAt;
-        status.textContent = "waiting " + formatDuration(elapsed);
-      }
-
-      function startWaitTimer() {
-        waitStartedAt = performance.now();
-        waitingForAssistant = true;
-        if (waitTicker) clearInterval(waitTicker);
-        updateWaitStatus();
-        waitTicker = setInterval(updateWaitStatus, 250);
-      }
-
-      function stopWaitTimer(reason) {
-        if (!waitingForAssistant) return;
-        const elapsed = performance.now() - waitStartedAt;
-        waitingForAssistant = false;
-        if (waitTicker) {
-          clearInterval(waitTicker);
-          waitTicker = null;
-        }
-        status.textContent = "connected";
-        const label = reason ?? "assistant reply";
-        addEvent("system", label + " after " + formatDuration(elapsed));
-      }
-
-      function clearWaitTimer() {
-        waitingForAssistant = false;
-        if (waitTicker) {
-          clearInterval(waitTicker);
-          waitTicker = null;
-        }
-      }
-
-      function updateNextAssistantStatus() {
-        if (!waitingForNextAssistant) return;
-        const elapsed = performance.now() - nextAssistantWaitStartedAt;
-        status.textContent = "waiting next reply " + formatDuration(elapsed);
-      }
-
-      function startNextAssistantWait() {
-        nextAssistantWaitStartedAt = performance.now();
-        waitingForNextAssistant = true;
-        if (nextAssistantTicker) clearInterval(nextAssistantTicker);
-        updateNextAssistantStatus();
-        nextAssistantTicker = setInterval(updateNextAssistantStatus, 250);
-      }
-
-      function stopNextAssistantWait(reason) {
-        if (!waitingForNextAssistant) return;
-        const elapsed = performance.now() - nextAssistantWaitStartedAt;
-        waitingForNextAssistant = false;
-        if (nextAssistantTicker) {
-          clearInterval(nextAssistantTicker);
-          nextAssistantTicker = null;
-        }
-        if (!waitingForAssistant) status.textContent = "connected";
-        const label = reason ?? "next reply";
-        addEvent("system", label + " after " + formatDuration(elapsed));
-      }
-
-      function clearNextAssistantWait() {
-        waitingForNextAssistant = false;
-        if (nextAssistantTicker) {
-          clearInterval(nextAssistantTicker);
-          nextAssistantTicker = null;
-        }
-      }
-
-      function summarizeTrace(ev) {
-        if (!ev || typeof ev !== "object") return "trace";
-        const name = typeof ev.name === "string" ? ev.name : undefined;
-        switch (ev.type) {
-          case "log": {
-            const summary = ev.title ?? ev.message ?? "";
-            return "log - " + summary;
-          }
-          case "model.call": {
-            const msgs = ev.messageCount ?? (ev.messages?.length ?? "?");
-            const tools = ev.toolCount ?? (ev.tools?.length ?? 0);
-            const stream = ev.stream ? "stream" : "no-stream";
-            return "model.call " + (ev.model ?? "(default)") +
-              " · msgs=" + msgs + " tools=" + tools + " · " + stream;
-          }
-          case "model.result": {
-            const toolCalls = ev.toolCalls?.length ?? 0;
-            const finish = ev.finishReason ?? "?";
-            return "model.result " + (ev.model ?? "(default)") +
-              " · finish=" + finish + " · toolCalls=" + toolCalls;
-          }
-          case "message.user": {
-            const content = ev?.message?.content;
-            const text = content === null || content === undefined
-              ? ""
-              : String(content);
-            const snippet = text.length > 120 ? text.slice(0, 117) + "..." : text;
-            return "user message" + (snippet ? " · " + snippet : "");
-          }
-          case "monolog": {
-            const text = (() => {
-              if (typeof ev.content === "string") return ev.content;
-              try { return JSON.stringify(ev.content); } catch { return String(ev.content); }
-            })();
-            const snippet = text.length > 120 ? text.slice(0, 117) + "..." : text;
-            return "monolog · " + snippet;
-          }
-          default: {
-            const label = String(ev.type || "trace");
-            const pretty = label.replace("action.", "action ").replace("deck.", "deck ");
-            return "• " + (name ? (pretty + " (" + name + ")") : pretty);
-          }
-        }
-      }
-
-      function traceRole(ev) {
-        if (!ev || typeof ev !== "object") return "trace";
-        if (ev.type === "message.user") return "user";
-        if (ev.type === "monolog") return "monolog";
-        const name = typeof ev.name === "string" ? ev.name : undefined;
-        const deckPath = typeof ev.deckPath === "string" ? ev.deckPath : undefined;
-        const isHandlerDeck = deckPath && deckPath.includes("/handlers/");
-        if (
-          isHandlerDeck ||
-          name === "gambit_respond" ||
-          name === "gambit_complete"
-        ) {
-          return "handler";
-        }
-        return "trace";
-      }
-
-      function recordTraceParent(ev) {
-        const id = ev?.actionCallId;
-        if (!id) return;
-        if (!traceParents.has(id)) {
-          traceParents.set(id, ev.parentActionCallId ?? null);
-        }
-      }
-
-      function traceDepth(ev) {
-        const id = ev?.actionCallId;
-        if (!id) return 0;
-        let depth = 0;
-        let current = id;
-        const seen = new Set();
-        while (traceParents.has(current)) {
-          const parent = traceParents.get(current);
-          if (!parent) break;
-          depth++;
-          if (seen.has(parent)) break;
-          seen.add(parent);
-          current = parent;
-        }
-        return depth;
-      }
-
-      function formatTraceEvent(ev) {
-        const hook = typeof window.gambitFormatTrace === "function"
-          ? window.gambitFormatTrace(ev)
-          : undefined;
-        if (hook) {
-          if (typeof hook === "string") {
-            return { role: "trace", summary: hook, details: formatPayload(ev) };
-          }
-          return {
-            role: hook.role || hook.type || "trace",
-            summary: hook.summary || hook.text || "trace",
-            details: hook.details || (hook.includeRaw ? formatPayload(ev) : undefined) || formatPayload(ev),
-            depth: typeof hook.depth === "number" ? hook.depth : traceDepth(ev),
-          };
-        }
-        return {
-          role: traceRole(ev),
-          summary: summarizeTrace(ev),
-          details: formatPayload(ev),
-          depth: traceDepth(ev),
-        };
-      }
-
-      function cloneValue(value) {
-        try { return structuredClone(value); } catch { try { return JSON.parse(JSON.stringify(value)); } catch { return value; } }
-      }
-
-      function deriveInitialFromSchema(schema, defaults) {
-        if (defaults !== undefined) return cloneValue(defaults);
-        if (!schema) return undefined;
-        if (schema.defaultValue !== undefined) return cloneValue(schema.defaultValue);
-        if (schema.example !== undefined) return cloneValue(schema.example);
-        if (schema.kind === "object") {
-          const obj = {};
-          for (const [key, child] of Object.entries(schema.fields || {})) {
-            const val = deriveInitialFromSchema(child);
-            if (val !== undefined) obj[key] = val;
-          }
-          return Object.keys(obj).length ? obj : {};
-        }
-        if (schema.kind === "array" && schema.items) {
-          const item = deriveInitialFromSchema(schema.items);
-          return item !== undefined ? [item] : [];
-        }
-        return undefined;
-      }
-
-      function getPathValue(path) {
-        let node = formState;
-        for (const key of path) {
-          if (node === undefined || node === null) return undefined;
-          if (typeof node !== "object") return undefined;
-          node = node[key];
-        }
-        return node;
-      }
-
-      function setPathValue(path, value, optional) {
-        if (path.length === 0) {
-          formState = value;
-          return;
-        }
-        if (!formState || typeof formState !== "object") {
-          formState = {};
-        }
-        let target = formState;
-        for (let i = 0; i < path.length - 1; i++) {
-          const key = path[i];
-          if (typeof target[key] !== "object" || target[key] === null) {
-            target[key] = {};
-          }
-          target = target[key];
-        }
-        const last = path[path.length - 1];
-        if (optional && (value === undefined || value === "")) {
-          delete target[last];
-        } else {
-          target[last] = value;
-        }
-      }
-
-      function renderSchemaForm() {
-        formContainer.innerHTML = "";
-        if (!schemaShape) {
-          const placeholder = document.createElement("div");
-          placeholder.className = "hint";
-          placeholder.textContent = "Waiting for schema... you can still paste JSON.";
-          formContainer.appendChild(placeholder);
-          return;
-        }
-        const root = renderField("Input", schemaShape, [], formState);
-        formContainer.appendChild(root);
-      }
-
-      function renderField(labelText, schema, path, value) {
-        if (schema.kind === "object" && schema.fields) {
-          const wrapper = document.createElement("div");
-          wrapper.className = "field";
-          const labelRow = document.createElement("div");
-          labelRow.className = "label-row";
-          const lbl = document.createElement("label");
-          lbl.textContent = labelText;
-          labelRow.appendChild(lbl);
-          const badge = document.createElement("span");
-          badge.className = "badge";
-          badge.textContent = schema.optional ? "optional" : "required";
-          labelRow.appendChild(badge);
-          wrapper.appendChild(labelRow);
-          if (schema.description) {
-            const desc = document.createElement("small");
-            desc.textContent = schema.description;
-            wrapper.appendChild(desc);
-          }
-          const grid = document.createElement("div");
-          grid.className = "field-grid";
-          for (const [key, child] of Object.entries(schema.fields)) {
-            const childValue = value && typeof value === "object" ? value[key] : undefined;
-            const childNode = renderField(key, child, [...path, key], childValue);
-            grid.appendChild(childNode);
-          }
-          wrapper.appendChild(grid);
-          return wrapper;
-        }
-
-        const field = document.createElement("div");
-        field.className = "field";
-        const labelRow = document.createElement("div");
-        labelRow.className = "label-row";
-        const lbl = document.createElement("label");
-        lbl.textContent = labelText;
-        labelRow.appendChild(lbl);
-        const badge = document.createElement("span");
-        badge.className = "badge";
-        badge.textContent = schema.optional ? "optional" : "required";
-        labelRow.appendChild(badge);
-        field.appendChild(labelRow);
-        if (schema.description) {
-          const desc = document.createElement("small");
-          desc.textContent = schema.description;
-          field.appendChild(desc);
-        }
-        const initial = value !== undefined ? value : deriveInitialFromSchema(schema);
-        const setDirty = () => { formTouched = true; if (!jsonDirty) jsonInput.value = safeStringify(formState); };
-
-        if (schema.kind === "string" || schema.kind === "unknown") {
-          const input = document.createElement("input");
-          input.className = "input-box";
-          input.type = "text";
-          if (initial !== undefined) input.value = String(initial);
-          if (!schema.optional && !initial) input.placeholder = "required";
-          input.addEventListener("input", () => {
-            const val = input.value;
-            setPathValue(path, val === "" && schema.optional ? undefined : val, schema.optional);
-            setDirty();
-          });
-          field.appendChild(input);
-        } else if (schema.kind === "number") {
-          const input = document.createElement("input");
-          input.className = "input-box";
-          input.type = "number";
-          if (typeof initial === "number") input.value = String(initial);
-          input.addEventListener("input", () => {
-            const raw = input.value;
-            if (raw === "" && schema.optional) {
-              setPathValue(path, undefined, true);
-            } else {
-              const parsed = Number(raw);
-              if (!Number.isNaN(parsed)) {
-                setPathValue(path, parsed, schema.optional);
-              }
-            }
-            setDirty();
-          });
-          field.appendChild(input);
-        } else if (schema.kind === "boolean") {
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.checked = Boolean(initial);
-          checkbox.addEventListener("change", () => {
-            setPathValue(path, checkbox.checked, schema.optional);
-            setDirty();
-          });
-          const row = document.createElement("div");
-          row.className = "input-row";
-          row.appendChild(checkbox);
-          const txt = document.createElement("span");
-          txt.textContent = "True / False";
-          row.appendChild(txt);
-          field.appendChild(row);
-        } else if (schema.kind === "enum" && Array.isArray(schema.enumValues)) {
-          const select = document.createElement("select");
-          select.className = "input-box";
-          const placeholder = document.createElement("option");
-          placeholder.value = "";
-          placeholder.textContent = schema.optional ? "— optional —" : "Select a value";
-          select.appendChild(placeholder);
-          for (const val of schema.enumValues) {
-            const opt = document.createElement("option");
-            opt.value = String(val);
-            opt.textContent = String(val);
-            select.appendChild(opt);
-          }
-          if (initial !== undefined) select.value = String(initial);
-          select.addEventListener("change", () => {
-            const raw = select.value;
-            const chosen = raw === "" && schema.optional ? undefined : raw;
-            setPathValue(path, chosen, schema.optional);
-            setDirty();
-          });
-          field.appendChild(select);
-        } else {
-          const area = document.createElement("textarea");
-          area.className = "input-box";
-          area.placeholder = "Enter JSON";
-          area.value = initial !== undefined ? safeStringify(initial) : "";
-          area.addEventListener("input", () => {
-            try {
-              const parsed = JSON.parse(area.value);
-              setPathValue(path, parsed, schema.optional);
-            } catch {
-              // keep last good value
-            }
-            setDirty();
-          });
-          field.appendChild(area);
-        }
-        return field;
-      }
-
-      function safeStringify(value) {
-        try { return JSON.stringify(value, null, 2); } catch { return String(value); }
-      }
-
-      function applySchemaPayload(payload) {
-        if (payload.schemaError) {
-          addEvent("error", "Schema error: " + payload.schemaError);
-        }
-        if (payload.schema) {
-          schemaShape = payload.schema;
-        }
-        initPanel.hidden = !schemaShape;
-        if (!schemaShape) return;
-        if (!formTouched || formState === undefined) {
-          formState = deriveInitialFromSchema(schemaShape, payload.defaults);
-          jsonDirty = false;
-        }
-        renderSchemaForm();
-        if (!jsonDirty) {
-          jsonInput.value = safeStringify(formState ?? {});
-        }
-        // First time we load schema, keep form pristine.
-        formTouched = false;
-        updateModeHint();
-      }
-
-      async function fetchSchema() {
-        try {
-          const res = await fetch("/schema");
-          if (!res.ok) throw new Error(res.status + " " + res.statusText);
-          const body = await res.json();
-          applySchemaPayload(body);
-        } catch (err) {
-          addEvent("error", "Failed to fetch schema: " + err);
-        }
-      }
-
-      function updateModeHint() {
-        if (initPanel.hidden) {
-          modeHint.textContent =
-            "Deck has no input schema; send a message or leave blank to let the assistant start.";
-          return;
-        }
-        if (latestState) {
-          modeHint.textContent = "State loaded; init payloads are treated as user messages unless you start a new run.";
-        } else {
-          modeHint.textContent = "Send runs init first (from schema), then your message in the same run.";
-        }
-      }
-
-      function handleMessage(msg) {
-        if (!msg || typeof msg !== "object") return;
-        switch (msg.type) {
-          case "ready": {
-            status.textContent = "ready";
-            addEvent("system", "Server ready.");
-            setLatestState(null);
-            applySchemaPayload(msg);
-            break;
-          }
-          case "pong":
-            status.textContent = "pong";
-            break;
-          case "stream": {
-            const chunk = msg.chunk ?? "";
-            const target = streamMode === "status" || streamMode === "handler"
-              ? "status"
-              : "assistant";
-            if (waitingForAssistant) stopWaitTimer("first token");
-            if (waitingForNextAssistant) stopNextAssistantWait("next reply");
-            if (target === "status") {
-              if (!statusBubble) statusBubble = addBubble(transcript, "status", "");
-              statusBubble.textContent += chunk;
-              if (!logStatus) logStatus = addEvent("status", "");
-              logStatus.textContent += chunk;
-            } else {
-              if (!currentAssistant) currentAssistant = addBubble(transcript, "assistant", "");
-              currentAssistant.textContent += chunk;
-              if (!logAssistant) logAssistant = addEvent("assistant", "");
-              logAssistant.textContent += chunk;
-            }
-            scrollBottom(transcript);
-            scrollBottom(events);
-            break;
-          }
-          case "result": {
-            if (waitingForAssistant) stopWaitTimer("result");
-            if (waitingForNextAssistant) stopNextAssistantWait("next reply");
-            const content = formatPayload(msg.result);
-            if (!currentAssistant) {
-              addBubble(transcript, "assistant", content);
-            } else if (!currentAssistant.textContent.trim()) {
-              currentAssistant.textContent = content;
-            }
-            if (!logAssistant) {
-              addEvent("assistant", content);
-            } else if (!logAssistant.textContent.trim()) {
-              logAssistant.textContent = content;
-            }
-            currentAssistant = null;
-            statusBubble = null;
-            streamMode = "assistant";
-            logAssistant = null;
-            logStatus = null;
-            status.textContent = "connected";
-            break;
-          }
-          case "error":
-            if (waitingForAssistant) stopWaitTimer("error");
-            if (waitingForNextAssistant) stopNextAssistantWait("error");
-            addBubble(events, "error", "Error: " + (msg.message ?? "unknown"));
-            currentAssistant = null;
-            statusBubble = null;
-            logStatus = null;
-            streamMode = "assistant";
-            status.textContent = "error";
-            break;
-          case "state": {
-            setLatestState(msg.state);
-            refreshFeedbackMap(msg.state);
-            bindMessages(msg.newMessages || []);
-            break;
-          }
-          case "trace": {
-            const ev = msg.event || {};
-            if (ev.type === "model.call") {
-              currentAssistant = null;
-              logAssistant = null;
-              statusBubble = null;
-              logStatus = null;
-              streamMode = "assistant";
-            }
-            recordTraceParent(ev);
-            const formatted = formatTraceEvent(ev);
-            if (formatted.role === "handler" && ev.type === "deck.start") {
-              streamMode = "status";
-              statusBubble = null;
-              logStatus = null;
-            } else if (formatted.role === "handler" && ev.type === "deck.end") {
-              streamMode = "assistant";
-              statusBubble = null;
-            } else if (ev.type === "deck.start" || ev.type === "deck.end") {
-              streamMode = "assistant";
-            }
-            addEvent(formatted.role, formatted.summary, {
-              collapsible: true,
-              details: formatted.details,
-              depth: formatted.depth,
-            });
-            if (ev.type === "model.result" && ev.finishReason === "tool_calls") {
-              startNextAssistantWait();
-            }
-            break;
-          }
-          default:
-            addEvent("system", JSON.stringify(msg));
-        }
-      }
-
-      function connect(reason = "connect") {
-        connectionAttempt += 1;
-        if (eventSource) {
-          eventSource.close();
-        }
-        status.textContent = "connecting...";
-        traceParents.clear();
-        eventSource = new EventSource(buildStreamUrl());
-        eventSource.onopen = () => {
-          status.textContent = "connected";
-          addEvent("system", reason === "reconnect" ? "Reconnected." : "Connected.");
-        };
-        eventSource.onerror = () => {
-          status.textContent = "error";
-          clearWaitTimer();
-          clearNextAssistantWait();
-          setLatestState(null);
-        };
-        eventSource.onmessage = (ev) => {
-          try {
-            const envelope = JSON.parse(ev.data);
-            if (
-              envelope &&
-              typeof envelope.offset === "number" &&
-              Number.isFinite(envelope.offset)
-            ) {
-              setStreamOffset(envelope.offset + 1);
-            }
-            handleMessage(envelope?.data);
-          } catch {
-            addEvent("system", String(ev.data));
-          }
-        };
-      }
-
-      updateModeHint();
-      connect();
-      fetchSchema();
-
-      function switchTab(tab) {
-        activeTab = tab;
-        tabButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tab));
-        formTab.hidden = tab !== "form";
-        jsonTab.hidden = tab !== "json";
-        if (tab === "form" && jsonDirty) {
-          try {
-            const parsed = JSON.parse(jsonInput.value);
-            formState = parsed;
-            formTouched = false;
-            jsonDirty = false;
-            renderSchemaForm();
-          } catch (err) {
-            addEvent("error", "Invalid JSON: " + err);
-          }
-        }
-      }
-
-      tabButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          switchTab(btn.dataset.tab || "form");
-        });
-      });
-
-      jsonInput.addEventListener("input", () => {
-        jsonDirty = true;
-      });
-
-      reconnectBtn.addEventListener("click", () => {
-        connect("reconnect");
-      });
-
-      composer.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const shouldResetState = resetState.checked;
-        const payload = {
-          stream: streamToggle.checked,
-          trace: traceToggle.checked,
-          resetState: shouldResetState,
-        };
-
-        const text = messageInput.value.trim();
-        const hasMessage = text.length > 0;
-        if (hasMessage) {
-          payload.message = text;
-        }
-
-        const hasState = Boolean(latestState) && !shouldResetState;
-        const includeInit = !hasState || formTouched || jsonDirty;
-        let inputValue = undefined;
-        if (!initPanel.hidden && includeInit) {
-          try {
-            inputValue = activeTab === "json"
-              ? JSON.parse(jsonInput.value || "null")
-              : formState;
-          } catch (err) {
-            addEvent("error", "JSON parse error: " + err);
-            return;
-          }
-          payload.input = inputValue === undefined ? {} : inputValue;
-        }
-
-        if (hasMessage) {
-          addBubble(transcript, "user", text);
-          addEvent("user", text);
-        } else if (payload.input === undefined && hasState) {
-          addEvent("error", "Nothing to send. Provide init input or a message.");
-          return;
-        }
-
-        if (payload.input !== undefined) {
-          const display = formatPayload(payload.input);
-          const role = hasState ? "user" : "system";
-          const label = hasState ? display : "gambit_init " + display;
-          addBubble(transcript, role, label);
-          addEvent(role, label);
-        }
-
-        currentAssistant = null;
-        statusBubble = null;
-        logAssistant = null;
-        logStatus = null;
-        streamMode = "assistant";
-        clearNextAssistantWait();
-        if (!shouldResetState && latestState?.meta?.sessionId) {
-          payload.sessionId = latestState.meta.sessionId;
-        }
-        fetch("/api/simulator/run", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then(async (res) => {
-          if (res.ok) return;
-          const info = await res.json().catch(() => ({}));
-          addEvent(
-            "error",
-            "Run failed: " +
-              (info?.error || res.status + " " + res.statusText),
-          );
-        }).catch((err) => {
-          addEvent("error", "Run failed: " + String(err));
-        });
-        if (shouldResetState) {
-          setLatestState(null);
-        }
-        messageInput.value = "";
-        startWaitTimer();
-      });
-
-      messageInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          btn.click();
-        }
-      });
-    })();
-  </script>
-</body>
-</html>`;
 }

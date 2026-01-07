@@ -79,8 +79,8 @@ Deno.test("simulator streams responses", async () => {
 
   const homepage = await fetch(`http://127.0.0.1:${port}/`);
   const html = await homepage.text();
-  if (!html.includes("Gambit Simulator Debug")) {
-    throw new Error("Debug page missing expected content");
+  if (!html.includes('id="root"')) {
+    throw new Error("Simulator HTML missing root mount");
   }
 
   await runSimulator(port, { input: "hello", stream: true });
