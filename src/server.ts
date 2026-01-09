@@ -1354,6 +1354,16 @@ export function startWebSocketSimulator(opts: {
           try {
             const result = await (async () => {
               if (runMode !== "turns") {
+                entry = {
+                  id: runId,
+                  graderId: grader.id,
+                  graderPath: grader.path,
+                  graderLabel: grader.label,
+                  status: "running",
+                  runAt: startedAt,
+                  input: { session: sessionPayload },
+                };
+                currentState = upsertCalibrationRun(currentState, entry);
                 return await runDeckWithFallback({
                   path: grader.path,
                   input: { session: sessionPayload },
@@ -1372,6 +1382,7 @@ export function startWebSocketSimulator(opts: {
                   typeof msg.content === "string" &&
                   msg.content.trim().length > 0
                 );
+              const totalTurns = assistantTurns.length;
               const turns: Array<{
                 index: number;
                 message: unknown;
@@ -1385,11 +1396,11 @@ export function startWebSocketSimulator(opts: {
                 graderLabel: grader.label,
                 status: "running",
                 runAt: startedAt,
-                result: { mode: "turns", turns: [] },
+                result: { mode: "turns", totalTurns, turns: [] },
               };
               currentState = upsertCalibrationRun(currentState, entry);
-              if (assistantTurns.length === 0) {
-                return { mode: "turns", turns: [] };
+              if (totalTurns === 0) {
+                return { mode: "turns", totalTurns, turns: [] };
               }
               for (const { msg, idx } of assistantTurns) {
                 const input = {
@@ -1416,11 +1427,11 @@ export function startWebSocketSimulator(opts: {
                 });
                 entry = {
                   ...entry,
-                  result: { mode: "turns", turns: [...turns] },
+                  result: { mode: "turns", totalTurns, turns: [...turns] },
                 };
                 currentState = upsertCalibrationRun(currentState, entry);
               }
-              return { mode: "turns", turns };
+              return { mode: "turns", totalTurns, turns };
             })();
             entry = {
               id: runId,

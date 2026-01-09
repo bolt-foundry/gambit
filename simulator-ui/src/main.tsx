@@ -188,6 +188,12 @@ function countUserMessages(
   return messages.filter((m) => m.role === "user").length;
 }
 
+function countAssistantMessages(
+  messages: Array<{ role?: string; content?: unknown }>,
+) {
+  return messages.filter((m) => m.role === "assistant").length;
+}
+
 function extractScoreAndReason(result: unknown): {
   score?: number;
   reason?: string;
@@ -215,6 +221,13 @@ function extractScoreAndReasonFromSample(sample?: {
     score: typeof sample.score === "number" ? sample.score : undefined,
     reason: typeof sample.reason === "string" ? sample.reason : undefined,
   };
+}
+
+function getScoreClass(displayScore?: number): string {
+  if (displayScore === undefined) return "calibrate-score--empty";
+  if (displayScore > 0) return "calibrate-score--positive";
+  if (displayScore < 0) return "calibrate-score--negative";
+  return "calibrate-score--neutral";
 }
 
 function extractTurnContext(input?: unknown): {
@@ -246,6 +259,40 @@ function extractTurnContext(input?: unknown): {
     }
   }
   return { priorUser, gradedAssistant };
+}
+
+function extractTotalTurns(input?: unknown): number | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const record = input as Record<string, unknown>;
+  const session = record.session;
+  const messages = session &&
+      typeof session === "object" &&
+      Array.isArray((session as { messages?: unknown }).messages)
+    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
+      .messages
+    : Array.isArray((record as { messages?: unknown }).messages)
+    ? (record as { messages: Array<{ role?: string; content?: unknown }> })
+      .messages
+    : [];
+  const total = countAssistantMessages(messages);
+  return total > 0 ? total : undefined;
+}
+
+function extractTotalTurnsFromResult(result?: unknown): number | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const record = result as Record<string, unknown>;
+  if (record.mode !== "turns") return undefined;
+  const totalTurns = typeof record.totalTurns === "number"
+    ? record.totalTurns
+    : undefined;
+  const turns = Array.isArray(record.turns) ? record.turns : undefined;
+  if (typeof totalTurns === "number") return totalTurns;
+  return turns ? turns.length : undefined;
+}
+
+function isTurnsResult(result?: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  return (result as { mode?: unknown }).mode === "turns";
 }
 
 function extractConversationContext(input?: unknown): {
@@ -2911,6 +2958,7 @@ function CalibrateApp() {
         turnIndex?: number;
         turnNumber?: number;
         refId: string;
+        pending?: boolean;
         referenceSample?: {
           score: number;
           reason: string;
@@ -2953,7 +3001,20 @@ function CalibrateApp() {
             referenceSample: turn.referenceSample,
           });
         });
-        if (turns.length === 0) {
+        if (run.status === "running") {
+          const pendingTurnNumber = turns.length + 1;
+          items.unshift({
+            key: `${run.id}-turn-pending-${pendingTurnNumber}`,
+            label: `Assistant turn ${pendingTurnNumber}`,
+            status: "running",
+            runAt: run.runAt,
+            runId: run.id,
+            turnNumber: pendingTurnNumber,
+            refId: `gradingRun:${run.id}#turn:${pendingTurnNumber}`,
+            pending: true,
+          });
+        }
+        if (turns.length === 0 && run.status !== "running") {
           items.push({
             key: `${run.id}-empty`,
             label: "Turns",
@@ -2968,18 +3029,30 @@ function CalibrateApp() {
           });
         }
       } else {
-        items.push({
-          key: run.id,
-          label: "Result",
-          status: run.status,
-          runAt: run.runAt,
-          error: run.error,
-          input: run.input,
-          result: run.result,
-          runId: run.id,
-          refId: `gradingRun:${run.id}`,
-          referenceSample: run.referenceSample,
-        });
+        if (run.status === "running") {
+          items.push({
+            key: `${run.id}-pending`,
+            label: "Result",
+            status: "running",
+            runAt: run.runAt,
+            runId: run.id,
+            refId: `gradingRun:${run.id}`,
+            pending: true,
+          });
+        } else {
+          items.push({
+            key: run.id,
+            label: "Result",
+            status: run.status,
+            runAt: run.runAt,
+            error: run.error,
+            input: run.input,
+            result: run.result,
+            runId: run.id,
+            refId: `gradingRun:${run.id}`,
+            referenceSample: run.referenceSample,
+          });
+        }
       }
       return {
         run,
@@ -3221,36 +3294,110 @@ function CalibrateApp() {
                     )}
                     {runSections.map((section) => {
                       const isExpanded = expandedRunId === section.run.id;
-                      const turnBadges = [...section.items]
-                        .sort((a, b) => {
-                          const aNum = a.turnNumber ?? 0;
-                          const bNum = b.turnNumber ?? 0;
-                          return aNum - bNum;
-                        })
-                        .map((item, idx) => {
-                          const graded = extractScoreAndReason(item.result);
-                          const reference = extractScoreAndReasonFromSample(
-                            item.referenceSample,
+                      const runModeTurns = isTurnsResult(section.run.result);
+                      const totalTurns = runModeTurns
+                        ? extractTotalTurnsFromResult(section.run.result) ??
+                          extractTotalTurns(section.run.input) ??
+                          extractTotalTurns(
+                            section.items.find((item) => item.input)?.input,
+                          )
+                        : undefined;
+                      const isTurnRun = Boolean(
+                        runModeTurns ||
+                          section.items.some((item) =>
+                            item.turnNumber !== undefined || item.pending
+                          ),
+                      );
+                      const turnBadges = isTurnRun
+                        ? Array.from({
+                          length: totalTurns ??
+                            section.items.filter((item) =>
+                              item.turnNumber !== undefined || item.pending
+                            ).length,
+                        }).map((_, idx) => {
+                          const turnLabel = idx + 1;
+                          const item = section.items.find((entry) =>
+                            entry.turnNumber === turnLabel || (
+                              entry.pending &&
+                              entry.turnNumber === turnLabel
+                            )
                           );
-                          const displayScore = reference.score ?? graded.score;
-                          const turnLabel = item.turnNumber ?? idx + 1;
-                          const scoreClass = displayScore === undefined
-                            ? "calibrate-score--neutral"
-                            : displayScore > 0
-                            ? "calibrate-score--positive"
-                            : displayScore < 0
-                            ? "calibrate-score--negative"
-                            : "calibrate-score--neutral";
+                          if (item?.pending) {
+                            return (
+                              <span
+                                key={`${section.run.id}-turn-${turnLabel}`}
+                                className="calibrate-run-turn calibrate-run-turn--pending"
+                                title={`Turn ${turnLabel}: running`}
+                              >
+                                <span
+                                  className="calibrate-spinner calibrate-spinner--tiny"
+                                  role="status"
+                                  aria-label="Grading"
+                                />
+                              </span>
+                            );
+                          }
+                          if (item) {
+                            const graded = extractScoreAndReason(item.result);
+                            const reference = extractScoreAndReasonFromSample(
+                              item.referenceSample,
+                            );
+                            const displayScore = reference.score ??
+                              graded.score;
+                            const scoreClass = getScoreClass(displayScore);
+                            return (
+                              <span
+                                key={`${section.run.id}-turn-${turnLabel}`}
+                                className={`calibrate-run-turn ${scoreClass}`}
+                                title={`Turn ${turnLabel}: ${
+                                  displayScore ?? "—"
+                                }`}
+                              />
+                            );
+                          }
                           return (
                             <span
                               key={`${section.run.id}-turn-${turnLabel}`}
-                              className={`calibrate-run-turn ${scoreClass}`}
-                              title={`Turn ${turnLabel}: ${
-                                displayScore ?? "—"
-                              }`}
+                              className="calibrate-run-turn calibrate-run-turn--empty"
+                              title={`Turn ${turnLabel}: pending`}
                             />
                           );
-                        });
+                        })
+                        : (() => {
+                          const item = section.items[0];
+                          if (section.run.status === "running") {
+                            return [
+                              <span
+                                key={`${section.run.id}-pending`}
+                                className="calibrate-run-turn calibrate-run-turn--pending"
+                                title="Running"
+                              >
+                                <span
+                                  className="calibrate-spinner calibrate-spinner--tiny"
+                                  role="status"
+                                  aria-label="Grading"
+                                />
+                              </span>,
+                            ];
+                          }
+                          if (item) {
+                            const graded = extractScoreAndReason(item.result);
+                            const reference = extractScoreAndReasonFromSample(
+                              item.referenceSample,
+                            );
+                            const displayScore = reference.score ??
+                              graded.score;
+                            const scoreClass = getScoreClass(displayScore);
+                            return [
+                              <span
+                                key={`${section.run.id}-result`}
+                                className={`calibrate-run-turn ${scoreClass}`}
+                                title={`Result: ${displayScore ?? "—"}`}
+                              />,
+                            ];
+                          }
+                          return [];
+                        })();
                       return (
                         <div
                           key={section.run.id}
@@ -3307,6 +3454,7 @@ function CalibrateApp() {
                                 );
                                 const conversationContext =
                                   extractConversationContext(item.input);
+                                const isPending = Boolean(item.pending);
                                 const delta = reference.score !== undefined &&
                                     graded.score !== undefined
                                   ? reference.score - graded.score
@@ -3318,14 +3466,8 @@ function CalibrateApp() {
                                   reference.score !== 0 &&
                                   (graded.score > 0) !==
                                     (reference.score > 0);
-                                const scoreClass = displayScore === undefined
-                                  ? "calibrate-score--neutral"
-                                  : displayScore > 0
-                                  ? "calibrate-score--positive"
-                                  : displayScore < 0
-                                  ? "calibrate-score--negative"
-                                  : "calibrate-score--neutral";
-                                const isOpen = Boolean(
+                                const scoreClass = getScoreClass(displayScore);
+                                const isOpen = !isPending && Boolean(
                                   expandedResults[item.key],
                                 );
                                 const draft = referenceDrafts[item.key];
@@ -3341,9 +3483,21 @@ function CalibrateApp() {
                                     <div className="calibrate-result-header">
                                       <div className="calibrate-result-main">
                                         <div
-                                          className={`calibrate-score-badge ${scoreClass}`}
+                                          className={`calibrate-score-badge ${scoreClass}${
+                                            isPending
+                                              ? " calibrate-score-badge--pending"
+                                              : ""
+                                          }`}
                                         >
-                                          {displayScore !== undefined
+                                          {isPending
+                                            ? (
+                                              <span
+                                                className="calibrate-spinner"
+                                                role="status"
+                                                aria-label="Grading"
+                                              />
+                                            )
+                                            : displayScore !== undefined
                                             ? displayScore
                                             : "—"}
                                         </div>
@@ -3376,7 +3530,7 @@ function CalibrateApp() {
                                               </span>
                                             )}
                                           </div>
-                                          {displayReason && (
+                                          {displayReason && !isPending && (
                                             <div className="calibrate-result-reason">
                                               {displayReason}
                                             </div>
@@ -3387,86 +3541,95 @@ function CalibrateApp() {
                                               Graded score: {graded.score}
                                             </div>
                                           )}
+                                          {isPending && (
+                                            <div className="calibrate-result-secondary">
+                                              Grading…
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
-                                      <div className="calibrate-result-actions">
-                                        <button
-                                          type="button"
-                                          className="ghost-btn calibrate-ref-copy"
-                                          onClick={() => {
-                                            const basePath =
-                                              selectedSession?.statePath ??
-                                                selectedSession?.sessionDir ??
-                                                "";
-                                            const refPath = basePath
-                                              ? `${basePath}#${item.refId}`
-                                              : item.refId;
-                                            navigator.clipboard?.writeText(
-                                              refPath,
-                                            );
-                                            setCopiedRef(item.key);
-                                            window.setTimeout(
-                                              () =>
-                                                setCopiedRef((prev) =>
-                                                  prev === item.key
-                                                    ? null
-                                                    : prev
-                                                ),
-                                              1200,
-                                            );
-                                          }}
-                                        >
-                                          {copiedRef === item.key
-                                            ? "Copied"
-                                            : "Copy ref"}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="ghost-btn calibrate-toggle"
-                                          onClick={() =>
-                                            setExpandedResults((prev) => {
-                                              const nextOpen = !isOpen;
-                                              if (
-                                                nextOpen &&
-                                                !referenceDrafts[item.key]
-                                              ) {
-                                                const seedScore =
-                                                  reference.score ?? NaN;
-                                                const seedReason =
-                                                  reference.reason ?? "";
-                                                const seedEvidence =
-                                                  item.referenceSample
-                                                      ?.evidence
-                                                    ? item.referenceSample
-                                                      .evidence.join("\n")
-                                                    : "";
-                                                setReferenceDrafts((
-                                                  drafts,
-                                                ) => ({
-                                                  ...drafts,
-                                                  [item.key]: {
-                                                    score: seedScore,
-                                                    reason: seedReason,
-                                                    evidenceText: seedEvidence,
-                                                  },
-                                                }));
-                                              }
-                                              return {
-                                                ...prev,
-                                                [item.key]: nextOpen,
-                                              };
-                                            })}
-                                        >
-                                          {isOpen
-                                            ? "Hide details"
-                                            : "Show details"}
-                                        </button>
-                                      </div>
+                                      {!isPending && (
+                                        <div className="calibrate-result-actions">
+                                          <button
+                                            type="button"
+                                            className="ghost-btn calibrate-ref-copy"
+                                            onClick={() => {
+                                              const basePath =
+                                                selectedSession?.statePath ??
+                                                  selectedSession?.sessionDir ??
+                                                  "";
+                                              const refPath = basePath
+                                                ? `${basePath}#${item.refId}`
+                                                : item.refId;
+                                              navigator.clipboard?.writeText(
+                                                refPath,
+                                              );
+                                              setCopiedRef(item.key);
+                                              window.setTimeout(
+                                                () =>
+                                                  setCopiedRef((prev) =>
+                                                    prev === item.key
+                                                      ? null
+                                                      : prev
+                                                  ),
+                                                1200,
+                                              );
+                                            }}
+                                          >
+                                            {copiedRef === item.key
+                                              ? "Copied"
+                                              : "Copy ref"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="ghost-btn calibrate-toggle"
+                                            onClick={() =>
+                                              setExpandedResults((prev) => {
+                                                const nextOpen = !isOpen;
+                                                if (
+                                                  nextOpen &&
+                                                  !referenceDrafts[item.key]
+                                                ) {
+                                                  const seedScore =
+                                                    reference.score ?? NaN;
+                                                  const seedReason =
+                                                    reference.reason ?? "";
+                                                  const seedEvidence =
+                                                    item.referenceSample
+                                                        ?.evidence
+                                                      ? item.referenceSample
+                                                        .evidence.join("\n")
+                                                      : "";
+                                                  setReferenceDrafts((
+                                                    drafts,
+                                                  ) => ({
+                                                    ...drafts,
+                                                    [item.key]: {
+                                                      score: seedScore,
+                                                      reason: seedReason,
+                                                      evidenceText:
+                                                        seedEvidence,
+                                                    },
+                                                  }));
+                                                }
+                                                return {
+                                                  ...prev,
+                                                  [item.key]: nextOpen,
+                                                };
+                                              })}
+                                          >
+                                            {isOpen
+                                              ? "Hide details"
+                                              : "Show details"}
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
                                     {item.error && (
                                       <div className="error">{item.error}</div>
                                     )}
-                                    {item.turnIndex !== undefined && (
+                                    {item.turnIndex !== undefined &&
+                                      !isPending && (
                                       <div className="calibrate-context calibrate-context-compact">
                                         {turnContext.priorUser && (
                                           <div className="calibrate-context-row">
