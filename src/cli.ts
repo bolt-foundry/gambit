@@ -1,4 +1,9 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run --allow-env --allow-net
+/**
+ * Gambit CLI entrypoint for running decks, REPLs, simulators, and tooling.
+ *
+ * @module
+ */
 import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startRepl } from "./repl.ts";

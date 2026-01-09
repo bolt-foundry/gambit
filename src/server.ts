@@ -434,6 +434,9 @@ function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
   }
 }
 
+/**
+ * Start the WebSocket simulator server used by the Gambit debug UI.
+ */
 export function startWebSocketSimulator(opts: {
   deckPath: string;
   modelProvider: ModelProvider;
