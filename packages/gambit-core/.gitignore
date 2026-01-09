@@ -1,3 +1,4 @@
+# keep scaffolding for dist structure, ignore dnt outputs
 /dist
 !/dist
 /dist/npm/
