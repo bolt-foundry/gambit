@@ -251,6 +251,34 @@ button.primary:disabled {
   border-radius: 5px;
   display: inline-block;
 }
+.calibrate-run-turn--pending {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #e2e8f0;
+}
+.calibrate-run-turn--empty {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+.calibrate-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.25);
+  border-top-color: #0b93f6;
+  animation: calibrate-spin 0.9s linear infinite;
+}
+.calibrate-spinner--tiny {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+}
+@keyframes calibrate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .calibrate-run-body {
   display: flex;
   flex-direction: column;
@@ -529,6 +557,10 @@ button.primary:disabled {
   font-size: 18px;
   font-weight: 700;
 }
+.calibrate-score-badge--pending {
+  background: #f1f5f9;
+  color: #0f172a;
+}
 .calibrate-score--positive {
   background: #16a34a;
   color: #ffffff;
@@ -538,8 +570,12 @@ button.primary:disabled {
   color: #ffffff;
 }
 .calibrate-score--neutral {
-  background: #94a3b8;
+  background: #64748b;
   color: #ffffff;
+}
+.calibrate-score--empty {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 .calibrate-result-meta {
   display: flex;
