@@ -276,3 +276,23 @@ jobs:
       - name: Publish release (gambit)
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.gambit_jsr_published != 'true'
         run: deno publish --allow-dirty
+
+      - name: Publish release (gambit-core npm)
+        if: steps.release.outputs.is_release == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          package="${{ steps.meta.outputs.core_package }}"
+          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+            echo "npm already has ${package}@${version}; skipping"
+            exit 0
+          fi
+          if [ -z "${NPM_TOKEN}" ]; then
+            echo "::error::Missing NPM_TOKEN secret for npm publish."
+            exit 1
+          fi
+          deno task build_npm
+          npm config set //registry.npmjs.org/:_authToken="${NPM_TOKEN}"
+          npm publish dist/npm --access public
+        working-directory: packages/gambit-core
