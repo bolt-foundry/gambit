@@ -30,24 +30,24 @@ jobs:
 
       - name: Guard bfmono imports
         run: deno run -A scripts/guard-bfmono-imports.ts
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
 
       - name: Lint
         run: deno lint
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core
 
       - name: Format check
         run: deno fmt --check
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core
 
       - name: Type check
         run: deno check --all mod.ts
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core
 
       - name: Test
         run: deno task test
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core

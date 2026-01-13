@@ -12,7 +12,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
