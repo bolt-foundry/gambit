@@ -304,3 +304,5 @@ jobs:
           deno task build_npm
           npm publish ./dist/npm --access public
         working-directory: packages/gambit-core
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
