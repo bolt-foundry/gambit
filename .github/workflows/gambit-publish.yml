@@ -12,7 +12,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        shell: nix develop --command bash -euo pipefail {0}
+        shell: bash -euo pipefail {0}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
 
       - name: Prepare local gambit-core import map
         run: |
-          deno eval -q '
+          nix develop "$GITHUB_WORKSPACE" --command deno eval -q '
             const exists = async (path) => {
               try {
                 await Deno.stat(path);
@@ -80,7 +80,7 @@ jobs:
       - name: Read package metadata
         id: meta
         run: |
-          deno eval -q '
+          nix develop "$GITHUB_WORKSPACE" --command deno eval -q '
             const gambitPath = "deno.json";
             const corePath = "packages/gambit-core/deno.json";
             const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
@@ -131,7 +131,7 @@ jobs:
               local package="$2"
               local version="$3"
               local meta_url="https://jsr.io/${package}/meta.json"
-              if deno eval -q '
+              if nix develop "$GITHUB_WORKSPACE" --command deno eval -q '
                 const [url, version] = Deno.args;
                 const res = await fetch(url);
                 if (!res.ok) {
@@ -164,41 +164,41 @@ jobs:
           fi
 
       - name: Lint (gambit)
-        run: deno lint --config deno.ci.json
+        run: nix develop "$GITHUB_WORKSPACE" --command deno lint --config deno.ci.json
 
       - name: Guard bfmono imports
-        run: deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
+        run: nix develop "$GITHUB_WORKSPACE" --command deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
 
       - name: Format check (gambit)
-        run: deno fmt --config deno.ci.json --check
+        run: nix develop "$GITHUB_WORKSPACE" --command deno fmt --config deno.ci.json --check
 
       - name: Type check (gambit)
-        run: deno check --config deno.ci.json --all mod.ts
+        run: nix develop "$GITHUB_WORKSPACE" --command deno check --config deno.ci.json --all mod.ts
 
       - name: Test (gambit)
-        run: deno test --config deno.ci.json -A --ignore=simulator-ui/__tests__/e2e
+        run: nix develop "$GITHUB_WORKSPACE" --command deno test --config deno.ci.json -A --ignore=simulator-ui/__tests__/e2e
 
       - name: Lint (gambit-core)
-        run: deno lint
+        run: nix develop "$GITHUB_WORKSPACE" --command deno lint
         working-directory: packages/gambit-core
 
       - name: Format check (gambit-core)
-        run: deno fmt --check
+        run: nix develop "$GITHUB_WORKSPACE" --command deno fmt --check
         working-directory: packages/gambit-core
 
       - name: Type check (gambit-core)
-        run: deno check --all mod.ts
+        run: nix develop "$GITHUB_WORKSPACE" --command deno check --all mod.ts
         working-directory: packages/gambit-core
 
       - name: Test (gambit-core)
-        run: deno task test
+        run: nix develop "$GITHUB_WORKSPACE" --command deno task test
         working-directory: packages/gambit-core
 
       - name: Compute canary version
         id: canary
         run: |
           CANARY_TS=$(date -u +%s)
-          BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
+          BASE_VERSION="$(nix develop \"$GITHUB_WORKSPACE\" --command deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
           if [[ "$BASE_VERSION" == *-* ]]; then
             CANARY_VERSION="${BASE_VERSION}.main.${CANARY_TS}"
           else
@@ -208,7 +208,7 @@ jobs:
           echo "Publishing canary ${CANARY_VERSION}"
 
       - name: Build simulator bundle
-        run: deno task bundle:sim:web:sourcemap
+        run: nix develop "$GITHUB_WORKSPACE" --command deno task bundle:sim:web:sourcemap
 
       - name: Allow simulator bundle for publish
         run: |
@@ -228,7 +228,7 @@ jobs:
           cp deno.json deno.publish-backup.json
           cp packages/gambit-core/deno.json packages/gambit-core/deno.publish-backup.json
           trap 'mv deno.publish-backup.json deno.json; mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json' EXIT
-          deno eval '
+          nix develop "$GITHUB_WORKSPACE" --command deno eval '
             const version = Deno.env.get("CANARY_VERSION");
             if (!version) throw new Error("CANARY_VERSION env var missing");
             const gambitPath = "deno.json";
@@ -254,8 +254,8 @@ jobs:
             gambit.imports = updated;
             await Deno.writeTextFile(gambitPath, JSON.stringify(gambit, null, 2) + "\n");
           '
-          (cd packages/gambit-core && deno publish --allow-dirty)
-          deno publish --allow-dirty
+          (cd packages/gambit-core && nix develop "$GITHUB_WORKSPACE" --command deno publish --allow-dirty)
+          nix develop "$GITHUB_WORKSPACE" --command deno publish --allow-dirty
         env:
           CANARY_VERSION: ${{ steps.canary.outputs.version }}
 
@@ -270,27 +270,27 @@ jobs:
 
       - name: Publish release (gambit-core)
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.core_jsr_published != 'true'
-        run: deno publish --allow-dirty
+        run: nix develop "$GITHUB_WORKSPACE" --command deno publish --allow-dirty
         working-directory: packages/gambit-core
 
       - name: Publish release (gambit)
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.gambit_jsr_published != 'true'
-        run: deno publish --allow-dirty
+        run: nix develop "$GITHUB_WORKSPACE" --command deno publish --allow-dirty
 
       - name: Publish release (gambit-core npm)
         if: steps.release.outputs.is_release == 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           package="${{ steps.meta.outputs.core_package }}"
-          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+          if nix develop "$GITHUB_WORKSPACE" --command npm view "${package}@${version}" version >/dev/null 2>&1; then
             echo "npm already has ${package}@${version}; skipping"
             exit 0
           fi
-          deno task build_npm
-          echo "node $(node --version)"
-          echo "npm $(npm --version)"
-          echo "npm registry: $(npm config get registry)"
-          echo "npm provenance: $(npm config get provenance || true)"
+          nix develop "$GITHUB_WORKSPACE" --command deno task build_npm
+          echo "node $(nix develop \"$GITHUB_WORKSPACE\" --command node --version)"
+          echo "npm $(nix develop \"$GITHUB_WORKSPACE\" --command npm --version)"
+          echo "npm registry: $(nix develop \"$GITHUB_WORKSPACE\" --command npm config get registry)"
+          echo "npm provenance: $(nix develop \"$GITHUB_WORKSPACE\" --command npm config get provenance || true)"
           if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL-}" ]; then
             echo "ACTIONS_ID_TOKEN_REQUEST_URL set: yes"
           else
@@ -301,5 +301,5 @@ jobs:
           else
             echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set: no"
           fi
-          npm publish ./dist/npm --access public
+          nix develop "$GITHUB_WORKSPACE" --command npm publish ./dist/npm --access public
         working-directory: packages/gambit-core

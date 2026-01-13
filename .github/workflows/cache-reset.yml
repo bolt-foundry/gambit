@@ -1,0 +1,79 @@
+name: Cache Reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner label to use for cache reset."
+        required: true
+        type: choice
+        default: ubuntu-latest
+        options:
+          - ubuntu-latest
+          - blacksmith-4vcpu-ubuntu-2404
+
+jobs:
+  reset:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    env:
+      DENO_DIR: /home/runner/.cache/deno
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mount sticky disk for Nix store (Blacksmith only)
+        if: ${{ inputs.runner == 'blacksmith-4vcpu-ubuntu-2404' }}
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-store
+          path: /nix
+
+      - name: Mount sticky disk for Deno cache (Blacksmith only)
+        if: ${{ inputs.runner == 'blacksmith-4vcpu-ubuntu-2404' }}
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-deno-cache
+          path: ${{ env.DENO_DIR }}
+
+      - name: Mount sticky disk for node_modules (Blacksmith only)
+        if: ${{ inputs.runner == 'blacksmith-4vcpu-ubuntu-2404' }}
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-node-modules
+          path: node_modules
+
+      - name: Mount sticky disk for devshell profile (Blacksmith only)
+        if: ${{ inputs.runner == 'blacksmith-4vcpu-ubuntu-2404' }}
+        uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-profile-ci
+          path: .nix-profiles
+
+      - name: Wipe caches
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${DENO_DIR:-}" ] && [ -d "$DENO_DIR" ]; then
+            echo "Clearing Deno cache at $DENO_DIR..."
+            rm -rf "${DENO_DIR:?}/"*
+          else
+            echo "No Deno cache found."
+          fi
+
+          echo "Clearing node_modules..."
+          rm -rf node_modules
+          rm -rf packages/gambit/node_modules packages/gambit-core/node_modules || true
+
+          echo "Clearing Nix devshell profiles..."
+          rm -rf .nix-profiles packages/gambit/.nix-profiles packages/gambit-core/.nix-profiles || true
+
+          if [ -d /nix ]; then
+            echo "Clearing /nix store..."
+            sudo rm -rf /nix/*
+          else
+            echo "No /nix store found."
+          fi
+
+          echo "Cache reset complete."

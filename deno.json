@@ -77,6 +77,7 @@
     "playwright-core": "npm:playwright-core@^1.57.0",
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
+    "@types/node": "npm:@types/node@^24.2.0",
     "@openai/openai": "npm:openai@^4.78.1",
     "react": "npm:react@^19.2.0",
     "react-dom": "npm:react-dom@^19.2.0"

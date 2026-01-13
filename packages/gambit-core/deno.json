@@ -33,11 +33,17 @@
       ]
     }
   },
+  "compilerOptions": {
+    "types": [
+      "@types/node"
+    ]
+  },
   "imports": {
     "@deno/dnt": "jsr:@deno/dnt@^0.41.3",
     "@std/assert": "jsr:@std/assert@^1.0.6",
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
     "@std/path": "jsr:@std/path@^1.0.6",
+    "@types/node": "npm:@types/node@^24.2.0",
     "@openai/openai": "npm:openai@^4.78.1",
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0"

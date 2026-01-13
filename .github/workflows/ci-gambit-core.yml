@@ -14,7 +14,7 @@ on:
 
 jobs:
   test:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
@@ -28,31 +28,53 @@ jobs:
       - name: Register Deno problem matcher
         run: echo '::add-matcher::.github/deno-problem-matcher.json'
 
+      - name: Debug toolchain
+        run: |
+          nix develop "$GITHUB_WORKSPACE" --command bash -euo pipefail <<'EOF'
+          echo "deno --version:"
+          deno --version
+          deno eval -q 'console.log("deno version json", JSON.stringify(Deno.version))'
+          echo "node --version:"
+          node --version || true
+          node -p 'process.versions' || true
+          echo "npm --version:"
+          npm --version || true
+          echo "DENO_DIR: ${DENO_DIR:-<unset>}"
+          echo "deno.json (gambit-core):"
+          cat packages/gambit-core/deno.json
+          if [ -f deno.json ]; then
+            echo "deno.json (root):"
+            cat deno.json
+          elif [ -f packages/gambit/deno.json ]; then
+            echo "deno.json (packages/gambit):"
+            cat packages/gambit/deno.json
+          fi
+          deno eval -q '
+            const core = JSON.parse(await Deno.readTextFile("packages/gambit-core/deno.json"));
+            console.log("core types", core.compilerOptions?.types ?? null);
+            console.log("core @types/node", core.imports?.["@types/node"] ?? null);
+          '
+          EOF
+
       - name: Guard bfmono imports
-        run: deno run -A scripts/guard-bfmono-imports.ts
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno run -A scripts/guard-bfmono-imports.ts
 
       - name: Lint
-        run: deno lint
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno lint
         working-directory: packages/gambit-core
 
       - name: Format check
-        run: deno fmt --check
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno fmt --check
         working-directory: packages/gambit-core
 
       - name: Type check
-        run: deno check --all mod.ts
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno check --all mod.ts
         working-directory: packages/gambit-core
 
       - name: Build npm package
-        run: deno task build_npm
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno task build_npm
         working-directory: packages/gambit-core
 
       - name: Test
-        run: deno task test
-        shell: nix develop --command bash -euo pipefail {0}
+        run: nix develop "$GITHUB_WORKSPACE" --command deno task test
         working-directory: packages/gambit-core
