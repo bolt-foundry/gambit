@@ -297,10 +297,25 @@ jobs:
         run: |
           version="${{ steps.release.outputs.version }}"
           package="${{ steps.meta.outputs.gambit_package }}"
+          core_package="${{ steps.meta.outputs.core_package }}"
           if npm view "${package}@${version}" version >/dev/null 2>&1; then
             echo "npm already has ${package}@${version}; skipping"
             exit 0
           fi
+          max_attempts=6
+          delay_seconds=10
+          for attempt in $(seq 1 "$max_attempts"); do
+            if npm view "${core_package}@${version}" version >/dev/null 2>&1; then
+              echo "npm has ${core_package}@${version}"
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Timed out waiting for ${core_package}@${version} to appear on npm"
+              exit 1
+            fi
+            echo "Waiting for ${core_package}@${version} to appear on npm (attempt ${attempt}/${max_attempts})"
+            sleep "$delay_seconds"
+          done
           deno task build_npm
           npm publish ./dist/npm --access public
         env:
