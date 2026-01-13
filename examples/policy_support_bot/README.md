@@ -13,15 +13,16 @@ includes:
 
 ## File tour
 
-| Path                          | Purpose                                                                                                          |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `policy_support_bot.deck.md`  | Main chatbot deck. Calls `search_faq` and returns one-sentence answers.                                          |
-| `actions/search_faq.deck.md`  | Markdown action that reads the FAQ card, selects the best entries, and emits structured match objects.           |
-| `cards/faq_knowledge.card.md` | Source-of-truth FAQ dataset (id, category, question, answer, URL) embedded inside both the action and bot decks. |
-| `cards/*.card.md`             | Persona, user persona, and behavior cards reused by the root deck.                                               |
-| `schemas/*.zod.ts`            | Zod schemas for bot outputs and search inputs.                                                                   |
-| `tests/faq_dataset.test.ts`   | Deno unit tests that ensure the FAQ knowledge base stays intact.                                                 |
-| `demo-script.md`              | Suggested prompts (answers + refusals) for the Gambit Debug UI.                                                  |
+| Path                                | Purpose                                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `policy_support_bot.deck.md`        | Main chatbot deck. Calls `search_faq` and returns one-sentence answers.                                          |
+| `actions/search_faq.deck.md`        | Markdown action that reads the FAQ card, selects the best entries, and emits structured match objects.           |
+| `cards/faq_knowledge.card.md`       | Source-of-truth FAQ dataset (id, category, question, answer, URL) embedded inside both the action and bot decks. |
+| `cards/*.card.md`                   | Persona, user persona, and behavior cards reused by the root deck.                                               |
+| `schemas/*.zod.ts`                  | Zod schemas for bot outputs and search inputs.                                                                   |
+| `tests/faq_dataset.test.ts`         | Deno unit tests that ensure the FAQ knowledge base stays intact.                                                 |
+| `tests/new_account_persona.deck.md` | Synthetic persona deck for the Test Bot tab.                                                                     |
+| `demo-script.md`                    | Suggested prompts (answers + refusals) for the Gambit Debug UI.                                                  |
 
 To wire synthetic QA personas into the Test Bot tab, add `[[testDecks]]` entries
 to `policy_support_bot.deck.md` that point at persona decks (for example
@@ -51,24 +52,24 @@ pointing the search action to an external data source.
 1. Answer mode:
 
    ```bash
-   deno run -A packages/gambit/src/cli.ts run \
-     packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md \
+   deno run -A src/cli.ts run \
+     examples/policy_support_bot/policy_support_bot.deck.md \
      --message '"How much does AcmeFlow cost?"' --stream
    ```
 
 2. No-coverage mode:
 
    ```bash
-   deno run -A packages/gambit/src/cli.ts run \
-     packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md \
+   deno run -A src/cli.ts run \
+     examples/policy_support_bot/policy_support_bot.deck.md \
      --message '"Do you support HIPAA workflows?"' --stream
    ```
 
 3. Debug UI (Gambit Web app):
 
    ```bash
-   deno run -A packages/gambit/src/cli.ts serve \
-     packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md \
+   deno run -A src/cli.ts serve \
+     examples/policy_support_bot/policy_support_bot.deck.md \
      --port 8787 --verbose
    # Open http://localhost:8787 to chat, view traces, and grade runs.
    ```
@@ -78,7 +79,6 @@ pointing the search action to an external data source.
 - Run the FAQ dataset guard tests:
 
   ```bash
-  cd packages/gambit
   deno test --allow-read examples/policy_support_bot/tests/faq_dataset.test.ts
   ```
 

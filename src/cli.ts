@@ -6,7 +6,7 @@
  */
 import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
-import { startRepl } from "./repl.tsx";
+import { startRepl } from "./repl.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
