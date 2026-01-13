@@ -48,7 +48,10 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run examples/voice_front_desk/decks/root.deck.md --init "$(cat examples/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
+- REPL (interactive):
+  `deno run -A src/cli.ts repl examples/voice_front_desk/decks/root.deck.md --init "$(cat examples/voice_front_desk/sample_input.json)"`
+- One-shot run:
+  `deno run -A src/cli.ts run examples/voice_front_desk/decks/root.deck.md --init "$(cat examples/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
 
 Try this input
 

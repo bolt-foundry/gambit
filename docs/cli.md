@@ -81,12 +81,12 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   decks so you can batch synthetic conversations, inspect per-turn scoring, and
   export JSONL artifacts for later ingestion. List personas by declaring
   `[[testDecks]]` entries in your root deck (for example
-  `packages/gambit/examples/voice_front_desk/decks/root.deck.md`). Each entry’s
-  `path` should point to a persona deck (Markdown or TS) that includes
+  `examples/voice_front_desk/decks/root.deck.md`). Each entry’s `path` should
+  point to a persona deck (Markdown or TS) that includes
   `acceptsUserTurns = true`; the persona deck’s own `inputSchema` and defaults
   power the Scenario/Test Bot form (see
-  `packages/gambit/examples/voice_front_desk/tests/new_patient_intake.deck.md`).
-  Editing those deck files is how you add/remove personas now—there is no
+  `examples/voice_front_desk/tests/new_patient_intake.deck.md`). Editing those
+  deck files is how you add/remove personas now—there is no
   `.gambit/test-bot.md` override.
 - The Calibrate page is the regroup/diagnostics view for graders that run
   against saved Debug/Test sessions; it currently serves as a placeholder until
