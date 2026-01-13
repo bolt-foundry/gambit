@@ -47,7 +47,26 @@ const run = async (cmd: string) => {
 await run("deno task bundle:sim:web:sourcemap");
 await emptyDir(distDir);
 
-const coreDir = join(packageRoot, "..", "gambit-core");
+const coreDirCandidates = [
+  join(packageRoot, "..", "gambit-core"),
+  join(packageRoot, "packages", "gambit-core"),
+];
+const coreDir = await (async () => {
+  for (const candidate of coreDirCandidates) {
+    try {
+      await Deno.stat(join(candidate, "deno.json"));
+      return candidate;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(
+    `Unable to find gambit-core; looked in ${coreDirCandidates.join(", ")}`,
+  );
+})();
 const coreConfigPath = join(coreDir, "deno.json");
 const coreConfig = JSON.parse(await Deno.readTextFile(coreConfigPath)) as {
   name?: string;
@@ -67,6 +86,20 @@ if (coreLocalOverride) {
     : `file:${resolvedLocal}`;
 }
 const coreExports = coreConfig.exports ?? {};
+const coreRelativeDir = relative(packageRoot, coreDir);
+const normalizeImportBase = (path: string) => {
+  const normalized = path.replaceAll("\\", "/");
+  if (!normalized || normalized === ".") return ".";
+  if (normalized.startsWith(".")) return normalized;
+  return `./${normalized}`;
+};
+const coreImportBase = normalizeImportBase(coreRelativeDir);
+const makeCoreImportTarget = (rel: string) => {
+  if (coreImportBase === ".") {
+    return `./${rel}`;
+  }
+  return `${coreImportBase}/${rel}`;
+};
 
 const exportTargets = new Map<string, string>();
 for (const [key, value] of Object.entries(coreExports)) {
@@ -75,7 +108,7 @@ for (const [key, value] of Object.entries(coreExports)) {
   const rel = value.startsWith("./") ? value.slice(2) : value;
   exportTargets.set(
     `${corePackageName}${suffix}`,
-    `../gambit-core/${rel}`,
+    makeCoreImportTarget(rel),
   );
 }
 
