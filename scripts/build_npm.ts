@@ -231,6 +231,9 @@ try {
       version: pkg.version,
       description: pkg.description ?? "",
       license: pkg.license ?? "Apache-2.0",
+      bin: {
+        gambit: "bin/gambit.cjs",
+      },
       repository: {
         type: "git",
         url: "git+https://github.com/bolt-foundry/gambit.git",
@@ -291,3 +294,9 @@ for (const filename of ["README.md", "LICENSE", "CHANGELOG.md"]) {
   const dest = join(distDir, filename);
   await Deno.copyFile(src, dest);
 }
+
+const binDir = join(distDir, "bin");
+await Deno.mkdir(binDir, { recursive: true });
+const binSrc = join(packageRoot, "bin", "gambit.cjs");
+const binDest = join(binDir, "gambit.cjs");
+await Deno.copyFile(binSrc, binDest);

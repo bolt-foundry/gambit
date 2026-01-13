@@ -5,9 +5,21 @@ since = "b0ddcc2ba4e861e0879dc92cc713e8cde30d230f"
 
 # Changelog
 
-## Unreleased (v0.5.6)
+## Unreleased (v0.6.1)
 
 - TBD
+
+## v0.6.0
+
+### Release and packaging
+
+- Add an npm CLI wrapper that downloads prebuilt Gambit binaries with checksum
+  verification.
+- Normalize release binary asset names and checksum generation for predictable
+  npm downloads.
+- Fix the npm build to resolve gambit-core in the mirror layout and derive
+  import-map targets from the detected path.
+- Add `@deno/dnt` to the Gambit package and refresh release/npm docs.
 
 ## v0.5.5
 

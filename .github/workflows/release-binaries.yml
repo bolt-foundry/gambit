@@ -27,6 +27,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             ext: ""
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            ext: ""
           - os: macos-latest
             target: x86_64-apple-darwin
             ext: ""
@@ -129,10 +132,38 @@ jobs:
         with:
           path: dist
 
+      - name: Normalize binary names
+        run: |
+          cd dist
+          map_name() {
+            case "$1" in
+              gambit-aarch64-apple-darwin) echo "gambit-darwin-arm64" ;;
+              gambit-aarch64-unknown-linux-gnu) echo "gambit-linux-arm64" ;;
+              gambit-x86_64-apple-darwin) echo "gambit-darwin-x64" ;;
+              gambit-x86_64-unknown-linux-gnu) echo "gambit-linux-x64" ;;
+              *) echo "" ;;
+            esac
+          }
+          for dir in gambit-*; do
+            [ -d "$dir" ] || continue
+            name="$(map_name "$dir")"
+            if [ -z "$name" ]; then
+              echo "Unknown artifact directory: $dir" >&2
+              exit 1
+            fi
+            if [ -f "$dir/gambit" ]; then
+              cp "$dir/gambit" "$name"
+            else
+              echo "Missing gambit binary in $dir" >&2
+              exit 1
+            fi
+          done
+
       - name: Create checksums
         run: |
           cd dist
-          find . -type f -maxdepth 2 -exec sh -c 'sha256sum "$1" >> SHA256SUMS' _ {} \;
+          rm -f SHA256SUMS
+          find . -maxdepth 1 -type f -name 'gambit-*' -exec sh -c 'sha256sum "$1" >> SHA256SUMS' _ {} \;
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -140,7 +171,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.name }}
           target_commitish: ${{ github.sha }}
           files: |
-            dist/**/gambit*
+            dist/gambit-*
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
