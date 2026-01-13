@@ -287,5 +287,19 @@ jobs:
             exit 0
           fi
           deno task build_npm
+          echo "node $(node --version)"
+          echo "npm $(npm --version)"
+          echo "npm registry: $(npm config get registry)"
+          echo "npm provenance: $(npm config get provenance || true)"
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL-}" ]; then
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL set: yes"
+          else
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL set: no"
+          fi
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN-}" ]; then
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set: yes"
+          else
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set: no"
+          fi
           npm publish ./dist/npm --access public
         working-directory: packages/gambit-core
