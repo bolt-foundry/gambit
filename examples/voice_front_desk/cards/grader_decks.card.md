@@ -16,8 +16,4 @@ description = "Scores how human and natural the assistant tone feels."
 label = "Tone human-likeness (turn)"
 path = "../graders/tone_human_likeness_turn_llm.deck.md"
 description = "Scores how human and natural the graded assistant message feels."
-[[graderDecks]]
-label = "Booking confirmation guard"
-path = "../graders/booking_confirmation_guard_llm.deck.md"
-description = "Flags booking claims without explicit tool-call confirmation."
 +++

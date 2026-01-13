@@ -4,6 +4,14 @@ modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
 actionDecks = [
   { name = "get_time", path = "./get_time.deck.ts", description = "Return the current ISO timestamp." },
 ]
+[[testDecks]]
+label = "Typescript agent test bot"
+path = "./tests/agent_with_typescript_test.deck.md"
+description = "Synthetic user that asks for the current time."
+[[graderDecks]]
+label = "Time greeting guard"
+path = "./graders/time_greeting_guard_llm.deck.md"
+description = "Checks get_time usage, timestamp echo, and brief reply."
 +++
 
 ![tooling](./tooling.card.md)
