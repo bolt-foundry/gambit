@@ -6,12 +6,12 @@ that only captures who’s calling (trainer name) in init; the trainer then
 describes their scenario in a follow-up message, and the assistant suggests
 Pokémon based on the message.
 
-Deck: `examples/schema_form.deck.ts`
+Deck: `examples/pokemon_advice/root.deck.ts`
 
 Run in the debug UI to see the generated form (with defaults prefilled):
 
 ```bash
-deno run -A src/cli.ts serve examples/schema_form.deck.ts --trace --verbose
+deno run -A src/cli.ts serve examples/pokemon_advice/root.deck.ts --trace --verbose
 ```
 
 Send with the form tab (init payload). Switch to the JSON tab if you want to

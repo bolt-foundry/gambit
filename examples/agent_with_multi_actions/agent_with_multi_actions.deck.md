@@ -4,6 +4,14 @@ label = "agent_with_multi_actions"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0
+[[testDecks]]
+label = "Multi-actions test bot"
+path = "./tests/agent_with_multi_actions_test.deck.md"
+description = "Synthetic user that requests a simple translation."
+[[graderDecks]]
+label = "Action routing guard (turn)"
+path = "./graders/action_routing_guard_llm.deck.md"
+description = "Grades each assistant turn for single-action routing and result use."
 +++
 
 You are a routing agent that picks exactly one action for the user's request.
