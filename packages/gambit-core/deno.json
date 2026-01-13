@@ -34,8 +34,10 @@
     }
   },
   "imports": {
+    "@deno/dnt": "jsr:@deno/dnt@^0.42.3",
     "@std/assert": "jsr:@std/assert@^1.0.6",
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
+    "@std/front-matter/any": "jsr:@std/front-matter@^1.0.9/any",
     "@std/path": "jsr:@std/path@^1.0.6",
     "@openai/openai": "npm:openai@^4.78.1",
     "zod": "npm:zod@^3.23.8",
