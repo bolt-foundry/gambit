@@ -277,36 +277,6 @@ jobs:
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.gambit_jsr_published != 'true'
         run: deno publish --allow-dirty
 
-      - name: Debug node/npm (gambit-core release)
-        if: steps.release.outputs.is_release == 'true'
-        run: |
-          echo "PATH=${PATH}"
-          command -v node || true
-          node --version
-          command -v npm || true
-          npm --version
-          required="11.5.0"
-          npm_version="$(npm --version)"
-          if [ "$(printf '%s\n%s\n' "${required}" "${npm_version}" | sort -V | head -n1)" != "${required}" ]; then
-            echo "::error::npm ${npm_version} is older than required ${required}"
-            exit 1
-          fi
-
-      - name: Debug workflow context (gambit-core release)
-        if: steps.release.outputs.is_release == 'true'
-        run: |
-          echo "workflow=${{ github.workflow }}"
-          echo "workflow_ref=${{ github.workflow_ref }}"
-          echo "workflow_sha=${{ github.workflow_sha }}"
-          echo "job=${{ github.job }}"
-          echo "ref=${{ github.ref }}"
-          echo "ref_name=${{ github.ref_name }}"
-          echo "repository=${{ github.repository }}"
-          echo "run_id=${{ github.run_id }}"
-          echo "run_attempt=${{ github.run_attempt }}"
-          echo "oidc_request_url=${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
-          echo "oidc_request_token=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
-
       - name: Publish release (gambit-core npm)
         if: steps.release.outputs.is_release == 'true'
         run: |
@@ -317,37 +287,7 @@ jobs:
             exit 0
           fi
           deno task build_npm
-          echo "dist/npm/package.json"
-          cat dist/npm/package.json
-          echo "npm publish dry-run"
-          set +e
-          npm publish --dry-run ./dist/npm --access public
-          dry_status=$?
-          set -e
-          if [ "${dry_status}" -ne 0 ]; then
-            echo "npm debug log (most recent):"
-            latest_log="$(ls -t /home/runner/.npm/_logs 2>/dev/null | head -n1)"
-            if [ -n "${latest_log}" ]; then
-              cat "/home/runner/.npm/_logs/${latest_log}"
-            else
-              echo "no npm debug logs found"
-            fi
-            exit "${dry_status}"
-          fi
-          set +e
           npm publish ./dist/npm --access public
-          status=$?
-          set -e
-          if [ "${status}" -ne 0 ]; then
-            echo "npm debug log (most recent):"
-            latest_log="$(ls -t /home/runner/.npm/_logs 2>/dev/null | head -n1)"
-            if [ -n "${latest_log}" ]; then
-              cat "/home/runner/.npm/_logs/${latest_log}"
-            else
-              echo "no npm debug logs found"
-            fi
-          fi
-          exit "${status}"
         working-directory: packages/gambit-core
         env:
           NPM_CONFIG_PROVENANCE: "true"
