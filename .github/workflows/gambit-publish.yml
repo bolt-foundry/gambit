@@ -287,5 +287,5 @@ jobs:
             exit 0
           fi
           deno task build_npm
-          npm publish dist/npm --access public
+          npm publish ./dist/npm --access public
         working-directory: packages/gambit-core
