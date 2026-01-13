@@ -291,3 +291,17 @@ jobs:
         working-directory: packages/gambit-core
         env:
           NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish release (gambit npm)
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          package="${{ steps.meta.outputs.gambit_package }}"
+          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+            echo "npm already has ${package}@${version}; skipping"
+            exit 0
+          fi
+          deno task build_npm
+          npm publish ./dist/npm --access public
+        env:
+          NPM_CONFIG_PROVENANCE: "true"

@@ -5,9 +5,17 @@ since = "b0ddcc2ba4e861e0879dc92cc713e8cde30d230f"
 
 # Changelog
 
-## Unreleased (v0.6.0)
+## Unreleased (v0.5.6)
 
 - TBD
+
+## v0.5.5
+
+### Release and packaging
+
+- Publish a minimal `@bolt-foundry/gambit` npm package alongside gambit-core
+  (runtime-only; no CLI/bin yet).
+- Document DNT/npm status and release notes for the npm publish flow.
 
 ## v0.5.0
 
