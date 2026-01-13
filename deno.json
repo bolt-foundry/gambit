@@ -4,6 +4,10 @@
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
   "version": "0.5.4",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bolt-foundry/gambit.git"
+  },
   "exports": {
     ".": "./mod.ts",
     "./cli": "./src/cli.ts"

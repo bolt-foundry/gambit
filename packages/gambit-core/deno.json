@@ -3,6 +3,10 @@
   "version": "0.5.4",
   "description": "Core runtime for Gambit decks.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bolt-foundry/gambit.git"
+  },
   "exports": {
     ".": "./mod.ts",
     "./internal/constants": "./src/constants.ts",

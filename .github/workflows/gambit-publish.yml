@@ -292,6 +292,19 @@ jobs:
             exit 1
           fi
 
+      - name: Debug workflow context (gambit-core release)
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          echo "workflow=${{ github.workflow }}"
+          echo "workflow_ref=${{ github.workflow_ref }}"
+          echo "workflow_sha=${{ github.workflow_sha }}"
+          echo "job=${{ github.job }}"
+          echo "ref=${{ github.ref }}"
+          echo "ref_name=${{ github.ref_name }}"
+          echo "repository=${{ github.repository }}"
+          echo "run_id=${{ github.run_id }}"
+          echo "run_attempt=${{ github.run_attempt }}"
+
       - name: Publish release (gambit-core npm)
         if: steps.release.outputs.is_release == 'true'
         run: |
@@ -302,6 +315,8 @@ jobs:
             exit 0
           fi
           deno task build_npm
+          echo "dist/npm/package.json"
+          cat dist/npm/package.json
           npm publish ./dist/npm --access public
         working-directory: packages/gambit-core
         env:
