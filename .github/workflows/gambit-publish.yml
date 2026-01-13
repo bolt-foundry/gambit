@@ -277,6 +277,21 @@ jobs:
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.gambit_jsr_published != 'true'
         run: deno publish --allow-dirty
 
+      - name: Debug node/npm (gambit-core release)
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          echo "PATH=${PATH}"
+          command -v node || true
+          node --version
+          command -v npm || true
+          npm --version
+          required="11.5.0"
+          npm_version="$(npm --version)"
+          if [ "$(printf '%s\n%s\n' "${required}" "${npm_version}" | sort -V | head -n1)" != "${required}" ]; then
+            echo "::error::npm ${npm_version} is older than required ${required}"
+            exit 1
+          fi
+
       - name: Publish release (gambit-core npm)
         if: steps.release.outputs.is_release == 'true'
         run: |
