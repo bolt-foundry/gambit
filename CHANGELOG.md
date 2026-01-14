@@ -1,13 +1,19 @@
 +++
 [release]
-since = "e2e9cf26e092bb919f8a3cbb2616f354a8561633"
+since = "225456917f75e92cc095af525201373c4be37944"
 +++
 
 # Changelog
 
-## Unreleased (v0.6.2)
+## Unreleased (v0.6.3)
 
 - TBD
+
+## v0.6.2
+
+### Release and packaging
+
+- Bump gambit + gambit-core to 0.6.2.
 
 ## v0.6.1
 
@@ -23,7 +29,7 @@ since = "e2e9cf26e092bb919f8a3cbb2616f354a8561633"
   verification.
 - Normalize release binary asset names and checksum generation for predictable
   npm downloads.
-- Fix the npm build to resolve gambit-core in the mirror layout and derive
+- Fix the npm build to resolve gambit-core in the gambitmono layout and derive
   import-map targets from the detected path.
 - Add `@deno/dnt` to the Gambit package and refresh release/npm docs.
 

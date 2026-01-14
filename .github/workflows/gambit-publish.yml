@@ -329,6 +329,55 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prepare release publish config
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          gambit_config="deno.json"
+          if [ -f "deno.jsonc" ]; then
+            gambit_config="deno.jsonc"
+          fi
+          export GAMBIT_CONFIG="$gambit_config"
+          cp "$gambit_config" "${gambit_config}.publish-backup"
+          cp packages/gambit-core/deno.json packages/gambit-core/deno.publish-backup.json
+          deno eval --ext=ts '
+            import { parse } from "jsr:@std/jsonc@1";
+            const version = Deno.env.get("RELEASE_VERSION");
+            if (!version) throw new Error("RELEASE_VERSION env var missing");
+            const gambitPath = Deno.env.get("GAMBIT_CONFIG") ?? "deno.json";
+            const corePath = "packages/gambit-core/deno.json";
+            const core = parse(await Deno.readTextFile(corePath));
+            core.version = version;
+            await Deno.writeTextFile(corePath, JSON.stringify(core, null, 2) + "\n");
+            const gambit = parse(await Deno.readTextFile(gambitPath));
+            gambit.version = version;
+            const imports = gambit.imports ?? {};
+            const prefix = "jsr:@bolt-foundry/gambit-core@";
+            const coreKey = "@bolt-foundry/gambit-core";
+            const updated = {};
+            for (const [key, value] of Object.entries(imports)) {
+              if (
+                typeof value === "string" &&
+                (key === coreKey || key.startsWith(`${coreKey}/`))
+              ) {
+                const suffix = key === coreKey ? "" : key.slice(coreKey.length);
+                updated[key] = `${prefix}${version}${suffix}`;
+                continue;
+              }
+              if (typeof value === "string" && value.startsWith(prefix)) {
+                const remainder = value.slice(prefix.length);
+                const slashIndex = remainder.indexOf("/");
+                const suffix = slashIndex === -1 ? "" : remainder.slice(slashIndex);
+                updated[key] = `${prefix}${version}${suffix}`;
+                continue;
+              }
+              updated[key] = value;
+            }
+            gambit.imports = updated;
+            await Deno.writeTextFile(gambitPath, JSON.stringify(gambit, null, 2) + "\n");
+          '
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+
       - name: Publish release (gambit-core)
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.core_jsr_published != 'true'
         run: deno publish --allow-dirty
@@ -381,3 +430,17 @@ jobs:
           npm publish ./dist/npm --access public
         env:
           NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Restore release publish config
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          gambit_config="deno.json"
+          if [ -f "deno.jsonc" ]; then
+            gambit_config="deno.jsonc"
+          fi
+          if [ -f "${gambit_config}.publish-backup" ]; then
+            mv "${gambit_config}.publish-backup" "$gambit_config"
+          fi
+          if [ -f packages/gambit-core/deno.publish-backup.json ]; then
+            mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json
+          fi
