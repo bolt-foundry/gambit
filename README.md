@@ -1,12 +1,12 @@
 # Gambit (draft README)
 
-This package is developed in Bolt Foundry’s monorepo and mirrored into
-`github.com/bolt-foundry/gambit`. For now, that repo is a strict mirror (please
-do not land direct changes there).
+This package is developed in Bolt Foundry’s monorepo and synced into gambitmono
+(`github.com/bolt-foundry/gambit`). For now, gambitmono is a strict sync target
+(please do not land direct changes there).
 
 CI runs `.github/workflows/gambit-mirror.yml` on every `main` push that touches
 this package, using `scripts/sync-gambit-mirror.sh` to open and auto-merge a PR
-from the `bft-codebot` fork into the public mirror.
+from the `bft-codebot` fork into gambitmono.
 
 Gambit helps developers build the most accurate LLM apps by making it simple to
 provide exactly the right amount of context at the right time.
