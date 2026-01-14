@@ -183,11 +183,22 @@ jobs:
             fi
           done
 
+      - name: Compress binaries
+        run: |
+          cd dist
+          for file in gambit-*; do
+            [ -f "$file" ] || continue
+            if [ "$file" = "gambit-core-src.tar.gz" ]; then
+              continue
+            fi
+            gzip -9 -n "$file"
+          done
+
       - name: Create checksums
         run: |
           cd dist
           rm -f SHA256SUMS
-          for file in gambit-* gambit-core-src.tar.gz; do
+          for file in gambit-*.gz gambit-core-src.tar.gz; do
             [ -f "$file" ] || continue
             sha256sum "$file" >> SHA256SUMS
           done
@@ -198,7 +209,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.name }}
           target_commitish: ${{ github.sha }}
           files: |
-            dist/gambit-*
+            dist/gambit-*.gz
             dist/gambit-core-src.tar.gz
             dist/SHA256SUMS
         env:

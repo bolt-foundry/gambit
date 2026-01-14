@@ -7,9 +7,20 @@ const os = require("os");
 const https = require("https");
 const http = require("http");
 const crypto = require("crypto");
+const zlib = require("zlib");
+const { pipeline } = require("stream/promises");
 const { spawnSync } = require("child_process");
 
 const MAX_REDIRECTS = 5;
+
+const fileExists = async (filePath) => {
+  try {
+    await fs.promises.access(filePath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const readJson = (filePath) => {
   const raw = fs.readFileSync(filePath, "utf8");
@@ -88,6 +99,17 @@ const downloadFile = async (url, dest) => {
   await fs.promises.rename(tmpDest, dest);
 };
 
+const gunzipFile = async (source, dest) => {
+  const tmpDest = `${dest}.tmp-${process.pid}`;
+  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+  await pipeline(
+    fs.createReadStream(source),
+    zlib.createGunzip(),
+    fs.createWriteStream(tmpDest, { mode: 0o755 }),
+  );
+  await fs.promises.rename(tmpDest, dest);
+};
+
 const fetchText = async (url) => {
   const res = await request(url);
   const chunks = [];
@@ -149,37 +171,86 @@ const main = async () => {
 
   const baseUrl = process.env.GAMBIT_BINARY_BASE_URL ||
     `https://github.com/bolt-foundry/gambit/releases/download/v${version}`;
-  const binaryUrl = process.env.GAMBIT_BINARY_URL || `${baseUrl}/${assetName}`;
+  const binaryUrl = process.env.GAMBIT_BINARY_URL ||
+    `${baseUrl}/${assetName}.gz`;
   const checksumUrl = process.env.GAMBIT_BINARY_CHECKSUM_URL ||
     `${baseUrl}/SHA256SUMS`;
+  const downloadName = (() => {
+    try {
+      return path.posix.basename(new URL(binaryUrl).pathname);
+    } catch {
+      return path.posix.basename(binaryUrl);
+    }
+  })();
+  const expectsGzip = downloadName.endsWith(".gz");
 
   const cacheDir = getCacheDir(version);
   const binPath = path.join(cacheDir, assetName);
+  const archivePath = expectsGzip ? `${binPath}.gz` : binPath;
   const ensureBinary = async () => {
-    if (fs.existsSync(binPath)) {
+    const hasBin = await fileExists(binPath);
+    const hasArchive = await fileExists(archivePath);
+    if (!hasBin && expectsGzip && hasArchive) {
       try {
-        await verifyChecksum(checksumUrl, assetName, binPath);
+        await verifyChecksum(checksumUrl, downloadName, archivePath);
+        await gunzipFile(archivePath, binPath);
         return;
       } catch (err) {
-        console.warn(
-          `Cached binary failed checksum; deleting and re-downloading.`,
-        );
         try {
-          await fs.promises.unlink(binPath);
+          await fs.promises.unlink(archivePath);
         } catch {
           // ignore
         }
       }
     }
+    if (hasBin) {
+      if (expectsGzip && !hasArchive) {
+        console.warn(`Cached binary missing archive; re-downloading.`);
+      } else {
+        try {
+          await verifyChecksum(checksumUrl, downloadName, archivePath);
+          if (expectsGzip) {
+            await gunzipFile(archivePath, binPath);
+          }
+          return;
+        } catch (err) {
+          console.warn(
+            `Cached binary failed checksum; deleting and re-downloading.`,
+          );
+          try {
+            await fs.promises.unlink(binPath);
+          } catch {
+            // ignore
+          }
+          if (expectsGzip) {
+            try {
+              await fs.promises.unlink(archivePath);
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
     console.log(`Downloading ${binaryUrl}...`);
-    await downloadFile(binaryUrl, binPath);
+    await downloadFile(binaryUrl, archivePath);
     try {
-      await verifyChecksum(checksumUrl, assetName, binPath);
+      await verifyChecksum(checksumUrl, downloadName, archivePath);
+      if (expectsGzip) {
+        await gunzipFile(archivePath, binPath);
+      }
     } catch (err) {
       try {
-        await fs.promises.unlink(binPath);
+        await fs.promises.unlink(archivePath);
       } catch {
         // ignore
+      }
+      if (expectsGzip) {
+        try {
+          await fs.promises.unlink(binPath);
+        } catch {
+          // ignore
+        }
       }
       throw err;
     }
