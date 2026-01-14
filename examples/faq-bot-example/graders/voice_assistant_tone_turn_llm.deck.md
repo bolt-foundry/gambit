@@ -3,7 +3,7 @@ label = "Voice assistant tone (turn) LLM"
 inputSchema = "../schemas/calibration_turn_input.zod.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
-model = "openai/gpt-4o-mini"
+model = "openai/gpt-4o"
 temperature = 0
 +++
 
@@ -14,7 +14,8 @@ score the graded message.
 Criteria:
 
 - Natural, conversational phrasing with contractions.
-- Short spoken response (1-2 sentences).
+- Short spoken response (1-2 sentences). A single long sentence is still
+  passable if it sounds like spoken language.
 - No markdown or list formatting (no bullets, numbering, headings, code blocks,
   or backticks).
 - Avoids chat-specific phrasing like "here is a list", "as an AI", or references
@@ -25,12 +26,7 @@ Response format:
 - Return JSON matching the output schema:
   `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
 
-Scoring rules:
-
-- Use the full -3 to +3 scale.
-- +3: voice-like, concise, and plain text.
-- 0: mixed tone or minor formatting slip.
-- -3: robotic, verbose, or uses markdown/list formatting.
+Scoring rules: ![voice_assistant_rubric](./cards/voice_assistant_rubric.card.md)
 
 ### Workflow
 
