@@ -14,6 +14,7 @@ const EXTENSIONS = new Set([
 const SKIP_DIRS = new Set([
   ".git",
   ".deno",
+  ".deno-cache",
   "node_modules",
   "dist",
   "build",
