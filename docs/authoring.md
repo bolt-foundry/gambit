@@ -81,7 +81,7 @@ export default defineDeck({
 - `testDecks` describe persona decks (synthetic users/bots). Each entry points
   to a deck that produces user turns/scenarios—use them for automated QA,
   persona-vs-workflow simulations, or even bot-vs-bot runs.
-- Example (see `packages/gambit/examples/voice_front_desk/decks/root.deck.md`):
+- Example (see `examples/voice_front_desk/decks/root.deck.md`):
   ```toml
   [[testDecks]]
   label = "Synthetic caller – new patient intake"
@@ -89,10 +89,10 @@ export default defineDeck({
   description = "Persona deck that stress-tests identity/routing coverage."
   ```
   The referenced deck (e.g.
-  `packages/gambit/examples/voice_front_desk/tests/new_patient_intake.deck.md`)
-  should set `acceptsUserTurns = true` and may declare its own `inputSchema`
-  (for example `inputSchema = "../schemas/my_persona_test.zod.ts"`) so the Test
-  tab renders a schema-driven “Scenario” form for that persona.
+  `examples/voice_front_desk/tests/new_patient_intake.deck.md`) should set
+  `acceptsUserTurns = true` and may declare its own `inputSchema` (for example
+  `inputSchema = "../schemas/my_persona_test.zod.ts"`) so the Test tab renders a
+  schema-driven “Scenario” form for that persona.
 - `graderDecks` describe calibration decks that score transcripts/artifacts. The
   simulator Calibrate page will run these decks against stored runs.
 - Configure `acceptsUserTurns` alongside these references:
