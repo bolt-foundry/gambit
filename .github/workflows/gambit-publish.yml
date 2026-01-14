@@ -8,6 +8,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       id-token: write
     defaults:
@@ -27,7 +28,8 @@ jobs:
 
       - name: Prepare local gambit-core import map
         run: |
-          deno eval -q '
+          deno eval --ext=ts -q '
+            import { parse } from "jsr:@std/jsonc@1";
             const exists = async (path) => {
               try {
                 await Deno.stat(path);
@@ -50,15 +52,20 @@ jobs:
               );
             };
             const gambitPath = await findPath(
-              ["deno.json", "packages/gambit/deno.json"],
-              "gambit deno.json",
+              [
+                "deno.jsonc",
+                "deno.json",
+                "packages/gambit/deno.jsonc",
+                "packages/gambit/deno.json",
+              ],
+              "gambit deno.json(c)",
             );
             const corePath = await findPath(
               ["packages/gambit-core/deno.json"],
               "gambit-core deno.json",
             );
-            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
-            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const gambit = parse(await Deno.readTextFile(gambitPath));
+            const core = parse(await Deno.readTextFile(corePath));
             const exportsMap = core.exports ?? {};
             const localImports = {};
             for (const [key, value] of Object.entries(exportsMap)) {
@@ -80,21 +87,39 @@ jobs:
       - name: Read package metadata
         id: meta
         run: |
-          deno eval -q '
-            const gambitPath = "deno.json";
+          deno eval --ext=ts -q '
+            import { parse } from "jsr:@std/jsonc@1";
+            const findPath = async (candidates, label) => {
+              for (const candidate of candidates) {
+                try {
+                  await Deno.stat(candidate);
+                  return candidate;
+                } catch (err) {
+                  if (err instanceof Deno.errors.NotFound) {
+                    continue;
+                  }
+                  throw err;
+                }
+              }
+              throw new Error(`Unable to find ${label}`);
+            };
+            const gambitPath = await findPath(
+              ["deno.jsonc", "deno.json"],
+              "gambit deno.json(c)",
+            );
             const corePath = "packages/gambit-core/deno.json";
-            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
-            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const gambit = parse(await Deno.readTextFile(gambitPath));
+            const core = parse(await Deno.readTextFile(corePath));
             const gambitVersion = (gambit.version ?? "").trim();
             const coreVersion = (core.version ?? "").trim();
-            if (!gambitVersion) throw new Error("deno.json missing version");
+            if (!gambitVersion) throw new Error(`${gambitPath} missing version`);
             if (!coreVersion) throw new Error("packages/gambit-core/deno.json missing version");
             if (gambitVersion !== coreVersion) {
               throw new Error(`gambit ${gambitVersion} != gambit-core ${coreVersion}`);
             }
             const gambitName = (gambit.name ?? "").trim();
             const coreName = (core.name ?? "").trim();
-            if (!gambitName) throw new Error("deno.json missing name");
+            if (!gambitName) throw new Error(`${gambitPath} missing name`);
             if (!coreName) throw new Error("packages/gambit-core/deno.json missing name");
             const imports = gambit.imports ?? {};
             const prefix = "jsr:@bolt-foundry/gambit-core@";
@@ -198,7 +223,11 @@ jobs:
         id: canary
         run: |
           CANARY_TS=$(date -u +%s)
-          BASE_VERSION="$(deno eval -q 'const data = JSON.parse(await Deno.readTextFile("deno.json")); const version = (data.version ?? "").trim(); if (!version) throw new Error("deno.json missing version"); console.log(version.replace(/^v/, ""));')"
+          GAMBIT_CONFIG="deno.json"
+          if [ -f "deno.jsonc" ]; then
+            GAMBIT_CONFIG="deno.jsonc"
+          fi
+          BASE_VERSION="$(GAMBIT_CONFIG="$GAMBIT_CONFIG" deno eval --ext=ts -q 'import { parse } from "jsr:@std/jsonc@1"; const path = Deno.env.get("GAMBIT_CONFIG") ?? "deno.json"; const data = parse(await Deno.readTextFile(path)); const version = (data.version ?? "").trim(); if (!version) throw new Error(`${path} missing version`); console.log(version.replace(/^v/, ""));')"
           if [[ "$BASE_VERSION" == *-* ]]; then
             CANARY_VERSION="${BASE_VERSION}.main.${CANARY_TS}"
           else
@@ -209,6 +238,11 @@ jobs:
 
       - name: Build simulator bundle
         run: deno task bundle:sim:web:sourcemap
+
+      - name: Install CLI deps (entrypoint only)
+        run: |
+          rm -f deno.entrypoint.lock
+          deno install --entrypoint --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false --no-prompt src/cli.ts
 
       - name: Allow simulator bundle for publish
         run: |
@@ -225,23 +259,38 @@ jobs:
 
       - name: Publish canary
         run: |
-          cp deno.json deno.publish-backup.json
+          gambit_config="deno.json"
+          if [ -f "deno.jsonc" ]; then
+            gambit_config="deno.jsonc"
+          fi
+          export GAMBIT_CONFIG="$gambit_config"
+          cp "$gambit_config" "${gambit_config}.publish-backup"
           cp packages/gambit-core/deno.json packages/gambit-core/deno.publish-backup.json
-          trap 'mv deno.publish-backup.json deno.json; mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json' EXIT
-          deno eval '
+          trap 'mv "${gambit_config}.publish-backup" "$gambit_config"; mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json' EXIT
+          deno eval --ext=ts '
+            import { parse } from "jsr:@std/jsonc@1";
             const version = Deno.env.get("CANARY_VERSION");
             if (!version) throw new Error("CANARY_VERSION env var missing");
-            const gambitPath = "deno.json";
+            const gambitPath = Deno.env.get("GAMBIT_CONFIG") ?? "deno.json";
             const corePath = "packages/gambit-core/deno.json";
-            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const core = parse(await Deno.readTextFile(corePath));
             core.version = version;
             await Deno.writeTextFile(corePath, JSON.stringify(core, null, 2) + "\n");
-            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
+            const gambit = parse(await Deno.readTextFile(gambitPath));
             gambit.version = version;
             const imports = gambit.imports ?? {};
             const prefix = "jsr:@bolt-foundry/gambit-core@";
+            const coreKey = "@bolt-foundry/gambit-core";
             const updated = {};
             for (const [key, value] of Object.entries(imports)) {
+              if (
+                typeof value === "string" &&
+                (key === coreKey || key.startsWith(`${coreKey}/`))
+              ) {
+                const suffix = key === coreKey ? "" : key.slice(coreKey.length);
+                updated[key] = `${prefix}${version}${suffix}`;
+                continue;
+              }
               if (typeof value === "string" && value.startsWith(prefix)) {
                 const remainder = value.slice(prefix.length);
                 const slashIndex = remainder.indexOf("/");
@@ -267,6 +316,18 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "v${version}"
           git push origin "v${version}"
+
+      - name: Dispatch release-binaries
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          curl -sSf -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/release-binaries.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"tag\":\"v${version}\"}}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish release (gambit-core)
         if: steps.release.outputs.is_release == 'true' && steps.release.outputs.core_jsr_published != 'true'

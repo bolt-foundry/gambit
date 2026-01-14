@@ -1,11 +1,30 @@
 import { build, emptyDir } from "@deno/dnt";
+import { parse } from "@std/jsonc";
 import { dirname, fromFileUrl, join, relative, toFileUrl } from "@std/path";
 
 const packageRoot = dirname(dirname(fromFileUrl(import.meta.url)));
-const denoConfigPath = join(packageRoot, "deno.json");
+const denoConfigPath = await (async () => {
+  const candidates = ["deno.jsonc", "deno.json"].map((name) =>
+    join(packageRoot, name)
+  );
+  for (const candidate of candidates) {
+    try {
+      await Deno.stat(candidate);
+      return candidate;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(
+    `Missing Gambit config; looked for ${candidates.join(", ")}`,
+  );
+})();
 const distDir = join(packageRoot, "dist", "npm");
 const bundleDir = join(packageRoot, "simulator-ui", "dist");
-const denoConfig = JSON.parse(await Deno.readTextFile(denoConfigPath)) as {
+const denoConfig = parse(await Deno.readTextFile(denoConfigPath)) as {
   name?: string;
   version?: string;
   description?: string;
@@ -68,7 +87,7 @@ const coreDir = await (async () => {
   );
 })();
 const coreConfigPath = join(coreDir, "deno.json");
-const coreConfig = JSON.parse(await Deno.readTextFile(coreConfigPath)) as {
+const coreConfig = parse(await Deno.readTextFile(coreConfigPath)) as {
   name?: string;
   version?: string;
   exports?: Record<string, string>;

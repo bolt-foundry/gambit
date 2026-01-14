@@ -125,14 +125,14 @@ async function main() {
 
     const tracerFns: Array<
       (
-        event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+        event: import("@bolt-foundry/gambit-core").TraceEvent,
       ) => void
     > = [];
     if (args.trace) tracerFns.push(makeJsonlTracer(args.trace));
     if (args.verbose) tracerFns.push(makeConsoleTracer());
     const tracer = tracerFns.length
       ? (
-        event: import("@bolt-foundry/gambit-core/internal/types").TraceEvent,
+        event: import("@bolt-foundry/gambit-core").TraceEvent,
       ) => tracerFns.forEach((fn) => fn(event))
       : undefined;
 

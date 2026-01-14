@@ -21,10 +21,10 @@ export type { ExecutionContext } from "./src/types.ts";
 export type { GraderDeckDefinition } from "./src/types.ts";
 /** Guardrails definition and hooks. */
 export type { Guardrails } from "./src/types.ts";
+/** Hooks and scheduled handlers for decks. */
+export type { HandlersConfig } from "./src/types.ts";
 /** JSON-serializable value type used throughout Gambit. */
 export type { JSONValue } from "./src/types.ts";
-/** Model provider interface for LLM backends. */
-export type { ModelProvider } from "./src/types.ts";
 /** Test deck definition shape. */
 export type { TestDeckDefinition } from "./src/types.ts";
 /** Check if a value is an explicit end-of-run signal. */
@@ -47,3 +47,21 @@ export type { RenderDeckOptions } from "./src/render.ts";
 export type { RenderDeckResult } from "./src/render.ts";
 /** Provider factory for OpenRouter-backed model calls. */
 export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
+/** Gambit CLI helpers and internal primitives. */
+export { GAMBIT_TOOL_INIT } from "./src/constants.ts";
+/** Load a deck definition from disk. */
+export { loadDeck } from "./src/loader.ts";
+/** Persisted run state stored on disk. */
+export { loadState, saveState } from "./src/state.ts";
+/** Persisted run state shape. */
+export type { SavedState } from "./src/state.ts";
+/** Feedback entries tracked during runs. */
+export type { FeedbackEntry } from "./src/state.ts";
+/** Deck definition after resolution and expansion. */
+export type { LoadedDeck } from "./src/types.ts";
+/** Model message exchanged with providers. */
+export type { ModelMessage } from "./src/types.ts";
+/** Model provider interface for LLM backends. */
+export type { ModelProvider } from "./src/types.ts";
+/** Trace events emitted during execution. */
+export type { TraceEvent } from "./src/types.ts";

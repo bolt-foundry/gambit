@@ -23,7 +23,8 @@ jobs:
 
       - name: Prepare local gambit-core import map
         run: |
-          nix develop --profile "$NIX_DEV_PROFILE" --command deno eval -q '
+          nix develop --profile "$NIX_DEV_PROFILE" --command deno eval --ext=ts -q '
+            import { parse } from "jsr:@std/jsonc@1";
             const exists = async (path) => {
               try {
                 await Deno.stat(path);
@@ -46,15 +47,20 @@ jobs:
               );
             };
             const gambitPath = await findPath(
-              ["deno.json", "packages/gambit/deno.json"],
-              "gambit deno.json",
+              [
+                "deno.jsonc",
+                "deno.json",
+                "packages/gambit/deno.jsonc",
+                "packages/gambit/deno.json",
+              ],
+              "gambit deno.json(c)",
             );
             const corePath = await findPath(
               ["packages/gambit-core/deno.json"],
               "gambit-core deno.json",
             );
-            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
-            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const gambit = parse(await Deno.readTextFile(gambitPath));
+            const core = parse(await Deno.readTextFile(corePath));
             const exportsMap = core.exports ?? {};
             const localImports = {};
             for (const [key, value] of Object.entries(exportsMap)) {
@@ -76,6 +82,13 @@ jobs:
       - name: Guard bfmono imports
         run: |
           nix develop --profile "$NIX_DEV_PROFILE" --command deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
+
+      - name: Install CLI deps (entrypoint only)
+        run: |
+          nix develop --profile "$NIX_DEV_PROFILE" --command bash -euo pipefail -c '
+            rm -f deno.entrypoint.lock
+            deno install --entrypoint --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false --no-prompt src/cli.ts
+          '
 
       - name: Run e2e tests
         run: |

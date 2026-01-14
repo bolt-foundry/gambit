@@ -49,15 +49,17 @@ async function exists(path: string): Promise<boolean> {
 async function findRoots(): Promise<Array<string>> {
   const roots: Array<string> = [];
 
-  if (await exists("packages/gambit/deno.json")) {
+  const hasGambit = await exists("packages/gambit/deno.jsonc") ||
+    await exists("packages/gambit/deno.json");
+
+  if (hasGambit) {
     roots.push("packages/gambit");
-  }
-  if (await exists("deno.json")) {
+  } else if (await exists("deno.jsonc") || await exists("deno.json")) {
     roots.push(".");
   }
 
   if (roots.length === 0) {
-    throw new Error("Unable to locate gambit deno.json in this repo.");
+    throw new Error("Unable to locate gambit deno.json(c) in this repo.");
   }
 
   const coreCandidates = ["packages/gambit-core", "../gambit-core"];
