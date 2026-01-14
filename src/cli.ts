@@ -17,7 +17,6 @@ import {
   parseCliArgs,
   printUsage,
   resolveDefaultReplDeckPath,
-  resolveExamplePath,
 } from "./cli_args.ts";
 
 const logger = console;
@@ -41,32 +40,16 @@ async function main() {
       Deno.exit(1);
     }
 
-    if (args.example && args.deckPath) {
-      logger.error("Provide either a deck path or --example, not both.");
-      Deno.exit(1);
-    }
-
-    const deckPath = args.example
-      ? resolveExamplePath(args.example)
-      : args.deckPath ??
-        args.exportDeckPath ??
-        (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
+    const deckPath = args.deckPath ??
+      args.exportDeckPath ??
+      (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
 
     if (!deckPath && args.cmd !== "grade" && args.cmd !== "export") {
       printUsage();
       Deno.exit(1);
     }
 
-    if (args.example) {
-      try {
-        await Deno.stat(deckPath);
-      } catch (err) {
-        logger.error(
-          `Example not found at ${deckPath}: ${(err as Error).message}`,
-        );
-        Deno.exit(1);
-      }
-    } else if (!args.deckPath && args.cmd === "repl") {
+    if (!args.deckPath && args.cmd === "repl") {
       try {
         await Deno.stat(deckPath);
       } catch {

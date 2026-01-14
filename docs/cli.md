@@ -23,8 +23,8 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   - Calibrate: `http://localhost:8000/calibrate`
 
   The WebSocket server streams turns, traces, and status updates.
-- Examples without cloning:
-  `deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --init '"hi"'`.
+- Examples from a local clone:
+  `deno run -A src/cli.ts run examples/hello_world.deck.md --init '"hi"'`.
 
 ## Inputs and models
 
