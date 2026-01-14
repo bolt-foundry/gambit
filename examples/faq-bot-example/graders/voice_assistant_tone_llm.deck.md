@@ -3,7 +3,7 @@ label = "Voice assistant tone (conversation) LLM"
 inputSchema = "../schemas/calibration_session_input.zod.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
-model = "openai/gpt-4o-mini"
+model = "openai/gpt-4o"
 temperature = 0
 +++
 
@@ -13,7 +13,8 @@ spoken plain text across the conversation.
 Criteria:
 
 - Natural, conversational phrasing with contractions.
-- Short spoken responses (1-2 sentences).
+- Short spoken responses (1-2 sentences). A single long sentence is still
+  passable if it sounds like spoken language.
 - No markdown or list formatting (no bullets, numbering, headings, code blocks,
   or backticks).
 - Avoids chat-specific phrasing like "here is a list", "as an AI", or references
@@ -24,12 +25,11 @@ Response format:
 - Return JSON matching the output schema:
   `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
 
-Scoring rules:
+Scoring rules: ![voice_assistant_rubric](./cards/voice_assistant_rubric.card.md)
 
-- Use the full -3 to +3 scale.
-- +3: consistently voice-like, concise, and plain text.
-- 0: mixed tone or occasional formatting slips.
-- -3: repeatedly robotic, verbose, or uses markdown/list formatting.
+Apply the rubric across the conversation. If any single assistant message is
+stiff, robotic, or uses unreadable formatting, reflect that in the overall
+score; prefer false positives to false negatives.
 
 ### Workflow
 
