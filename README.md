@@ -47,11 +47,11 @@ export OPENROUTER_API_KEY=...
 deno run -A jsr:@bolt-foundry/gambit/cli --help
 ```
 
-Run a packaged example without cloning:
+Run an example from a clone of this repo:
 
 ```sh
 export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli run --example hello_world.deck.md --init '"hi"'
+deno run -A src/cli.ts run examples/hello_world.deck.md --init '"hi"'
 ```
 
 Run the built-in assistant (from a clone of this repo):

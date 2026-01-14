@@ -8,7 +8,6 @@ type Args = {
   cmd: "run" | "repl" | "serve" | "test-bot" | "grade" | "export";
   deckPath?: string;
   exportDeckPath?: string;
-  example?: string;
   testDeckPath?: string;
   graderPath?: string;
   gradePaths?: Array<string>;
@@ -59,21 +58,6 @@ export function resolveDefaultReplDeckPath(): string | null {
   return DEFAULT_REPL_DECK_PATH;
 }
 
-export function resolveExamplePath(example: string): string {
-  const examplesDir = resolveBundledPath("../examples/");
-  if (!examplesDir) {
-    throw new Error(
-      "--example is unavailable when running from a remote URL; pass a deck path instead.",
-    );
-  }
-  const candidate = path.resolve(examplesDir, example);
-  const rel = path.relative(examplesDir, candidate);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`Example path must stay within examples/: ${example}`);
-  }
-  return candidate;
-}
-
 export function parseCliArgs(argv: Array<string>): Args {
   const parsed = parseArgs(argv, {
     boolean: [
@@ -87,7 +71,6 @@ export function parseCliArgs(argv: Array<string>): Args {
     ],
     string: [
       "deck",
-      "example",
       "init",
       "message",
       "test-deck",
@@ -134,7 +117,6 @@ export function parseCliArgs(argv: Array<string>): Args {
     cmd,
     deckPath,
     exportDeckPath: parsed.deck as string | undefined,
-    example: parsed.example as string | undefined,
     init: parsed.init as string | undefined,
     initProvided: parsed.init !== undefined,
     message: parsed.message as string | undefined,
@@ -164,9 +146,9 @@ export function parseCliArgs(argv: Array<string>): Args {
 export function printUsage() {
   logger.log(
     `Usage:
-  gambit run [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl [<deck.(ts|md)>] [--example <examples/...>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve [<deck.(ts|md)>] [--example <examples/...>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
+  gambit run [<deck.(ts|md)>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
+  gambit repl [<deck.(ts|md)>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
+  gambit serve [<deck.(ts|md)>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
   gambit test-bot <root-deck.(ts|md)> --test-deck <persona-deck.(ts|md)> [--init <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck.(ts|md)> ...] [--trace <file>] [--verbose]
   gambit grade <grader-deck.(ts|md)> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]
   gambit export [<deck.(ts|md)>] --state <file> --out <bundle.tar.gz>
@@ -193,7 +175,6 @@ Flags:
   --sourcemap             Generate external source maps (serve; default)
   --no-sourcemap          Disable source map generation (serve)
   --platform <platform>   Bundle target platform: deno (default) or web (browser)
-  --example <path>        Path relative to examples/ (e.g. hello_world.deck.md)
   -h, --help              Show this help
   repl default deck       src/decks/gambit-assistant.deck.md
 `,
