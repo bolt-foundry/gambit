@@ -20,6 +20,8 @@ jobs:
     defaults:
       run:
         shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
+    env:
+      DENO_DIR: ${{ github.workspace }}/.deno-cache
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +51,8 @@ jobs:
 
       - name: Prepare local gambit-core import map
         run: |
-          deno eval -q '
+          deno eval --ext=ts -q '
+            import { parse } from "jsr:@std/jsonc@1";
             const exists = async (path) => {
               try {
                 await Deno.stat(path);
@@ -72,15 +75,20 @@ jobs:
               );
             };
             const gambitPath = await findPath(
-              ["deno.json", "packages/gambit/deno.json"],
-              "gambit deno.json",
+              [
+                "deno.jsonc",
+                "deno.json",
+                "packages/gambit/deno.jsonc",
+                "packages/gambit/deno.json",
+              ],
+              "gambit deno.json(c)",
             );
             const corePath = await findPath(
               ["packages/gambit-core/deno.json"],
               "gambit-core deno.json",
             );
-            const gambit = JSON.parse(await Deno.readTextFile(gambitPath));
-            const core = JSON.parse(await Deno.readTextFile(corePath));
+            const gambit = parse(await Deno.readTextFile(gambitPath));
+            const core = parse(await Deno.readTextFile(corePath));
             const exportsMap = core.exports ?? {};
             const localImports = {};
             for (const [key, value] of Object.entries(exportsMap)) {
@@ -102,10 +110,15 @@ jobs:
       - name: Guard bfmono imports
         run: deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
 
+      - name: Install CLI deps (entrypoint only)
+        run: |
+          rm -f deno.entrypoint.lock
+          deno install --entrypoint --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false --no-prompt src/cli.ts
+
       - name: Compile
         run: |
           mkdir -p dist
-          deno compile --config deno.ci.json -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
+          deno compile --config deno.ci.json --lock=deno.entrypoint.lock --frozen -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -127,10 +140,21 @@ jobs:
             echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.name }}
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Package gambit-core source
+        run: |
+          mkdir -p dist
+          git archive --format=tar --prefix=gambit-core/ "${{ steps.tag.outputs.name }}:packages/gambit-core" | gzip > dist/gambit-core-src.tar.gz
 
       - name: Normalize binary names
         run: |
@@ -163,7 +187,10 @@ jobs:
         run: |
           cd dist
           rm -f SHA256SUMS
-          find . -maxdepth 1 -type f -name 'gambit-*' -exec sh -c 'sha256sum "$1" >> SHA256SUMS' _ {} \;
+          for file in gambit-* gambit-core-src.tar.gz; do
+            [ -f "$file" ] || continue
+            sha256sum "$file" >> SHA256SUMS
+          done
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -172,6 +199,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             dist/gambit-*
+            dist/gambit-core-src.tar.gz
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

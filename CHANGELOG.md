@@ -1,13 +1,19 @@
 +++
 [release]
-since = "b0ddcc2ba4e861e0879dc92cc713e8cde30d230f"
+since = "e2e9cf26e092bb919f8a3cbb2616f354a8561633"
 +++
 
 # Changelog
 
-## Unreleased (v0.6.1)
+## Unreleased (v0.6.2)
 
 - TBD
+
+## v0.6.1
+
+### Release and packaging
+
+- Bump gambit + gambit-core to 0.6.1.
 
 ## v0.6.0
 

@@ -4,3 +4,4 @@
 !/dist/npm/.gitkeep
 !/dist/deno/.gitkeep
 !/dist/binary/.gitkeep
+deno.entrypoint.lock

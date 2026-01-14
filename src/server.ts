@@ -1,25 +1,19 @@
 import * as path from "@std/path";
-import {
-  isGambitEndSignal,
-  runDeck,
-} from "@bolt-foundry/gambit-core/internal/runtime";
+import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
-import { loadDeck } from "@bolt-foundry/gambit-core/internal/loader";
+import { loadDeck } from "@bolt-foundry/gambit-core";
 import {
   appendDurableStreamEvent,
   handleDurableStreamRequest,
 } from "./durable_streams.ts";
-import type {
-  FeedbackEntry,
-  SavedState,
-} from "@bolt-foundry/gambit-core/internal/state";
+import type { FeedbackEntry, SavedState } from "@bolt-foundry/gambit-core";
 import type {
   LoadedDeck,
   ModelMessage,
   ModelProvider,
   TraceEvent,
-} from "@bolt-foundry/gambit-core/internal/types";
+} from "@bolt-foundry/gambit-core";
 import type { ZodTypeAny } from "zod";
 
 const logger = console;

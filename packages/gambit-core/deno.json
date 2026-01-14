@@ -1,6 +1,6 @@
 {
   "name": "@bolt-foundry/gambit-core",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Core runtime for Gambit decks.",
   "license": "Apache-2.0",
   "repository": {
@@ -8,18 +8,7 @@
     "url": "git+https://github.com/bolt-foundry/gambit.git"
   },
   "exports": {
-    ".": "./mod.ts",
-    "./internal/constants": "./src/constants.ts",
-    "./internal/definitions": "./src/definitions.ts",
-    "./internal/loader": "./src/loader.ts",
-    "./internal/markdown": "./src/markdown.ts",
-    "./internal/openai_compat": "./src/openai_compat.ts",
-    "./internal/render": "./src/render.ts",
-    "./internal/runtime": "./src/runtime.ts",
-    "./internal/schema": "./src/schema.ts",
-    "./internal/state": "./src/state.ts",
-    "./internal/types": "./src/types.ts",
-    "./internal/providers/openrouter": "./src/providers/openrouter.ts"
+    ".": "./mod.ts"
   },
   "tasks": {
     "fmt": "deno fmt",
