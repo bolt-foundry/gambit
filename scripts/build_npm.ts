@@ -148,7 +148,7 @@ await Deno.writeTextFile(
   JSON.stringify({ ...denoConfig, imports: mergedImports }, null, 2),
 );
 
-const specPattern = /["'`](@bolt-foundry\/gambit-core[^"'`]+)["'`]/g;
+const specPattern = /["'`](@bolt-foundry\/gambit-core[^"'`]*)["'`]/g;
 const sourceExtensions = [".ts", ".tsx", ".mts", ".cts"];
 const testSuffixes = [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"];
 
