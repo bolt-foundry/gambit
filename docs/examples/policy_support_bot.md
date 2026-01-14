@@ -1,8 +1,8 @@
 # Policy-Aware Support Bot
 
-This example (located at `packages/gambit/examples/policy_support_bot/`) shows
-how to combine Markdown decks and compute action decks to build a refusal-first
-support bot grounded entirely in a curated FAQ.
+This example (located at `examples/policy_support_bot/`) shows how to combine
+Markdown decks and compute action decks to build a refusal-first support bot
+grounded entirely in a curated FAQ.
 
 Key ideas:
 
@@ -22,15 +22,15 @@ Key ideas:
 Run the bot:
 
 ```bash
-deno run -A packages/gambit/src/cli.ts run \
-  packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md \
+deno run -A src/cli.ts run \
+  examples/policy_support_bot/policy_support_bot.deck.md \
   --message '"How much does AcmeFlow cost?"' --stream
 ```
 
 Serve it in the web-based Gambit Debug UI:
 
 ```bash
-deno run -A packages/gambit/src/cli.ts serve \
-  packages/gambit/examples/policy_support_bot/policy_support_bot.deck.md \
+deno run -A src/cli.ts serve \
+  examples/policy_support_bot/policy_support_bot.deck.md \
   --port 8787
 ```

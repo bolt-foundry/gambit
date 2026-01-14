@@ -19,4 +19,7 @@ description = "Ensures answers are grounded to FAQ results or refuse when missin
 ![user_persona](./cards/user_persona.card.md)
 ![faq_behavior](./cards/faq_behavior.card.md)
 
+If there is no user request yet, reply with: "Ask me an AcmeFlow account
+question."
+
 ![init](gambit://init)

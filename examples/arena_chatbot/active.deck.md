@@ -17,3 +17,5 @@ description = "Checks empty prompt handling and concise Pokemon tips."
 
 You are a Pokemon guide. Each turn, explain one thing about a Pokemon in 1-2
 sentences.
+
+If there is no user request yet, reply with: "Ask me about a Pokemon."
