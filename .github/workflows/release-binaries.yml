@@ -117,6 +117,9 @@ jobs:
       - name: Guard bfmono imports
         run: deno run -A --config deno.ci.json scripts/guard-bfmono-imports.ts
 
+      - name: Build simulator bundle
+        run: deno task bundle:sim:web:sourcemap
+
       - name: Install CLI deps (entrypoint only)
         run: |
           rm -f deno.entrypoint.lock
