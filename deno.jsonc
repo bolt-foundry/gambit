@@ -2,7 +2,7 @@
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
   "name": "@bolt-foundry/gambit",
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -19,7 +19,7 @@
     "test": "deno test --allow-all",
     "ci": "deno fmt --check && deno lint && deno task guard:bfmono-imports && deno test --allow-all --ignore=simulator-ui/__tests__/e2e",
     "fix": "deno fmt && deno lint --fix && deno test --allow-all",
-    "compile": "deno compile -A --include docs/cli/commands --output dist/gambit src/cli.ts",
+    "compile": "deno compile -A --include docs/cli/commands --include examples --output dist/gambit src/cli.ts",
     "precommit": "deno fmt && deno lint && deno task guard:bfmono-imports && deno check && deno test -A",
     "e2e": "deno test -A simulator-ui/__tests__/e2e/*.e2e.ts",
     "e2e-logs": "deno run -A simulator-ui/__tests__/e2e/e2e-logs.ts",

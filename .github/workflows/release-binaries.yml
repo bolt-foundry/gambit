@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runs_on }}
     defaults:
       run:
         shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
@@ -26,16 +26,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - runs_on: blacksmith-4vcpu-ubuntu-2404
             target: x86_64-unknown-linux-gnu
             ext: ""
-          - os: ubuntu-latest
+          - runs_on: blacksmith-4vcpu-ubuntu-2404-arm
             target: aarch64-unknown-linux-gnu
             ext: ""
-          - os: macos-latest
+          - runs_on: blacksmith-4vcpu-ubuntu-2404
             target: x86_64-apple-darwin
             ext: ""
-          - os: macos-latest
+          - runs_on: blacksmith-4vcpu-ubuntu-2404-arm
             target: aarch64-apple-darwin
             ext: ""
 

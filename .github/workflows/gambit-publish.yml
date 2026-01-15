@@ -329,6 +329,63 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Wait for release binaries
+        if: steps.release.outputs.is_release == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          tag="v${version}"
+          api="https://api.github.com/repos/${{ github.repository }}/releases/tags/${tag}"
+          max_attempts=30
+          delay_seconds=20
+          required_assets=(
+            "gambit-darwin-arm64.gz"
+            "gambit-darwin-x64.gz"
+            "gambit-linux-arm64.gz"
+            "gambit-linux-x64.gz"
+            "SHA256SUMS"
+          )
+          for attempt in $(seq 1 "$max_attempts"); do
+            release_json="$(mktemp)"
+            status="$(curl -sS -o "$release_json" -w "%{http_code}" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "$api" || true)"
+            if [ "$status" = "200" ]; then
+              missing="$(RELEASE_JSON="$release_json" REQUIRED_ASSETS="$REQUIRED_ASSETS" deno eval -q --ext=ts '
+                const path = Deno.env.get("RELEASE_JSON");
+                const required = (Deno.env.get("REQUIRED_ASSETS") ?? "")
+                  .split(",")
+                  .filter(Boolean);
+                if (!path) {
+                  throw new Error("RELEASE_JSON env var missing");
+                }
+                const data = JSON.parse(await Deno.readTextFile(path));
+                const assets = (data.assets ?? []).map((asset: { name?: string }) =>
+                  asset?.name
+                );
+                const missing = required.filter((name) => !assets.includes(name));
+                console.log(missing.join("\\n"));
+              ')"
+              if [ -z "$missing" ]; then
+                echo "Release assets present for ${tag}."
+                rm -f "$release_json"
+                break
+              fi
+              echo "Release assets not ready yet (missing: ${missing//$'\n'/, })."
+            else
+              echo "Release ${tag} not ready yet (HTTP ${status})."
+            fi
+            rm -f "$release_json"
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Timed out waiting for release binaries for ${tag}."
+              exit 1
+            fi
+            sleep "$delay_seconds"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUIRED_ASSETS: "gambit-darwin-arm64.gz,gambit-darwin-x64.gz,gambit-linux-arm64.gz,gambit-linux-x64.gz,SHA256SUMS"
+
       - name: Prepare release publish config
         if: steps.release.outputs.is_release == 'true'
         run: |
