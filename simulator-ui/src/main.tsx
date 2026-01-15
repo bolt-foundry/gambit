@@ -121,6 +121,23 @@ type CalibrationRun = {
   error?: string;
 };
 
+type GradingFlag = {
+  id: string;
+  refId: string;
+  runId?: string;
+  turnIndex?: number;
+  reason?: string;
+  createdAt?: string;
+};
+
+type SessionDetailResponse = {
+  sessionId: string;
+  messages: ModelMessage[];
+  messageRefs?: MessageRef[];
+  feedback?: FeedbackEntry[];
+  meta?: Record<string, unknown>;
+};
+
 type CalibrateSession = SessionMeta & {
   gradingRuns?: Array<CalibrationRun>;
 };
@@ -204,6 +221,28 @@ function extractScoreAndReasonFromSample(sample?: {
     score: typeof sample.score === "number" ? sample.score : undefined,
     reason: typeof sample.reason === "string" ? sample.reason : undefined,
   };
+}
+
+function extractGradingFlags(meta?: Record<string, unknown>): GradingFlag[] {
+  if (!meta) return [];
+  const flags = (meta as { gradingFlags?: unknown }).gradingFlags;
+  if (!Array.isArray(flags)) return [];
+  return flags.filter((flag): flag is GradingFlag =>
+    Boolean(flag && typeof flag === "object" && "refId" in flag)
+  );
+}
+
+function formatSnippet(value: unknown, maxLength = 140): string {
+  if (value === null || value === undefined) return "";
+  const text = typeof value === "string" ? value : (() => {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  })();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
 }
 
 function getScoreClass(displayScore?: number): string {
@@ -2665,6 +2704,14 @@ function CalibrateApp() {
   );
   const [selectedGraderId, setSelectedGraderId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [sessionDetail, setSessionDetail] = useState<
+    SessionDetailResponse | null
+  >(null);
+  const [sessionDetailError, setSessionDetailError] = useState<string | null>(
+    null,
+  );
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
+  const [copiedStatePath, setCopiedStatePath] = useState(false);
   const initialCalibrateSessionRef = useRef<string | null>(
     getCalibrateSessionIdFromLocation(),
   );
@@ -2789,6 +2836,44 @@ function CalibrateApp() {
       updateCalibratePath(null);
     }
   }, [selectedSessionId, updateCalibratePath]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setSessionDetail(null);
+      setSessionDetailError(null);
+      setSessionDetailLoading(false);
+      return;
+    }
+    let active = true;
+    const loadSessionDetail = async () => {
+      try {
+        setSessionDetailLoading(true);
+        const res = await fetch(
+          `/api/session?sessionId=${encodeURIComponent(selectedSessionId)}`,
+        );
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        const data = await res.json() as SessionDetailResponse;
+        if (!active) return;
+        setSessionDetail(data);
+        setSessionDetailError(null);
+      } catch (err) {
+        if (!active) return;
+        setSessionDetailError(
+          err instanceof Error ? err.message : "Failed to load session details",
+        );
+        setSessionDetail(null);
+      } finally {
+        if (active) setSessionDetailLoading(false);
+      }
+    };
+    loadSessionDetail();
+    return () => {
+      active = false;
+    };
+  }, [selectedSessionId]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -2947,6 +3032,60 @@ function CalibrateApp() {
     () => runSections.flatMap((section) => section.items),
     [runSections],
   );
+  const runLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    runSections.forEach((section) => {
+      map.set(section.run.id, section.label);
+    });
+    return map;
+  }, [runSections]);
+  const runItemByRefId = useMemo(() => {
+    const map = new Map<string, (typeof runItems)[number]>();
+    runItems.forEach((item) => {
+      map.set(item.refId, item);
+    });
+    return map;
+  }, [runItems]);
+  const gradingFlags = useMemo(
+    () => extractGradingFlags(sessionDetail?.meta),
+    [sessionDetail?.meta],
+  );
+  const gradingFlagByRefId = useMemo(() => {
+    const map = new Map<string, GradingFlag>();
+    gradingFlags.forEach((flag) => {
+      map.set(flag.refId, flag);
+    });
+    return map;
+  }, [gradingFlags]);
+  const flaggedRefSet = useMemo(() => {
+    return new Set(gradingFlags.map((flag) => flag.refId));
+  }, [gradingFlags]);
+  const messageByRefId = useMemo(() => {
+    const map = new Map<string, ModelMessage>();
+    const refs = sessionDetail?.messageRefs ?? [];
+    const messages = sessionDetail?.messages ?? [];
+    refs.forEach((ref, idx) => {
+      if (!ref?.id) return;
+      const message = messages[idx];
+      if (message) map.set(ref.id, message);
+    });
+    return map;
+  }, [sessionDetail?.messageRefs, sessionDetail?.messages]);
+  const feedbackItems = useMemo(() => {
+    const feedback = sessionDetail?.feedback ?? [];
+    const items = feedback.map((entry) => {
+      const message = messageByRefId.get(entry.messageRefId);
+      return {
+        entry,
+        message,
+      };
+    });
+    return items.sort((a, b) => {
+      const aKey = a.entry.createdAt ?? "";
+      const bKey = b.entry.createdAt ?? "";
+      return bKey.localeCompare(aKey);
+    });
+  }, [sessionDetail?.feedback, messageByRefId]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedResults, setExpandedResults] = useState<
     Record<string, boolean>
@@ -2955,6 +3094,10 @@ function CalibrateApp() {
     null,
   );
   const [copiedRef, setCopiedRef] = useState<string | null>(null);
+  const [flagReasonDrafts, setFlagReasonDrafts] = useState<
+    Record<string, string>
+  >({});
+  const flagReasonTimeoutsRef = useRef<Record<string, number>>({});
   const [referenceDrafts, setReferenceDrafts] = useState<
     Record<
       string,
@@ -2985,6 +3128,134 @@ function CalibrateApp() {
     }
     setExpandedRunId((prev) => (prev === latestRunId ? prev : latestRunId));
   }, [runSections]);
+
+  useEffect(() => {
+    return () => {
+      const timers = flagReasonTimeoutsRef.current;
+      Object.values(timers).forEach((handle) => clearTimeout(handle));
+      flagReasonTimeoutsRef.current = {};
+    };
+  }, []);
+
+  const toggleFlag = useCallback(async (item: {
+    refId: string;
+    runId: string;
+    turnIndex?: number;
+  }) => {
+    if (!selectedSessionId) return;
+    try {
+      const res = await fetch("/api/calibrate/flag", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sessionId: selectedSessionId,
+          refId: item.refId,
+          runId: item.runId,
+          turnIndex: item.turnIndex,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = await res.json() as {
+        flags?: GradingFlag[];
+      };
+      if (!data.flags) return;
+      setSessionDetail((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          meta: {
+            ...(prev.meta ?? {}),
+            gradingFlags: data.flags,
+          },
+        };
+      });
+      setFlagReasonDrafts((prev) => {
+        const next = { ...prev };
+        const isNowFlagged = data.flags?.some((flag) =>
+          flag.refId === item.refId
+        );
+        if (!isNowFlagged) {
+          const timers = flagReasonTimeoutsRef.current;
+          if (timers[item.refId]) {
+            clearTimeout(timers[item.refId]);
+            delete timers[item.refId];
+          }
+          delete next[item.refId];
+          return next;
+        }
+        const flag = data.flags?.find((entry) => entry.refId === item.refId);
+        if (flag?.reason) {
+          next[item.refId] = flag.reason;
+        } else {
+          next[item.refId] = "";
+        }
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to flag grader");
+    }
+  }, [selectedSessionId]);
+
+  const updateFlagReason = useCallback(
+    async (refId: string, reason: string) => {
+      if (!selectedSessionId) return;
+      try {
+        const res = await fetch("/api/calibrate/flag/reason", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId: selectedSessionId,
+            refId,
+            reason,
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || res.statusText);
+        }
+        const data = await res.json() as { flags?: GradingFlag[] };
+        if (!data.flags) return;
+        setSessionDetail((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            meta: {
+              ...(prev.meta ?? {}),
+              gradingFlags: data.flags,
+            },
+          };
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save reason");
+      }
+    },
+    [selectedSessionId],
+  );
+
+  const scheduleFlagReasonSave = useCallback((
+    refId: string,
+    reason: string,
+  ) => {
+    const timers = flagReasonTimeoutsRef.current;
+    if (timers[refId]) {
+      clearTimeout(timers[refId]);
+    }
+    timers[refId] = window.setTimeout(() => {
+      updateFlagReason(refId, reason);
+      delete timers[refId];
+    }, 650);
+  }, [updateFlagReason]);
+
+  const handleCopyStatePath = useCallback(() => {
+    const target = selectedSession?.statePath ?? null;
+    if (!target) return;
+    navigator.clipboard?.writeText(target);
+    setCopiedStatePath(true);
+    window.setTimeout(() => setCopiedStatePath(false), 1200);
+  }, [selectedSession?.statePath]);
 
   const runGrader = useCallback(async () => {
     if (!selectedSessionId || !selectedGraderId) return;
@@ -3353,6 +3624,7 @@ function CalibrateApp() {
                                   expandedResults[item.key],
                                 );
                                 const draft = referenceDrafts[item.key];
+                                const isFlagged = flaggedRefSet.has(item.refId);
                                 return (
                                   <div
                                     key={item.key}
@@ -3434,6 +3706,22 @@ function CalibrateApp() {
                                         <div className="calibrate-result-actions">
                                           <button
                                             type="button"
+                                            className={classNames(
+                                              "ghost-btn",
+                                              "calibrate-flag-btn",
+                                              isFlagged && "active",
+                                            )}
+                                            onClick={() =>
+                                              toggleFlag({
+                                                refId: item.refId,
+                                                runId: item.runId,
+                                                turnIndex: item.turnIndex,
+                                              })}
+                                          >
+                                            {isFlagged ? "Flagged" : "Flag"}
+                                          </button>
+                                          <button
+                                            type="button"
                                             className="ghost-btn calibrate-ref-copy"
                                             onClick={() => {
                                               const basePath =
@@ -3507,6 +3795,39 @@ function CalibrateApp() {
                                         </div>
                                       )}
                                     </div>
+                                    {isFlagged && !isPending && (
+                                      <div className="calibrate-flag-reason">
+                                        <label>
+                                          Reason
+                                          <textarea
+                                            value={flagReasonDrafts[
+                                              item.refId
+                                            ] ??
+                                              gradingFlagByRefId.get(item.refId)
+                                                ?.reason ??
+                                              ""}
+                                            placeholder="Why is this flagged?"
+                                            onChange={(e) => {
+                                              const nextReason = e.target.value;
+                                              setFlagReasonDrafts((prev) => ({
+                                                ...prev,
+                                                [item.refId]: nextReason,
+                                              }));
+                                              scheduleFlagReasonSave(
+                                                item.refId,
+                                                nextReason,
+                                              );
+                                            }}
+                                            onBlur={(e) => {
+                                              scheduleFlagReasonSave(
+                                                item.refId,
+                                                e.target.value,
+                                              );
+                                            }}
+                                          />
+                                        </label>
+                                      </div>
+                                    )}
                                     {item.error && (
                                       <div className="error">{item.error}</div>
                                     )}
@@ -3895,6 +4216,114 @@ function CalibrateApp() {
         </div>
         <aside className="calibrate-drawer">
           <h3>Deck & session</h3>
+          <div className="drawer-section">
+            <strong>Ratings & flags</strong>
+            {selectedSession?.statePath && (
+              <>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleCopyStatePath}
+                >
+                  {copiedStatePath ? "Copied" : "Copy state path"}
+                </button>
+                <p className="calibrate-button-meta">
+                  Paste this in your coding assistant to debug the agent.
+                </p>
+              </>
+            )}
+            {sessionDetailLoading && (
+              <div className="placeholder">Loading ratings and flags…</div>
+            )}
+            {sessionDetailError && (
+              <div className="error">{sessionDetailError}</div>
+            )}
+            {!sessionDetailLoading &&
+              !sessionDetailError &&
+              feedbackItems.length === 0 &&
+              gradingFlags.length === 0 && (
+              <div className="placeholder">
+                No ratings or flags yet.
+              </div>
+            )}
+            {feedbackItems.length > 0 && (
+              <div className="calibrate-summary-list">
+                {feedbackItems.map(({ entry, message }) => (
+                  <div
+                    key={`${entry.id}-${entry.messageRefId}`}
+                    className="calibrate-summary-card"
+                  >
+                    <div className="calibrate-summary-title">
+                      Rating {entry.score}
+                    </div>
+                    {entry.reason && (
+                      <div className="calibrate-summary-reason ellipsis">
+                        {entry.reason}
+                      </div>
+                    )}
+                    {message?.content && (
+                      <div className="calibrate-summary-meta ellipsis">
+                        {formatSnippet(message.content)}
+                      </div>
+                    )}
+                    {entry.createdAt && (
+                      <div className="calibrate-summary-meta ellipsis">
+                        {formatTimestampShort(entry.createdAt)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {gradingFlags.length > 0 && (
+              <div className="calibrate-summary-list">
+                {gradingFlags.map((flag) => {
+                  const runLabel = flag.runId
+                    ? runLabelById.get(flag.runId)
+                    : undefined;
+                  const flaggedItem = runItemByRefId.get(flag.refId);
+                  const turnLabel = flaggedItem?.turnNumber
+                    ? `Turn ${flaggedItem.turnNumber}`
+                    : undefined;
+                  return (
+                    <div
+                      key={flag.id}
+                      className="calibrate-summary-card calibrate-flag-card"
+                    >
+                      <div className="calibrate-summary-title">
+                        Flagged grader
+                      </div>
+                      {runLabel && (
+                        <div className="calibrate-summary-meta ellipsis">
+                          {runLabel}
+                        </div>
+                      )}
+                      {turnLabel && (
+                        <div className="calibrate-summary-meta ellipsis">
+                          {turnLabel}
+                        </div>
+                      )}
+                      {!runLabel && (
+                        <div className="calibrate-summary-meta ellipsis">
+                          {flag.refId}
+                        </div>
+                      )}
+                      {flag.reason && (
+                        <div className="calibrate-summary-reason ellipsis">
+                          {flag.reason}
+                        </div>
+                      )}
+                      {flag.createdAt && (
+                        <div className="calibrate-summary-meta ellipsis ">
+                          {formatTimestampShort(flag.createdAt)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="drawer-section">
             <strong>Deck reference</strong>
             <CopyBadge
@@ -4774,13 +5203,6 @@ function TestBotApp(props: {
               >
                 Stop
               </button>
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={() => refreshStatus()}
-              >
-                Refresh
-              </button>
             </div>
           </div>
           {run.error && <div className="error">{run.error}</div>}
@@ -5165,12 +5587,7 @@ function App() {
         </div>
         <div className="page-shell">
           {currentPage === "docs"
-            ? (
-              <DocsPage
-                deckDisplayPath={deckDisplayPath}
-                deckAbsolutePath={normalizedDeckPath}
-              />
-            )
+            ? <DocsPage />
             : currentPage === "debug"
             ? <SimulatorApp basePath={simulatorBasePath} />
             : currentPage === "test-bot"

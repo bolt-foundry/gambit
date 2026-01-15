@@ -5,7 +5,7 @@ since = "225456917f75e92cc095af525201373c4be37944"
 
 # Changelog
 
-## Unreleased (v0.6.8)
+## Unreleased (v0.6.9)
 
 - Repl fixes.
 - Replaced voice front desk graders and expanded FAQ persona/grading coverage.
