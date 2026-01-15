@@ -1,4 +1,4 @@
-import { z } from "npm:zod@^3.23.8";
+import { z } from "npm:zod";
 
 export default z.object({
   draft: z.string().min(1).describe("Email draft to critique"),
