@@ -28,7 +28,7 @@ If you can run it, you can inspect it. That is the core promise.
 ## Tactical walkthrough script
 
 Start from a local checkout. In `packages/gambit`, run
-`deno run -A src/cli.ts serve examples/voice_front_desk/decks/root.deck.md --port 8000`,
+`deno run -A src/cli.ts serve examples/advanced/voice_front_desk/decks/root.deck.md --port 8000`,
 then open `http://localhost:8000/test-bot`.
 
 In Test Bot, select the New patient intake persona. Fill the scenario

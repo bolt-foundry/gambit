@@ -142,7 +142,7 @@ const DEFAULT_SERVER_COMMAND = [
   "-A",
   "src/cli.ts",
   "serve",
-  "examples/voice_front_desk/decks/root.deck.md",
+  "examples/advanced/voice_front_desk/decks/root.deck.md",
   "--bundle",
 ];
 

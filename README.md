@@ -21,7 +21,7 @@ Downloads example files and sets environment variables.
 Run an example in the terminal (`repl`):
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli repl examples/hello.deck.md
+deno run -A jsr:@bolt-foundry/gambit/cli repl examples/init/hello.deck.md
 ```
 
 This example just says "hello" and repeats your message back to you.
@@ -29,7 +29,7 @@ This example just says "hello" and repeats your message back to you.
 Run an example in the browser (`serve`):
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli serve examples/hello.deck.md
+deno run -A jsr:@bolt-foundry/gambit/cli serve examples/init/hello.deck.md
 open http://localhost:8000/debug
 ```
 
