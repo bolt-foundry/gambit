@@ -2,11 +2,12 @@
 label = "monolog_child"
 modelParams = { model = "openai/gpt-4o", temperature = 0 }
 guardrails = { maxPasses = 200 }
-actionDecks = [
-  { name = "lookup_fact", path = "./lookup_fact.deck.ts", description = "Return a short factoid to help answer the question." },
-]
 inputSchema = "./schemas/child_input.zod.ts"
 outputSchema = "./schemas/child_output.zod.ts"
+[[actionDecks]]
+name = "lookup_fact"
+path = "./lookup_fact.deck.ts"
+description = "Return a short factoid to help answer the question."
 +++
 
 ![respond](gambit://respond)

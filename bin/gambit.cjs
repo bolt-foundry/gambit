@@ -161,6 +161,9 @@ const verifyChecksum = async (checksumUrl, assetName, filePath) => {
 
 const main = async () => {
   const version = getPackageVersion();
+  if (!process.env.GAMBIT_VERSION) {
+    process.env.GAMBIT_VERSION = version;
+  }
   const assetName = process.env.GAMBIT_BINARY_NAME || getPlatformAsset();
   if (!assetName) {
     console.error(

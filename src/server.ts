@@ -2486,6 +2486,7 @@ export function startWebSocketSimulator(opts: {
         url.pathname.startsWith("/simulate") ||
         url.pathname.startsWith("/debug") ||
         url.pathname.startsWith("/editor") ||
+        url.pathname.startsWith("/docs") ||
         url.pathname.startsWith("/test-bot") ||
         url.pathname.startsWith("/calibrate")
       ) {

@@ -1,11 +1,43 @@
-import * as path from "@std/path";
 import { parseArgs } from "@std/cli/parse-args";
+import * as path from "@std/path";
+import { parse as parseToml } from "@std/toml";
 import { normalizeFlagList, parsePortValue } from "./cli_utils.ts";
 
 const logger = console;
 
+const COMMANDS = [
+  "init",
+  "run",
+  "repl",
+  "serve",
+  "test-bot",
+  "grade",
+  "export",
+] as const;
+
+type Command = typeof COMMANDS[number];
+
+function isKnownCommand(cmd?: string): cmd is Command {
+  return COMMANDS.includes(cmd as Command);
+}
+
+const HELP_COMMANDS = [
+  "init",
+  "run",
+  "repl",
+  "serve",
+  "test-bot",
+  "grade",
+] as const;
+
+type HelpCommand = typeof HELP_COMMANDS[number];
+
+function isHelpCommand(cmd?: string): cmd is HelpCommand {
+  return HELP_COMMANDS.includes(cmd as HelpCommand);
+}
+
 type Args = {
-  cmd: "run" | "repl" | "serve" | "test-bot" | "grade" | "export";
+  cmd: Command | "help";
   deckPath?: string;
   exportDeckPath?: string;
   testDeckPath?: string;
@@ -29,6 +61,15 @@ type Args = {
   sourcemap?: boolean;
   platform?: string;
   help?: boolean;
+  version?: boolean;
+};
+
+type CommandDoc = {
+  command: Command;
+  summary: string;
+  usage: string;
+  flags: Array<string>;
+  details: string;
 };
 
 function resolveBundledPath(specifier: string): string | null {
@@ -43,19 +84,94 @@ function resolveBundledPath(specifier: string): string | null {
   return null;
 }
 
-const DEFAULT_REPL_DECK_PATH = resolveBundledPath(
-  "./decks/gambit-assistant.deck.md",
-);
+const COMMAND_DOC_ROOT = "../docs/cli/commands";
 
-export function resolveDefaultReplDeckPath(): string | null {
-  if (!DEFAULT_REPL_DECK_PATH) {
-    logger.error(
-      "Default REPL deck is unavailable when running from a remote URL. " +
-        "Pass a deck path (e.g. src/decks/gambit-assistant.deck.md) or run from a local checkout.",
-    );
-    return null;
+function resolveCommandDocPath(cmd: Command): string | null {
+  return resolveBundledPath(`${COMMAND_DOC_ROOT}/${cmd}.md`);
+}
+
+function parseTomlFrontMatter(
+  text: string,
+): { data: Record<string, unknown>; body: string } | null {
+  const lines = text.split(/\r?\n/);
+  if (lines[0] !== "+++") return null;
+  const endIndex = lines.indexOf("+++", 1);
+  if (endIndex === -1) return null;
+  const tomlText = lines.slice(1, endIndex).join("\n");
+  const body = lines.slice(endIndex + 1).join("\n");
+  const data = parseToml(tomlText) as Record<string, unknown>;
+  return { data, body };
+}
+
+function normalizeCommandDocField(
+  value: unknown,
+): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed;
+}
+
+function normalizeCommandDocFlags(
+  value: unknown,
+): Array<string> {
+  if (!Array.isArray(value)) return [];
+  const flags = value.filter((item): item is string =>
+    typeof item === "string" && item.trim() !== ""
+  );
+  return flags;
+}
+
+function loadCommandDoc(cmd: HelpCommand): CommandDoc {
+  const docPath = resolveCommandDocPath(cmd);
+  if (!docPath) {
+    throw new Error(`Missing command doc for "${cmd}".`);
   }
-  return DEFAULT_REPL_DECK_PATH;
+  const text = Deno.readTextFileSync(docPath);
+  const parsed = parseTomlFrontMatter(text);
+  if (!parsed) {
+    throw new Error(`Missing TOML front matter in ${docPath}.`);
+  }
+  const summary = normalizeCommandDocField(parsed.data.summary);
+  const usage = normalizeCommandDocField(parsed.data.usage);
+  const flags = normalizeCommandDocFlags(parsed.data.flags);
+  if (!summary || !usage) {
+    throw new Error(`Command doc ${docPath} is missing required fields.`);
+  }
+  const details = parsed.body.trim();
+  return {
+    command: cmd,
+    summary,
+    usage,
+    flags,
+    details,
+  };
+}
+
+function loadCommandDocs(): Array<CommandDoc> {
+  return HELP_COMMANDS.map(loadCommandDoc);
+}
+
+function formatIndentedBlock(text: string, indent: string): string {
+  return text.split("\n").map((line) => (line ? `${indent}${line}` : line))
+    .join("\n");
+}
+
+function formatCommandDoc(doc: CommandDoc, includeDetails: boolean): string {
+  const lines: Array<string> = [];
+  lines.push("Usage:");
+  lines.push(formatIndentedBlock(doc.usage, "  "));
+  if (doc.flags.length > 0) {
+    lines.push("");
+    lines.push("Flags:");
+    for (const flag of doc.flags) {
+      lines.push(formatIndentedBlock(flag, "  "));
+    }
+  }
+  if (includeDetails && doc.details) {
+    lines.push("");
+    lines.push(doc.details);
+  }
+  return lines.join("\n");
 }
 
 export function parseCliArgs(argv: Array<string>): Args {
@@ -64,6 +180,7 @@ export function parseCliArgs(argv: Array<string>): Args {
       "stream",
       "verbose",
       "help",
+      "version",
       "watch",
       "bundle",
       "no-bundle",
@@ -88,6 +205,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     ],
     alias: {
       help: "h",
+      version: "V",
     },
     default: {
       stream: false,
@@ -140,45 +258,56 @@ export function parseCliArgs(argv: Array<string>): Args {
     sourcemap: hasNoSourceMapFlag ? false : hasSourceMapFlag ? true : undefined,
     platform: parsed.platform as string | undefined,
     help: Boolean(parsed.help),
+    version: Boolean(parsed.version),
   };
 }
 
 export function printUsage() {
-  logger.log(
-    `Usage:
-  gambit run [<deck.(ts|md)>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]
-  gambit repl [<deck.(ts|md)>] [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]
-  gambit serve [<deck.(ts|md)>] [--model <id>] [--model-force <id>] [--port <n>] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]
-  gambit test-bot <root-deck.(ts|md)> --test-deck <persona-deck.(ts|md)> [--init <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck.(ts|md)> ...] [--trace <file>] [--verbose]
-  gambit grade <grader-deck.(ts|md)> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]
-  gambit export [<deck.(ts|md)>] --state <file> --out <bundle.tar.gz>
-
-Flags:
-  --init <json|string>    Init payload (when provided, sent via gambit_init)
-  --message <json|string> Initial user message (sent before assistant speaks)
-  --test-deck <path>      Persona/test deck path (test-bot only)
-  --grade <path>          Grader deck path (repeatable, test-bot only)
-  --grader <path>         Grader deck path (grade only; overrides positional)
-  --bot-input <json|string> Input payload for the persona deck (test-bot only)
-  --max-turns <n>         Max turns for test-bot (default: 12)
-  --model <id>            Default model id
-  --model-force <id>      Override model id
-  --trace <file>          Write trace events to file (JSONL)
-  --state <file>          Load/persist state (run/test-bot) or export from state (export)
-  --stream                Enable streaming responses
-  --verbose               Print trace events to console
-  --out <file>            Bundle output path (export)
-  --port <n>              Port for serve (default: 8000)
-  --watch                 Restart server on file changes (serve)
-  --bundle                Force auto-bundling (serve; default)
-  --no-bundle             Disable auto-bundling for simulator UI (serve)
-  --sourcemap             Generate external source maps (serve; default)
-  --no-sourcemap          Disable source map generation (serve)
-  --platform <platform>   Bundle target platform: deno (default) or web (browser)
-  -h, --help              Show this help
-  repl default deck       src/decks/gambit-assistant.deck.md
-`,
-  );
+  const docs = loadCommandDocs();
+  const lines: Array<string> = [];
+  lines.push("Usage:");
+  lines.push("  gambit <command> [options]");
+  lines.push("  gambit help [command]");
+  lines.push("");
+  lines.push("Commands:");
+  for (const doc of docs) {
+    lines.push(`  ${doc.command.padEnd(9)} ${doc.summary}`);
+  }
+  lines.push("");
+  lines.push("Help:");
+  lines.push("  gambit help <command>   Show command-specific help");
+  lines.push("  gambit help --verbose   Show full usage and all flags");
+  lines.push("");
+  lines.push("Details:");
+  for (const doc of docs) {
+    lines.push("");
+    lines.push(formatCommandDoc(doc, true));
+  }
+  logger.log(lines.join("\n"));
 }
 
-export type { Args };
+export function printShortUsage() {
+  const docs = loadCommandDocs();
+  const lines: Array<string> = [];
+  lines.push("Usage:");
+  lines.push("  gambit <command> [options]");
+  lines.push("  gambit help [command]");
+  lines.push("");
+  lines.push("Commands:");
+  for (const doc of docs) {
+    lines.push(`  ${doc.command.padEnd(9)} ${doc.summary}`);
+  }
+  lines.push("");
+  lines.push("Help:");
+  lines.push("  gambit help <command>   Show command-specific help");
+  lines.push("  gambit help --verbose   Show full usage and all flags");
+  logger.log(lines.join("\n"));
+}
+
+export function printCommandUsage(cmd: HelpCommand) {
+  const doc = loadCommandDoc(cmd);
+  logger.log(formatCommandDoc(doc, true));
+}
+
+export type { Args, Command };
+export { COMMANDS, HELP_COMMANDS, isHelpCommand, isKnownCommand };
