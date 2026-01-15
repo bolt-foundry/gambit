@@ -14,6 +14,8 @@ const baseArgs = [
   "docs/cli/commands",
   "--include",
   "examples/init",
+  "--include",
+  "simulator-ui/dist",
 ];
 
 const extraArgs = Deno.args.filter((arg) => arg !== "--");
