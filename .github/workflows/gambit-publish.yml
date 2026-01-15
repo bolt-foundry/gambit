@@ -269,7 +269,6 @@ jobs:
           init_template="packages/gambit/examples/init/deno.json"
           if [ -f "$init_template" ]; then
             cp "$init_template" "${init_template}.publish-backup"
-            rm -f "$init_template"
           fi
           trap 'mv "${gambit_config}.publish-backup" "$gambit_config"; mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json; if [ -f "${init_template}.publish-backup" ]; then mv "${init_template}.publish-backup" "$init_template"; fi' EXIT
           deno eval --ext=ts '
@@ -314,6 +313,20 @@ jobs:
             init.dependencies["@bolt-foundry/gambit-core"] =
               `npm:@bolt-foundry/gambit-core@${version}`;
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
+
+            const initDenoPath = "packages/gambit/examples/init/deno.json";
+            try {
+              const initDeno = JSON.parse(await Deno.readTextFile(initDenoPath));
+              initDeno.imports ??= {};
+              initDeno.imports["@bolt-foundry/gambit-core"] =
+                `jsr:@bolt-foundry/gambit-core@${version}`;
+              await Deno.writeTextFile(
+                initDenoPath,
+                JSON.stringify(initDeno, null, 2) + "\n",
+              );
+            } catch (err) {
+              if (!(err instanceof Deno.errors.NotFound)) throw err;
+            }
           '
           (cd packages/gambit-core && deno publish --allow-dirty)
           deno publish --allow-dirty
@@ -411,7 +424,6 @@ jobs:
           init_template="packages/gambit/examples/init/deno.json"
           if [ -f "$init_template" ]; then
             cp "$init_template" "${init_template}.publish-backup"
-            rm -f "$init_template"
           fi
           deno eval --ext=ts '
             import { parse } from "jsr:@std/jsonc@1";
@@ -455,6 +467,20 @@ jobs:
             init.dependencies["@bolt-foundry/gambit-core"] =
               `npm:@bolt-foundry/gambit-core@${version}`;
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
+
+            const initDenoPath = "packages/gambit/examples/init/deno.json";
+            try {
+              const initDeno = JSON.parse(await Deno.readTextFile(initDenoPath));
+              initDeno.imports ??= {};
+              initDeno.imports["@bolt-foundry/gambit-core"] =
+                `jsr:@bolt-foundry/gambit-core@${version}`;
+              await Deno.writeTextFile(
+                initDenoPath,
+                JSON.stringify(initDeno, null, 2) + "\n",
+              );
+            } catch (err) {
+              if (!(err instanceof Deno.errors.NotFound)) throw err;
+            }
           '
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
