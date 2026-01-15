@@ -17,6 +17,10 @@ export async function handleServeCommand(opts: {
   sourcemap?: boolean;
   platform?: string;
 }) {
+  const envMode = (Deno.env.get("GAMBIT_ENV") ?? Deno.env.get("NODE_ENV") ?? "")
+    .toLowerCase();
+  const isDevEnv = envMode === "development" || envMode === "dev" ||
+    envMode === "local";
   const envPort = parsePortValue(Deno.env.get("PORT"), "PORT");
   const port = opts.port ?? envPort ?? 8000;
   const bundlePlatform = (() => {
@@ -27,8 +31,8 @@ export async function handleServeCommand(opts: {
       `Invalid --platform ${opts.platform}; expected deno or web`,
     );
   })();
-  const autoBundle = opts.bundle ?? true;
-  const sourceMap = opts.sourcemap ?? true;
+  const autoBundle = opts.bundle ?? isDevEnv;
+  const sourceMap = opts.sourcemap ?? autoBundle;
   if (!autoBundle && sourceMap) {
     throw new Error(
       "--sourcemap requires bundling; remove --no-bundle or add --no-sourcemap.",

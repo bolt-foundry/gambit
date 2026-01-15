@@ -5,6 +5,9 @@
  * @module
  */
 import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
+import { parse } from "@std/jsonc";
+import * as path from "@std/path";
+import { load as loadDotenv } from "@std/dotenv";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
 import { handleRunCommand } from "./commands/run.ts";
@@ -12,53 +15,147 @@ import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
 import { runGraderAgainstState } from "./commands/grade.ts";
 import { exportBundle } from "./commands/export.ts";
+import { handleInitCommand } from "./commands/init.ts";
 import { parseBotInput, parseInit, parseMessage } from "./cli_utils.ts";
 import {
+  isHelpCommand,
+  isKnownCommand,
   parseCliArgs,
+  printCommandUsage,
+  printShortUsage,
   printUsage,
-  resolveDefaultReplDeckPath,
 } from "./cli_args.ts";
 
 const logger = console;
 
+async function readVersionFromConfig(
+  configPath: string,
+): Promise<string | null> {
+  try {
+    const text = await Deno.readTextFile(configPath);
+    const data = parse(text) as { version?: string };
+    const version = typeof data.version === "string" ? data.version.trim() : "";
+    return version || null;
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function resolveCliVersion(): Promise<string> {
+  const envVersion = Deno.env.get("GAMBIT_VERSION");
+  if (envVersion) {
+    return envVersion.trim() || "unknown";
+  }
+  const candidates = ["../deno.jsonc", "../deno.json"];
+  for (const rel of candidates) {
+    const url = new URL(rel, import.meta.url);
+    if (url.protocol !== "file:") continue;
+    const configPath = path.fromFileUrl(url);
+    const version = await readVersionFromConfig(configPath);
+    if (version) return version;
+  }
+  return "unknown";
+}
+
+async function loadGambitEnv() {
+  const envPath = path.resolve(Deno.cwd(), "gambit", ".env");
+  try {
+    await loadDotenv({ envPath, export: true });
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) {
+      throw err;
+    }
+  }
+}
+
 async function main() {
   try {
+    await loadGambitEnv();
     const args = parseCliArgs(Deno.args);
-    if (args.help || !args.cmd) {
-      printUsage();
-      Deno.exit(args.cmd ? 0 : 1);
+    if (args.version) {
+      logger.log(await resolveCliVersion());
+      return;
     }
-    if (
-      !["run", "repl", "serve", "test-bot", "grade", "export"].includes(
-        args.cmd,
-      )
-    ) {
-      logger.error(
-        "Only `run`, `repl`, `serve`, `test-bot`, `grade`, and `export` are supported",
-      );
-      printUsage();
+
+    if (args.cmd && args.cmd !== "help" && !isKnownCommand(args.cmd)) {
+      logger.error(`Unknown command "${args.cmd}".`);
+      logger.error(`Run "gambit help" to see available commands.`);
       Deno.exit(1);
     }
 
-    const deckPath = args.deckPath ??
-      args.exportDeckPath ??
-      (args.cmd === "repl" ? resolveDefaultReplDeckPath() ?? "" : "");
+    if (args.help) {
+      const helpTarget = args.cmd === "help" ? args.deckPath : args.cmd;
+      if (!helpTarget) {
+        if (args.verbose) {
+          printUsage();
+        } else {
+          printShortUsage();
+        }
+        Deno.exit(0);
+      }
+      if (!isKnownCommand(helpTarget)) {
+        logger.error(`Unknown command "${helpTarget}".`);
+        logger.error(`Run "gambit help" to see available commands.`);
+        Deno.exit(1);
+      }
+      if (!isHelpCommand(helpTarget)) {
+        logger.error(`Help for "${helpTarget}" is not available yet.`);
+        logger.error(`Run "gambit help" to see available commands.`);
+        Deno.exit(1);
+      }
+      printCommandUsage(helpTarget);
+      Deno.exit(0);
+    }
+
+    if (!args.cmd) {
+      printShortUsage();
+      Deno.exit(1);
+    }
+
+    if (args.cmd === "help") {
+      if (!args.deckPath) {
+        if (args.verbose) {
+          printUsage();
+        } else {
+          printShortUsage();
+        }
+        return;
+      }
+      if (!isKnownCommand(args.deckPath)) {
+        logger.error(`Unknown command "${args.deckPath}".`);
+        logger.error(`Run "gambit help" to see available commands.`);
+        Deno.exit(1);
+      }
+      if (!isHelpCommand(args.deckPath)) {
+        logger.error(`Help for "${args.deckPath}" is not available yet.`);
+        logger.error(`Run "gambit help" to see available commands.`);
+        Deno.exit(1);
+      }
+      printCommandUsage(args.deckPath);
+      return;
+    }
+
+    if (args.cmd === "init") {
+      await handleInitCommand();
+      return;
+    }
+
+    const deckPath = args.deckPath ?? args.exportDeckPath ?? "";
+
+    if (args.cmd === "repl" && !args.deckPath) {
+      printCommandUsage("repl");
+      return;
+    }
 
     if (!deckPath && args.cmd !== "grade" && args.cmd !== "export") {
       printUsage();
       Deno.exit(1);
     }
 
-    if (!args.deckPath && args.cmd === "repl") {
-      try {
-        await Deno.stat(deckPath);
-      } catch {
-        logger.error(
-          `Default REPL deck not found at ${deckPath}. Pass a deck path explicitly.`,
-        );
-        Deno.exit(1);
-      }
-    } else if (args.cmd === "grade") {
+    if (args.cmd === "grade") {
       const graderPath = args.graderPath ?? deckPath;
       if (!graderPath) {
         logger.error("grade requires a grader deck path.");

@@ -4,6 +4,12 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 
 ## Commands
 
+- Init starter folder: `deno run -A src/cli.ts init`.
+- Help and usage:
+  - General usage: `deno run -A src/cli.ts help` (or `-h` / `--help`).
+  - Full usage: `deno run -A src/cli.ts help --verbose`.
+  - Command help: `deno run -A src/cli.ts help <command>` (or
+    `deno run -A src/cli.ts <command> -h`).
 - Run once:
   `deno run -A src/cli.ts run <deck> [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
@@ -49,7 +55,8 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - `--port <n>` overrides debug UI port (default 8000); `PORT` env is honored
   when `--port` is not provided.
 - `serve` auto-builds the debug UI bundle on every start and generates source
-  maps by default.
+  maps by default in dev environments (set `GAMBIT_ENV=development` or
+  `NODE_ENV=development`, or pass `--bundle`/`--sourcemap` explicitly).
 - `--no-bundle` (serve only): disable auto-bundling.
 - `--no-sourcemap` (serve only): disable source map generation.
 - `--bundle` / `--sourcemap` (serve only): explicitly enable bundling or source

@@ -84,10 +84,10 @@ code:not(pre *) {
 }
 button.ghost-btn,
 a.ghost-btn {
-  border: 1px solid #cbd5e1;
+  border: 1px solid transparent;
   border-radius: 10px;
   padding: 8px 14px;
-  background: white;
+  background: transparent;
   cursor: pointer;
   font-weight: 600;
   text-decoration: none;
@@ -96,6 +96,11 @@ a.ghost-btn {
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+button.ghost-btn:hover,
+a.ghost-btn:hover {
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
 }
 button.primary,
 a.primary {
@@ -111,6 +116,11 @@ a.primary {
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+button.primary:hover,
+a.primary:hover {
+  background: #0a83e0;
+  border-color: #0a83e0;
 }
 button.primary:disabled {
   opacity: 0.6;
@@ -139,6 +149,9 @@ button.primary:disabled {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
   color: #0f172a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .copy-badge .copy-label {
   font-weight: 600;
@@ -1167,6 +1180,15 @@ button.primary:disabled {
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 600;
+}
+.top-nav button.top-nav-link {
+  border-color: transparent;
+  background: transparent;
+  color: #0f172a;
+}
+.top-nav button.top-nav-link:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 .top-nav button.active {
   background: #0b93f6;

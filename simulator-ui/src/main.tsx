@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import { classNames, formatTimestamp, formatTimestampShort } from "./utils.ts";
 
@@ -76,24 +77,6 @@ type SessionNotes = {
 type SessionRating = {
   score: number;
   updatedAt?: string;
-};
-
-type SessionState = {
-  messages?: ModelMessage[];
-  messageRefs?: MessageRef[];
-  notes?: SessionNotes;
-};
-
-type SessionContextWindow = {
-  sessionId: string;
-  targetIndex: number;
-  start: number;
-  end: number;
-  messages: Array<{
-    role: string;
-    content?: string | null;
-    id?: string;
-  }>;
 };
 
 type TraceEvent = {
@@ -373,28 +356,6 @@ type TestBotConfigResponse = {
   defaults?: { input?: unknown } | null;
 };
 
-type AssistantChatMessage = {
-  role: "user" | "assistant" | "system";
-  content: string;
-};
-
-type ReplaceRangeEdit = {
-  start: number;
-  end: number;
-  text: string;
-};
-
-type PatchProposal = {
-  summary: string;
-  edits: ReplaceRangeEdit[];
-};
-
-type EditorAssistantResponse = {
-  messages?: Array<{ role?: string; content?: string | null }>;
-  patch?: PatchProposal;
-  error?: string;
-};
-
 type SimulatorMessage =
   | {
     type: "ready";
@@ -432,12 +393,6 @@ const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
 const CALIBRATE_STREAM_ID = "gambit-calibrate";
-const GAMBIT_MESSAGING_SPINE_DOC =
-  "/@fs/bolt-foundry/bfmono/docs/internal/_memos/2-areas/marketing/gambit-messaging/2025-12-31-gambit-messaging-spine.md";
-const GAMBIT_PACKAGE_README =
-  "/@fs/bolt-foundry/bfmono/packages/gambit/README.md";
-const GAMBIT_CLI_DOC = "/@fs/bolt-foundry/bfmono/packages/gambit/docs/cli.md";
-
 function getDurableStreamOffset(streamId: string): number {
   try {
     const raw = window.localStorage.getItem(
@@ -756,12 +711,6 @@ function useSessions() {
   return { sessions, loading, error, refresh, deleteSession };
 }
 
-function pathDirname(p: string): string {
-  const parts = p.split(/[/\\]+/);
-  parts.pop();
-  return parts.join("/") || ".";
-}
-
 function toDeckSlug(input: string): string {
   const base = input?.split(/[/\\]/).pop() || "deck";
   const withoutExt = base.replace(/\.[^.]+$/, "");
@@ -946,73 +895,6 @@ function CopyBadge(props: {
       {copied && <span className="copy-feedback">Copied</span>}
     </button>
   );
-}
-
-function normalizePatchProposal(
-  raw: unknown,
-): { patch?: PatchProposal; error?: string } {
-  if (!raw || typeof raw !== "object") {
-    return { error: "Patch payload missing" };
-  }
-  const summary = (raw as { summary?: unknown }).summary;
-  const editsRaw = (raw as { edits?: unknown }).edits;
-  if (typeof summary !== "string") {
-    return { error: "Patch summary is missing" };
-  }
-  if (!Array.isArray(editsRaw)) {
-    return { error: "Patch edits are missing" };
-  }
-  const edits: ReplaceRangeEdit[] = [];
-  for (let i = 0; i < editsRaw.length; i++) {
-    const edit = editsRaw[i] as {
-      start?: unknown;
-      end?: unknown;
-      text?: unknown;
-    };
-    const start = typeof edit.start === "number"
-      ? edit.start
-      : Number(edit.start);
-    const end = typeof edit.end === "number" ? edit.end : Number(edit.end);
-    const text = edit.text;
-    if (
-      !Number.isFinite(start) || !Number.isFinite(end) ||
-      typeof text !== "string"
-    ) {
-      return { error: `Edit ${i + 1} is invalid` };
-    }
-    if (start < 0 || end < 0 || end < start) {
-      return { error: `Edit ${i + 1} has invalid bounds` };
-    }
-    if (i > 0 && start < edits[i - 1].end) {
-      return {
-        error: "Edits must be sorted and non-overlapping",
-      };
-    }
-    edits.push({ start, end, text });
-  }
-  return { patch: { summary, edits } };
-}
-
-function applyPatchProposal(
-  content: string,
-  patch: PatchProposal,
-): { ok: true; next: string } | { ok: false; error: string } {
-  let cursor = 0;
-  let next = "";
-  for (let i = 0; i < patch.edits.length; i++) {
-    const edit = patch.edits[i];
-    if (edit.start < cursor) {
-      return { ok: false, error: "Edits overlap; cannot apply patch" };
-    }
-    if (edit.start > content.length || edit.end > content.length) {
-      return { ok: false, error: `Edit ${i + 1} is out of bounds` };
-    }
-    next += content.slice(cursor, edit.start);
-    next += edit.text;
-    cursor = edit.end;
-  }
-  next += content.slice(cursor);
-  return { ok: true, next };
 }
 
 function getPathValue(value: unknown, path: string[]): unknown {
@@ -4083,14 +3965,12 @@ function CalibrateApp() {
 }
 
 function TestBotApp(props: {
-  onNavigateToSimulator: () => void;
   onNavigateToSession: (sessionId: string) => void;
   onReplaceTestBotSession: (sessionId: string) => void;
   onResetTestBotSession: () => void;
   activeSessionId: string | null;
 }) {
   const {
-    onNavigateToSimulator,
     onNavigateToSession,
     onReplaceTestBotSession,
     onResetTestBotSession,
@@ -4775,9 +4655,6 @@ function TestBotApp(props: {
           <button type="button" className="primary" onClick={handleNewChat}>
             New chat
           </button>
-          <button type="button" onClick={onNavigateToSimulator}>
-            Open debug
-          </button>
         </div>
       </div>
       <div className="editor-main">
@@ -4866,34 +4743,45 @@ function TestBotApp(props: {
           className="editor-panel"
           style={{ display: "flex", flexDirection: "column", gap: 8 }}
         >
-          <strong>Latest test run</strong>
-          <div className="editor-status">{runStatusLabel}</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              className="primary"
-              onClick={startRun}
-              disabled={!canStart}
-              data-testid="testbot-run"
+          <div style={{ display: "flex", flexDirection: "row", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+              <strong>Latest test run</strong>
+              <div className="editor-status">{runStatusLabel}</div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row-reverse",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
             >
-              Run test bot
-            </button>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={stopRun}
-              disabled={run.status !== "running"}
-              data-testid="testbot-stop"
-            >
-              Stop
-            </button>
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => refreshStatus()}
-            >
-              Refresh
-            </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={startRun}
+                disabled={!canStart}
+                data-testid="testbot-run"
+              >
+                Run test bot
+              </button>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={stopRun}
+                disabled={run.status !== "running"}
+                data-testid="testbot-stop"
+              >
+                Stop
+              </button>
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={() => refreshStatus()}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
           {run.error && <div className="error">{run.error}</div>}
           {run.sessionId && (
@@ -5162,203 +5050,6 @@ function normalizeAppPath(input: string): string {
   return trimmed || DEFAULT_SESSION_PATH;
 }
 
-type DocsPageProps = {
-  deckDisplayPath: string;
-  deckAbsolutePath: string;
-  onNavigateToTestBot: () => void;
-  onNavigateToDebug: () => void;
-  onNavigateToCalibrate: () => void;
-};
-
-function DocsPage(props: DocsPageProps) {
-  const {
-    deckDisplayPath,
-    deckAbsolutePath,
-    onNavigateToTestBot,
-    onNavigateToDebug,
-    onNavigateToCalibrate,
-  } = props;
-  const [deckSource, setDeckSource] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/deck-source");
-        if (!res.ok) throw new Error(res.statusText);
-        const body = await res.json() as {
-          path?: string;
-          content?: string;
-          error?: string;
-        };
-        if (cancelled) return;
-        if (body.error) {
-          setError(body.error);
-          setDeckSource(body.content ?? null);
-        } else {
-          setDeckSource(body.content ?? "");
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load deck");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const handle = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(handle);
-  }, [copied]);
-
-  const runCommand = useMemo(() => {
-    const target = deckDisplayPath || deckAbsolutePath;
-    return `deno run -A src/cli.ts serve "${target}" --port 8000`;
-  }, [deckDisplayPath, deckAbsolutePath]);
-
-  const handleCopyPath = useCallback(async () => {
-    try {
-      await navigator.clipboard?.writeText(deckAbsolutePath);
-      setCopied(true);
-    } catch {
-      setCopied(true);
-    }
-  }, [deckAbsolutePath]);
-
-  return (
-    <div className="docs-shell">
-      <section className="docs-hero">
-        <p>
-          <strong>Gambit makes LLM workflows feel like software.</strong>{" "}
-          Build typed decks, run them locally, and verify the results with test
-          and grader decks.
-        </p>
-        <p>
-          That framing comes straight from{" "}
-          <a
-            href={GAMBIT_MESSAGING_SPINE_DOC}
-            target="_blank"
-            rel="noreferrer"
-          >
-            the Gambit messaging spine
-          </a>{" "}
-          so the simulator, docs, and demos all share the same Build → Run →
-          Verify story.
-        </p>
-      </section>
-      <section className="docs-grid">
-        <article className="docs-card">
-          <h3>Build</h3>
-          <p>
-            Use your editor (VS Code, Cursor, Codex Cloud, etc.) to edit decks
-            directly in the repo. The active deck for this run lives at{" "}
-            <code>{deckDisplayPath}</code>.
-          </p>
-        </article>
-        <article className="docs-card">
-          <h3>Run</h3>
-          <p>
-            Spin up the simulator locally and iterate on Test Bot and Debug
-            loops without leaving your machine.
-          </p>
-        </article>
-        <article className="docs-card">
-          <h3>Verify</h3>
-          <p>
-            Feed saved sessions through grader decks in Calibrate so every demo
-            includes traceability and scores.
-          </p>
-        </article>
-      </section>
-      <section className="docs-run">
-        <h3>Run the simulator</h3>
-        <p>Launch Gambit locally with your current deck:</p>
-        <pre className="docs-command">
-          <code>{runCommand}</code>
-        </pre>
-      </section>
-      <section className="deck-preview-shell">
-        <header>
-          <div>
-            <h3>Deck preview</h3>
-            <p>
-              Edit this file in your editor, then rerun or refresh the
-              simulator.
-            </p>
-          </div>
-          <div className="deck-preview-meta">
-            <span>
-              Path: <code>{deckDisplayPath}</code>
-            </span>{" "}
-            <button type="button" onClick={handleCopyPath}>
-              {copied ? "Copied" : "Copy path"}
-            </button>
-          </div>
-        </header>
-        <div className="deck-preview-body">
-          {loading && <div className="placeholder">Loading deck…</div>}
-          {!loading && error && (
-            <div className="error">Failed to read deck: {error}</div>
-          )}
-          {!loading && !error && (
-            <pre className="deck-preview">
-              <code>{deckSource ?? ""}</code>
-            </pre>
-          )}
-        </div>
-      </section>
-      <section className="docs-buttons">
-        <button type="button" onClick={onNavigateToTestBot}>
-          Open Test Bot
-        </button>
-        <button type="button" onClick={onNavigateToDebug}>
-          Inspect in Debug
-        </button>
-        <button type="button" onClick={onNavigateToCalibrate}>
-          Grade in Calibrate
-        </button>
-      </section>
-      <section className="docs-links">
-        <h3>More docs</h3>
-        <ul>
-          <li>
-            <a
-              href={GAMBIT_MESSAGING_SPINE_DOC}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Gambit messaging spine (Build → Run → Verify narrative)
-            </a>
-          </li>
-          <li>
-            <a href={GAMBIT_PACKAGE_README} target="_blank" rel="noreferrer">
-              packages/gambit/README.md
-            </a>{" "}
-            — architecture, concepts, release notes.
-          </li>
-          <li>
-            <a href={GAMBIT_CLI_DOC} target="_blank" rel="noreferrer">
-              packages/gambit/docs/cli.md
-            </a>{" "}
-            — CLI commands, flags, and workflows.
-          </li>
-        </ul>
-      </section>
-    </div>
-  );
-}
-
 function App() {
   const simulatorBasePath = SESSIONS_BASE_PATH;
   const [path, setPath] = useState(() =>
@@ -5408,7 +5099,6 @@ function App() {
   const isCalibrate = !isDocs &&
     (path.startsWith("/calibrate") ||
       /^\/sessions\/[^/]+\/calibrate/.test(path));
-  const isSimulator = !isDocs && !isTestBot && !isCalibrate;
   const currentPage = isDocs
     ? "docs"
     : isTestBot
@@ -5449,19 +5139,22 @@ function App() {
             </button>
             <button
               type="button"
-              className={currentPage === "debug" ? "active" : ""}
-              onClick={() => navigate(debugPath)}
-              data-testid="nav-debug"
-            >
-              Debug
-            </button>
-            <button
-              type="button"
               className={currentPage === "calibrate" ? "active" : ""}
               onClick={() => navigate(calibratePath)}
               data-testid="nav-calibrate"
             >
               Calibrate
+            </button>
+            <button
+              type="button"
+              className={classNames(
+                "top-nav-link",
+                currentPage === "debug" && "active",
+              )}
+              onClick={() => navigate(debugPath)}
+              data-testid="nav-debug"
+            >
+              Debug
             </button>
           </div>
           <div className="top-nav-info">
@@ -5476,9 +5169,6 @@ function App() {
               <DocsPage
                 deckDisplayPath={deckDisplayPath}
                 deckAbsolutePath={normalizedDeckPath}
-                onNavigateToTestBot={() => navigate(testBotPath)}
-                onNavigateToDebug={() => navigate(debugPath)}
-                onNavigateToCalibrate={() => navigate(calibratePath)}
               />
             )
             : currentPage === "debug"
@@ -5486,7 +5176,6 @@ function App() {
             : currentPage === "test-bot"
             ? (
               <TestBotApp
-                onNavigateToSimulator={() => navigate(debugPath)}
                 onNavigateToSession={(sessionId) =>
                   navigate(
                     `${simulatorBasePath}/${

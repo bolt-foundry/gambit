@@ -1,9 +1,10 @@
 +++
 label = "internal_monolog_parent"
 modelParams = { model = "openai/gpt-4o", temperature = 0 }
-actionDecks = [
-  { name = "monolog_child", path = "./monolog_child.deck.md", description = "Internal helper that thinks aloud then calls lookup_fact." },
-]
+[[actionDecks]]
+name = "monolog_child"
+path = "./monolog_child.deck.md"
+description = "Internal helper that thinks aloud then calls lookup_fact."
 +++
 
 You are a thin wrapper over `monolog_child`.

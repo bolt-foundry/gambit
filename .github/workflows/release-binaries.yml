@@ -118,7 +118,7 @@ jobs:
       - name: Compile
         run: |
           mkdir -p dist
-          deno compile --config deno.ci.json --lock=deno.entrypoint.lock --frozen -A --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
+          deno compile --config deno.ci.json --lock=deno.entrypoint.lock --frozen -A --include deno.jsonc --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -210,7 +210,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             dist/gambit-*.gz
-            dist/gambit-core-src.tar.gz
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
