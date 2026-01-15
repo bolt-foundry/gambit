@@ -146,6 +146,14 @@ type GradingRunRecord = {
   result?: unknown;
   error?: string;
 };
+type GradingFlag = {
+  id: string;
+  refId: string;
+  runId?: string;
+  turnIndex?: number;
+  reason?: string;
+  createdAt: string;
+};
 
 type OutgoingMessage =
   | {
@@ -1474,6 +1482,155 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
+      if (url.pathname === "/api/calibrate/flag") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            refId?: string;
+            runId?: string;
+            turnIndex?: number;
+            reason?: string;
+          };
+          if (!body.sessionId || !body.refId) {
+            throw new Error("Missing sessionId or refId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) {
+            throw new Error("Session not found");
+          }
+          const meta = (state.meta && typeof state.meta === "object")
+            ? { ...(state.meta as Record<string, unknown>) }
+            : {};
+          const existingFlags = Array.isArray(
+              (meta as { gradingFlags?: unknown }).gradingFlags,
+            )
+            ? ((meta as { gradingFlags: Array<GradingFlag> }).gradingFlags)
+            : [];
+          const flagIndex = existingFlags.findIndex((flag) =>
+            flag?.refId === body.refId
+          );
+          let nextFlags: Array<GradingFlag>;
+          let flagged = false;
+          if (flagIndex >= 0) {
+            nextFlags = existingFlags.filter((_, idx) => idx !== flagIndex);
+            flagged = false;
+          } else {
+            const now = new Date().toISOString();
+            nextFlags = [
+              ...existingFlags,
+              {
+                id: randomId("flag"),
+                refId: body.refId,
+                runId: body.runId,
+                turnIndex: body.turnIndex,
+                reason: body.reason?.trim() || undefined,
+                createdAt: now,
+              },
+            ];
+            flagged = true;
+          }
+          const updated = persistSessionState({
+            ...state,
+            meta: {
+              ...meta,
+              gradingFlags: nextFlags,
+            },
+          });
+          const sessionMeta = buildSessionMeta(body.sessionId, updated);
+          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+            type: "calibrateSession",
+            sessionId: body.sessionId,
+            session: sessionMeta,
+          });
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              flagged,
+              flags: nextFlags,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/calibrate/flag/reason") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as {
+            sessionId?: string;
+            refId?: string;
+            reason?: string;
+          };
+          if (!body.sessionId || !body.refId) {
+            throw new Error("Missing sessionId or refId");
+          }
+          const state = readSessionState(body.sessionId);
+          if (!state) {
+            throw new Error("Session not found");
+          }
+          const meta = (state.meta && typeof state.meta === "object")
+            ? { ...(state.meta as Record<string, unknown>) }
+            : {};
+          const existingFlags = Array.isArray(
+              (meta as { gradingFlags?: unknown }).gradingFlags,
+            )
+            ? ((meta as { gradingFlags: Array<GradingFlag> }).gradingFlags)
+            : [];
+          const flagIndex = existingFlags.findIndex((flag) =>
+            flag?.refId === body.refId
+          );
+          if (flagIndex < 0) {
+            throw new Error("Flag not found");
+          }
+          const updatedFlag: GradingFlag = {
+            ...existingFlags[flagIndex],
+            reason: body.reason?.trim() || undefined,
+          };
+          const nextFlags = existingFlags.map((flag, idx) =>
+            idx === flagIndex ? updatedFlag : flag
+          );
+          const updated = persistSessionState({
+            ...state,
+            meta: {
+              ...meta,
+              gradingFlags: nextFlags,
+            },
+          });
+          const sessionMeta = buildSessionMeta(body.sessionId, updated);
+          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+            type: "calibrateSession",
+            sessionId: body.sessionId,
+            session: sessionMeta,
+          });
+          return new Response(
+            JSON.stringify({
+              sessionId: body.sessionId,
+              flags: nextFlags,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
       if (url.pathname === "/api/grading/reference") {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
@@ -2194,6 +2351,7 @@ export function startWebSocketSimulator(opts: {
             sessionId,
             messages: state.messages,
             messageRefs: state.messageRefs,
+            feedback: state.feedback,
             traces: state.traces,
             notes: state.notes,
             meta: state.meta,

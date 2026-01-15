@@ -1,143 +1,121 @@
-import { useCallback, useEffect, useState } from "react";
-
 const GAMBIT_PACKAGE_README =
   "https://github.com/bolt-foundry/gambit/blob/main/README.md";
 const GAMBIT_CLI_DOC =
   "https://github.com/bolt-foundry/gambit/blob/main/docs/cli.md";
+const DEFAULT_TEST_BOT_PATH = "/sessions/new/test-bot";
+const DEFAULT_DEBUG_PATH = "/sessions/new/debug";
+const DEFAULT_CALIBRATE_PATH = "/calibrate";
 
-export type DocsPageProps = {
-  deckDisplayPath: string;
-  deckAbsolutePath: string;
-};
-
-export default function DocsPage(props: DocsPageProps) {
-  const {
-    deckDisplayPath,
-    deckAbsolutePath,
-  } = props;
-  const [deckSource, setDeckSource] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await fetch("/api/deck-source");
-        if (!res.ok) throw new Error(res.statusText);
-        const body = await res.json() as {
-          path?: string;
-          content?: string;
-          error?: string;
-        };
-        if (cancelled) return;
-        if (body.error) {
-          setError(body.error);
-          setDeckSource(body.content ?? null);
-        } else {
-          setDeckSource(body.content ?? "");
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load deck");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const handle = window.setTimeout(() => setCopied(false), 2000);
-    return () => window.clearTimeout(handle);
-  }, [copied]);
-
-  const handleCopyPath = useCallback(async () => {
-    try {
-      await navigator.clipboard?.writeText(deckAbsolutePath);
-      setCopied(true);
-    } catch {
-      setCopied(true);
-    }
-  }, [deckAbsolutePath]);
-
+export default function DocsPage() {
   return (
     <div className="docs-shell">
       <section className="docs-hero">
-        <h2>Gambit Simulator</h2>
-        <p>
-          <strong>Use the simulator to iterate fast and fix failures.</strong>
-          {" "}
-          Run a test, capture why it failed, grade the result, and hand the
-          evidence to Codex so it can help you update the deck.
-        </p>
-        <p>
-          The simulator keeps the whole loop in one place: Test Bot to explore,
-          Calibrate to grade, and Debug to inspect.
+        <p className="docs-eyebrow">Gambit Simulator</p>
+        <h1>Test an agent. See where it fails. Fix it fast.</h1>
+        <p className="docs-subtitle">
+          Gambit is an open-source agent harness framework. It's designed to
+          make it simple to create, debug, and fix AI workflows, agents and
+          assistants.
         </p>
       </section>
-      <section className="docs-grid">
-        <article className="docs-card">
-          <h3>Run the test</h3>
-          <p>
-            Open Test Bot and try the scenario you care about. If the output
-            looks wrong, add a rating and a short reason so the failure is
-            captured.
-          </p>
-        </article>
-        <article className="docs-card">
-          <h3>Grade</h3>
-          <p>
-            Run the grader in Calibrate. Copy a reference or the state file link
-            for sharing.
-          </p>
-        </article>
-        <article className="docs-card">
-          <h3>Fix + rerun</h3>
-          <p>
-            Paste the reference or state link into Codex and ask for help fixing
-            the deck. Codex updates files, then you rerun the simulator to
-            verify.
-          </p>
-        </article>
-      </section>
-      <section className="deck-preview-shell">
-        <header>
+
+      <section className="docs-callout">
+        <header className="docs-callout-header">
           <div>
-            <h3>Current deck</h3>
-            <p>
-              Edit this file in your editor. After changes, rerun or refresh the
-              simulator.
-            </p>
-          </div>
-          <div className="deck-preview-meta">
-            <span>
-              Path: <code>{deckDisplayPath}</code>
-            </span>{" "}
-            <button type="button" onClick={handleCopyPath}>
-              {copied ? "Copied" : "Copy path"}
-            </button>
+            <h2
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                gap: 12,
+                alignItems: "center",
+              }}
+            >
+              <span className="docs-icon">🤖</span>
+              Start here:
+              <a className="docs-primary-btn" href={DEFAULT_TEST_BOT_PATH}>
+                Open Test Bot
+              </a>
+            </h2>
           </div>
         </header>
-        <div className="deck-preview-body">
-          {loading && <div className="placeholder">Loading deck…</div>}
-          {!loading && error && (
-            <div className="error">Failed to read deck: {error}</div>
-          )}
-          {!loading && !error && (
-            <pre className="deck-preview">
-              <code>{deckSource ?? ""}</code>
-            </pre>
-          )}
+        <div className="docs-callout-body">
+          <p>
+            The Test Bot lets you interact with your agent like a real user
+            would.
+          </p>
+          <div className="docs-divider" />
+          <h3>What to do</h3>
+          <ul>
+            <li>
+              Some examples have a Test Bot input, these are usually optional.
+            </li>
+            <li>Click "Run test bot" to start the conversation.</li>
+            <li>Review the agent's response.</li>
+          </ul>
+          <h3>If something looks wrong</h3>
+          <ul>
+            <li>Leave a quick rating and a short note explaining why.</li>
+            <li>Failures get captured for evaluation.</li>
+          </ul>
+          <h3>Calibrate the agent</h3>
+          <ul>
+            <li>Click the "Calibrate" tab to see all test bot runs.</li>
+            <li>Run graders to measure quality and identify issues.</li>
+            <li>Flag grader results you want to keep track of.</li>
+          </ul>
+          <h3>Fix it</h3>
+          <ul>
+            <li>Click "Copy state path" to copy the state file location.</li>
+            <li>
+              Share the state file with Codex, update the deck, then rerun.
+            </li>
+          </ul>
         </div>
       </section>
+
+      <section className="docs-section docs-tabs">
+        <header className="docs-section-header">
+          <span className="docs-icon">🧭</span>
+          <h2>When should I use each tab?</h2>
+        </header>
+        <div className="docs-tab-card">
+          <div className="docs-tab-row">
+            <a className="docs-tab-pill" href={DEFAULT_TEST_BOT_PATH}>
+              Test Bot
+            </a>
+            <p>
+              Use this whenever you want to{" "}
+              <strong>understand behavior</strong>. This is where almost
+              everyone should start.
+            </p>
+          </div>
+          <div className="docs-tab-row">
+            <a
+              className="docs-tab-pill docs-tab-pill--gold"
+              href={DEFAULT_CALIBRATE_PATH}
+            >
+              Calibrate
+            </a>
+            <p>
+              Use this once you care about{" "}
+              <strong>measuring quality</strong>, not just eyeballing it.
+            </p>
+          </div>
+          <div className="docs-tab-row">
+            <a
+              className="docs-tab-pill docs-tab-pill--indigo"
+              href={DEFAULT_DEBUG_PATH}
+            >
+              Debug
+            </a>
+            <p>
+              Use this when you need to understand{" "}
+              <strong>why something failed</strong> at a deeper level.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section className="docs-links">
         <h3>More docs</h3>
         <ul>

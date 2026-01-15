@@ -240,3 +240,26 @@ Run it:
 ```
 npx @bolt-foundry/gambit run ./agent_with_time.deck.md --init '"hello"' --stream
 ```
+
+## Deno
+
+If you prefer Deno, use the Deno commands below.
+
+Quickstart:
+
+```
+export OPENROUTER_API_KEY=...
+deno run -A jsr:@bolt-foundry/gambit/cli init
+```
+
+Run a deck:
+
+```
+deno run -A jsr:@bolt-foundry/gambit/cli run <deck> --init <json|string> --message <json|string>
+```
+
+Start the Debug UI:
+
+```
+deno run -A jsr:@bolt-foundry/gambit/cli serve <deck> --port 8000
+```
