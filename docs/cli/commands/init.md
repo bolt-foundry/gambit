@@ -5,4 +5,5 @@ usage = "gambit init"
 flags = []
 +++
 
-Creates a `gambit/` folder with example decks and a starter layout.
+Creates a `gambit/` folder with example decks (including the `examples/`
+gallery) and a starter layout.

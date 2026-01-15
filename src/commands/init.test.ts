@@ -13,6 +13,10 @@ const HELLO_EXAMPLE_FILES = [
   "schemas/grader_output.zod.ts",
 ];
 
+const EXAMPLE_DIRECTORIES = [
+  "examples",
+];
+
 function resolveExamplePath(filename: string): string {
   return path.fromFileUrl(
     new URL(import.meta.resolve(`../../init/${filename}`)),
@@ -39,6 +43,23 @@ Deno.test({
       assertEquals(actual, expected);
     }
 
+    for (const directory of EXAMPLE_DIRECTORIES) {
+      const expectedRoot = resolveExamplePath(directory);
+      const actualRoot = path.join(tempDir, "gambit", directory);
+      const expectedFiles = await collectFiles(expectedRoot);
+      const actualFiles = await collectFiles(actualRoot);
+      assertEquals(actualFiles.sort(), expectedFiles.sort());
+      for (const relativePath of expectedFiles) {
+        const expected = await Deno.readTextFile(
+          path.join(expectedRoot, relativePath),
+        );
+        const actual = await Deno.readTextFile(
+          path.join(actualRoot, relativePath),
+        );
+        assertEquals(actual, expected);
+      }
+    }
+
     assert(
       !await exists(path.join(tempDir, "gambit", ".env")),
       "should not create .env when OPENROUTER_API_KEY is set",
@@ -62,5 +83,27 @@ async function exists(filePath: string): Promise<boolean> {
       return false;
     }
     throw err;
+  }
+}
+
+async function collectFiles(root: string): Promise<Array<string>> {
+  const files: Array<string> = [];
+  await visit(root, "", files);
+  return files;
+}
+
+async function visit(dir: string, prefix: string, files: Array<string>) {
+  for await (const entry of Deno.readDir(dir)) {
+    const relative = prefix ? path.join(prefix, entry.name) : entry.name;
+    const absolute = path.join(dir, entry.name);
+    if (entry.isDirectory) {
+      await visit(absolute, relative, files);
+      continue;
+    }
+    if (entry.isFile) {
+      files.push(relative);
+      continue;
+    }
+    throw new Error(`Unsupported entry type for ${absolute}`);
   }
 }

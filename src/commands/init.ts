@@ -15,6 +15,10 @@ const HELLO_EXAMPLE_FILES = [
   "schemas/grader_output.zod.ts",
 ];
 
+const EXAMPLE_DIRECTORIES = [
+  "examples",
+];
+
 function resolveExamplePath(filename: string): string {
   const resolveCandidate = (specifier: string) => {
     const url = new URL(import.meta.resolve(specifier));
@@ -81,6 +85,52 @@ async function ensureExampleFile(
     logger.log(`Created ${path.relative(Deno.cwd(), destinationPath)}`);
     return true;
   }
+}
+
+async function copyDirectoryRecursive(
+  sourceDir: string,
+  destinationDir: string,
+) {
+  await Deno.mkdir(destinationDir, { recursive: true });
+  for await (const entry of Deno.readDir(sourceDir)) {
+    const sourcePath = path.join(sourceDir, entry.name);
+    const destinationPath = path.join(destinationDir, entry.name);
+    if (entry.isFile) {
+      await Deno.copyFile(sourcePath, destinationPath);
+      logger.log(`Created ${path.relative(Deno.cwd(), destinationPath)}`);
+      continue;
+    }
+    if (entry.isDirectory) {
+      await copyDirectoryRecursive(sourcePath, destinationPath);
+      continue;
+    }
+    throw new Error(`Unsupported entry type for ${sourcePath}`);
+  }
+}
+
+async function ensureExampleDirectory(
+  destinationPath: string,
+  sourceRelative: string,
+): Promise<boolean> {
+  try {
+    const existing = await Deno.stat(destinationPath);
+    if (!existing.isDirectory) {
+      logger.error(
+        `Cannot create ${path.relative(Deno.cwd(), destinationPath)}: ` +
+          "path exists and is not a directory.",
+      );
+      Deno.exit(1);
+    }
+    return false;
+  } catch (err) {
+    if (!(err instanceof Deno.errors.NotFound)) {
+      throw err;
+    }
+  }
+
+  const sourceDir = resolveExamplePath(sourceRelative);
+  await copyDirectoryRecursive(sourceDir, destinationPath);
+  return true;
 }
 
 async function readDotenv(pathToFile: string): Promise<
@@ -174,6 +224,14 @@ export async function handleInitCommand() {
     const created = await ensureExampleFile(
       path.join(rootDir, filename),
       filename,
+    );
+    exampleCreated ||= created;
+  }
+
+  for (const directory of EXAMPLE_DIRECTORIES) {
+    const created = await ensureExampleDirectory(
+      path.join(rootDir, directory),
+      directory,
     );
     exampleCreated ||= created;
   }
