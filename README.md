@@ -6,14 +6,15 @@ debug with a built-in UI.
 
 ## Quickstart
 
-Requirements: Deno 2.2+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL` if\
+Requirements: Node.js 18+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL`
+if\
 you proxy OpenRouter-style APIs).
 
-Run the CLI directly from JSR (no install):
+Run the CLI directly with npx (no install):
 
 ```
 export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli init
+npx @bolt-foundry/gambit init
 ```
 
 Downloads example files and sets environment variables.
@@ -21,7 +22,7 @@ Downloads example files and sets environment variables.
 Run an example in the terminal (`repl`):
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli repl examples/init/hello.deck.md
+npx @bolt-foundry/gambit repl examples/init/hello.deck.md
 ```
 
 This example just says "hello" and repeats your message back to you.
@@ -29,7 +30,7 @@ This example just says "hello" and repeats your message back to you.
 Run an example in the browser (`serve`):
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli serve examples/init/hello.deck.md
+npx @bolt-foundry/gambit serve examples/init/hello.deck.md
 open http://localhost:8000/debug
 ```
 
@@ -65,40 +66,40 @@ open http://localhost:8000/debug
 
 Use the CLI to run decks locally, stream output, and capture traces/state.
 
-Install the CLI:
+Run with npx (no install):
 
 ```
-deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
+npx @bolt-foundry/gambit <command>
 ```
 
 Run a deck once:
 
 ```
-gambit run <deck> --init <json|string> --message <json|string>
+npx @bolt-foundry/gambit run <deck> --init <json|string> --message <json|string>
 ```
 
 Drop into a REPL (streams by default):
 
 ```
-gambit repl <deck>
+npx @bolt-foundry/gambit repl <deck>
 ```
 
 Run a persona against a root deck (test bot):
 
 ```
-gambit test-bot <root-deck> --test-deck <persona-deck>
+npx @bolt-foundry/gambit test-bot <root-deck> --test-deck <persona-deck>
 ```
 
 Grade a saved session:
 
 ```
-gambit grade <grader-deck> --state <file>
+npx @bolt-foundry/gambit grade <grader-deck> --state <file>
 ```
 
 Start the Debug UI server:
 
 ```
-gambit serve <deck> --port 8000
+npx @bolt-foundry/gambit serve <deck> --port 8000
 ```
 
 Tracing and state: 
@@ -111,16 +112,16 @@ Tracing and state: 
 
 The simulator is the local Debug UI that streams runs and renders traces.
 
-Install the CLI:
+Run with npx (no install):
 
 ```
-deno install -A -n gambit jsr:@bolt-foundry/gambit/cli
+npx @bolt-foundry/gambit <command>
 ```
 
 Start it:
 
 ```
-gambit serve <deck> --port 8000
+npx @bolt-foundry/gambit serve <deck> --port 8000
 ```
 
 Then open:
@@ -159,7 +160,7 @@ Define `inputSchema`/`outputSchema` with Zod to validate IO, and implement\
 
 ## Author your first deck
 
-### Minimal Markdown deck (model-powered):
+### Minimal Markdown deck (model-powered): `hello_world.deck.md`
 
 ```
 +++
@@ -176,12 +177,12 @@ You are a concise assistant. Greet the user and echo the input.
 Run it:
 
 ```
-deno run -A src/cli.ts run ./hello_world.deck.md --init '"Gambit"' --stream
+npx @bolt-foundry/gambit run ./hello_world.deck.md --init '"Gambit"' --stream
 ```
 
-### Compute deck in TypeScript (no model call):
+### Compute deck in TypeScript (no model call): `echo.deck.ts`
 
-```
+```typescript
 // echo.deck.ts
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "zod";
@@ -199,10 +200,10 @@ export default defineDeck({
 Run it:
 
 ```
-deno run -A src/cli.ts run ./echo.deck.ts --init '{"text":"ping"}'
+npx @bolt-foundry/gambit run ./echo.deck.ts --init '{"text":"ping"}'
 ```
 
-### Deck with a child action (calls a TypeScript tool):
+### Deck with a child action (calls a TypeScript tool): `agent_with_time.deck.md`
 
 ```
 +++
@@ -217,9 +218,9 @@ description = "Return the current ISO timestamp."
 A tiny agent that calls get_time, then replies with the timestamp and the input.
 ```
 
-And the child action:
+And the child action: `get_time.deck.ts`
 
-```
+```typescript
 // get_time.deck.ts
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "zod";
@@ -232,4 +233,10 @@ export default defineDeck({
     return { iso: new Date().toISOString() };
   },
 });
+```
+
+Run it:
+
+```
+npx @bolt-foundry/gambit run ./agent_with_time.deck.md --init '"hello"' --stream
 ```
