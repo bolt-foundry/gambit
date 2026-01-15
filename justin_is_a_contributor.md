@@ -1,2 +1,1 @@
-Justin was here
-Codebot always takes the credit
+Justin was here, codebot always takes the credit
