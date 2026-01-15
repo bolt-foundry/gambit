@@ -1,4 +1,4 @@
-import { z } from "npm:zod@^3.23.8";
+import { z } from "npm:zod";
 
 export default z.object({
   spokenResponse: z.string().describe(

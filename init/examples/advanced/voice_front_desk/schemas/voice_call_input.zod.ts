@@ -1,4 +1,4 @@
-import { z } from "npm:zod@^3.23.8";
+import { z } from "npm:zod";
 
 const todayIso = new Date().toISOString().slice(0, 10);
 
