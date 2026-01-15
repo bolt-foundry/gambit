@@ -13,7 +13,7 @@ const baseArgs = [
   "--include",
   "docs/cli/commands",
   "--include",
-  "examples",
+  "examples/init",
 ];
 
 const extraArgs = Deno.args.filter((arg) => arg !== "--");

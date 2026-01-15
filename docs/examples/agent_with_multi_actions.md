@@ -9,14 +9,14 @@ What it shows
 
 Key files
 
-- `examples/agent_with_multi_actions/agent_with_multi_actions.deck.md` — root
-  LLM router with brevity rules.
-- `examples/agent_with_multi_actions/actions/cards/*.card.md` — cards declare
-  action decks/labels/descriptions.
-- `examples/agent_with_multi_actions/actions/decks/*` — child decks (TS compute
-  and MD LLM) with Zod schemas.
-- `examples/agent_with_multi_actions/schemas/*` — shared input/output schemas
-  for tool calls.
+- `examples/advanced/agent_with_multi_actions/agent_with_multi_actions.deck.md`
+  — root LLM router with brevity rules.
+- `examples/advanced/agent_with_multi_actions/actions/cards/*.card.md` — cards
+  declare action decks/labels/descriptions.
+- `examples/advanced/agent_with_multi_actions/actions/decks/*` — child decks (TS
+  compute and MD LLM) with Zod schemas.
+- `examples/advanced/agent_with_multi_actions/schemas/*` — shared input/output
+  schemas for tool calls.
 
 Why it’s structured this way
 
@@ -30,7 +30,7 @@ Why it’s structured this way
 How to run
 
 - Translate:
-  `deno run -A src/cli.ts run examples/agent_with_multi_actions/agent_with_multi_actions.deck.md --init '"translate bonjour to English"' --stream`
+  `deno run -A src/cli.ts run examples/advanced/agent_with_multi_actions/agent_with_multi_actions.deck.md --init '"translate bonjour to English"' --stream`
 - Summarize: `--init '"summarize: long text here"'`
 - Math: `--init '{"a":4,"b":5,"op":"multiply"}'` (tool fills in defaults if
   missing).

@@ -3,14 +3,19 @@ import * as path from "@std/path";
 import { handleInitCommand } from "./init.ts";
 
 const HELLO_EXAMPLE_FILES = [
+  "deno.json",
   "hello.deck.md",
   "hello.grader.deck.md",
   "hello.test.deck.md",
+  "package.json",
+  "schemas/grader_input_conversation.zod.ts",
+  "schemas/grader_input_turns.zod.ts",
+  "schemas/grader_output.zod.ts",
 ];
 
 function resolveExamplePath(filename: string): string {
   return path.fromFileUrl(
-    new URL(import.meta.resolve(`../../examples/${filename}`)),
+    new URL(import.meta.resolve(`../../examples/init/${filename}`)),
   );
 }
 
@@ -29,7 +34,7 @@ Deno.test({
 
     for (const filename of HELLO_EXAMPLE_FILES) {
       const expected = await Deno.readTextFile(resolveExamplePath(filename));
-      const actualPath = path.join(tempDir, "gambit", "examples", filename);
+      const actualPath = path.join(tempDir, "gambit", filename);
       const actual = await Deno.readTextFile(actualPath);
       assertEquals(actual, expected);
     }

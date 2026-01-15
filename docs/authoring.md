@@ -81,7 +81,7 @@ export default defineDeck({
 - `testDecks` describe persona decks (synthetic users/bots). Each entry points
   to a deck that produces user turns/scenarios—use them for automated QA,
   persona-vs-workflow simulations, or even bot-vs-bot runs.
-- Example (see `examples/voice_front_desk/decks/root.deck.md`):
+- Example (see `examples/advanced/voice_front_desk/decks/root.deck.md`):
   ```toml
   [[testDecks]]
   label = "Synthetic caller – new patient intake"
@@ -89,10 +89,10 @@ export default defineDeck({
   description = "Persona deck that stress-tests identity/routing coverage."
   ```
   The referenced deck (e.g.
-  `examples/voice_front_desk/tests/new_patient_intake.deck.md`) should set
-  `acceptsUserTurns = true` and may declare its own `inputSchema` (for example
-  `inputSchema = "../schemas/my_persona_test.zod.ts"`) so the Test tab renders a
-  schema-driven “Scenario” form for that persona.
+  `examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`) should
+  set `acceptsUserTurns = true` and may declare its own `inputSchema` (for
+  example `inputSchema = "../schemas/my_persona_test.zod.ts"`) so the Test tab
+  renders a schema-driven “Scenario” form for that persona.
 - `graderDecks` describe calibration decks that score transcripts/artifacts. The
   simulator Calibrate page will run these decks against stored runs.
 - Configure `acceptsUserTurns` alongside these references:
@@ -134,7 +134,10 @@ export default defineDeck({
   http://localhost:8000/debug.
 - Tracing: add `--verbose` for console traces or `--trace out.jsonl` to persist
   events; use `--state state.json` with `run` to persist conversation state
-  between turns.
+  between turns. When `--state` is omitted, test-bot/serve sessions default to
+  `<project-root>/.gambit/sessions/...` where the project root is the nearest
+  parent with `deno.json`, `deno.jsonc`, or `package.json` (falling back to the
+  deck directory).
 
 ### Compute deck logging
 
@@ -158,10 +161,10 @@ export default defineDeck({
 
 ## What to read next
 
-- Examples: `examples/hello_world.deck.md` (LLM),
-  `examples/agent_with_typescript/` (Markdown + TS action),
-  `examples/agent_with_multi_actions/` (routing with multiple action decks),
-  `examples/handlers_*` (busy/idle/error handlers).
+- Examples: `examples/init/hello.deck.md` (LLM),
+  `examples/advanced/agent_with_typescript/` (Markdown + TS action),
+  `examples/advanced/agent_with_multi_actions/` (routing with multiple action
+  decks), `examples/advanced/cli_handlers_*` (busy/idle/error handlers).
 - Hourglass prompting (context engineering) best practices: `docs/hourglass.md`.
 - Prompt structuring: `docs/hourglass.md`.
 - Handler details: `docs/handlers.md`.

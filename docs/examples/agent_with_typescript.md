@@ -7,12 +7,12 @@ What it shows
 
 Key files
 
-- `examples/agent_with_typescript/agent_with_typescript.deck.md` — root LLM deck
-  and workflow steps.
-- `examples/agent_with_typescript/get_time.deck.ts` — TS compute action (returns
-  ISO timestamp with Zod schemas).
-- `examples/agent_with_typescript/tooling.card.md` — card that defines how/when
-  to call the tool and how to respond.
+- `examples/advanced/agent_with_typescript/agent_with_typescript.deck.md` — root
+  LLM deck and workflow steps.
+- `examples/advanced/agent_with_typescript/get_time.deck.ts` — TS compute action
+  (returns ISO timestamp with Zod schemas).
+- `examples/advanced/agent_with_typescript/tooling.card.md` — card that defines
+  how/when to call the tool and how to respond.
 
 Why it’s structured this way
 
@@ -25,7 +25,7 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run examples/agent_with_typescript/agent_with_typescript.deck.md --init '"hi"' --stream`
+- `deno run -A src/cli.ts run examples/advanced/agent_with_typescript/agent_with_typescript.deck.md --init '"hi"' --stream`
 - Override model: `--model-force anthropic/claude-3-haiku`
 
 Try this input

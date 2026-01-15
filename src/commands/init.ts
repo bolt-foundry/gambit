@@ -5,15 +5,34 @@ import * as path from "@std/path";
 const logger = console;
 
 const HELLO_EXAMPLE_FILES = [
+  "deno.json",
   "hello.deck.md",
   "hello.grader.deck.md",
   "hello.test.deck.md",
+  "package.json",
+  "schemas/grader_input_conversation.zod.ts",
+  "schemas/grader_input_turns.zod.ts",
+  "schemas/grader_output.zod.ts",
 ];
 
 function resolveExamplePath(filename: string): string {
-  return path.fromFileUrl(
-    new URL(import.meta.resolve(`../../examples/${filename}`)),
-  );
+  const resolveCandidate = (specifier: string) => {
+    const url = new URL(import.meta.resolve(specifier));
+    if (url.protocol !== "file:") return undefined;
+    const candidatePath = path.fromFileUrl(url);
+    try {
+      Deno.statSync(candidatePath);
+      return candidatePath;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const initPath = resolveCandidate(`../../examples/init/${filename}`);
+  if (initPath) return initPath;
+  const sharedPath = resolveCandidate(`../../examples/${filename}`);
+  if (sharedPath) return sharedPath;
+  throw new Error(`Unable to resolve example template: ${filename}`);
 }
 
 async function loadExampleTemplate(filename: string): Promise<string> {
@@ -54,6 +73,10 @@ async function ensureExampleFile(
   } catch (err) {
     if (!(err instanceof Deno.errors.NotFound)) {
       throw err;
+    }
+    const parentDir = path.dirname(destinationPath);
+    if (parentDir) {
+      await Deno.mkdir(parentDir, { recursive: true });
     }
     const template = await loadExampleTemplate(filename);
     await Deno.writeTextFile(destinationPath, template);
@@ -147,14 +170,11 @@ export async function handleInitCommand() {
   const rootDir = path.resolve(Deno.cwd(), "gambit");
   await ensureDirectory(rootDir);
 
-  const examplesDir = path.join(rootDir, "examples");
-  await ensureDirectory(examplesDir);
-
-  const deckPath = path.join(examplesDir, "hello.deck.md");
+  const deckPath = path.join(rootDir, "hello.deck.md");
   let exampleCreated = false;
   for (const filename of HELLO_EXAMPLE_FILES) {
     const created = await ensureExampleFile(
-      path.join(examplesDir, filename),
+      path.join(rootDir, filename),
       filename,
     );
     exampleCreated ||= created;

@@ -32,12 +32,40 @@ export function slugifyDeckPath(deckPath: string): string {
   return slug || "session";
 }
 
+const PROJECT_ROOT_MARKERS = ["deno.json", "deno.jsonc", "package.json"];
+
+function findProjectRoot(startDir: string): string | undefined {
+  let current = startDir;
+  while (true) {
+    for (const marker of PROJECT_ROOT_MARKERS) {
+      try {
+        const candidate = path.join(current, marker);
+        const info = Deno.statSync(candidate);
+        if (info.isFile) return current;
+      } catch {
+        // ignore
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return undefined;
+}
+
+export function defaultSessionRoot(deckPath: string): string {
+  const resolvedDeckPath = path.resolve(deckPath);
+  const deckDir = path.dirname(resolvedDeckPath);
+  const projectRoot = findProjectRoot(deckDir);
+  const baseDir = projectRoot ?? deckDir;
+  return path.join(baseDir, ".gambit", "sessions");
+}
+
 export function defaultTestBotStatePath(deckPath: string): string {
   const slug = slugifyDeckPath(deckPath);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.join(
-    ".gambit",
-    "sessions",
+    defaultSessionRoot(deckPath),
     `${slug}-${stamp}`,
     "state.json",
   );

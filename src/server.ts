@@ -2,6 +2,7 @@ import * as path from "@std/path";
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
+import { defaultSessionRoot } from "./cli_utils.ts";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import {
   appendDurableStreamEvent,
@@ -450,7 +451,7 @@ export function startWebSocketSimulator(opts: {
   const sessionsRoot = (() => {
     const base = opts.sessionDir
       ? path.resolve(opts.sessionDir)
-      : path.resolve(Deno.cwd(), ".gambit", "sessions");
+      : defaultSessionRoot(resolvedDeckPath);
     try {
       Deno.mkdirSync(base, { recursive: true });
     } catch (err) {
