@@ -2,7 +2,7 @@
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
   "name": "@bolt-foundry/gambit",
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
-  "version": "0.6.9",
+  "version": "0.7.0",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -46,7 +46,7 @@
         "no-unversioned-import"
       ],
       "include": [
-        "gambit/examples-remote-imports"
+        "gambit/init/examples-remote-imports"
       ]
     }
   },

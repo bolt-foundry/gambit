@@ -15,7 +15,7 @@ const HELLO_EXAMPLE_FILES = [
 
 function resolveExamplePath(filename: string): string {
   return path.fromFileUrl(
-    new URL(import.meta.resolve(`../../examples/init/${filename}`)),
+    new URL(import.meta.resolve(`../../init/${filename}`)),
   );
 }
 

@@ -6,7 +6,7 @@ const plugin = {
     "examples-remote-imports": {
       create(context: any) {
         const filename: string = context.filename || "";
-        if (!filename.includes("packages/gambit/examples/")) {
+        if (!filename.includes("packages/gambit/init/")) {
           return {};
         }
         const allowedPrefixes = /^(?:\.{1,2}\/|npm:|jsr:|https?:|data:|blob:)/;

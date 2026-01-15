@@ -53,7 +53,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts run \
-     examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
      --message '"How much does AcmeFlow cost?"' --stream
    ```
 
@@ -61,7 +61,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts run \
-     examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
      --message '"Do you support HIPAA workflows?"' --stream
    ```
 
@@ -69,7 +69,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts serve \
-     examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
      --port 8787 --verbose
    # Open http://localhost:8787 to chat, view traces, and grade runs.
    ```
@@ -79,7 +79,7 @@ pointing the search action to an external data source.
 - Run the FAQ dataset guard tests:
 
   ```bash
-  deno test --allow-read examples/advanced/policy_support_bot/tests/faq_dataset.test.ts
+  deno test --allow-read init/examples/advanced/policy_support_bot/tests/faq_dataset.test.ts
   ```
 
 - Work through `demo-script.md` to exercise:

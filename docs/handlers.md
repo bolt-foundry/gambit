@@ -78,7 +78,7 @@ Notes:
 
 ## Examples
 
-- TS: `examples/advanced/cli_handlers_ts/handlers/on_busy.ts`, `.../on_idle.ts`,
-  `.../on_error.ts`
-- MD: `examples/advanced/cli_handlers_md/handlers/on_busy.deck.md`,
+- TS: `init/examples/advanced/cli_handlers_ts/handlers/on_busy.ts`,
+  `.../on_idle.ts`, `.../on_error.ts`
+- MD: `init/examples/advanced/cli_handlers_md/handlers/on_busy.deck.md`,
   `.../on_idle.deck.md`, `.../on_error.deck.md`

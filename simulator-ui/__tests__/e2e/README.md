@@ -3,7 +3,7 @@
 These tests exercise the Gambit simulator UI in a full browser environment. They
 use a local context wrapper around Puppeteer, record artifacts, and
 automatically start a Gambit server pointing at:
-`examples/advanced/voice_front_desk/decks/root.deck.md`.
+`init/examples/advanced/voice_front_desk/decks/root.deck.md`.
 
 ## Quick Start
 

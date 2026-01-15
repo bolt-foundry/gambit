@@ -28,10 +28,8 @@ function resolveExamplePath(filename: string): string {
     }
   };
 
-  const initPath = resolveCandidate(`../../examples/init/${filename}`);
+  const initPath = resolveCandidate(`../../init/${filename}`);
   if (initPath) return initPath;
-  const sharedPath = resolveCandidate(`../../examples/${filename}`);
-  if (sharedPath) return sharedPath;
   throw new Error(`Unable to resolve example template: ${filename}`);
 }
 
