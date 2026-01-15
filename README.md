@@ -17,7 +17,8 @@ export OPENROUTER_API_KEY=...
 npx @bolt-foundry/gambit init
 ```
 
-Downloads example files and sets environment variables.
+Downloads example files (hello decks plus the `examples/` gallery) and sets
+environment variables.
 
 Run an example in the terminal (`repl`):
 
