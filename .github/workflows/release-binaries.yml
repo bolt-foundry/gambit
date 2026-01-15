@@ -120,10 +120,11 @@ jobs:
       - name: Build simulator bundle
         run: deno task bundle:sim:web:sourcemap
 
-      - name: Install CLI deps (entrypoint only)
+      - name: Prepare entrypoint lock (cli + compile)
         run: |
           rm -f deno.entrypoint.lock
-          deno install --entrypoint --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false --no-prompt src/cli.ts
+          deno cache --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false \
+            src/cli.ts scripts/compile.ts
 
       - name: Compile
         run: |
