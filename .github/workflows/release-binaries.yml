@@ -118,7 +118,7 @@ jobs:
       - name: Compile
         run: |
           mkdir -p dist
-          deno compile --config deno.ci.json --lock=deno.entrypoint.lock --frozen -A --include deno.jsonc --target ${{ matrix.target }} --output dist/gambit${{ matrix.ext }} src/cli.ts
+          deno task compile -- --config deno.ci.json --lock=deno.entrypoint.lock --frozen --target ${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
