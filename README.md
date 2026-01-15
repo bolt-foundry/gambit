@@ -22,7 +22,7 @@ Downloads example files and sets environment variables.
 Run an example in the terminal (`repl`):
 
 ```
-npx @bolt-foundry/gambit repl examples/init/hello.deck.md
+npx @bolt-foundry/gambit repl gambit/hello.deck.md
 ```
 
 This example just says "hello" and repeats your message back to you.
@@ -30,7 +30,7 @@ This example just says "hello" and repeats your message back to you.
 Run an example in the browser (`serve`):
 
 ```
-npx @bolt-foundry/gambit serve examples/init/hello.deck.md
+npx @bolt-foundry/gambit serve gambit/hello.deck.md
 open http://localhost:8000/debug
 ```
 

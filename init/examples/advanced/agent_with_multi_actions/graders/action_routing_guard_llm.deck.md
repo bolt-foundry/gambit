@@ -1,7 +1,7 @@
 +++
 label = "Action routing guard (turn) LLM"
-inputSchema = "../../../schemas/grader_input_turns.zod.ts"
-outputSchema = "../../../schemas/grader_output.zod.ts"
+inputSchema = "../../../../schemas/grader_input_turns.zod.ts"
+outputSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0

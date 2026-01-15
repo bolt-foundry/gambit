@@ -30,7 +30,7 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 
   The WebSocket server streams turns, traces, and status updates.
 - Examples from a local clone:
-  `deno run -A src/cli.ts run examples/init/hello.deck.md --init '"hi"'`.
+  `deno run -A src/cli.ts run gambit/hello.deck.md --init '"hi"'`.
 
 ## Inputs and models
 
@@ -74,10 +74,10 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - Every WebSocket message echoes `runId` so you can correlate with traces.
 - Deck `inputSchema` is exposed at `/schema` and included in the `ready`
   WebSocket message; the debug UI renders a schema-driven form with defaults
-  (falling back to examples/advanced/description) plus a raw JSON tab for init
-  input, stacked beneath the user message box. One “Send” submits init first,
-  then the user message in the same run. A reconnect button reopens the socket
-  without reloading.
+  (falling back to gambit/examples/advanced/description) plus a raw JSON tab for
+  init input, stacked beneath the user message box. One “Send” submits init
+  first, then the user message in the same run. A reconnect button reopens the
+  socket without reloading.
 - `--watch` on `serve` restarts the debug UI when files change (`PORT` env or
   `--port` controls the bind port; default 8000).
 - Custom trace formatting is supported via an optional
@@ -88,11 +88,11 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   decks so you can batch synthetic conversations, inspect per-turn scoring, and
   export JSONL artifacts for later ingestion. List personas by declaring
   `[[testDecks]]` entries in your root deck (for example
-  `examples/advanced/voice_front_desk/decks/root.deck.md`). Each entry’s `path`
-  should point to a persona deck (Markdown or TS) that includes
+  `gambit/examples/advanced/voice_front_desk/decks/root.deck.md`). Each entry’s
+  `path` should point to a persona deck (Markdown or TS) that includes
   `acceptsUserTurns = true`; the persona deck’s own `inputSchema` and defaults
   power the Scenario/Test Bot form (see
-  `examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`).
+  `gambit/examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`).
   Editing those deck files is how you add/remove personas now—there is no
   `.gambit/test-bot.md` override.
 - The Calibrate page is the regroup/diagnostics view for graders that run

@@ -1,7 +1,7 @@
 +++
 label = "Pokemon advice guard LLM"
-inputSchema = "../../../schemas/grader_input_conversation.zod.ts"
-outputSchema = "../../../schemas/grader_output.zod.ts"
+inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+outputSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0

@@ -8,42 +8,42 @@ What it shows
 
 Key files
 
-- `examples/advanced/cli_cold_emailer/cold_emailer.deck.md` — root deck with
-  formatting and tone constraints.
-- `examples/advanced/cli_cold_emailer/schemas/cold_emailer_input.zod.ts` — input
-  schema with `name`, `details`, `sender`, `products`, and optional voice
+- `init/examples/advanced/cli_cold_emailer/cold_emailer.deck.md` — root deck
+  with formatting and tone constraints.
+- `init/examples/advanced/cli_cold_emailer/schemas/cold_emailer_input.zod.ts` —
+  input schema with `name`, `details`, `sender`, `products`, and optional voice
   fields.
-- `examples/advanced/cli_cold_emailer/tests/buyer_feedback.deck.md` — test deck
-  that simulates a buyer persona’s requests/objections.
-- `examples/advanced/cli_cold_emailer/tests/buyer_feedback.deck.md` — test deck
-  that simulates buyer feedback and drives the Test page runs.
-- `examples/advanced/cli_cold_emailer/research_recipient.deck.md` — research
-  action deck for personalization insights.
-- `examples/advanced/cli_cold_emailer/voice_critic.deck.md` — critique action
-  deck for tone and voice.
-- `examples/advanced/cli_cold_emailer/send_email.deck.ts` — demo send action
-  (TypeScript).
-- `examples/advanced/cli_cold_emailer/log_revision_plan.deck.ts` — demo logger
-  for revision steps (TypeScript).
-- `examples/advanced/cli_cold_emailer/cards/assistant_persona.card.md` —
+- `init/examples/advanced/cli_cold_emailer/tests/buyer_feedback.deck.md` — test
+  deck that simulates a buyer persona’s requests/objections.
+- `init/examples/advanced/cli_cold_emailer/tests/buyer_feedback.deck.md` — test
+  deck that simulates buyer feedback and drives the Test page runs.
+- `init/examples/advanced/cli_cold_emailer/research_recipient.deck.md` —
+  research action deck for personalization insights.
+- `init/examples/advanced/cli_cold_emailer/voice_critic.deck.md` — critique
+  action deck for tone and voice.
+- `init/examples/advanced/cli_cold_emailer/send_email.deck.ts` — demo send
+  action (TypeScript).
+- `init/examples/advanced/cli_cold_emailer/log_revision_plan.deck.ts` — demo
+  logger for revision steps (TypeScript).
+- `init/examples/advanced/cli_cold_emailer/cards/assistant_persona.card.md` —
   assistant motivation and guidance for outreach.
-- `examples/advanced/cli_cold_emailer/cards/user_persona.card.md` — recipient
-  motivations and response blockers.
-- `examples/advanced/cli_cold_emailer/cards/behavior.card.md` — behavior rules
-  and output format guidance.
-- `examples/advanced/cli_cold_emailer/cards/send_email.card.md` — action card
-  for sending the drafted email.
-- `examples/advanced/cli_cold_emailer/cards/log_revision_plan.card.md` — action
-  card for logging the revision plan.
-- `examples/advanced/cli_cold_emailer/lookup_profile.deck.ts` — TypeScript
+- `init/examples/advanced/cli_cold_emailer/cards/user_persona.card.md` —
+  recipient motivations and response blockers.
+- `init/examples/advanced/cli_cold_emailer/cards/behavior.card.md` — behavior
+  rules and output format guidance.
+- `init/examples/advanced/cli_cold_emailer/cards/send_email.card.md` — action
+  card for sending the drafted email.
+- `init/examples/advanced/cli_cold_emailer/cards/log_revision_plan.card.md` —
+  action card for logging the revision plan.
+- `init/examples/advanced/cli_cold_emailer/lookup_profile.deck.ts` — TypeScript
   action with hard-coded demo profile data.
-- `examples/advanced/cli_cold_emailer/schemas/research_input.zod.ts` — input
-  schema for `research_recipient`.
-- `examples/advanced/cli_cold_emailer/schemas/research_output.zod.ts` — output
-  schema for `research_recipient`.
-- `examples/advanced/cli_cold_emailer/schemas/voice_critic_input.zod.ts` — input
-  schema for `voice_critic`.
-- `examples/advanced/cli_cold_emailer/schemas/voice_critic_output.zod.ts` —
+- `init/examples/advanced/cli_cold_emailer/schemas/research_input.zod.ts` —
+  input schema for `research_recipient`.
+- `init/examples/advanced/cli_cold_emailer/schemas/research_output.zod.ts` —
+  output schema for `research_recipient`.
+- `init/examples/advanced/cli_cold_emailer/schemas/voice_critic_input.zod.ts` —
+  input schema for `voice_critic`.
+- `init/examples/advanced/cli_cold_emailer/schemas/voice_critic_output.zod.ts` —
   output schema for `voice_critic`.
 
 Why it’s structured this way
@@ -59,7 +59,7 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run examples/advanced/cli_cold_emailer/cold_emailer.deck.md --init '{"name":"Ava","details":"CTO at a fintech, cares about infra costs; pitching a cost monitoring tool","sender":"Riley","products":["Cost monitoring"],"voiceOptions":["founder-to-founder","casual concise","technical direct","warm consultative"]}' --stream`
+- `deno run -A src/cli.ts run init/examples/advanced/cli_cold_emailer/cold_emailer.deck.md --init '{"name":"Ava","details":"CTO at a fintech, cares about infra costs; pitching a cost monitoring tool","sender":"Riley","products":["Cost monitoring"],"voiceOptions":["founder-to-founder","casual concise","technical direct","warm consultative"]}' --stream`
 
 Try this input
 

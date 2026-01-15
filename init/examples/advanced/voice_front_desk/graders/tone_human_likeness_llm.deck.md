@@ -1,6 +1,6 @@
 +++
 label = "tone_human_likeness_llm"
-inputSchema = "../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"

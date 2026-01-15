@@ -16,21 +16,21 @@ What it shows
 
 Key files
 
-- `examples/advanced/voice_front_desk/decks/root.deck.md` — greeter/orchestrator
-  deck that calls the identity and routing decks.
-- `examples/advanced/voice_front_desk/decks/*.deck.md` — modular decks for
+- `init/examples/advanced/voice_front_desk/decks/root.deck.md` —
+  greeter/orchestrator deck that calls the identity and routing decks.
+- `init/examples/advanced/voice_front_desk/decks/*.deck.md` — modular decks for
   identity, routing, scheduling, results, billing, refills, insurance, FAQs,
   transfers, and callback logging.
-- `examples/advanced/voice_front_desk/cards/*.card.md` — persona, identity,
+- `init/examples/advanced/voice_front_desk/cards/*.card.md` — persona, identity,
   routing, and per-flow behavior cards that each deck imports as needed.
-- `examples/advanced/voice_front_desk/actions/*.deck.ts` — deterministic
+- `init/examples/advanced/voice_front_desk/actions/*.deck.ts` — deterministic
   TypeScript compute decks for patient lookup, new-patient capture,
   scheduling_ops, results_lookup, billing_support, refill_ops, insurance_check,
   frontdesk_faq, transfer_request, and log_message.
-- `examples/advanced/voice_front_desk/schemas/*.zod.ts` — init schema plus
+- `init/examples/advanced/voice_front_desk/schemas/*.zod.ts` — init schema plus
   identity, routing, and service-response schemas that keep tool calls typed.
-- `examples/advanced/voice_front_desk/sample_input.json` — sample call metadata
-  for quick CLI runs.
+- `init/examples/advanced/voice_front_desk/sample_input.json` — sample call
+  metadata for quick CLI runs.
 
 Why it’s structured this way
 
@@ -48,7 +48,7 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run examples/advanced/voice_front_desk/decks/root.deck.md --init "$(cat examples/advanced/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
+- `deno run -A src/cli.ts run init/examples/advanced/voice_front_desk/decks/root.deck.md --init "$(cat init/examples/advanced/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
 
 Try this input
 

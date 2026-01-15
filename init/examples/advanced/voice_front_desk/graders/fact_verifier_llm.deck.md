@@ -1,6 +1,6 @@
 +++
 label = "Fact verifier (conversation) LLM"
-inputSchema = "../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"

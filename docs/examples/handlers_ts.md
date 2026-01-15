@@ -8,13 +8,13 @@ What it shows
 
 Key files
 
-- `examples/advanced/cli_handlers_ts/handlers_ts.deck.md` — root LLM deck wiring
-  TS handlers and two actions.
-- `examples/advanced/cli_handlers_ts/handlers/` — TS handler decks:
+- `init/examples/advanced/cli_handlers_ts/handlers_ts.deck.md` — root LLM deck
+  wiring TS handlers and two actions.
+- `init/examples/advanced/cli_handlers_ts/handlers/` — TS handler decks:
   `on_busy.ts`, `on_idle.ts`, `on_error.ts`.
-- `examples/advanced/cli_handlers_ts/actions/decks/` — TS actions
+- `init/examples/advanced/cli_handlers_ts/actions/decks/` — TS actions
   `flaky_action_ts` (can throw) and `slow_action_ts` (delays).
-- `examples/advanced/cli_handlers_ts/actions/cards/` — action cards with
+- `init/examples/advanced/cli_handlers_ts/actions/cards/` — action cards with
   descriptions.
 
 Why it’s structured this way
@@ -29,7 +29,7 @@ Why it’s structured this way
 How to run
 
 - Trigger busy/idle:
-  `deno run -A src/cli.ts run examples/advanced/cli_handlers_ts/handlers_ts.deck.md --init '{"text":"please wait","delayMs":2500}' --stream`
+  `deno run -A src/cli.ts run init/examples/advanced/cli_handlers_ts/handlers_ts.deck.md --init '{"text":"please wait","delayMs":2500}' --stream`
 - Trigger error handling: `--init '{"text":"fail this","fail":true}'`
 
 Try this input

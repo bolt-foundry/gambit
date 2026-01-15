@@ -7,13 +7,13 @@ What it shows
 
 Key files
 
-- `examples/advanced/cli_handlers_md/handlers_md.deck.md` — root LLM deck
+- `init/examples/advanced/cli_handlers_md/handlers_md.deck.md` — root LLM deck
   configuring handlers and two actions.
-- `examples/advanced/cli_handlers_md/handlers/` — Markdown handler decks with
-  Zod schemas.
-- `examples/advanced/cli_handlers_md/actions/decks/` — TS actions `flaky_action`
-  (throws on demand) and `slow_action` (delays).
-- `examples/advanced/cli_handlers_md/handlers/schemas/` — input/output Zod
+- `init/examples/advanced/cli_handlers_md/handlers/` — Markdown handler decks
+  with Zod schemas.
+- `init/examples/advanced/cli_handlers_md/actions/decks/` — TS actions
+  `flaky_action` (throws on demand) and `slow_action` (delays).
+- `init/examples/advanced/cli_handlers_md/handlers/schemas/` — input/output Zod
   schemas for handlers.
 
 Why it’s structured this way
@@ -28,7 +28,7 @@ Why it’s structured this way
 How to run
 
 - Trigger busy/idle:
-  `deno run -A src/cli.ts run examples/advanced/cli_handlers_md/handlers_md.deck.md --init '{"text":"wait","delayMs":3000}' --stream`
+  `deno run -A src/cli.ts run init/examples/advanced/cli_handlers_md/handlers_md.deck.md --init '{"text":"wait","delayMs":3000}' --stream`
 - Trigger error handling: `--init '{"text":"fail me","fail":true}'`
 
 Try this input
