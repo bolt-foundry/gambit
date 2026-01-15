@@ -5,79 +5,9 @@ since = "225456917f75e92cc095af525201373c4be37944"
 
 # Changelog
 
-## Unreleased (v0.6.3)
+## Unreleased (v0.6.8)
 
-- TBD
-
-## v0.6.2
-
-### Release and packaging
-
-- Bump gambit + gambit-core to 0.6.2.
-
-## v0.6.1
-
-### Release and packaging
-
-- Bump gambit + gambit-core to 0.6.1.
-
-## v0.6.0
-
-### Release and packaging
-
-- Add an npm CLI wrapper that downloads prebuilt Gambit binaries with checksum
-  verification.
-- Normalize release binary asset names and checksum generation for predictable
-  npm downloads.
-- Fix the npm build to resolve gambit-core in the gambitmono layout and derive
-  import-map targets from the detected path.
-- Add `@deno/dnt` to the Gambit package and refresh release/npm docs.
-
-## v0.5.5
-
-### Release and packaging
-
-- Publish a minimal `@bolt-foundry/gambit` npm package alongside gambit-core
-  (runtime-only; no CLI/bin yet).
-- Document DNT/npm status and release notes for the npm publish flow.
-
-## v0.5.0
-
-### Runtime and API
-
-- Synthetic tools refreshed: `gambit_init`, `gambit_respond`, `gambit_complete`
-  (function-style tools, underscore names).
-- Envelope simplification: init carries run/action IDs plus guardrails/model
-  hints; respond wraps payload/message/status/code/meta (default status 200 for
-  success, 500 for handled errors unless overridden).
-- Runtime behavior: child completions and handled errors emit `gambit_complete`;
-  interval handlers surface mid-run updates; roots stay conversational-only.
-- `gambit_init` only fires when `--init` is provided and its payload is the raw
-  input (no run/action metadata).
-- Added trace timestamps for latency metrics and persisted streamed assistant
-  text before tool calls.
-- Added OpenAI chat completions compatibility (`renderDeck` plus wrapper).
-- Increased default guardrail `maxPasses`.
-
-### Simulator UI and test bot
-
-- New React simulator UI with sessions, recents, nested trace hierarchy, and
-  session notes/ratings.
-- Pivoted the simulator to debug/test/calibrate workflows with a new editor
-  assistant endpoint and UI tab.
-- Test bot upgrades: per-run streaming + debug link, init/scenario panels,
-  default scenario schema, deck input config, feedback on all bubbles, and
-  session routing/persistence.
-- Calibration/grading updates: deck-defined grading flows, streamed results,
-  reference samples, compact context previews, and renaming calibration runs to
-  grading runs.
-
-### Decks and examples (voice front desk)
-
-- Added voice front desk example decks and modularized the deck set.
-- Added new patient intake + additional voice front desk test decks.
-- Added appointment lookup orchestration and scheduling confirmation flow.
-- Enabled scheduling service deck and shared patient identity test input schema.
+- Repl fixes.
 - Replaced voice front desk graders and expanded FAQ persona/grading coverage.
 
 ### CLI and UX
