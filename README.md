@@ -1,13 +1,14 @@
-# Gambit
+# <img src="./gambit_1color_bg.png" alt="Gambit logo" height="50" />
 
 Gambit helps you build reliable LLM workflows by composing small, typed “decks”\
 with clear inputs/outputs and guardrails. Run decks locally, stream traces, and\
 debug with a built-in UI.
 
+[Watch the demo video](https://youtu.be/J_hQ2L_yy60).
+
 ## Quickstart
 
-Requirements: Node.js 18+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL`
-if\
+Requirements: Node.js 18+ and `OPENROUTER_API_KEY` (set `OPENROUTER_BASE_URL` if
 you proxy OpenRouter-style APIs).
 
 Run the CLI directly with npx (no install):
