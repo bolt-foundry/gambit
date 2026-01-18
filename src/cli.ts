@@ -5,6 +5,7 @@
  * @module
  */
 import {
+  createDispatchingProvider,
   createGeminiProvider,
   createOpenRouterProvider,
   ModelProvider,
@@ -194,28 +195,33 @@ async function main() {
       return;
     }
 
-    let provider: ModelProvider;
-    const model = args.model ?? "";
+    // Default provider is OpenRouter
+    const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
+    if (!openRouterApiKey) {
+      throw new Error(
+        "OPENROUTER_API_KEY is required as the default provider.",
+      );
+    }
+    const openRouterProvider = createOpenRouterProvider({
+      apiKey: openRouterApiKey,
+      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+    });
 
-    if (model.startsWith("gemini") || model.startsWith("google")) {
-      const apiKey = Deno.env.get("GOOGLE_API_KEY") ??
-        Deno.env.get("GEMINI_API_KEY");
-      if (!apiKey) {
-        throw new Error("GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini models");
-      }
-      provider = createGeminiProvider({ apiKey });
-    } else {
-      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-      if (!apiKey) {
-        throw new Error(
-          "OPENROUTER_API_KEY is required for this model. For Gemini, use GOOGLE_API_KEY.",
-        );
-      }
-      provider = createOpenRouterProvider({
-        apiKey,
-        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+    // Setup providers for the dispatcher
+    const providers: { prefix: string; provider: ModelProvider }[] = [];
+    const googleApiKey = Deno.env.get("GOOGLE_API_KEY") ??
+      Deno.env.get("GEMINI_API_KEY");
+    if (googleApiKey) {
+      providers.push({
+        prefix: "google/",
+        provider: createGeminiProvider({ apiKey: googleApiKey }),
       });
     }
+
+    const provider = createDispatchingProvider({
+      providers,
+      defaultProvider: openRouterProvider,
+    });
 
 
     const tracerFns: Array<

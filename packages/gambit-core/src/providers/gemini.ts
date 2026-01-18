@@ -1,13 +1,13 @@
+// @ts-ignore: Deno read-only file system
 import {
   GoogleGenerativeAI,
   GenerativeModel,
   Content,
   Part,
-  FunctionCallingMode,
-  Tool as GoogleTool,
+  FunctionDeclaration,
+  FunctionDeclarationSchemaType,
 } from "@google/generative-ai";
 import type {
-  JSONValue,
   ModelMessage,
   ModelProvider,
   ToolDefinition,
@@ -16,15 +16,10 @@ import type {
 const logger = console;
 
 // Maps Gambit's ModelMessage to Google's Content format
-function toGoogleContent(messages: ModelMessage[]): Content[] {
+export function toGoogleContent(messages: ModelMessage[]): Content[] {
   const history: Content[] = [];
   for (const msg of messages) {
-    // Gemini uses "model" for assistant and "user" for user.
-    // System messages are handled separately.
-    if (msg.role === "system") {
-      // Skip for now, will be added to startChat's history
-      continue;
-    }
+    if (msg.role === "system") continue; // Handled in getGenerativeModel
 
     const parts: Part[] = [];
     if (msg.content) {
@@ -62,8 +57,7 @@ function toGoogleContent(messages: ModelMessage[]): Content[] {
   return history;
 }
 
-// Maps Google's tools to Gambit's format
-function toGambitToolCalls(
+export function toGambitToolCalls(
   result: any,
 ): ModelMessage["tool_calls"] | undefined {
   const calls = result?.response?.candidates?.[0]?.content?.parts
@@ -71,7 +65,7 @@ function toGambitToolCalls(
     .map((part: Part) => {
       const fc = part.functionCall!;
       return {
-        id: `call_${crypto.randomUUID()}`, // Gemini doesn't provide IDs
+        id: `call_${crypto.randomUUID()}`,
         type: "function" as const,
         function: {
           name: fc.name,
@@ -85,18 +79,12 @@ function toGambitToolCalls(
 
 export function createGeminiProvider(opts: {
   apiKey: string;
+  client?: GoogleGenerativeAI;
 }): ModelProvider {
-  const genAI = new GoogleGenerativeAI(opts.apiKey);
+  const genAI = opts.client ?? new GoogleGenerativeAI(opts.apiKey);
 
   return {
-    async chat(input: {
-      model: string;
-      messages: Array<ModelMessage>;
-      tools?: Array<ToolDefinition>;
-      stream?: boolean;
-      onStreamText?: (chunk: string) => void;
-      params?: Record<string, unknown>;
-    }) {
+    async chat(input) {
       logger.log(
         `[GeminiProvider] Using native Google provider for model: ${input.model}`,
       );
@@ -105,14 +93,34 @@ export function createGeminiProvider(opts: {
         (m) => m.role === "system",
       )?.content;
 
+      // Map Gambit/OpenAI tools to Gemini tools
+      const tools = input.tools && input.tools.length > 0
+        ? [{
+          functionDeclarations: input.tools.map((t): FunctionDeclaration => {
+            // Gambit parameters are essentially a JSON schema.
+            // We need to ensure it matches FunctionDeclarationSchema.
+            // Using 'as any' for the properties/parameters mapping to avoid
+            // strict type mismatch between JSONSchema variants, as they are
+            // functionally compatible for this use case.
+            const params = t.function.parameters as any;
+            
+            return {
+              name: t.function.name,
+              description: t.function.description,
+              parameters: {
+                type: FunctionDeclarationSchemaType.OBJECT,
+                properties: params.properties,
+                required: params.required,
+              },
+            };
+          }),
+        }]
+        : undefined;
+
       const model: GenerativeModel = genAI.getGenerativeModel({
         model: input.model,
-        systemInstruction: systemInstruction
-          ? { role: "system", parts: [{ text: systemInstruction }] }
-          : undefined,
-        tools: input.tools
-          ? [{ functionDeclarations: input.tools.map((t) => t.function) }]
-          : undefined,
+        systemInstruction: systemInstruction ?? undefined,
+        tools,
       });
 
       const history = toGoogleContent(input.messages);
@@ -123,50 +131,47 @@ export function createGeminiProvider(opts: {
 
       const chat = model.startChat({
         history,
-        tools: input.tools
-          ? [{ functionDeclarations: input.tools.map((t) => t.function) as any }]
-          : undefined,
+        tools,
       });
 
       if (input.stream) {
         const streamResult = await chat.sendMessageStream(lastMessage.parts);
-
         let fullText = "";
         for await (const chunk of streamResult.stream) {
-          const chunkText = chunk.text();
-          if (chunkText) {
-            fullText += chunkText;
-            input.onStreamText?.(chunkText);
-          }
+          fullText += chunk.text();
+          input.onStreamText?.(chunk.text());
         }
-
-        const toolCalls = toGambitToolCalls({ response: await streamResult.response });
-
+        const response = await streamResult.response;
+        const toolCalls = toGambitToolCalls({ response });
         return {
           message: {
             role: "assistant",
             content: fullText,
             tool_calls: toolCalls,
           },
-          finishReason: "stop", // Gemini SDK doesn't directly expose this yet
-          toolCalls: toolCalls?.map(tc => ({ id: tc.id, name: tc.function.name, args: JSON.parse(tc.function.arguments) })),
-          // Usage data is not yet available in the Node SDK for streaming
+          finishReason: "stop",
+          toolCalls: toolCalls?.map((tc) => ({
+            id: tc.id,
+            name: tc.function.name,
+            args: JSON.parse(tc.function.arguments),
+          })),
         };
       }
 
       const result = await chat.sendMessage(lastMessage.parts);
-
       const toolCalls = toGambitToolCalls(result);
-
       return {
         message: {
           role: "assistant",
           content: result.response.text(),
           tool_calls: toolCalls,
         },
-        finishReason: "stop", // Or map from `result.response.candidates[0].finishReason`
-        toolCalls: toolCalls?.map(tc => ({ id: tc.id, name: tc.function.name, args: JSON.parse(tc.function.arguments) })),
-        // usage: ... not easily available
+        finishReason: "stop",
+        toolCalls: toolCalls?.map((tc) => ({
+          id: tc.id,
+          name: tc.function.name,
+          args: JSON.parse(tc.function.arguments),
+        })),
       };
     },
   };
