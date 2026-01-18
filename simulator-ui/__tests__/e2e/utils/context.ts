@@ -6,6 +6,7 @@ import {
   type CDPSession,
   launch,
   type Page,
+  type ConsoleMessage,
 } from "puppeteer-core";
 
 function getErrorMessage(err: unknown): string {
@@ -341,10 +342,10 @@ class E2eTestContext {
         // ignore file write errors in CI
       }
     };
-    ctx.page.on("console", (msg) => {
+    ctx.page.on("console", (msg: ConsoleMessage) => {
       writeLog(msg.type(), "console", msg.text()).catch(() => {});
     });
-    ctx.page.on("pageerror", (err) => {
+    ctx.page.on("pageerror", (err: unknown) => {
       writeLog("error", "pageerror", String(err)).catch(() => {});
     });
 
@@ -441,8 +442,9 @@ class E2eTestContext {
         timeout: 15_000,
         visible: true,
       });
-      const ok = await this.page!.evaluate((sel) => {
-        const el = document.querySelector<HTMLElement>(sel);
+      const ok = await this.page!.evaluate((sel: string) => {
+        const doc = document;
+        const el = doc.querySelector(sel) as HTMLElement | null;
         if (!el) return false;
         el.scrollIntoView({ block: "center", inline: "center" });
         el.click();
@@ -474,10 +476,12 @@ class E2eTestContext {
         visible: true,
       });
       if (opts?.clear) {
-        await this.page!.evaluate((sel) => {
-          const el = document.querySelector<
-            HTMLInputElement | HTMLTextAreaElement
-          >(sel);
+        await this.page!.evaluate((sel: string) => {
+          const doc = document;
+          const el = doc.querySelector(sel) as
+            | HTMLInputElement
+            | HTMLTextAreaElement
+            | null;
           if (el) el.value = "";
         }, selector);
       }
@@ -512,7 +516,7 @@ class E2eTestContext {
       const handle = await this.page.$(selector);
       if (!handle) return "";
       const txt = await this.page.evaluate(
-        (el) => (el.textContent || "").trim(),
+        (el: Element) => (el.textContent || "").trim(),
         handle,
       );
       await handle.dispose();
@@ -528,7 +532,7 @@ class E2eTestContext {
   ): Promise<void> {
     if (!this.page) throw new Error("context page not initialized");
     await this.page.evaluate(
-      (fnName, fnArgs) => {
+      (fnName: string, fnArgs: Array<unknown>) => {
         const api = (window as { gambitDemo?: Record<string, unknown> })
           .gambitDemo;
         const target = api?.[fnName as keyof typeof api];

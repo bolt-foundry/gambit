@@ -47,6 +47,10 @@ export type { RenderDeckOptions } from "./src/render.ts";
 export type { RenderDeckResult } from "./src/render.ts";
 /** Provider factory for OpenRouter-backed model calls. */
 export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
+/** Provider factory for Google Gemini-backed model calls. */
+export { createGeminiProvider } from "./src/providers/gemini.ts";
+/** Provider factory for dispatching to other providers. */
+export { createDispatchingProvider } from "./src/providers/dispatcher.ts";
 /** Gambit CLI helpers and internal primitives. */
 export { GAMBIT_TOOL_INIT } from "./src/constants.ts";
 /** Load a deck definition from disk. */
