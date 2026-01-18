@@ -22,7 +22,7 @@ export function toGoogleContent(messages: ModelMessage[]): Content[] {
     if (msg.role === "system") continue; // Handled in getGenerativeModel
 
     const parts: Part[] = [];
-    if (msg.content) {
+    if (msg.content && msg.role !== "tool") {
       parts.push({ text: msg.content });
     }
 
