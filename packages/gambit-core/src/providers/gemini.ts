@@ -26,17 +26,37 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 // Maps Gambit's ModelMessage to Google's Content format
-export function toGoogleContent(messages: ModelMessage[]): Content[] {
+export function toGoogleContent(
+  messages: ModelMessage[],
+  opts: { allowFunctionCalls?: boolean } = {},
+): Content[] {
+  const allowFunctionCalls = opts.allowFunctionCalls ?? true;
   const history: Content[] = [];
   for (const msg of messages) {
-    if (msg.role === "system") continue; // Handled in getGenerativeModel
+    if (msg.role === "system") continue; // Handled separately
 
-    const parts: Part[] = [];
-    if (msg.content && msg.role !== "tool") {
-      parts.push({ text: msg.content });
+    if (msg.role === "tool") {
+      if (!allowFunctionCalls) {
+        continue;
+      }
+      const toolName = msg.name ?? "tool";
+      const toolContent = typeof msg.content === "string" ? msg.content : "";
+      history.push({
+        role: "user",
+        parts: [{ text: `[${toolName}]: ${toolContent}` }],
+      });
+      continue;
     }
 
-    if (msg.role === "assistant" && msg.tool_calls) {
+    const parts: Part[] = [];
+    if (msg.content) {
+      parts.push({ text: msg.content });
+    }
+    if (parts.length === 0 && msg.role !== "assistant") {
+      parts.push({ text: "" });
+    }
+
+    if (allowFunctionCalls && msg.role === "assistant" && msg.tool_calls) {
       for (const tc of msg.tool_calls) {
         parts.push({
           functionCall: {
@@ -47,22 +67,15 @@ export function toGoogleContent(messages: ModelMessage[]): Content[] {
       }
     }
 
-    if (msg.role === "tool") {
-      parts.push({
-        functionResponse: {
-          name: msg.name!,
-          response: {
-            name: msg.name!,
-            content: msg.content,
-          },
-        },
-      });
+    if (parts.length === 0) {
+      continue;
     }
 
-    history.push({
-      role: msg.role === "assistant" ? "model" : "user",
-      parts,
-    });
+    const role = msg.role === "assistant" ? "model" : "user";
+    history.push({ role, parts });
+  }
+  if (history.length > 0 && history[0].role === "model") {
+    history.unshift({ role: "user", parts: [{ text: "" }] });
   }
   return history;
 }
@@ -94,6 +107,7 @@ export function createGeminiProvider(opts: {
   const genAI = opts.client ?? new GoogleGenerativeAI(opts.apiKey);
   const apiVersion = Deno.env.get("GOOGLE_API_VERSION") ?? "v1";
   const requestOptions = { apiVersion };
+
 
   return {
     async chat(input) {
@@ -144,25 +158,54 @@ export function createGeminiProvider(opts: {
         }]
         : undefined;
 
-      const model: GenerativeModel = genAI.getGenerativeModel({
+      const baseModelParams = {
         model: input.model,
-        systemInstruction: systemInstruction ?? undefined,
         tools,
-      }, requestOptions);
+      };
 
-      const history = toGoogleContent(input.messages);
+      const systemContent = systemInstruction && systemInstruction.trim()
+        ? ({ role: "user", parts: [{ text: systemInstruction }] } as Content)
+        : undefined;
+
+      const history = toGoogleContent(
+        input.messages.filter((msg) => msg.role !== "system"),
+        { allowFunctionCalls: Boolean(tools && tools.length > 0) },
+      );
+
+      if (systemContent) {
+        history.unshift(systemContent);
+      }
+
       const lastMessage = history.pop();
       if (!lastMessage) {
         throw new Error("No user message found to send.");
       }
+
+      if (lastMessage.role === "model") {
+        history.push({ role: "user", parts: [{ text: "" }] });
+        history.push(lastMessage);
+      } else {
+        history.push(lastMessage);
+      }
+
+      const userMessage = history.pop();
+      if (!userMessage || userMessage.role !== "user") {
+        throw new Error("No user message found to send.");
+      }
+
+      const model: GenerativeModel = genAI.getGenerativeModel(
+        baseModelParams,
+        requestOptions,
+      );
 
       const chat = model.startChat({
         history,
         tools,
       });
 
+
       if (input.stream) {
-        const streamResult = await chat.sendMessageStream(lastMessage.parts);
+        const streamResult = await chat.sendMessageStream(userMessage.parts);
         let fullText = "";
         for await (const chunk of streamResult.stream) {
           fullText += chunk.text();
@@ -185,7 +228,7 @@ export function createGeminiProvider(opts: {
         };
       }
 
-      const result = await chat.sendMessage(lastMessage.parts);
+      const result = await chat.sendMessage(userMessage.parts);
       const toolCalls = toGambitToolCalls(result);
       return {
         message: {
