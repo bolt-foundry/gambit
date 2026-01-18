@@ -55,7 +55,8 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "jsxImportSource": "react",
+    "lib": ["dom", "dom.iterable", "es2022", "deno.ns"]
   },
   "imports": {
     "@deno/dnt": "jsr:@deno/dnt@^0.42.3", // dev
@@ -75,6 +76,7 @@
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
     "@openai/openai": "npm:openai@^4.78.1",
     "@google/generative-ai": "npm:@google/generative-ai@^0.24.1",
+    "puppeteer-core": "npm:puppeteer-core@^24.35.0",
     "react": "npm:react@^19.2.0",
     "react-dom": "npm:react-dom@^19.2.0"
   },
