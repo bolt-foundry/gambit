@@ -105,12 +105,13 @@ export function createGeminiProvider(opts: {
   client?: GoogleGenerativeAI;
 }): ModelProvider {
   const genAI = opts.client ?? new GoogleGenerativeAI(opts.apiKey);
-  const apiVersion = Deno.env.get("GOOGLE_API_VERSION") ?? "v1";
+  const apiVersion = Deno.env.get("GOOGLE_API_VERSION") ?? "default";
+  const resolvedApiVersion = apiVersion === "default" ? "v1beta" : apiVersion;
 
   return {
     async chat(input) {
       logger.log(
-        `[GeminiProvider] Using native Google provider for model: ${input.model} (apiVersion=${apiVersion})`,
+        `[GeminiProvider] Using native Google provider for model: ${input.model} (apiVersion=${apiVersion} [${resolvedApiVersion}])`,
       );
 
 
