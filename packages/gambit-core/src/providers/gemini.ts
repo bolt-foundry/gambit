@@ -7,6 +7,7 @@ import {
   FunctionDeclaration,
   FunctionDeclarationSchema,
   FunctionDeclarationSchemaProperty,
+  FunctionCallingMode,
   Schema,
   SchemaType,
 } from "@google/generative-ai";
@@ -33,17 +34,23 @@ export function toGoogleContent(
   const allowFunctionCalls = opts.allowFunctionCalls ?? true;
   const history: Content[] = [];
   for (const msg of messages) {
-    if (msg.role === "system") continue; // Handled separately
+    if (msg.role === "system") continue; // Handled via systemInstruction
 
     if (msg.role === "tool") {
       if (!allowFunctionCalls) {
         continue;
       }
-      const toolName = msg.name ?? "tool";
-      const toolContent = typeof msg.content === "string" ? msg.content : "";
       history.push({
-        role: "user",
-        parts: [{ text: `[${toolName}]: ${toolContent}` }],
+        role: "function",
+        parts: [{
+          functionResponse: {
+            name: msg.name ?? "tool",
+            response: {
+              name: msg.name ?? "tool",
+              content: msg.content,
+            },
+          },
+        }],
       });
       continue;
     }
@@ -51,9 +58,6 @@ export function toGoogleContent(
     const parts: Part[] = [];
     if (msg.content) {
       parts.push({ text: msg.content });
-    }
-    if (parts.length === 0 && msg.role !== "assistant") {
-      parts.push({ text: "" });
     }
 
     if (allowFunctionCalls && msg.role === "assistant" && msg.tool_calls) {
@@ -83,6 +87,21 @@ export function toGoogleContent(
 export function toGambitToolCalls(
   result: any,
 ): ModelMessage["tool_calls"] | undefined {
+  const functionCalls = typeof result?.response?.functionCalls === "function"
+    ? result.response.functionCalls()
+    : undefined;
+
+  if (functionCalls && functionCalls.length > 0) {
+    return functionCalls.map((fc: { name: string; args: object }) => ({
+      id: `call_${crypto.randomUUID()}`,
+      type: "function" as const,
+      function: {
+        name: fc.name,
+        arguments: JSON.stringify(fc.args ?? {}),
+      },
+    }));
+  }
+
   const calls = result?.response?.candidates?.[0]?.content?.parts
     ?.filter((part: Part) => part.functionCall)
     .map((part: Part) => {
@@ -158,39 +177,54 @@ export function createGeminiProvider(opts: {
         }]
         : undefined;
 
+
+      const hasToolResponse = input.messages.some((msg) => msg.role === "tool");
       const baseModelParams = {
         model: input.model,
+        systemInstruction: systemInstruction
+          ? { role: "system", parts: [{ text: systemInstruction }] }
+          : undefined,
         tools,
+        toolConfig: tools
+          ? {
+            functionCallingConfig: {
+              mode: hasToolResponse
+                ? FunctionCallingMode.AUTO
+                : FunctionCallingMode.ANY,
+              ...(hasToolResponse
+                ? {}
+                : { allowedFunctionNames: tools[0]?.functionDeclarations?.map((fn) => fn.name) }),
+            },
+          }
+          : undefined,
       };
-
-      const systemContent = systemInstruction && systemInstruction.trim()
-        ? ({ role: "user", parts: [{ text: systemInstruction }] } as Content)
-        : undefined;
 
       const history = toGoogleContent(
         input.messages.filter((msg) => msg.role !== "system"),
         { allowFunctionCalls: Boolean(tools && tools.length > 0) },
       );
 
-      if (systemContent) {
-        history.unshift(systemContent);
+      if (history.length === 0) {
+        return {
+          message: { role: "assistant", content: "" },
+          finishReason: "stop",
+        };
       }
 
       const lastMessage = history.pop();
+      let userMessage: Content;
       if (!lastMessage) {
-        throw new Error("No user message found to send.");
+        return {
+          message: { role: "assistant", content: "" },
+          finishReason: "stop",
+        };
       }
 
-      if (lastMessage.role === "model") {
-        history.push({ role: "user", parts: [{ text: "" }] });
-        history.push(lastMessage);
+      if (lastMessage.role === "user") {
+        userMessage = lastMessage;
       } else {
         history.push(lastMessage);
-      }
-
-      const userMessage = history.pop();
-      if (!userMessage || userMessage.role !== "user") {
-        throw new Error("No user message found to send.");
+        userMessage = { role: "user", parts: [{ text: "" }] };
       }
 
       const model: GenerativeModel = genAI.getGenerativeModel(

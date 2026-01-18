@@ -44,7 +44,7 @@ Deno.test("toGoogleContent maps messages correctly", () => {
   });
 
   // Tool response message
-  assertEquals(googleContent[2].role, "user");
+  assertEquals(googleContent[2].role, "function");
   assertEquals(googleContent[2].parts[0], {
     functionResponse: {
       name: "get_weather",
