@@ -33,6 +33,7 @@
     "@std/front-matter/any": "jsr:@std/front-matter@^1.0.9/any",
     "@std/path": "jsr:@std/path@^1.0.6",
     "@openai/openai": "npm:openai@^4.78.1",
+    "@google/generative-ai": "npm:@google/generative-ai@^0.15.0",
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0"
   }

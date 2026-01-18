@@ -4,7 +4,11 @@
  *
  * @module
  */
-import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
+import {
+  createGeminiProvider,
+  createOpenRouterProvider,
+  ModelProvider,
+} from "@bolt-foundry/gambit-core";
 import { parse } from "@std/jsonc";
 import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
@@ -150,10 +154,6 @@ async function main() {
       return;
     }
 
-    if (!deckPath && args.cmd !== "grade" && args.cmd !== "export") {
-      printUsage();
-      Deno.exit(1);
-    }
 
     if (args.cmd === "grade") {
       const graderPath = args.graderPath ?? deckPath;
@@ -194,14 +194,29 @@ async function main() {
       return;
     }
 
-    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-    if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY is required");
+    let provider: ModelProvider;
+    const model = args.model ?? "";
+
+    if (model.startsWith("gemini") || model.startsWith("google")) {
+      const apiKey = Deno.env.get("GOOGLE_API_KEY") ??
+        Deno.env.get("GEMINI_API_KEY");
+      if (!apiKey) {
+        throw new Error("GOOGLE_API_KEY or GEMINI_API_KEY is required for Gemini models");
+      }
+      provider = createGeminiProvider({ apiKey });
+    } else {
+      const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+      if (!apiKey) {
+        throw new Error(
+          "OPENROUTER_API_KEY is required for this model. For Gemini, use GOOGLE_API_KEY.",
+        );
+      }
+      provider = createOpenRouterProvider({
+        apiKey,
+        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+      });
     }
-    const provider = createOpenRouterProvider({
-      apiKey,
-      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
-    });
+
 
     const tracerFns: Array<
       (
