@@ -16,7 +16,7 @@
     "jsr:@std/toml@^1.0.3": "1.0.11",
     "jsr:@std/toml@^1.0.9": "1.0.11",
     "jsr:@std/yaml@^1.0.5": "1.0.10",
-    "npm:@google/generative-ai@0.15": "0.15.0",
+    "npm:@google/generative-ai@~0.24.1": "0.24.1",
     "npm:openai@^4.78.1": "4.104.0_zod@3.25.76",
     "npm:playwright-core@^1.57.0": "1.57.0",
     "npm:react-dom@^19.2.0": "19.2.3_react@19.2.3",
@@ -89,8 +89,8 @@
     }
   },
   "npm": {
-    "@google/generative-ai@0.15.0": {
-      "integrity": "sha512-zs37judcTYFJf1U7tnuqnh7gdzF6dcWj9pNRxjA5JTONRoiQ0htrRdbefRFiewOIfXwhun5t9hbd2ray7812eQ=="
+    "@google/generative-ai@0.24.1": {
+      "integrity": "sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q=="
     },
     "@types/node-fetch@2.6.13": {
       "integrity": "sha512-QGpRVpzSaUs30JBSGPjOg4Uveu384erbHBoT1zeONvyCfwQxIkUshLAOqN/k9EjGviPRmWTTe6aH2qySWKTVSw==",
@@ -338,7 +338,7 @@
       "jsr:@std/path@^1.0.6",
       "jsr:@std/tar@~0.1.9",
       "jsr:@std/toml@^1.0.9",
-      "npm:@google/generative-ai@0.15",
+      "npm:@google/generative-ai@~0.24.1",
       "npm:openai@^4.78.1",
       "npm:playwright-core@^1.57.0",
       "npm:react-dom@^19.2.0",

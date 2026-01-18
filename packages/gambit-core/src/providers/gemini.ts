@@ -5,15 +5,25 @@ import {
   Content,
   Part,
   FunctionDeclaration,
-  FunctionDeclarationSchemaType,
+  FunctionDeclarationSchema,
+  FunctionDeclarationSchemaProperty,
+  Schema,
+  SchemaType,
 } from "@google/generative-ai";
 import type {
   ModelMessage,
   ModelProvider,
-  ToolDefinition,
 } from "../types.ts";
 
 const logger = console;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
 
 // Maps Gambit's ModelMessage to Google's Content format
 export function toGoogleContent(messages: ModelMessage[]): Content[] {
@@ -82,6 +92,8 @@ export function createGeminiProvider(opts: {
   client?: GoogleGenerativeAI;
 }): ModelProvider {
   const genAI = opts.client ?? new GoogleGenerativeAI(opts.apiKey);
+  const apiVersion = Deno.env.get("GOOGLE_API_VERSION") ?? "v1";
+  const requestOptions = { apiVersion };
 
   return {
     async chat(input) {
@@ -97,21 +109,36 @@ export function createGeminiProvider(opts: {
       const tools = input.tools && input.tools.length > 0
         ? [{
           functionDeclarations: input.tools.map((t): FunctionDeclaration => {
-            // Gambit parameters are essentially a JSON schema.
-            // We need to ensure it matches FunctionDeclarationSchema.
-            // Using 'as any' for the properties/parameters mapping to avoid
-            // strict type mismatch between JSONSchema variants, as they are
-            // functionally compatible for this use case.
-            const params = t.function.parameters as any;
-            
+            const rawParams = t.function.parameters;
+            const rawType = isRecord(rawParams) ? rawParams.type : undefined;
+            const rawProps = isRecord(rawParams) ? rawParams.properties : undefined;
+            const rawRequired = isRecord(rawParams) ? rawParams.required : undefined;
+
+            const schemaType = typeof rawType === "string" && rawType.toLowerCase() === "object"
+              ? SchemaType.OBJECT
+              : SchemaType.OBJECT;
+
+            const properties: Record<string, FunctionDeclarationSchemaProperty> = isRecord(rawProps)
+              ? Object.fromEntries(
+                Object.entries(rawProps).map(([key, value]) => {
+                  const schemaValue: Schema = isRecord(value)
+                    ? (value as unknown as Schema)
+                    : { type: SchemaType.STRING };
+                  return [key, schemaValue];
+                }),
+              )
+              : {};
+
+            const parameters: FunctionDeclarationSchema = {
+              type: schemaType,
+              properties,
+              required: isStringArray(rawRequired) ? rawRequired : undefined,
+            };
+
             return {
               name: t.function.name,
               description: t.function.description,
-              parameters: {
-                type: FunctionDeclarationSchemaType.OBJECT,
-                properties: params.properties,
-                required: params.required,
-              },
+              parameters,
             };
           }),
         }]
@@ -121,7 +148,7 @@ export function createGeminiProvider(opts: {
         model: input.model,
         systemInstruction: systemInstruction ?? undefined,
         tools,
-      });
+      }, requestOptions);
 
       const history = toGoogleContent(input.messages);
       const lastMessage = history.pop();
