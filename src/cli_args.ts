@@ -6,6 +6,7 @@ import { normalizeFlagList, parsePortValue } from "./cli_utils.ts";
 const logger = console;
 
 const COMMANDS = [
+  "demo",
   "init",
   "run",
   "repl",
@@ -22,6 +23,7 @@ function isKnownCommand(cmd?: string): cmd is Command {
 }
 
 const HELP_COMMANDS = [
+  "demo",
   "init",
   "run",
   "repl",

@@ -15,11 +15,21 @@ Run the CLI directly with npx (no install):
 
 ```
 export OPENROUTER_API_KEY=...
-npx @bolt-foundry/gambit init
+npx @bolt-foundry/gambit demo
 ```
 
 Downloads example files (hello decks plus the `examples/` gallery) and sets
 environment variables.
+
+To scaffold a starter project that you can customize, run:
+
+```
+npx @bolt-foundry/gambit init my-project
+```
+
+This creates a structured skeleton (`decks/`, `actions/`, `graders/`, `tests/`,
+`schemas/`, `.gambit/`) with README guides so you can start authoring your own
+workflows immediately.
 
 Run an example in the terminal (`repl`):
 
@@ -251,7 +261,13 @@ Quickstart:
 
 ```
 export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli init
+deno run -A jsr:@bolt-foundry/gambit/cli demo
+```
+
+Starter project:
+
+```
+deno run -A jsr:@bolt-foundry/gambit/cli init my-project
 ```
 
 Run a deck:
