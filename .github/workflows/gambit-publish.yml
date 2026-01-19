@@ -267,7 +267,9 @@ jobs:
           cp "$gambit_config" "${gambit_config}.publish-backup"
           cp packages/gambit-core/deno.json packages/gambit-core/deno.publish-backup.json
           init_template=""
-          for candidate in "init/deno.json" "packages/gambit/init/deno.json"; do
+          for candidate in \
+            "scaffolds/init/deno.json" \
+            "packages/gambit/scaffolds/init/deno.json"; do
             if [ -f "$candidate" ]; then
               init_template="$candidate"
               break
@@ -314,8 +316,8 @@ jobs:
             await Deno.writeTextFile(gambitPath, JSON.stringify(gambit, null, 2) + "\n");
 
             const initPathCandidates = [
-              "init/package.json",
-              "packages/gambit/init/package.json",
+              "scaffolds/init/package.json",
+              "packages/gambit/scaffolds/init/package.json",
             ];
             const initPath = await (async () => {
               for (const candidate of initPathCandidates) {
@@ -337,8 +339,8 @@ jobs:
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
 
             const initDenoPathCandidates = [
-              "init/deno.json",
-              "packages/gambit/init/deno.json",
+              "scaffolds/init/deno.json",
+              "packages/gambit/scaffolds/init/deno.json",
             ];
             const initDenoPath = await (async () => {
               for (const candidate of initDenoPathCandidates) {
@@ -459,7 +461,9 @@ jobs:
           cp "$gambit_config" "${gambit_config}.publish-backup"
           cp packages/gambit-core/deno.json packages/gambit-core/deno.publish-backup.json
           init_template=""
-          for candidate in "init/deno.json" "packages/gambit/init/deno.json"; do
+          for candidate in \
+            "scaffolds/init/deno.json" \
+            "packages/gambit/scaffolds/init/deno.json"; do
             if [ -f "$candidate" ]; then
               init_template="$candidate"
               break
@@ -505,8 +509,8 @@ jobs:
             await Deno.writeTextFile(gambitPath, JSON.stringify(gambit, null, 2) + "\n");
 
             const initPathCandidates = [
-              "init/package.json",
-              "packages/gambit/init/package.json",
+              "scaffolds/init/package.json",
+              "packages/gambit/scaffolds/init/package.json",
             ];
             const initPath = await (async () => {
               for (const candidate of initPathCandidates) {
@@ -528,8 +532,8 @@ jobs:
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
 
             const initDenoPathCandidates = [
-              "init/deno.json",
-              "packages/gambit/init/deno.json",
+              "scaffolds/init/deno.json",
+              "packages/gambit/scaffolds/init/deno.json",
             ];
             const initDenoPath = await (async () => {
               for (const candidate of initDenoPathCandidates) {
@@ -626,7 +630,9 @@ jobs:
             mv packages/gambit-core/deno.publish-backup.json packages/gambit-core/deno.json
           fi
           init_template=""
-          for candidate in "init/deno.json" "packages/gambit/init/deno.json"; do
+          for candidate in \
+            "scaffolds/init/deno.json" \
+            "packages/gambit/scaffolds/init/deno.json"; do
             if [ -f "${candidate}.publish-backup" ]; then
               init_template="$candidate"
               break
