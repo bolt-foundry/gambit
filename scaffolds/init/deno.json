@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@bolt-foundry/gambit-core": "../../gambit-core/mod.ts"
+  }
+}

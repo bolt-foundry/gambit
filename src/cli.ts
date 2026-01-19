@@ -15,6 +15,7 @@ import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
 import { runGraderAgainstState } from "./commands/grade.ts";
 import { exportBundle } from "./commands/export.ts";
+import { handleDemoCommand } from "./commands/demo.ts";
 import { handleInitCommand } from "./commands/init.ts";
 import { parseBotInput, parseInit, parseMessage } from "./cli_utils.ts";
 import {
@@ -138,8 +139,13 @@ async function main() {
       return;
     }
 
+    if (args.cmd === "demo") {
+      await handleDemoCommand();
+      return;
+    }
+
     if (args.cmd === "init") {
-      await handleInitCommand();
+      await handleInitCommand(args.deckPath);
       return;
     }
 

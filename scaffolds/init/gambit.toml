@@ -1,0 +1,6 @@
+[workspace]
+decks = "decks"
+actions = "actions"
+graders = "graders"
+tests = "tests"
+schemas = "schemas"
