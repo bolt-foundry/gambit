@@ -1,9 +1,0 @@
-/**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
- */
-
-"use strict";var e=require("@lexical/react/LexicalComposerContext"),t=require("@lexical/react/useLexicalEditable"),r=require("@lexical/text"),n=require("@lexical/utils"),o=require("react"),i=require("react-dom"),c=require("react/jsx-runtime"),u=require("@lexical/dragon"),s=require("@lexical/plain-text");const l="undefined"!=typeof window&&void 0!==window.document&&void 0!==window.document.createElement?o.useLayoutEffect:o.useEffect;function a(e){return e.getEditorState().read(r.$canShowPlaceholderCurry(e.isComposing()))}function d({content:r}){const[i]=e.useLexicalComposerContext(),c=function(e){const[t,r]=o.useState((()=>a(e)));return l((()=>{function t(){const t=a(e);r(t)}return t(),n.mergeRegister(e.registerUpdateListener((()=>{t()})),e.registerEditableListener((()=>{t()})))}),[e]),t}(i),u=t.useLexicalEditable();return c?"function"==typeof r?r(u):r:null}exports.PlainTextPlugin=function({contentEditable:t,placeholder:r=null,ErrorBoundary:a}){const[x]=e.useLexicalComposerContext(),f=function(e,t){const[r,n]=o.useState((()=>e.getDecorators()));return l((()=>e.registerDecoratorListener((e=>{i.flushSync((()=>{n(e)}))}))),[e]),o.useEffect((()=>{n(e.getDecorators())}),[e]),o.useMemo((()=>{const n=[],u=Object.keys(r);for(let s=0;s<u.length;s++){const l=u[s],a=c.jsx(t,{onError:t=>e._onError(t),children:c.jsx(o.Suspense,{fallback:null,children:r[l]})}),d=e.getElementByKey(l);null!==d&&n.push(i.createPortal(a,d,l))}return n}),[t,r,e])}(x,a);return function(e){l((()=>n.mergeRegister(s.registerPlainText(e),u.registerDragonSupport(e))),[e])}(x),c.jsxs(c.Fragment,{children:[t,c.jsx(d,{content:r}),f]})};
