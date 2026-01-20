@@ -1,17 +1,94 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { loadDeck } from "./loader.ts";
+import {
+  messagesFromOpenResponseOutput,
+  openResponseItemFromMessage,
+} from "./openresponses.ts";
 import { runDeck } from "./runtime.ts";
-import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
+import type {
+  JSONValue,
+  ModelMessage,
+  ModelProvider,
+  OpenResponseInput,
+  OpenResponseItem,
+  OpenResponseMessageItem,
+  TraceEvent,
+} from "./types.ts";
 
-const dummyProvider: ModelProvider = {
-  chat() {
-    return Promise.resolve({
-      message: { role: "assistant", content: "dummy" },
-      finishReason: "stop",
-    });
-  },
+type ChatHandlerInput = {
+  model: string;
+  messages: Array<ModelMessage>;
+  stream?: boolean;
+  onStreamText?: (chunk: string) => void;
+  params?: Record<string, unknown>;
 };
+
+type ChatHandlerResult = {
+  message: ModelMessage | OpenResponseMessageItem;
+  finishReason: "stop" | "tool_calls" | "length";
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    args: Record<string, JSONValue>;
+  }>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  updatedState?: import("./state.ts").SavedState;
+};
+
+function normalizeResponseInput(
+  input: OpenResponseInput,
+): Array<OpenResponseItem> {
+  if (typeof input === "string") {
+    return [{ type: "message", role: "user", content: input }];
+  }
+  return input ?? [];
+}
+
+function createChatLikeProvider(
+  handler: (
+    input: ChatHandlerInput,
+  ) => ChatHandlerResult | Promise<ChatHandlerResult>,
+): ModelProvider {
+  return {
+    responses: async (input) => {
+      const result = await handler({
+        model: input.model,
+        messages: messagesFromOpenResponseOutput(
+          normalizeResponseInput(input.input),
+        ),
+        stream: input.stream,
+        onStreamText: input.onStreamEvent
+          ? (chunk) =>
+            input.onStreamEvent?.({
+              type: "response.output_text.delta",
+              delta: chunk,
+            })
+          : undefined,
+        params: input.params,
+      });
+      const outputItem = "type" in result.message
+        ? result.message
+        : openResponseItemFromMessage(result.message);
+      return {
+        id: "resp-test",
+        output: [outputItem],
+        finishReason: result.finishReason,
+        updatedState: result.updatedState,
+        usage: result.usage,
+      };
+    },
+  };
+}
+
+const dummyProvider = createChatLikeProvider(() => ({
+  message: { role: "assistant", content: "dummy" },
+  finishReason: "stop",
+}));
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -219,14 +296,10 @@ Deno.test("LLM deck fails fast when finishReason=tool_calls with no calls", asyn
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "tool_calls",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => ({
+    message: { role: "assistant", content: null },
+    finishReason: "tool_calls",
+  }));
 
   await assertRejects(
     () =>
@@ -259,14 +332,10 @@ Deno.test("LLM deck fails fast when finishReason=length with no content", async 
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "length",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => ({
+    message: { role: "assistant", content: null },
+    finishReason: "length",
+  }));
 
   await assertRejects(
     () =>
@@ -300,19 +369,26 @@ Deno.test("LLM deck completes via gambit_respond", async () => {
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "tool_calls",
-        toolCalls: [{
-          id: "respond-1",
+  const provider = createChatLikeProvider(() => ({
+    message: {
+      role: "assistant",
+      content: null,
+      tool_calls: [{
+        id: "respond-1",
+        type: "function",
+        function: {
           name: "gambit_respond",
-          args: { payload: "ok" },
-        }],
-      });
+          arguments: '{"payload":"ok"}',
+        },
+      }],
     },
-  };
+    finishReason: "tool_calls",
+    toolCalls: [{
+      id: "respond-1",
+      name: "gambit_respond",
+      args: { payload: "ok" },
+    }],
+  }));
 
   const result = await runDeck({
     path: deckPath,
@@ -324,7 +400,7 @@ Deno.test("LLM deck completes via gambit_respond", async () => {
   assertEquals(result, { payload: "ok" });
 });
 
-Deno.test("root deck with object inputSchema accepts --message without --init", async () => {
+Deno.test("root deck with object inputSchema accepts --message without --context", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -342,14 +418,10 @@ Deno.test("root deck with object inputSchema accepts --message without --init", 
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => ({
+    message: { role: "assistant", content: "ok" },
+    finishReason: "stop",
+  }));
 
   const result = await runDeck({
     path: deckPath,
@@ -382,19 +454,27 @@ Deno.test("LLM deck gambit_respond propagates status and message", async () => {
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "tool_calls",
-        toolCalls: [{
-          id: "respond-1",
+  const provider = createChatLikeProvider(() => ({
+    message: {
+      role: "assistant",
+      content: null,
+      tool_calls: [{
+        id: "respond-1",
+        type: "function",
+        function: {
           name: "gambit_respond",
-          args: { payload: "fail", status: 503, message: "nope", code: "X" },
-        }],
-      });
+          arguments:
+            '{"payload":"fail","status":503,"message":"nope","code":"X"}',
+        },
+      }],
     },
-  };
+    finishReason: "tool_calls",
+    toolCalls: [{
+      id: "respond-1",
+      name: "gambit_respond",
+      args: { payload: "fail", status: 503, message: "nope", code: "X" },
+    }],
+  }));
 
   const result = await runDeck({
     path: deckPath,
@@ -468,26 +548,32 @@ Deno.test("busy handler uses action start time", async () => {
 
   const traces: Array<import("./types.ts").TraceEvent> = [];
   let callCount = 0;
-  const provider: ModelProvider = {
-    chat() {
-      callCount++;
-      if (callCount === 1) {
-        // Simulate the run having started long ago (run start at now=0), but the
-        // action starts later at now=100.
-        now = 100;
-        return Promise.resolve({
-          message: { role: "assistant", content: null },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "t1", name: "child", args: {} }],
-        });
-      }
-      // Second pass returns final content.
-      return Promise.resolve({
-        message: { role: "assistant", content: "done" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => {
+    callCount++;
+    if (callCount === 1) {
+      // Simulate the run having started long ago (run start at now=0), but the
+      // action starts later at now=100.
+      now = 100;
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "t1",
+            type: "function",
+            function: { name: "child", arguments: "{}" },
+          }],
+        },
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "t1", name: "child", args: {} }],
+      };
+    }
+    // Second pass returns final content.
+    return {
+      message: { role: "assistant", content: "done" },
+      finishReason: "stop",
+    };
+  });
 
   // Child completes immediately; advance slightly after action start.
   now = 101;
@@ -559,22 +645,28 @@ Deno.test("onInterval alias still triggers busy handler", async () => {
 
   let callCount = 0;
   const stream: Array<string> = [];
-  const provider: ModelProvider = {
-    chat() {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.resolve({
-          message: { role: "assistant", content: null },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "t1", name: "work", args: {} }],
-        });
-      }
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "t1",
+            type: "function",
+            function: { name: "work", arguments: "{}" },
+          }],
+        },
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "t1", name: "work", args: {} }],
+      };
+    }
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   const result = await runDeck({
     path: parentPath,
@@ -626,18 +718,16 @@ Deno.test("idle handler fires after inactivity", async () => {
   );
 
   const stream: Array<string> = [];
-  const provider: ModelProvider = {
-    chat() {
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          resolve({
-            message: { role: "assistant", content: "done" },
-            finishReason: "stop",
-          });
-        }, 25);
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() =>
+    new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          message: { role: "assistant", content: "done" },
+          finishReason: "stop",
+        });
+      }, 25);
+    })
+  );
 
   const result = await runDeck({
     path: parentPath,
@@ -703,17 +793,15 @@ Deno.test("LLM deck streams via onStreamText", async () => {
 
   const chunks: Array<string> = [];
   let sawStreamFlag = false;
-  const streamingProvider: ModelProvider = {
-    chat(input) {
-      sawStreamFlag = Boolean(input.stream);
-      input.onStreamText?.("a");
-      input.onStreamText?.("b");
-      return Promise.resolve({
-        message: { role: "assistant", content: "ab" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const streamingProvider = createChatLikeProvider((input) => {
+    sawStreamFlag = Boolean(input.stream);
+    input.onStreamText?.("a");
+    input.onStreamText?.("b");
+    return {
+      message: { role: "assistant", content: "ab" },
+      finishReason: "stop",
+    };
+  });
 
   const result = await runDeck({
     path: deckPath,
@@ -748,15 +836,13 @@ Deno.test("LLM deck defaults to assistant-first and sends a user message when pr
   );
 
   let lastMessages: Array<ModelMessage> = [];
-  const provider: ModelProvider = {
-    chat(input) {
-      lastMessages = input.messages;
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider((input) => {
+    lastMessages = input.messages;
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   await runDeck({
     path: deckPath,
@@ -799,15 +885,13 @@ Deno.test("LLM deck defaults input to empty string for message-only runs", async
   );
 
   let lastMessages: Array<ModelMessage> = [];
-  const provider: ModelProvider = {
-    chat(input) {
-      lastMessages = input.messages;
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider((input) => {
+    lastMessages = input.messages;
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   await runDeck({
     path: deckPath,
@@ -846,15 +930,13 @@ Deno.test("LLM deck reuses saved input when follow-up messages arrive without in
 
   let savedState: import("./state.ts").SavedState | undefined;
   let callCount = 0;
-  const provider: ModelProvider = {
-    chat() {
-      callCount++;
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => {
+    callCount++;
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   await runDeck({
     path: deckPath,
@@ -957,26 +1039,32 @@ Deno.test("onError handler result surfaces via gambit_complete when an action fa
 
   // provider that first issues a tool call to failing_action, then finishes
   let calls = 0;
-  const provider: ModelProvider = {
-    chat() {
-      calls++;
-      if (calls === 1) {
-        return Promise.resolve({
-          message: { role: "assistant", content: null },
-          finishReason: "tool_calls" as const,
-          toolCalls: [{
+  const provider = createChatLikeProvider(() => {
+    calls++;
+    if (calls === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
             id: "call-1",
-            name: "failing_action",
-            args: {},
+            type: "function",
+            function: { name: "failing_action", arguments: "{}" },
           }],
-        });
-      }
-      return Promise.resolve({
-        message: { role: "assistant", content: "done" },
-        finishReason: "stop" as const,
-      });
-    },
-  };
+        },
+        finishReason: "tool_calls" as const,
+        toolCalls: [{
+          id: "call-1",
+          name: "failing_action",
+          args: {},
+        }],
+      };
+    }
+    return {
+      message: { role: "assistant", content: "done" },
+      finishReason: "stop" as const,
+    };
+  });
 
   const traceEvents: Array<TraceEvent> = [];
   await runDeck({
@@ -1019,14 +1107,10 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
   );
 
   const traces: Array<TraceEvent> = [];
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => ({
+    message: { role: "assistant", content: "ok" },
+    finishReason: "stop",
+  }));
 
   const input = { question: "hours?" };
   await runDeck({
@@ -1072,17 +1156,15 @@ Deno.test("gambit_init does not run when input is not provided", async () => {
   );
 
   let sawInit = false;
-  const provider: ModelProvider = {
-    chat(input) {
-      sawInit = input.messages.some((m) =>
-        m.tool_calls?.some((t) => t.function.name === "gambit_init")
-      );
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider((input) => {
+    sawInit = input.messages.some((m) =>
+      m.tool_calls?.some((t) => t.function.name === "gambit_init")
+    );
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   await runDeck({
     path: deckPath,
@@ -1130,28 +1212,34 @@ Deno.test("trace includes parentActionCallId hierarchy", async () => {
 
   const traces: Array<TraceEvent> = [];
   let callCount = 0;
-  const provider: ModelProvider = {
-    chat() {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.resolve({
-          message: { role: "assistant", content: null },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "call-child", name: "child", args: {} }],
-        });
-      }
-      if (callCount === 2) {
-        return Promise.resolve({
-          message: { role: "assistant", content: "child-done" },
-          finishReason: "stop",
-        });
-      }
-      return Promise.resolve({
-        message: { role: "assistant", content: "parent-done" },
+  const provider = createChatLikeProvider(() => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-child",
+            type: "function",
+            function: { name: "child", arguments: "{}" },
+          }],
+        },
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "call-child", name: "child", args: {} }],
+      };
+    }
+    if (callCount === 2) {
+      return {
+        message: { role: "assistant", content: "child-done" },
         finishReason: "stop",
-      });
-    },
-  };
+      };
+    }
+    return {
+      message: { role: "assistant", content: "parent-done" },
+      finishReason: "stop",
+    };
+  });
 
   const result = await runDeck({
     path: parentPath,
@@ -1212,28 +1300,34 @@ Deno.test("non-root assistant text emits monolog trace", async () => {
   );
 
   let callCount = 0;
-  const provider: ModelProvider = {
-    chat() {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.resolve({
-          message: { role: "assistant", content: null },
-          finishReason: "tool_calls" as const,
-          toolCalls: [{ id: "call-child", name: "child", args: {} }],
-        });
-      }
-      if (callCount === 2) {
-        return Promise.resolve({
-          message: { role: "assistant", content: "child-internal" },
-          finishReason: "stop" as const,
-        });
-      }
-      return Promise.resolve({
-        message: { role: "assistant", content: "parent-done" },
+  const provider = createChatLikeProvider(() => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-child",
+            type: "function",
+            function: { name: "child", arguments: "{}" },
+          }],
+        },
+        finishReason: "tool_calls" as const,
+        toolCalls: [{ id: "call-child", name: "child", args: {} }],
+      };
+    }
+    if (callCount === 2) {
+      return {
+        message: { role: "assistant", content: "child-internal" },
         finishReason: "stop" as const,
-      });
-    },
-  };
+      };
+    }
+    return {
+      message: { role: "assistant", content: "parent-done" },
+      finishReason: "stop" as const,
+    };
+  });
 
   const traces: Array<TraceEvent> = [];
   const result = await runDeck({
@@ -1376,15 +1470,13 @@ Deck outro after embed.
   );
 
   const seen: Array<Array<ModelMessage>> = [];
-  const provider: ModelProvider = {
-    chat({ messages }) {
-      seen.push(messages);
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider(({ messages }) => {
+    seen.push(messages);
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   await runDeck({
     path: deckPath,

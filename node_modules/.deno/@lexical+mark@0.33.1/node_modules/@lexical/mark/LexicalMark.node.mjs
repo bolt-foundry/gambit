@@ -1,0 +1,15 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+const mod = await (process.env.NODE_ENV !== 'production' ? import('./LexicalMark.dev.mjs') : import('./LexicalMark.prod.mjs'));
+export const $createMarkNode = mod.$createMarkNode;
+export const $getMarkIDs = mod.$getMarkIDs;
+export const $isMarkNode = mod.$isMarkNode;
+export const $unwrapMarkNode = mod.$unwrapMarkNode;
+export const $wrapSelectionInMarkNode = mod.$wrapSelectionInMarkNode;
+export const MarkNode = mod.MarkNode;

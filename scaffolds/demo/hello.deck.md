@@ -11,7 +11,7 @@ path = "./hello.grader.deck.md"
 description = "Enforces the exact hello echo responses."
 +++
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)
 
 Rules:
 

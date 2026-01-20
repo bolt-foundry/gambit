@@ -1,6 +1,6 @@
 +++
 label = "tone_human_likeness_llm"
-inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -34,4 +34,4 @@ Scoring rules:
 2. Decide the score based on the criteria above.
 3. Provide a short reason and optional evidence quotes.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

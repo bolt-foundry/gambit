@@ -4,7 +4,13 @@
  *
  * @module
  */
-import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
+import {
+  createAnthropicProvider,
+  createGeminiProvider,
+  createModelRouterProvider,
+  createOpenAIProvider,
+  createOpenRouterProvider,
+} from "./providers/mod.ts";
 import { parse } from "@std/jsonc";
 import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
@@ -17,7 +23,7 @@ import { runGraderAgainstState } from "./commands/grade.ts";
 import { exportBundle } from "./commands/export.ts";
 import { handleDemoCommand } from "./commands/demo.ts";
 import { handleInitCommand } from "./commands/init.ts";
-import { parseBotInput, parseInit, parseMessage } from "./cli_utils.ts";
+import { parseBotInput, parseContext, parseMessage } from "./cli_utils.ts";
 import {
   isHelpCommand,
   isKnownCommand,
@@ -200,13 +206,62 @@ async function main() {
       return;
     }
 
-    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-    if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY is required");
+    const routes: Array<
+      {
+        prefix: string;
+        provider: import("@bolt-foundry/gambit-core").ModelProvider;
+      }
+    > = [];
+    const geminiKey = Deno.env.get("GEMINI_API_KEY");
+    if (geminiKey) {
+      routes.push({
+        prefix: "google/",
+        provider: createGeminiProvider({
+          apiKey: geminiKey,
+          baseURL: Deno.env.get("GEMINI_BASE_URL") ?? undefined,
+        }),
+      });
     }
-    const provider = createOpenRouterProvider({
-      apiKey,
-      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    if (openaiKey) {
+      routes.push({
+        prefix: "openai/",
+        provider: createOpenAIProvider({
+          apiKey: openaiKey,
+          baseURL: Deno.env.get("OPENAI_BASE_URL") ?? undefined,
+        }),
+      });
+    }
+
+    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
+    if (anthropicKey) {
+      routes.push({
+        prefix: "anthropic/",
+        provider: createAnthropicProvider({
+          apiKey: anthropicKey,
+          baseURL: Deno.env.get("ANTHROPIC_BASE_URL") ?? undefined,
+        }),
+      });
+    }
+
+    const openrouterKey = Deno.env.get("OPENROUTER_API_KEY");
+    const fallback = openrouterKey
+      ? createOpenRouterProvider({
+        apiKey: openrouterKey,
+        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+      })
+      : undefined;
+
+    if (!routes.length && !fallback) {
+      throw new Error(
+        "At least one provider is required (GEMINI_API_KEY or OPENROUTER_API_KEY).",
+      );
+    }
+
+    const provider = createModelRouterProvider({
+      routes,
+      fallback,
     });
 
     const tracerFns: Array<
@@ -230,8 +285,10 @@ async function main() {
         modelProvider: provider,
         trace: tracer,
         verbose: args.verbose,
-        initialInit: args.init !== undefined ? parseInit(args.init) : undefined,
-        initProvided: args.initProvided,
+        initialContext: args.context !== undefined
+          ? parseContext(args.context)
+          : undefined,
+        contextProvided: args.contextProvided,
         initialMessage: parseMessage(args.message),
       });
       return;
@@ -266,8 +323,8 @@ async function main() {
       const statePath = await runTestBotLoop({
         rootDeckPath: deckPath,
         botDeckPath: args.testDeckPath,
-        init: parseInit(args.init),
-        initProvided: args.initProvided,
+        context: parseContext(args.context),
+        contextProvided: args.contextProvided,
         initialUserMessage: parseMessage(args.message),
         botInput: parseBotInput(args.botInput),
         maxTurns,
@@ -317,8 +374,8 @@ async function main() {
 
     await handleRunCommand({
       deckPath,
-      init: parseInit(args.init),
-      initProvided: args.initProvided,
+      context: parseContext(args.context),
+      contextProvided: args.contextProvided,
       message: parseMessage(args.message),
       modelProvider: provider,
       model: args.model,

@@ -115,14 +115,12 @@ export default defineCard({
 ## Running decks programmatically
 
 The runtime loads the deck (Markdown or TS) and steps through each pass. Provide
-any `ModelProvider` implementation; `createOpenRouterProvider` covers most
-OpenRouter-style APIs out of the box.
+any `ModelProvider` implementation; the OpenRouter adapter lives in
+`@bolt-foundry/gambit`.
 
 ```
-import {
-  createOpenRouterProvider,
-  runDeck,
-} from "jsr:@bolt-foundry/gambit-core";
+import { runDeck } from "jsr:@bolt-foundry/gambit-core";
+import { createOpenRouterProvider } from "jsr:@bolt-foundry/gambit";
 
 const provider = createOpenRouterProvider({
   apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
@@ -172,7 +170,7 @@ actionDecks:
 testDecks:
   - path: ./personas/test_bot.deck.md
 ---
-![](gambit://init)
+![](gambit://cards/context.card.md)
 
 You are the front door for support tickets. Summarize the ticket and ask
 clarifying questions before choosing an action.
@@ -195,10 +193,9 @@ when you add `gambit://` markers.
 - **Request rendering**: [`renderDeck`](src/render.ts) merges an existing Chat
   Completions request with the deck’s system prompt and tool schema, so you can
   debug what will actually reach the model or feed it into another orchestrator.
-- **Model providers**: [`createOpenRouterProvider`](src/providers/openrouter.ts)
-  implements the `ModelProvider` contract backed by OpenRouter/OpenAI-compatible
-  APIs, including streaming tool calls. Write your own provider by implementing
-  the same `chat()` signature.
+- **Model providers**: the OpenRouter adapter lives in `@bolt-foundry/gambit`
+  (see `packages/gambit/src/providers/openrouter.ts`). Implement your own
+  provider by conforming to the `responses()` signature in `ModelProvider`.
 - **Constants**:
   [`GAMBIT_TOOL_INIT`, `GAMBIT_TOOL_RESPOND`, `GAMBIT_TOOL_END`](src/constants.ts)
   define the reserved tool names the runtime expects when the assistant starts,

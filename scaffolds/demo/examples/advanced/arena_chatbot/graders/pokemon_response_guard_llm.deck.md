@@ -1,6 +1,6 @@
 +++
 label = "Pokemon response guard LLM"
-inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -38,4 +38,4 @@ Scoring rules:
 2. Apply the appropriate criteria based on whether the request exists.
 3. Score according to the rules above.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

@@ -5,7 +5,7 @@ inputSchema = "./schemas/research_input.zod.ts"
 outputSchema = "./schemas/research_output.zod.ts"
 +++
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 You are a sales research assistant. You only use the provided input; do not
 invent facts or browse.

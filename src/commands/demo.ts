@@ -15,8 +15,6 @@ const HELLO_EXAMPLE_FILES = [
   "hello.grader.deck.md",
   "hello.test.deck.md",
   "package.json",
-  "schemas/grader_input_conversation.zod.ts",
-  "schemas/grader_input_turns.zod.ts",
   "schemas/grader_output.zod.ts",
 ];
 

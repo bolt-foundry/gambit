@@ -40,9 +40,9 @@ export async function startTui(opts: {
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
   verbose?: boolean;
-  initialInit?: unknown;
+  initialContext?: unknown;
   initialMessage?: unknown;
-  initProvided?: boolean;
+  contextProvided?: boolean;
 }) {
   if (!Deno.stdin.isTerminal()) {
     throw new Error("tui requires an interactive TTY.");
@@ -269,17 +269,21 @@ export async function startTui(opts: {
     render();
 
     const skipAssistantLead = opts.initialMessage !== undefined;
-    const initialInit = opts.initialInit;
+    const initialContext = opts.initialContext;
 
     if (!skipAssistantLead) {
-      await runOnce(initialInit, undefined, Boolean(opts.initProvided));
+      await runOnce(
+        initialContext,
+        undefined,
+        Boolean(opts.contextProvided),
+      );
     }
 
     if (opts.initialMessage !== undefined) {
       await runOnce(
-        initialInit,
+        initialContext,
         opts.initialMessage,
-        Boolean(opts.initProvided),
+        Boolean(opts.contextProvided),
       );
     }
 

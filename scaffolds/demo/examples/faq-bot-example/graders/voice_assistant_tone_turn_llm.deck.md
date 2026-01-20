@@ -1,6 +1,6 @@
 +++
 label = "Voice assistant tone (turn) LLM"
-inputSchema = "../../../schemas/grader_input_turns.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/turn.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
@@ -34,4 +34,4 @@ Scoring rules: ![voice_assistant_rubric](./cards/voice_assistant_rubric.card.md)
 2. Decide the score based on the criteria above.
 3. Provide a short reason and optional evidence quotes.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

@@ -5,7 +5,7 @@ inputSchema = "./schemas/voice_critic_input.zod.ts"
 outputSchema = "./schemas/voice_critic_output.zod.ts"
 +++
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 You are a voice critic. Your job is to identify if the draft feels stiff,
 corporate, or corny and provide concrete fixes.

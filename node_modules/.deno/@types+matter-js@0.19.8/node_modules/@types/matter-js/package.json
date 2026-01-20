@@ -1,0 +1,50 @@
+{
+    "name": "@types/matter-js",
+    "version": "0.19.8",
+    "description": "TypeScript definitions for matter-js",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/matter-js",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": "Ivane Gegia",
+            "url": "https://twitter.com/ivanegegia"
+        },
+        {
+            "name": "David Asmuth",
+            "githubUsername": "piranha771",
+            "url": "https://github.com/piranha771"
+        },
+        {
+            "name": "Piotr Pietrzak",
+            "githubUsername": "hasparus",
+            "url": "https://github.com/hasparus"
+        },
+        {
+            "name": "Dale Whinham",
+            "githubUsername": "dwhinham",
+            "url": "https://github.com/dwhinham"
+        },
+        {
+            "name": "slikts",
+            "githubUsername": "slikts",
+            "url": "https://github.com/slikts"
+        },
+        {
+            "name": "Steven Snoeijen",
+            "githubUsername": "stevensnoeijen",
+            "url": "https://github.com/stevensnoeijen"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/matter-js"
+    },
+    "scripts": {},
+    "dependencies": {},
+    "peerDependencies": {},
+    "typesPublisherContentHash": "4c1de4b85df15f7a29c1a41ee128a9932002207e5dac18831d7456e0e65947b3",
+    "typeScriptVersion": "5.0"
+}

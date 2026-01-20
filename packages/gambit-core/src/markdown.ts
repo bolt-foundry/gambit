@@ -12,6 +12,7 @@ import {
 import { isCardDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
 import { mergeZodObjects } from "./schema.ts";
+import { resolveBuiltinSchemaPath } from "./builtins.ts";
 import type {
   ActionDeckDefinition,
   DeckDefinition,
@@ -28,6 +29,11 @@ type ParsedFrontmatter = Record<string, unknown>;
 const RESPOND_MARKER = "gambit://respond";
 const INIT_MARKER = "gambit://init";
 const END_MARKER = "gambit://end";
+const LEGACY_MARKER_WARNINGS: Record<"respond" | "init" | "end", boolean> = {
+  respond: false,
+  init: false,
+  end: false,
+};
 
 const INIT_TEXT = `
 You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info.
@@ -41,6 +47,17 @@ const END_TEXT = `
 If the entire workflow is finished and no further user turns should be sent, call the \`${GAMBIT_TOOL_END}\` tool with optional \`message\` and \`payload\` fields to explicitly end the session.
 `.trim();
 
+function warnLegacyMarker(
+  marker: keyof typeof LEGACY_MARKER_WARNINGS,
+  replacement: string,
+) {
+  if (LEGACY_MARKER_WARNINGS[marker]) return;
+  LEGACY_MARKER_WARNINGS[marker] = true;
+  logger.warn(
+    `[gambit] "gambit://${marker}" is deprecated; use ${replacement} instead.`,
+  );
+}
+
 function toFileUrl(p: string): string {
   const abs = path.resolve(p);
   return path.toFileUrl(abs).href;
@@ -51,7 +68,9 @@ async function maybeLoadSchema(
   basePath: string,
 ): Promise<ZodTypeAny | undefined> {
   if (!schemaPath || typeof schemaPath !== "string") return undefined;
-  const resolved = path.resolve(path.dirname(basePath), schemaPath);
+  const builtin = resolveBuiltinSchemaPath(schemaPath);
+  const resolved = builtin ??
+    path.resolve(path.dirname(basePath), schemaPath);
   const mod = await import(toFileUrl(resolved));
   return mod.default as ZodTypeAny;
 }
@@ -140,12 +159,15 @@ async function expandEmbedsInBody(args: {
     const target = match[1];
     out += body.slice(lastIndex, matchIndex);
     if (target === RESPOND_MARKER) {
+      warnLegacyMarker("respond", "gambit://cards/respond.card.md");
       respond = true;
       out += RESPOND_TEXT;
     } else if (target === INIT_MARKER) {
+      warnLegacyMarker("init", "gambit://cards/context.card.md");
       initHint = true;
       out += INIT_TEXT;
     } else if (target === END_MARKER) {
+      warnLegacyMarker("end", "gambit://cards/end.card.md");
       endHint = true;
       out += END_TEXT;
     } else {
@@ -236,12 +258,14 @@ export async function loadMarkdownCard(
   });
   const cleanedBody = replaced.body;
   const embeddedCards = replaced.embeds;
+  const respondFlag = Boolean((attrs as { respond?: unknown }).respond);
+  const allowEndFlag = Boolean((attrs as { allowEnd?: unknown }).allowEnd);
 
   return {
     kind: "gambit.card",
     path: resolved,
     body: cleanedBody.trim(),
-    allowEnd: replaced.endHint,
+    allowEnd: allowEndFlag || replaced.endHint,
     actionDecks,
     actions: actionDecks,
     testDecks: normalizeDeckRefs<TestDeckDefinition>(
@@ -255,7 +279,7 @@ export async function loadMarkdownCard(
     cards: embeddedCards,
     inputFragment,
     outputFragment,
-    respond: replaced.respond,
+    respond: respondFlag || replaced.respond,
   };
 }
 
@@ -433,7 +457,9 @@ export async function loadMarkdownDeck(
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
     handlers,
-    respond: replaced.respond || allCards.some((c) => c.respond),
+    respond: Boolean(deckMeta.respond) ||
+      replaced.respond ||
+      allCards.some((c) => c.respond),
     inlineEmbeds: true,
   };
 }

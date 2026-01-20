@@ -3,7 +3,8 @@
 What it shows
 
 - Busy/idle/error handlers authored in Markdown decks, paired with TS actions.
-- Using `gambit://respond` in an error handler to force structured completion.
+- Using `gambit://cards/respond.card.md` in an error handler to force structured
+  completion.
 
 Key files
 
@@ -28,12 +29,13 @@ Why it’s structured this way
 How to run
 
 - Trigger busy/idle:
-  `deno run -A src/cli.ts run init/examples/advanced/cli_handlers_md/handlers_md.deck.md --init '{"text":"wait","delayMs":3000}' --stream`
-- Trigger error handling: `--init '{"text":"fail me","fail":true}'`
+  `deno run -A src/cli.ts run init/examples/advanced/cli_handlers_md/handlers_md.deck.md --context '{"text":"wait","delayMs":3000}' --stream`
+- Trigger error handling: `--context '{"text":"fail me","fail":true}'`
 
 Try this input
 
-- `--init '{"text":"please wait","delayMs":2500}'` → calls `slow_action`, busy
-  handler streams updates, idle may fire if no activity, final echo after delay
-- `--init '{"text":"fail on purpose","fail":true}'` → calls `flaky_action`,
+- `--context '{"text":"please wait","delayMs":2500}'` → calls `slow_action`,
+  busy handler streams updates, idle may fire if no activity, final echo after
+  delay
+- `--context '{"text":"fail on purpose","fail":true}'` → calls `flaky_action`,
   triggers onError handler response envelope with status/code/meta/payload

@@ -1,9 +1,9 @@
 +++
 command = "repl"
 summary = "Start an interactive REPL"
-usage = "gambit repl <deck.(ts|md)> [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]"
+usage = "gambit repl <deck.(ts|md)> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--verbose]"
 flags = [
-  "--init <json|string>    Init payload (when provided, sent via gambit_init)",
+  "--context <json|string> Context payload (seeds gambit_init; legacy --init still works)",
   "--message <json|string> Initial user message (sent before assistant speaks)",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",

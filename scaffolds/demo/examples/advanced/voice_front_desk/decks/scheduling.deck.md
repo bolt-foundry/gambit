@@ -43,4 +43,4 @@ Use the identity summary plus caller intent to drive scheduling.
    - When no slots exist, set `status = "no_slots"` and include `summary`.
    - When waitlisted, set `status = "waitlisted"` and include `summary`.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

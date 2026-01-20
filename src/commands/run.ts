@@ -7,8 +7,8 @@ const logger = console;
 
 export async function handleRunCommand(opts: {
   deckPath: string;
-  init: unknown;
-  initProvided: boolean;
+  context: unknown;
+  contextProvided: boolean;
   message: unknown;
   modelProvider: ModelProvider;
   model?: string;
@@ -28,8 +28,8 @@ export async function handleRunCommand(opts: {
 
   const result = await runDeck({
     path: opts.deckPath,
-    input: opts.init,
-    inputProvided: opts.initProvided,
+    input: opts.context,
+    inputProvided: opts.contextProvided,
     initialUserMessage: opts.message,
     modelProvider: opts.modelProvider,
     isRoot: true,

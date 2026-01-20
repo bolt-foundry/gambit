@@ -1,6 +1,6 @@
 +++
 label = "Action routing guard (turn) LLM"
-inputSchema = "../../../../schemas/grader_input_turns.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/turn.ts"
 outputSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -53,4 +53,4 @@ Data supplied:
 4. Check the assistant reply length and that it includes the tool result.
 5. Score according to the rules above.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

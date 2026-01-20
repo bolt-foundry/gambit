@@ -2,7 +2,18 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { chatCompletionsWithDeck } from "../mod.ts";
 import { logger as openaiLogger } from "./openai_compat.ts";
-import type { ModelProvider, ToolDefinition } from "./types.ts";
+import {
+  messagesFromOpenResponseOutput,
+  openResponseItemFromMessage,
+} from "./openresponses.ts";
+import type {
+  JSONValue,
+  ModelMessage,
+  ModelProvider,
+  OpenResponseInput,
+  OpenResponseItem,
+  ToolDefinition,
+} from "./types.ts";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -14,6 +25,72 @@ async function writeTempDeck(dir: string, filename: string, contents: string) {
   const target = path.join(dir, filename);
   await Deno.writeTextFile(target, contents);
   return target;
+}
+
+type ChatHandlerInput = {
+  model: string;
+  messages: Array<ModelMessage>;
+  tools?: Array<ToolDefinition>;
+  stream?: boolean;
+  onStreamText?: (chunk: string) => void;
+  params?: Record<string, unknown>;
+};
+
+type ChatHandlerResult = {
+  message: ModelMessage;
+  finishReason: "stop" | "tool_calls" | "length";
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    args: Record<string, JSONValue>;
+  }>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+};
+
+function normalizeResponseInput(
+  input: OpenResponseInput,
+): Array<OpenResponseItem> {
+  if (typeof input === "string") {
+    return [{ type: "message", role: "user", content: input }];
+  }
+  return input ?? [];
+}
+
+function createChatLikeProvider(
+  handler: (
+    input: ChatHandlerInput,
+  ) => ChatHandlerResult | Promise<ChatHandlerResult>,
+): ModelProvider {
+  return {
+    responses: async (input) => {
+      const result = await handler({
+        model: input.model,
+        messages: messagesFromOpenResponseOutput(
+          normalizeResponseInput(input.input),
+        ),
+        tools: input.tools,
+        stream: input.stream,
+        onStreamText: input.onStreamEvent
+          ? (chunk) =>
+            input.onStreamEvent?.({
+              type: "response.output_text.delta",
+              delta: chunk,
+            })
+          : undefined,
+        params: input.params,
+      });
+      return {
+        id: "resp-test",
+        output: [openResponseItemFromMessage(result.message)],
+        finishReason: result.finishReason,
+        usage: result.usage,
+      };
+    },
+  };
 }
 
 Deno.test("chatCompletionsWithDeck returns an OpenAI-shaped response", async () => {
@@ -34,17 +111,15 @@ Deno.test("chatCompletionsWithDeck returns an OpenAI-shaped response", async () 
   );
 
   let sawSystem = false;
-  const provider: ModelProvider = {
-    chat(input) {
-      sawSystem = input.messages.some((m) =>
-        m.role === "system" && m.content?.includes("You are concise.")
-      );
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider((input) => {
+    sawSystem = input.messages.some((m) =>
+      m.role === "system" && m.content?.includes("You are concise.")
+    );
+    return {
+      message: { role: "assistant", content: "ok" },
+      finishReason: "stop",
+    };
+  });
 
   const resp = await chatCompletionsWithDeck({
     deckPath,
@@ -87,20 +162,16 @@ Deno.test("chatCompletionsWithDeck warns on mismatched system message and still 
   };
   try {
     let sawDeckSystem = false;
-    const provider: ModelProvider = {
-      chat(input) {
-        const systemMessages = input.messages.filter((m) =>
-          m.role === "system"
-        );
-        sawDeckSystem = systemMessages.some((m) =>
-          m.content === "Deck system prompt."
-        );
-        return Promise.resolve({
-          message: { role: "assistant", content: "ok" },
-          finishReason: "stop",
-        });
-      },
-    };
+    const provider = createChatLikeProvider((input) => {
+      const systemMessages = input.messages.filter((m) => m.role === "system");
+      sawDeckSystem = systemMessages.some((m) =>
+        m.content === "Deck system prompt."
+      );
+      return {
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      };
+    });
 
     await chatCompletionsWithDeck({
       deckPath,
@@ -158,35 +229,33 @@ Deno.test("chatCompletionsWithDeck executes deck tool calls and continues", asyn
 
   let callCount = 0;
   let secondCallSawToolResult = false;
-  const provider: ModelProvider = {
-    chat(input) {
-      callCount++;
-      if (callCount === 1) {
-        return Promise.resolve({
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: { name: "child", arguments: '{"text":"hi"}' },
-            }],
-          },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "call-1", name: "child", args: { text: "hi" } }],
-        });
-      }
-      secondCallSawToolResult = input.messages.some((m) =>
-        m.role === "tool" && m.name === "child" &&
-        m.tool_call_id === "call-1" &&
-        m.content === "child:hi"
-      );
-      return Promise.resolve({
-        message: { role: "assistant", content: "done" },
-        finishReason: "stop",
-      });
-    },
-  };
+  const provider = createChatLikeProvider((input) => {
+    callCount++;
+    if (callCount === 1) {
+      return {
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "child", arguments: '{"text":"hi"}' },
+          }],
+        },
+        finishReason: "tool_calls",
+        toolCalls: [{ id: "call-1", name: "child", args: { text: "hi" } }],
+      };
+    }
+    secondCallSawToolResult = input.messages.some((m) =>
+      m.role === "tool" && m.name === "child" &&
+      m.tool_call_id === "call-1" &&
+      m.content === "child:hi"
+    );
+    return {
+      message: { role: "assistant", content: "done" },
+      finishReason: "stop",
+    };
+  });
 
   const resp = await chatCompletionsWithDeck({
     deckPath: parentPath,
@@ -234,24 +303,22 @@ Deno.test("chatCompletionsWithDeck returns external tool calls without executing
   };
 
   let calls = 0;
-  const provider: ModelProvider = {
-    chat() {
-      calls++;
-      return Promise.resolve({
-        message: {
-          role: "assistant",
-          content: null,
-          tool_calls: [{
-            id: "ext-1",
-            type: "function",
-            function: { name: "external_tool", arguments: '{"x":1}' },
-          }],
-        },
-        finishReason: "tool_calls",
-        toolCalls: [{ id: "ext-1", name: "external_tool", args: { x: 1 } }],
-      });
-    },
-  };
+  const provider = createChatLikeProvider(() => {
+    calls++;
+    return {
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "ext-1",
+          type: "function",
+          function: { name: "external_tool", arguments: '{"x":1}' },
+        }],
+      },
+      finishReason: "tool_calls",
+      toolCalls: [{ id: "ext-1", name: "external_tool", args: { x: 1 } }],
+    };
+  });
 
   const resp = await chatCompletionsWithDeck({
     deckPath,
@@ -302,11 +369,9 @@ Deno.test("chatCompletionsWithDeck rejects tool name collisions", async () => {
     `,
   );
 
-  const provider: ModelProvider = {
-    chat() {
-      throw new Error("should not be called");
-    },
-  };
+  const provider = createChatLikeProvider(() => {
+    throw new Error("should not be called");
+  });
 
   await assertRejects(
     () =>

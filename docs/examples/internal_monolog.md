@@ -5,8 +5,9 @@ without tool calls) before completing its work.
 
 - `internal_monolog_parent.deck.md`: root deck that calls the child tool and
   relays its answer.
-- `monolog_child.deck.md`: LLM child with the `gambit://respond` marker that
-  first thinks aloud (monolog), then calls a compute action, then responds.
+- `monolog_child.deck.md`: LLM child with the `gambit://cards/respond.card.md`
+  marker that first thinks aloud (monolog), then calls a compute action, then
+  responds.
 - `lookup_fact.deck.ts`: simple compute action the child calls.
 
 Run in the debug UI to see monolog traces:

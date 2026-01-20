@@ -6,11 +6,12 @@ import { loadDeck } from "@bolt-foundry/gambit-core";
 import { loadState } from "@bolt-foundry/gambit-core";
 import type {
   HandlersConfig,
-  ModelMessage,
+  OpenResponseContentPart,
+  OpenResponseItem,
   TraceEvent,
 } from "@bolt-foundry/gambit-core";
 import {
-  extractInitInput,
+  extractContextInput,
   findLastAssistantMessage,
   slugifyDeckPath,
 } from "../cli_utils.ts";
@@ -71,7 +72,7 @@ type TraceRunSummary = {
   deckPath?: string;
   input?: unknown;
   initialUserMessage?: unknown;
-  lastMessage?: ModelMessage;
+  lastMessage?: OpenResponseItem;
   traceEvents: Array<TraceEvent>;
 };
 
@@ -106,10 +107,31 @@ function collectTraceRuns(
   return runs;
 }
 
-function outputFromMessage(message?: ModelMessage): unknown {
+function contentText(parts: Array<OpenResponseContentPart>): string {
+  return parts.map((part) => {
+    switch (part.type) {
+      case "input_text":
+      case "output_text":
+      case "text":
+      case "summary_text":
+      case "reasoning_text":
+        return part.text;
+      case "refusal":
+        return part.refusal;
+      default:
+        return "";
+    }
+  }).join("");
+}
+
+function outputFromMessage(message?: OpenResponseItem): unknown {
   if (!message) return undefined;
+  if (message.type !== "message") return message;
   const content = message.content;
   if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return contentText(content);
+  }
   if (content !== null && content !== undefined) return content;
   return message;
 }
@@ -340,7 +362,7 @@ export async function exportBundle(
     }
     const rootRun = traceRuns.get(rootRunId);
     const rootInput = rootRun?.input ?? rootRun?.initialUserMessage ??
-      extractInitInput(state) ?? {};
+      extractContextInput(state) ?? {};
     const rootResponse = findLastAssistantMessage(state.messages ?? []);
 
     const deckHash = `sha256:${await sha256Hex(deckContents)}`;

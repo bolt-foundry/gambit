@@ -1,6 +1,6 @@
 +++
 label = "Voice readability guard LLM"
-inputSchema = "../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
@@ -56,4 +56,4 @@ Scoring rules:
 4. Decide whether they satisfy the spoken style criteria and provide evidence
    only from assistant text when failing.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

@@ -59,8 +59,8 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run init/examples/advanced/cli_cold_emailer/cold_emailer.deck.md --init '{"name":"Ava","details":"CTO at a fintech, cares about infra costs; pitching a cost monitoring tool","sender":"Riley","products":["Cost monitoring"],"voiceOptions":["founder-to-founder","casual concise","technical direct","warm consultative"]}' --stream`
+- `deno run -A src/cli.ts run init/examples/advanced/cli_cold_emailer/cold_emailer.deck.md --context '{"name":"Ava","details":"CTO at a fintech, cares about infra costs; pitching a cost monitoring tool","sender":"Riley","products":["Cost monitoring"],"voiceOptions":["founder-to-founder","casual concise","technical direct","warm consultative"]}' --stream`
 
 Try this input
 
-- `--init '{"name":"Jordan","details":"VP Marketing at a SaaS company; growth stalled; pitching analytics","sender":"Riley","products":["Attribution analytics"],"voice":"founder-to-founder"}'`
+- `--context '{"name":"Jordan","details":"VP Marketing at a SaaS company; growth stalled; pitching analytics","sender":"Riley","products":["Attribution analytics"],"voice":"founder-to-founder"}'`

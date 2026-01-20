@@ -1,6 +1,6 @@
 +++
 label = "Fact verifier (conversation) LLM"
-inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -48,4 +48,4 @@ Scoring rules:
 4. If there are no factual claims, output score 0.
 5. If any claim lacks proof, output score -3 with evidence quotes; otherwise +3.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
