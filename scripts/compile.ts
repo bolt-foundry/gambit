@@ -13,7 +13,7 @@ const baseArgs = [
   "--include",
   "docs/cli/commands",
   "--include",
-  "init",
+  "scaffolds",
   "--include",
   "simulator-ui/dist",
 ];
