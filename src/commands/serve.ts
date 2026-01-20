@@ -10,6 +10,8 @@ export async function handleServeCommand(opts: {
   model?: string;
   modelForce?: string;
   modelProvider: ModelProvider;
+  context?: unknown;
+  contextProvided?: boolean;
   port?: number;
   verbose?: boolean;
   watch?: boolean;
@@ -44,6 +46,8 @@ export async function handleServeCommand(opts: {
       model: opts.model,
       modelForce: opts.modelForce,
       modelProvider: opts.modelProvider,
+      initialContext: opts.context,
+      contextProvided: opts.contextProvided,
       port,
       verbose: opts.verbose,
       autoBundle,

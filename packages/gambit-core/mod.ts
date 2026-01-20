@@ -25,32 +25,6 @@ export type { Guardrails } from "./src/types.ts";
 export type { HandlersConfig } from "./src/types.ts";
 /** JSON-serializable value type used throughout Gambit. */
 export type { JSONValue } from "./src/types.ts";
-/** Open Responses content part. */
-export type { OpenResponseContentPart } from "./src/types.ts";
-/** Open Responses input (string or items). */
-export type { OpenResponseInput } from "./src/types.ts";
-/** Open Responses item. */
-export type { OpenResponseItem } from "./src/types.ts";
-/** Open Responses item status. */
-export type { OpenResponseItemStatus } from "./src/types.ts";
-/** Open Responses message role. */
-export type { OpenResponseMessageRole } from "./src/types.ts";
-/** Open Responses request type. */
-export type { OpenResponseCreateRequest } from "./src/types.ts";
-/** Open Responses response type. */
-export type { OpenResponseCreateResponse } from "./src/types.ts";
-/** Open Responses usage metadata. */
-export type { OpenResponseUsage } from "./src/types.ts";
-/** Open Responses response format. */
-export type { OpenResponseFormat } from "./src/types.ts";
-/** Open Responses tool choice. */
-export type { OpenResponseToolChoice } from "./src/types.ts";
-/** Open Responses reasoning config. */
-export type { OpenResponseReasoning } from "./src/types.ts";
-/** Open Responses stream options. */
-export type { OpenResponseStreamOptions } from "./src/types.ts";
-/** Open Responses streaming event type. */
-export type { OpenResponseEvent } from "./src/types.ts";
 /** Test deck definition shape. */
 export type { TestDeckDefinition } from "./src/types.ts";
 /** Check if a value is an explicit end-of-run signal. */
@@ -71,6 +45,8 @@ export { renderDeck } from "./src/render.ts";
 export type { RenderDeckOptions } from "./src/render.ts";
 /** Result data from rendering a deck. */
 export type { RenderDeckResult } from "./src/render.ts";
+/** Provider factory for OpenRouter-backed model calls. */
+export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
 /** Gambit CLI helpers and internal primitives. */
 export { GAMBIT_TOOL_INIT } from "./src/constants.ts";
 /** Load a deck definition from disk. */

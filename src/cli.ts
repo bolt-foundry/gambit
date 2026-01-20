@@ -4,13 +4,7 @@
  *
  * @module
  */
-import {
-  createAnthropicProvider,
-  createGeminiProvider,
-  createModelRouterProvider,
-  createOpenAIProvider,
-  createOpenRouterProvider,
-} from "./providers/mod.ts";
+import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
 import { parse } from "@std/jsonc";
 import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
@@ -206,62 +200,13 @@ async function main() {
       return;
     }
 
-    const routes: Array<
-      {
-        prefix: string;
-        provider: import("@bolt-foundry/gambit-core").ModelProvider;
-      }
-    > = [];
-    const geminiKey = Deno.env.get("GEMINI_API_KEY");
-    if (geminiKey) {
-      routes.push({
-        prefix: "google/",
-        provider: createGeminiProvider({
-          apiKey: geminiKey,
-          baseURL: Deno.env.get("GEMINI_BASE_URL") ?? undefined,
-        }),
-      });
+    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
+    if (!apiKey) {
+      throw new Error("OPENROUTER_API_KEY is required");
     }
-
-    const openaiKey = Deno.env.get("OPENAI_API_KEY");
-    if (openaiKey) {
-      routes.push({
-        prefix: "openai/",
-        provider: createOpenAIProvider({
-          apiKey: openaiKey,
-          baseURL: Deno.env.get("OPENAI_BASE_URL") ?? undefined,
-        }),
-      });
-    }
-
-    const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY");
-    if (anthropicKey) {
-      routes.push({
-        prefix: "anthropic/",
-        provider: createAnthropicProvider({
-          apiKey: anthropicKey,
-          baseURL: Deno.env.get("ANTHROPIC_BASE_URL") ?? undefined,
-        }),
-      });
-    }
-
-    const openrouterKey = Deno.env.get("OPENROUTER_API_KEY");
-    const fallback = openrouterKey
-      ? createOpenRouterProvider({
-        apiKey: openrouterKey,
-        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
-      })
-      : undefined;
-
-    if (!routes.length && !fallback) {
-      throw new Error(
-        "At least one provider is required (GEMINI_API_KEY or OPENROUTER_API_KEY).",
-      );
-    }
-
-    const provider = createModelRouterProvider({
-      routes,
-      fallback,
+    const provider = createOpenRouterProvider({
+      apiKey,
+      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
     });
 
     const tracerFns: Array<
@@ -300,6 +245,8 @@ async function main() {
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,
+        context: parseContext(args.context),
+        contextProvided: args.contextProvided,
         port: args.port,
         verbose: args.verbose,
         watch: args.watch,
