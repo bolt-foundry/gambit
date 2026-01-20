@@ -1,13 +1,9 @@
 import * as path from "@std/path";
-import type {
-  OpenResponseItem,
-  OpenResponseMessageItem,
-  TraceEvent,
-} from "./types.ts";
+import type { ModelMessage, TraceEvent } from "./types.ts";
 
 export type SavedState = {
   runId: string;
-  messages: Array<OpenResponseItem>;
+  messages: Array<ModelMessage>;
   meta?: Record<string, unknown>;
   messageRefs?: Array<MessageRef>;
   feedback?: Array<FeedbackEntry>;
@@ -18,8 +14,7 @@ export type SavedState = {
 
 export type MessageRef = {
   id: string;
-  type: OpenResponseItem["type"];
-  role?: OpenResponseMessageItem["role"];
+  role: ModelMessage["role"];
 };
 
 export type FeedbackEntry = {

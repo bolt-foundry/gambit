@@ -1,30 +1,12 @@
 import OpenAI from "@openai/openai";
 import type {
+  JSONValue,
   ModelMessage,
   ModelProvider,
-  OpenResponseContentPart,
-  OpenResponseInput,
-  OpenResponseItem,
+  ToolDefinition,
 } from "../types.ts";
 
 const logger = console;
-
-function contentText(parts: Array<OpenResponseContentPart>): string {
-  return parts.map((part) => {
-    switch (part.type) {
-      case "input_text":
-      case "output_text":
-      case "text":
-      case "summary_text":
-      case "reasoning_text":
-        return part.text;
-      case "refusal":
-        return part.refusal;
-      default:
-        return "";
-    }
-  }).join("");
-}
 
 function normalizeMessage(
   content: OpenAI.Chat.Completions.ChatCompletionMessage,
@@ -46,46 +28,6 @@ function normalizeMessage(
   };
 }
 
-function openResponseItemFromMessage(message: ModelMessage): OpenResponseItem {
-  return {
-    type: "message",
-    role: message.role,
-    content: message.content,
-    name: message.name,
-    tool_call_id: message.tool_call_id,
-    tool_calls: message.tool_calls,
-  };
-}
-
-function messagesFromResponseItems(
-  input: OpenResponseInput,
-): Array<ModelMessage> {
-  const items = typeof input === "string"
-    ? [
-      {
-        type: "message",
-        role: "user",
-        content: input,
-      } satisfies OpenResponseItem,
-    ]
-    : input ?? [];
-  const messages: Array<ModelMessage> = [];
-  for (const item of items) {
-    if (item.type !== "message") continue;
-    const content = typeof item.content === "string" || item.content === null
-      ? item.content
-      : contentText(item.content);
-    messages.push({
-      role: item.role,
-      content,
-      name: item.name,
-      tool_call_id: item.tool_call_id,
-      tool_calls: item.tool_calls,
-    });
-  }
-  return messages;
-}
-
 export function createOpenRouterProvider(opts: {
   apiKey: string;
   baseURL?: string;
@@ -104,13 +46,20 @@ export function createOpenRouterProvider(opts: {
   });
 
   return {
-    async responses(input) {
-      const messages = messagesFromResponseItems(input.input);
+    async chat(input: {
+      model: string;
+      messages: Array<ModelMessage>;
+      tools?: Array<ToolDefinition>;
+      stream?: boolean;
+      state?: import("../state.ts").SavedState;
+      onStreamText?: (chunk: string) => void;
+      params?: Record<string, unknown>;
+    }) {
       const params = input.params ?? {};
       if (input.stream) {
         if (debugStream) {
           logger.log(
-            `[stream-debug] requesting stream model=${input.model} messages=${messages.length} tools=${
+            `[stream-debug] requesting stream model=${input.model} messages=${input.messages.length} tools=${
               input.tools?.length ?? 0
             }`,
           );
@@ -118,12 +67,14 @@ export function createOpenRouterProvider(opts: {
 
         const stream = await client.chat.completions.create({
           model: input.model,
-          messages: messages as Array<
-            OpenAI.Chat.Completions.ChatCompletionMessageParam
-          >,
-          tools: input.tools as unknown as Array<
-            OpenAI.Chat.Completions.ChatCompletionTool
-          >,
+          messages: input
+            .messages as Array<
+              OpenAI.Chat.Completions.ChatCompletionMessageParam
+            >,
+          tools: input
+            .tools as unknown as Array<
+              OpenAI.Chat.Completions.ChatCompletionTool
+            >,
           tool_choice: "auto",
           stream: true,
           ...(params as Record<string, unknown>),
@@ -155,10 +106,7 @@ export function createOpenRouterProvider(opts: {
 
           if (typeof delta.content === "string") {
             contentParts.push(delta.content);
-            input.onStreamEvent?.({
-              type: "response.output_text.delta",
-              delta: delta.content,
-            });
+            input.onStreamText?.(delta.content);
             streamedChars += delta.content.length;
           } else if (Array.isArray(delta.content)) {
             const chunkStr =
@@ -167,10 +115,7 @@ export function createOpenRouterProvider(opts: {
                 .join("");
             if (chunkStr) {
               contentParts.push(chunkStr);
-              input.onStreamEvent?.({
-                type: "response.output_text.delta",
-                delta: chunkStr,
-              });
+              input.onStreamText?.(chunkStr);
               streamedChars += chunkStr.length;
             }
           }
@@ -212,21 +157,31 @@ export function createOpenRouterProvider(opts: {
           tool_calls,
         } as OpenAI.Chat.Completions.ChatCompletionMessage);
 
+        const toolCalls = tool_calls.length > 0
+          ? tool_calls.map((tc) => ({
+            id: tc.id,
+            name: tc.function.name,
+            args: safeJson(tc.function.arguments),
+          }))
+          : undefined;
+
         return {
-          id: crypto.randomUUID(),
-          output: [openResponseItemFromMessage(message)],
+          message,
           finishReason: finishReason ?? "stop",
+          toolCalls,
         };
       }
 
       const response = await client.chat.completions.create({
         model: input.model,
-        messages: messages as Array<
-          OpenAI.Chat.Completions.ChatCompletionMessageParam
-        >,
-        tools: input.tools as unknown as Array<
-          OpenAI.Chat.Completions.ChatCompletionTool
-        >,
+        messages: input
+          .messages as unknown as Array<
+            OpenAI.Chat.Completions.ChatCompletionMessageParam
+          >,
+        tools: input
+          .tools as unknown as Array<
+            OpenAI.Chat.Completions.ChatCompletionTool
+          >,
         tool_choice: "auto",
         stream: false,
         ...(params as Record<string, unknown>),
@@ -235,13 +190,20 @@ export function createOpenRouterProvider(opts: {
       const choice = response.choices[0];
       const message = choice.message;
       const normalizedMessage = normalizeMessage(message);
+      const toolCalls = message.tool_calls?.map((
+        tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
+      ) => ({
+        id: tc.id,
+        name: tc.function.name,
+        args: safeJson(tc.function.arguments),
+      }));
 
       return {
-        id: response.id ?? crypto.randomUUID(),
-        output: [openResponseItemFromMessage(normalizedMessage)],
+        message: normalizedMessage,
         finishReason:
           (choice.finish_reason as "stop" | "tool_calls" | "length" | null) ??
             "stop",
+        toolCalls,
         usage: response.usage
           ? {
             promptTokens: response.usage.prompt_tokens ?? 0,
@@ -252,4 +214,16 @@ export function createOpenRouterProvider(opts: {
       };
     },
   };
+}
+
+function safeJson(str: string): Record<string, JSONValue> {
+  try {
+    const parsed = JSON.parse(str);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, JSONValue>;
+    }
+  } catch {
+    // ignore bad tool args
+  }
+  return {};
 }

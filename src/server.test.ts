@@ -1,14 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
-import type {
-  ModelMessage,
-  ModelProvider,
-  OpenResponseCreateResponse,
-  OpenResponseInput,
-  OpenResponseItem,
-  SavedState,
-} from "@bolt-foundry/gambit-core";
+import type { ModelProvider } from "@bolt-foundry/gambit-core";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -47,105 +40,6 @@ async function readStreamEvents(port: number, offset = 0) {
   return body.events ?? [];
 }
 
-type ChatHandlerInput = {
-  model: string;
-  messages: Array<ModelMessage>;
-  stream?: boolean;
-  onStreamText?: (chunk: string) => void;
-  params?: Record<string, unknown>;
-  state?: SavedState;
-};
-
-type ChatHandlerResult = {
-  message: ModelMessage;
-  finishReason: "stop" | "tool_calls" | "length";
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-  updatedState?: SavedState;
-};
-
-function toModelMessages(input: OpenResponseInput): Array<ModelMessage> {
-  const items = typeof input === "string"
-    ? [{ type: "message", role: "user", content: input } as OpenResponseItem]
-    : input ?? [];
-  const out: Array<ModelMessage> = [];
-  for (const item of items) {
-    if (item.type !== "message") continue;
-    const content = typeof item.content === "string" || item.content === null
-      ? item.content
-      : item.content
-        .map((part) => {
-          switch (part.type) {
-            case "input_text":
-            case "output_text":
-            case "text":
-            case "summary_text":
-            case "reasoning_text":
-              return part.text;
-            case "refusal":
-              return part.refusal;
-            default:
-              return "";
-          }
-        })
-        .join("");
-    out.push({
-      role: item.role,
-      content,
-      name: item.name,
-      tool_call_id: item.tool_call_id,
-      tool_calls: item.tool_calls,
-    });
-  }
-  return out;
-}
-
-function toResponseMessageItem(message: ModelMessage): OpenResponseItem {
-  return {
-    type: "message",
-    role: message.role,
-    content: message.content ?? null,
-    name: message.name,
-    tool_call_id: message.tool_call_id,
-    tool_calls: message.tool_calls,
-  };
-}
-
-function createChatLikeProvider(
-  handler: (
-    input: ChatHandlerInput,
-  ) => ChatHandlerResult | Promise<ChatHandlerResult>,
-): ModelProvider {
-  return {
-    responses: async (input) => {
-      const result = await handler({
-        model: input.model,
-        messages: toModelMessages(input.input),
-        stream: input.stream,
-        onStreamText: input.onStreamEvent
-          ? (chunk) =>
-            input.onStreamEvent?.({
-              type: "response.output_text.delta",
-              delta: chunk,
-            })
-          : undefined,
-        params: input.params,
-        state: input.state,
-      });
-      return {
-        id: "resp-test",
-        output: [toResponseMessageItem(result.message)],
-        finishReason: result.finishReason,
-        usage: result.usage,
-        updatedState: result.updatedState,
-      };
-    },
-  };
-}
-
 Deno.test("simulator streams responses", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -164,14 +58,16 @@ Deno.test("simulator streams responses", async () => {
     `,
   );
 
-  const provider = createChatLikeProvider((input) => {
-    input.onStreamText?.("h");
-    input.onStreamText?.("i");
-    return {
-      message: { role: "assistant", content: "hi" },
-      finishReason: "stop",
-    };
-  });
+  const provider: ModelProvider = {
+    chat(input) {
+      input.onStreamText?.("h");
+      input.onStreamText?.("i");
+      return Promise.resolve({
+        message: { role: "assistant", content: "hi" },
+        finishReason: "stop",
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -205,70 +101,6 @@ Deno.test("simulator streams responses", async () => {
   assertEquals(messages.some((m) => m.type === "result"), true);
 });
 
-Deno.test("responses endpoint streams Open Responses events", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
-
-  const deckPath = path.join(dir, "responses.deck.ts");
-  await Deno.writeTextFile(
-    deckPath,
-    `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.string(),
-      outputSchema: z.string(),
-      modelParams: { model: "dummy-model" },
-    });
-    `,
-  );
-
-  const provider: ModelProvider = {
-    responses: (input) => {
-      input.onStreamEvent?.({
-        type: "response.output_text.delta",
-        delta: "hi",
-      });
-      const response: OpenResponseCreateResponse = {
-        id: "resp-test",
-        output: [toResponseMessageItem({ role: "assistant", content: "hi" })],
-        finishReason: "stop",
-      };
-      input.onStreamEvent?.({
-        type: "response.completed",
-        response,
-      });
-      return Promise.resolve(response);
-    },
-  };
-
-  const server = startWebSocketSimulator({
-    deckPath,
-    modelProvider: provider,
-    port: 0,
-  });
-  const port = (server.addr as Deno.NetAddr).port;
-
-  const res = await fetch(`http://127.0.0.1:${port}/v1/responses`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: "dummy-model",
-      input: "hello",
-      stream: true,
-    }),
-  });
-  const body = await res.text();
-
-  await server.shutdown();
-  await server.finished;
-
-  assertEquals(res.status, 200);
-  assert(body.includes("event: response.output_text.delta"));
-  assert(body.includes("event: response.completed"));
-  assert(body.includes("data: [DONE]"));
-});
-
 Deno.test("simulator exposes schema and defaults", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -291,10 +123,14 @@ Deno.test("simulator exposes schema and defaults", async () => {
     `,
   );
 
-  const provider = createChatLikeProvider(() => ({
-    message: { role: "assistant", content: "ok" },
-    finishReason: "stop",
-  }));
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -313,6 +149,57 @@ Deno.test("simulator exposes schema and defaults", async () => {
   assert(schemaBody.schema);
   assertEquals(schemaBody.schema?.kind, "object");
   assertEquals(schemaBody.defaults?.name, "CallFlow");
+  await server.shutdown();
+  await server.finished;
+});
+
+Deno.test("simulator schema defaults honor provided context", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "context.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        name: z.string(),
+        mode: z.enum(["a", "b"]),
+      }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const initialContext = { name: "Dr. Aurora", mode: "b" } as const;
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+    initialContext,
+    contextProvided: true,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const schemaRes = await fetch(`http://127.0.0.1:${port}/schema`);
+  const schemaBody = await schemaRes.json() as { defaults?: unknown };
+
+  assertEquals(schemaBody.defaults, initialContext);
+
   await server.shutdown();
   await server.finished;
 });
@@ -342,16 +229,18 @@ Deno.test("simulator preserves state and user input", async () => {
     state?: import("@bolt-foundry/gambit-core").SavedState;
   }> = [];
 
-  const provider = createChatLikeProvider((input) => {
-    calls.push({ messages: input.messages, state: input.state });
-    const lastUser = [...input.messages].reverse().find((m) =>
-      m.role === "user"
-    );
-    return {
-      message: { role: "assistant", content: lastUser?.content ?? "ok" },
-      finishReason: "stop",
-    };
-  });
+  const provider: ModelProvider = {
+    chat(input) {
+      calls.push({ messages: input.messages, state: input.state });
+      const lastUser = [...input.messages].reverse().find((m) =>
+        m.role === "user"
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: lastUser?.content ?? "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -431,16 +320,18 @@ Deno.test("simulator treats follow-up input as a user message when state exists"
     state?: import("@bolt-foundry/gambit-core").SavedState;
   }> = [];
 
-  const provider = createChatLikeProvider((input) => {
-    calls.push({ messages: input.messages, state: input.state });
-    const lastUser = [...input.messages].reverse().find((m) =>
-      m.role === "user"
-    );
-    return {
-      message: { role: "assistant", content: lastUser?.content ?? "no-user" },
-      finishReason: "stop",
-    };
-  });
+  const provider: ModelProvider = {
+    chat(input) {
+      calls.push({ messages: input.messages, state: input.state });
+      const lastUser = [...input.messages].reverse().find((m) =>
+        m.role === "user"
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: lastUser?.content ?? "no-user" },
+        finishReason: "stop",
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -483,18 +374,20 @@ Deno.test("simulator emits state updates for download", async () => {
     `,
   );
 
-  const provider = createChatLikeProvider((input) => {
-    const updatedState = {
-      runId: input.state?.runId ?? "state-run",
-      messages: input.messages.map(toResponseMessageItem),
-      meta: { note: "saved" },
-    };
-    return {
-      message: { role: "assistant", content: "ok" },
-      finishReason: "stop",
-      updatedState,
-    };
-  });
+  const provider: ModelProvider = {
+    chat(input) {
+      const updatedState = {
+        runId: input.state?.runId ?? "state-run",
+        messages: input.messages,
+        meta: { note: "saved" },
+      };
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+        updatedState,
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -547,20 +440,22 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
     state?: import("@bolt-foundry/gambit-core").SavedState;
   }> = [];
 
-  const provider = createChatLikeProvider((input) => {
-    calls.push({ messages: input.messages, state: input.state });
-    const lastUser = [...input.messages].reverse().find((m) =>
-      m.role === "user"
-    );
-    return {
-      message: { role: "assistant", content: lastUser?.content ?? "ok" },
-      finishReason: "stop",
-      // Simulate a provider that returns a minimal state without messages.
-      updatedState: {
-        runId: input.state?.runId ?? "missing-messages",
-      } as unknown as import("@bolt-foundry/gambit-core").SavedState,
-    };
-  });
+  const provider: ModelProvider = {
+    chat(input) {
+      calls.push({ messages: input.messages, state: input.state });
+      const lastUser = [...input.messages].reverse().find((m) =>
+        m.role === "user"
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: lastUser?.content ?? "ok" },
+        finishReason: "stop",
+        // Simulate a provider that returns a minimal state without messages.
+        updatedState: {
+          runId: input.state?.runId ?? "missing-messages",
+        } as unknown as import("@bolt-foundry/gambit-core").SavedState,
+      });
+    },
+  };
 
   const server = startWebSocketSimulator({
     deckPath,
@@ -584,11 +479,11 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
   await server.finished;
 
   assertEquals(calls.length, 2);
-  const previousUser = calls[0].messages.find((m) =>
-    m.role === "user" && m.content === "one"
+  const previousAssistant = calls[0].messages.find((m) =>
+    m.role === "assistant" && m.content === "one"
   );
-  if (!previousUser) {
-    throw new Error("expected first user message");
+  if (!previousAssistant) {
+    throw new Error("expected first assistant message");
   }
 
   // Second call should include the first exchange even though the provider

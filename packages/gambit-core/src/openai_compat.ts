@@ -1,19 +1,12 @@
 import { DEFAULT_GUARDRAILS, RESERVED_TOOL_PREFIX } from "./constants.ts";
 import { loadDeck } from "./loader.ts";
-import {
-  messagesFromOpenResponseOutput,
-  openResponseItemsFromMessages,
-} from "./openresponses.ts";
 import { assertZodSchema, toJsonSchema } from "./schema.ts";
 import { runDeck } from "./runtime.ts";
 import type {
   Guardrails,
-  JSONValue,
   LoadedDeck,
   ModelMessage,
   ModelProvider,
-  OpenResponseItem,
-  OpenResponseUsage,
   ToolDefinition,
 } from "./types.ts";
 
@@ -99,84 +92,6 @@ function normalizeMessages(
       ? m.tool_calls
       : undefined,
   }));
-}
-
-function toChatUsage(
-  usage: OpenResponseUsage | undefined,
-): {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-} | undefined {
-  if (!usage) return undefined;
-  const prompt = usage.promptTokens ?? usage.input_tokens;
-  const completion = usage.completionTokens ?? usage.output_tokens;
-  const total = usage.totalTokens ?? usage.total_tokens;
-  if (prompt === undefined && completion === undefined && total === undefined) {
-    return undefined;
-  }
-  return {
-    prompt_tokens: prompt ?? 0,
-    completion_tokens: completion ?? 0,
-    total_tokens: total ?? 0,
-  };
-}
-
-function safeJsonArgs(str: string): Record<string, JSONValue> {
-  try {
-    const parsed = JSON.parse(str);
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, JSONValue>;
-    }
-  } catch {
-    // ignore bad tool args
-  }
-  return {};
-}
-
-function extractToolCalls(
-  output: Array<OpenResponseItem>,
-  message: ModelMessage,
-):
-  | Array<{ id: string; name: string; args: Record<string, JSONValue> }>
-  | undefined {
-  const responseCalls = output.filter((item) => item.type === "function_call");
-  if (responseCalls.length > 0) {
-    return responseCalls.map((item) => ({
-      id: item.call_id,
-      name: item.name,
-      args: safeJsonArgs(item.arguments),
-    }));
-  }
-
-  const messageCalls = message.tool_calls ?? [];
-  if (messageCalls.length === 0) return undefined;
-  return messageCalls.map((call) => ({
-    id: call.id,
-    name: call.function.name,
-    args: safeJsonArgs(call.function.arguments),
-  }));
-}
-
-function mergeOutputToolCalls(
-  output: Array<OpenResponseItem>,
-  baseMessage: ModelMessage,
-): ModelMessage {
-  const responseCalls = output.filter((item) => item.type === "function_call");
-  if (responseCalls.length === 0) return baseMessage;
-  return {
-    role: "assistant",
-    content: baseMessage.content ?? null,
-    name: baseMessage.name,
-    tool_calls: responseCalls.map((item) => ({
-      id: item.call_id,
-      type: "function" as const,
-      function: {
-        name: item.name,
-        arguments: item.arguments,
-      },
-    })),
-  };
 }
 
 function providerParamsFromRequest(
@@ -366,39 +281,22 @@ export async function chatCompletionsWithDeck(args: {
         throw new Error("No model provided");
       })();
 
-    const result = await args.modelProvider.responses({
+    const result = await args.modelProvider.chat({
       model,
-      input: openResponseItemsFromMessages(messages),
+      messages,
       tools: tools.length ? tools : undefined,
       stream: Boolean(args.request.stream),
-      onStreamEvent: args.onStreamText
-        ? (event) => {
-          if (event.type === "response.output_text.delta") {
-            args.onStreamText?.(event.delta);
-          }
-        }
-        : undefined,
+      onStreamText: args.onStreamText,
       params: providerParamsFromRequest(args.request),
     });
 
-    const outputMessages = messagesFromOpenResponseOutput(result.output);
-    const lastAssistantMessage = [...outputMessages].reverse().find((item) =>
-      item.role === "assistant"
-    );
-    const baseMessage = lastAssistantMessage ?? {
-      role: "assistant",
-      content: null,
-    };
-    const message = mergeOutputToolCalls(result.output, baseMessage);
-    const toolCalls = extractToolCalls(result.output, message);
+    messages.push(result.message);
 
-    messages.push(message);
-
-    if (toolCalls && toolCalls.length > 0) {
-      const gambitCalls = toolCalls.filter((c) =>
+    if (result.toolCalls && result.toolCalls.length > 0) {
+      const gambitCalls = result.toolCalls.filter((c) =>
         gambit.toolNameSet.has(c.name)
       );
-      const externalCalls = toolCalls.filter((c) =>
+      const externalCalls = result.toolCalls.filter((c) =>
         !gambit.toolNameSet.has(c.name)
       );
 
@@ -410,11 +308,17 @@ export async function chatCompletionsWithDeck(args: {
           model,
           choices: [{
             index: 0,
-            message,
+            message: result.message,
             finish_reason: "tool_calls",
             logprobs: null,
           }],
-          usage: toChatUsage(result.usage),
+          usage: result.usage
+            ? {
+              prompt_tokens: result.usage.promptTokens,
+              completion_tokens: result.usage.completionTokens,
+              total_tokens: result.usage.totalTokens,
+            }
+            : undefined,
           gambit: { deckPath: deck.path, messages, runId },
         };
       }
@@ -459,8 +363,7 @@ export async function chatCompletionsWithDeck(args: {
       continue;
     }
 
-    const finishReason = result.finishReason ?? "stop";
-    if (finishReason === "tool_calls") {
+    if (result.finishReason === "tool_calls") {
       throw new Error("Model requested tool_calls but provided none");
     }
 
@@ -471,11 +374,17 @@ export async function chatCompletionsWithDeck(args: {
       model,
       choices: [{
         index: 0,
-        message,
-        finish_reason: finishReason,
+        message: result.message,
+        finish_reason: result.finishReason,
         logprobs: null,
       }],
-      usage: toChatUsage(result.usage),
+      usage: result.usage
+        ? {
+          prompt_tokens: result.usage.promptTokens,
+          completion_tokens: result.usage.completionTokens,
+          total_tokens: result.usage.totalTokens,
+        }
+        : undefined,
       gambit: { deckPath: deck.path, messages, runId },
     };
   }

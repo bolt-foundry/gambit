@@ -171,9 +171,7 @@ export async function runGraderAgainstState(opts: {
       const turns = [];
       for (let idx = 0; idx < state.messages.length; idx++) {
         const msg = state.messages[idx];
-        if (!msg || msg.type !== "message" || msg.role !== "assistant") {
-          continue;
-        }
+        if (!msg || msg.role !== "assistant") continue;
         const input = { session: sessionPayload, messageToGrade: msg };
         const turnResult = await runDeckWithFallback({
           path: opts.graderPath,
