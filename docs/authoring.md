@@ -36,7 +36,7 @@ label = "hello_world"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
 +++
 
-![init](gambit://init) # seed input if provided via CLI
+![init](gambit://cards/context.card.md) # seed input if provided via CLI
 
 Rules:
 
@@ -104,12 +104,12 @@ export default defineDeck({
 
 ## Synthetic tools and handlers
 
-- `gambit_init`: injected automatically when `--init` is provided; carries the
-  raw input as the first tool result.
-- `gambit_respond`: enable by inserting the `![respond](gambit://respond)`
-  marker in Markdown decks (or `respond: true` in TypeScript). Required for LLM
-  decks finish via a structured envelope:
-  `{ status?, payload, message?, code?, meta? }`.
+- `gambit_init`: injected automatically when `--context` (formerly `--init`) is
+  provided; carries the raw input as the first tool result.
+- `gambit_respond`: enable by inserting the
+  `![respond](gambit://cards/respond.card.md)` marker in Markdown decks (or
+  `respond: true` in TypeScript). Required for LLM decks finish via a structured
+  envelope: `{ status?, payload, message?, code?, meta? }`.
 - `gambit_complete`: emitted by child actions and handled errors to wrap their
   results for the parent.
 - Optional handlers (deck-only): `handlers.onBusy`, `handlers.onIdle`,
@@ -119,16 +119,17 @@ export default defineDeck({
 ## Embeds (cards)
 
 - In Markdown, use image syntax to embed:
-  `![behavior](./cards/behavior.card.md)`. Special markers: `gambit://init`
-  hints init tool, `gambit://respond` injects respond instructions, and
-  `gambit://end` enables the `gambit_end` hang-up tool.
+  `![behavior](./cards/behavior.card.md)`. Special markers:
+  `gambit://cards/context.card.md` hints init tool,
+  `gambit://cards/respond.card.md` injects respond instructions, and
+  `gambit://cards/end.card.md` enables the `gambit_end` hang-up tool.
 - Cards can also be TS files exported with `defineCard`. They may contain
   action/test/grader deck references and schema fragments, but no handlers.
 
 ## Running and debugging
 
 - Run once:
-  `deno run -A src/cli.ts run path/to/deck --init '"hi"' --message '"hello"' --stream`.
+  `deno run -A src/cli.ts run path/to/deck --context '"hi"' --message '"hello"' --stream`.
 - REPL: `deno run -A src/cli.ts repl path/to/deck --model openai/gpt-4o-mini`.
 - Debug UI: `deno run -A src/cli.ts serve path/to/deck --port 8000` then open
   http://localhost:8000/debug.

@@ -1,0 +1,42 @@
+{
+  "name": "@supabase/auth-ui-shared",
+  "version": "0.1.8",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/supabase/auth-ui.git"
+  },
+  "keywords": [
+    "Supabase",
+    "Auth",
+    "React",
+    "Svelte",
+    "Solid"
+  ],
+  "author": "Supabase",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/supabase/auth-ui/issues"
+  },
+  "homepage": "https://github.com/supabase/auth-ui#readme",
+  "devDependencies": {
+    "@stitches/core": "^1.2.8",
+    "@supabase/supabase-js": "^2.21.0",
+    "tsup": "^6.6.3",
+    "tsconfig": "0.0.0"
+  },
+  "peerDependencies": {
+    "@supabase/supabase-js": "^2.21.0"
+  },
+  "scripts": {
+    "build": "tsup"
+  }
+}

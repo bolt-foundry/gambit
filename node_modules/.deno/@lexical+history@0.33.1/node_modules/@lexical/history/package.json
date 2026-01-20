@@ -1,0 +1,42 @@
+{
+  "name": "@lexical/history",
+  "description": "This package contains selection history helpers for Lexical.",
+  "keywords": [
+    "lexical",
+    "editor",
+    "rich-text",
+    "history"
+  ],
+  "license": "MIT",
+  "version": "0.33.1",
+  "main": "LexicalHistory.js",
+  "types": "index.d.ts",
+  "dependencies": {
+    "@lexical/utils": "0.33.1",
+    "lexical": "0.33.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/facebook/lexical",
+    "directory": "packages/lexical-history"
+  },
+  "module": "LexicalHistory.mjs",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "development": "./LexicalHistory.dev.mjs",
+        "production": "./LexicalHistory.prod.mjs",
+        "node": "./LexicalHistory.node.mjs",
+        "default": "./LexicalHistory.mjs"
+      },
+      "require": {
+        "types": "./index.d.ts",
+        "development": "./LexicalHistory.dev.js",
+        "production": "./LexicalHistory.prod.js",
+        "default": "./LexicalHistory.js"
+      }
+    }
+  }
+}

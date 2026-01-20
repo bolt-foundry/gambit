@@ -14,7 +14,7 @@ description = "Capture billing concerns and determine next steps."
 
 ![billing_behavior](../cards/billing_behavior.card.md)
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 1. Gather the invoice/statement reference, amount, and concern.
 2. Call `billing_support` with the structured summary and patient context when

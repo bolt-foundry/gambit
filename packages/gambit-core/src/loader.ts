@@ -12,6 +12,7 @@ import {
   loadMarkdownCard,
   loadMarkdownDeck,
 } from "./markdown.ts";
+import { resolveBuiltinCardPath } from "./builtins.ts";
 import type {
   ActionDeckDefinition,
   CardDefinition,
@@ -143,10 +144,12 @@ export async function loadCard(
   parentPath?: string,
   stack: Array<string> = [],
 ): Promise<LoadedCard> {
-  if (isMarkdownFile(cardPath)) {
-    return await loadMarkdownCard(cardPath, parentPath, stack);
+  const builtinPath = resolveBuiltinCardPath(cardPath);
+  const normalizedPath = builtinPath ?? cardPath;
+  if (isMarkdownFile(normalizedPath)) {
+    return await loadMarkdownCard(normalizedPath, parentPath, stack);
   }
-  return await loadCardInternal(cardPath, parentPath, stack);
+  return await loadCardInternal(normalizedPath, parentPath, stack);
 }
 
 export async function loadDeck(

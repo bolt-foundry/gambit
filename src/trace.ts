@@ -46,9 +46,12 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
         break;
       }
       case "message.user": {
+        const messageContent = event.message?.type === "message"
+          ? event.message.content
+          : event.message;
         logger.log(
           `[trace] message.user runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath} content=${
-            JSON.stringify(event.message?.content ?? "")
+            JSON.stringify(messageContent ?? "")
           }`,
         );
         break;

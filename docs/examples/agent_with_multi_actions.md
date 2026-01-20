@@ -30,17 +30,17 @@ Why it’s structured this way
 How to run
 
 - Translate:
-  `deno run -A src/cli.ts run init/examples/advanced/agent_with_multi_actions/agent_with_multi_actions.deck.md --init '"translate bonjour to English"' --stream`
-- Summarize: `--init '"summarize: long text here"'`
-- Math: `--init '{"a":4,"b":5,"op":"multiply"}'` (tool fills in defaults if
+  `deno run -A src/cli.ts run init/examples/advanced/agent_with_multi_actions/agent_with_multi_actions.deck.md --context '"translate bonjour to English"' --stream`
+- Summarize: `--context '"summarize: long text here"'`
+- Math: `--context '{"a":4,"b":5,"op":"multiply"}'` (tool fills in defaults if
   missing).
 
 Try this input
 
-- `--init '"translate hola to French"'` → calls `translate_text`, returns
+- `--context '"translate hola to French"'` → calls `translate_text`, returns
   translated text only
-- `--init '"summarize: The quick brown fox jumps over the lazy dog."'` → calls
-  `summarize_text`, returns one-sentence summary
-- `--init '{"a":3,"b":7,"op":"add"}'` → calls `basic_math`, returns
+- `--context '"summarize: The quick brown fox jumps over the lazy dog."'` →
+  calls `summarize_text`, returns one-sentence summary
+- `--context '{"a":3,"b":7,"op":"add"}'` → calls `basic_math`, returns
   `{ "result": 10, "op": "add" }`
-- `--init '"echo this back"'` → calls `echo_input`, returns echoed text
+- `--context '"echo this back"'` → calls `echo_input`, returns echoed text

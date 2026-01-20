@@ -12,9 +12,11 @@ import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
 import type {
   ExecutionContext,
   Guardrails,
+  JSONValue,
   LoadedDeck,
-  ModelMessage,
   ModelProvider,
+  OpenResponseItem,
+  OpenResponseMessageItem,
   ToolCallResult,
   ToolDefinition,
 } from "./types.ts";
@@ -248,7 +250,10 @@ function extractInitInput(state?: SavedState): unknown {
   if (!state?.messages) return undefined;
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
-    if (msg.role === "tool" && msg.name === GAMBIT_TOOL_INIT) {
+    if (
+      msg.type === "message" && msg.role === "tool" &&
+      msg.name === GAMBIT_TOOL_INIT
+    ) {
       const content = msg.content;
       if (typeof content !== "string") return undefined;
       try {
@@ -414,8 +419,11 @@ async function runLlmDeck(
   const systemPrompt = buildSystemPrompt(deck);
 
   const refToolCallId = randomId("call");
-  const messages: Array<ModelMessage> = ctx.state?.messages
-    ? ctx.state.messages.map(sanitizeMessage)
+  const messages: Array<OpenResponseMessageItem> = ctx.state?.messages
+    ? ctx.state.messages
+      .map(coerceToMessageItem)
+      .filter((item): item is OpenResponseMessageItem => item !== null)
+      .map(sanitizeMessageItem)
     : [];
   const resumed = messages.length > 0;
   const sendInit = Boolean(inputProvided) && input !== undefined && !resumed;
@@ -432,7 +440,7 @@ async function runLlmDeck(
     trace: ctx.trace,
     stream: ctx.stream,
     onStreamText: ctx.onStreamText,
-    pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
+    pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessageItem)),
   });
   let streamingBuffer = "";
   let streamingCommitted = false;
@@ -443,7 +451,13 @@ async function runLlmDeck(
     ctx.onStreamText?.(chunk);
   };
   if (!resumed) {
-    messages.push(sanitizeMessage({ role: "system", content: systemPrompt }));
+    messages.push(
+      sanitizeMessageItem({
+        type: "message",
+        role: "system",
+        content: systemPrompt,
+      }),
+    );
     if (sendInit) {
       ctx.trace?.({
         type: "tool.call",
@@ -454,7 +468,8 @@ async function runLlmDeck(
         parentActionCallId: actionCallId,
       });
       messages.push(
-        sanitizeMessage({
+        sanitizeMessageItem({
+          type: "message",
           role: "assistant",
           content: null,
           tool_calls: [{
@@ -466,7 +481,8 @@ async function runLlmDeck(
             },
           }],
         }),
-        sanitizeMessage({
+        sanitizeMessageItem({
+          type: "message",
           role: "tool",
           name: GAMBIT_TOOL_INIT,
           tool_call_id: refToolCallId,
@@ -485,7 +501,8 @@ async function runLlmDeck(
   }
 
   if (initialUserMessage !== undefined) {
-    const userMessage = sanitizeMessage({
+    const userMessage = sanitizeMessageItem({
+      type: "message",
       role: "user",
       content: formatInputForUser(initialUserMessage),
     });
@@ -537,46 +554,65 @@ async function runLlmDeck(
         stream: ctx.stream,
         messageCount: messages.length,
         toolCount: tools.length,
-        messages: messages.map(sanitizeMessage),
+        messages: messages.map(sanitizeMessageItem),
         tools,
         stateMessages,
         parentActionCallId: ctx.parentActionCallId,
       });
 
-      const result = await modelProvider.chat({
+      const result = await modelProvider.responses({
         model,
-        messages,
+        input: messages,
         tools,
         stream: ctx.stream,
         state: ctx.state,
         params: toProviderParams(deck.modelParams),
-        onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
-          ? wrappedOnStreamText
+        onStreamEvent: (ctx.onStreamText || deck.handlers?.onIdle)
+          ? (event) => {
+            switch (event.type) {
+              case "response.output_text.delta":
+                wrappedOnStreamText(event.delta);
+                break;
+              case "response.refusal.delta":
+                if (event.delta) wrappedOnStreamText(event.delta);
+                break;
+              case "response.refusal.done":
+                if (event.refusal) wrappedOnStreamText(event.refusal);
+                break;
+              default:
+                break;
+            }
+          }
           : undefined,
       });
       idleController.touch();
-      const message = result.message;
+      const message = messageItemFromResponse(result.output);
+      const toolCalls = extractToolCalls(result.output, message);
       ctx.trace?.({
         type: "model.result",
         runId,
         actionCallId,
         deckPath: deck.path,
         model,
-        finishReason: result.finishReason,
-        message: sanitizeMessage(message),
-        toolCalls: result.toolCalls,
+        finishReason: result.finishReason ?? "stop",
+        message: sanitizeMessageItem(message),
+        toolCalls,
         stateMessages: result.updatedState?.messages?.length,
         parentActionCallId: ctx.parentActionCallId,
       });
       const computeState = (updated?: SavedState): SavedState => {
         const base = updated ??
-          { runId, messages: messages.map(sanitizeMessage) };
+          { runId, messages: messages.map(sanitizeMessageItem) };
         const mergedMessages = base.messages && base.messages.length > 0
-          ? base.messages.map(sanitizeMessage)
-          : messages.map(sanitizeMessage);
+          ? sanitizeResponseItems(base.messages)
+          : messages.map(sanitizeMessageItem);
         const priorRefs = updated?.messageRefs ?? ctx.state?.messageRefs ?? [];
         const messageRefs: Array<MessageRef> = mergedMessages.map((m, idx) =>
-          priorRefs[idx] ?? { id: randomId("msg"), role: m.role }
+          priorRefs[idx] ?? {
+            id: randomId("msg"),
+            type: m.type,
+            role: m.type === "message" ? m.role : undefined,
+          }
         );
         const feedback = updated?.feedback ?? ctx.state?.feedback;
         const traces = updated?.traces ?? ctx.state?.traces;
@@ -590,19 +626,23 @@ async function runLlmDeck(
         };
       };
 
-      if (result.toolCalls && result.toolCalls.length > 0) {
+      if (toolCalls && toolCalls.length > 0) {
         let responded = false;
         let respondValue: unknown;
         let endSignal: GambitEndSignal | undefined;
-        const appendedMessages: Array<ModelMessage> = [];
+        const appendedMessages: Array<OpenResponseMessageItem> = [];
         if (!streamingCommitted && streamingBuffer) {
           messages.push(
-            sanitizeMessage({ role: "assistant", content: streamingBuffer }),
+            sanitizeMessageItem({
+              type: "message",
+              role: "assistant",
+              content: streamingBuffer,
+            }),
           );
           streamingCommitted = true;
         }
 
-        for (const call of result.toolCalls) {
+        for (const call of toolCalls) {
           if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {
             const status = typeof call.args?.status === "number"
               ? call.args.status
@@ -647,6 +687,7 @@ async function runLlmDeck(
             });
             const toolContent = JSON.stringify(call.args ?? {});
             appendedMessages.push({
+              type: "message",
               role: "assistant",
               content: null,
               tool_calls: [{
@@ -659,6 +700,7 @@ async function runLlmDeck(
               }],
             });
             appendedMessages.push({
+              type: "message",
               role: "tool",
               tool_call_id: call.id,
               name: call.name,
@@ -704,6 +746,7 @@ async function runLlmDeck(
             });
             const toolContent = JSON.stringify(call.args ?? {});
             appendedMessages.push({
+              type: "message",
               role: "assistant",
               content: null,
               tool_calls: [{
@@ -716,6 +759,7 @@ async function runLlmDeck(
               }],
             });
             appendedMessages.push({
+              type: "message",
               role: "tool",
               tool_call_id: call.id,
               name: call.name,
@@ -781,6 +825,7 @@ async function runLlmDeck(
             parentActionCallId: actionCallId,
           });
           appendedMessages.push({
+            type: "message",
             role: "assistant",
             content: null,
             tool_calls: [{
@@ -793,13 +838,20 @@ async function runLlmDeck(
             }],
           });
           appendedMessages.push({
+            type: "message",
             role: "tool",
             tool_call_id: call.id,
             name: call.name,
             content: toolResult.toolContent,
           });
           if (toolResult.extraMessages?.length) {
-            appendedMessages.push(...toolResult.extraMessages);
+            appendedMessages.push(
+              ...toolResult.extraMessages
+                .map(coerceToMessageItem)
+                .filter((item): item is OpenResponseMessageItem =>
+                  item !== null
+                ),
+            );
           }
           ctx.trace?.({
             type: "action.end",
@@ -812,7 +864,7 @@ async function runLlmDeck(
         }
 
         if (appendedMessages.length) {
-          messages.push(...appendedMessages.map(sanitizeMessage));
+          messages.push(...appendedMessages.map(sanitizeMessageItem));
           idleController.touch();
         }
         if (ctx.onStateUpdate) {
@@ -854,14 +906,14 @@ async function runLlmDeck(
       }
 
       if (message.content !== null && message.content !== undefined) {
-        messages.push(sanitizeMessage(message));
+        messages.push(sanitizeMessageItem(message));
         if (ctx.onStateUpdate) {
           const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
         }
         if (
           ctx.parentActionCallId !== undefined &&
-          (!result.toolCalls || result.toolCalls.length === 0)
+          (!toolCalls || toolCalls.length === 0)
         ) {
           ctx.trace?.({
             type: "monolog",
@@ -956,7 +1008,7 @@ async function handleToolCall(
       code: payload.code,
       meta: payload.meta,
     });
-  const extraMessages: Array<ModelMessage> = [];
+  const extraMessages: Array<OpenResponseItem> = [];
   const started = performance.now();
 
   const busyCfg = ctx.parentDeck.handlers?.onBusy ??
@@ -1020,7 +1072,7 @@ async function handleToolCall(
         initialUserMessage: undefined,
       });
       if (envelope.length) {
-        extraMessages.push(...envelope.map(sanitizeMessage));
+        extraMessages.push(...envelope.map(sanitizeMessageItem));
       }
       ctx.idle?.touch();
     } catch {
@@ -1104,7 +1156,7 @@ async function handleToolCall(
           initialUserMessage: undefined,
         });
         if (envelope.length) {
-          extraMessages.push(...envelope.map(sanitizeMessage));
+          extraMessages.push(...envelope.map(sanitizeMessageItem));
         }
         ctx.idle?.touch();
       } catch {
@@ -1116,6 +1168,7 @@ async function handleToolCall(
   const completeEventId = randomId("event");
   extraMessages.push(
     {
+      type: "message",
       role: "assistant",
       content: null,
       tool_calls: [{
@@ -1128,6 +1181,7 @@ async function handleToolCall(
       }],
     },
     {
+      type: "message",
       role: "tool",
       tool_call_id: completeEventId,
       name: GAMBIT_TOOL_COMPLETE,
@@ -1181,7 +1235,7 @@ async function runBusyHandler(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   initialUserMessage?: unknown;
-}): Promise<Array<ModelMessage>> {
+}): Promise<Array<OpenResponseMessageItem>> {
   try {
     const input = {
       kind: "busy",
@@ -1230,6 +1284,7 @@ async function runBusyHandler(args: {
       logger.log(message);
     }
     return [{
+      type: "message",
       role: "assistant",
       content: `${message} (elapsed ${elapsedMs}ms)`,
     }];
@@ -1251,7 +1306,7 @@ function createIdleController(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-  pushMessages: (msgs: Array<ModelMessage>) => void;
+  pushMessages: (msgs: Array<OpenResponseMessageItem>) => void;
 }): IdleController {
   if (!args.cfg?.path) {
     return {
@@ -1298,7 +1353,9 @@ function createIdleController(args: {
           stream: args.stream,
           onStreamText: args.onStreamText,
         });
-        if (envelope.length) args.pushMessages(envelope.map(sanitizeMessage));
+        if (envelope.length) {
+          args.pushMessages(envelope.map(sanitizeMessageItem));
+        }
       } catch {
         // ignore idle handler errors
       }
@@ -1346,7 +1403,7 @@ async function runIdleHandler(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
-}): Promise<Array<ModelMessage>> {
+}): Promise<Array<OpenResponseMessageItem>> {
   try {
     const input = {
       kind: "idle",
@@ -1394,6 +1451,7 @@ async function runIdleHandler(args: {
       logger.log(message);
     }
     return [{
+      type: "message",
       role: "assistant",
       content: `${message} (idle for ${elapsedMs}ms)`,
     }];
@@ -1485,8 +1543,9 @@ async function maybeHandleError(args: {
     });
 
     const callId = randomId("event");
-    const extraMessages: Array<ModelMessage> = [
+    const extraMessages: Array<OpenResponseItem> = [
       {
+        type: "message",
         role: "assistant",
         content: null,
         tool_calls: [{
@@ -1499,6 +1558,7 @@ async function maybeHandleError(args: {
         }],
       },
       {
+        type: "message",
         role: "tool",
         tool_call_id: callId,
         name: GAMBIT_TOOL_COMPLETE,
@@ -1529,8 +1589,9 @@ async function maybeHandleError(args: {
     });
 
     const callId = randomId("event");
-    const extraMessages: Array<ModelMessage> = [
+    const extraMessages: Array<OpenResponseItem> = [
       {
+        type: "message",
         role: "assistant",
         content: null,
         tool_calls: [{
@@ -1543,6 +1604,7 @@ async function maybeHandleError(args: {
         }],
       },
       {
+        type: "message",
         role: "tool",
         tool_call_id: callId,
         name: GAMBIT_TOOL_COMPLETE,
@@ -1575,11 +1637,79 @@ function formatInputForUser(input: unknown): string {
   }
 }
 
-function sanitizeMessage(msg: ModelMessage): ModelMessage {
-  const toolCalls = msg.tool_calls && msg.tool_calls.length > 0
-    ? msg.tool_calls
+function sanitizeMessageItem(
+  item: OpenResponseMessageItem,
+): OpenResponseMessageItem {
+  const toolCalls = item.tool_calls && item.tool_calls.length > 0
+    ? item.tool_calls
     : undefined;
-  return { ...msg, tool_calls: toolCalls };
+  return { ...item, tool_calls: toolCalls };
+}
+
+function sanitizeResponseItems(
+  items: Array<OpenResponseItem>,
+): Array<OpenResponseItem> {
+  return items.map((item) =>
+    item.type === "message" ? sanitizeMessageItem(item) : item
+  );
+}
+
+function coerceToMessageItem(
+  item: OpenResponseItem,
+): OpenResponseMessageItem | null {
+  if (item.type === "message") return item;
+  if (item.type === "output_text") {
+    return { type: "message", role: "assistant", content: item.text };
+  }
+  return null;
+}
+
+function messageItemFromResponse(
+  output: Array<OpenResponseItem>,
+): OpenResponseMessageItem {
+  const messageItem = output.find((item) => item.type === "message");
+  if (messageItem && messageItem.type === "message") return messageItem;
+  const textItem = output.find((item) => item.type === "output_text");
+  if (textItem && textItem.type === "output_text") {
+    return { type: "message", role: "assistant", content: textItem.text };
+  }
+  return { type: "message", role: "assistant", content: null };
+}
+
+function safeJsonArgs(str: string): Record<string, JSONValue> {
+  try {
+    const parsed = JSON.parse(str);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, JSONValue>;
+    }
+  } catch {
+    // ignore bad tool args
+  }
+  return {};
+}
+
+function extractToolCalls(
+  output: Array<OpenResponseItem>,
+  message: OpenResponseMessageItem,
+):
+  | Array<{ id: string; name: string; args: Record<string, JSONValue> }>
+  | undefined {
+  const responseCalls = output.filter((item) => item.type === "function_call");
+  if (responseCalls.length > 0) {
+    return responseCalls.map((item) => ({
+      id: item.call_id,
+      name: item.name,
+      args: safeJsonArgs(item.arguments),
+    }));
+  }
+
+  const messageCalls = message.tool_calls ?? [];
+  if (messageCalls.length === 0) return undefined;
+  return messageCalls.map((call) => ({
+    id: call.id,
+    name: call.function.name,
+    args: safeJsonArgs(call.function.arguments),
+  }));
 }
 
 async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {

@@ -87,8 +87,11 @@ npx @bolt-foundry/gambit <command>
 Run a deck once:
 
 ```
-npx @bolt-foundry/gambit run <deck> --init <json|string> --message <json|string>
+npx @bolt-foundry/gambit run <deck> --context <json|string> --message <json|string>
 ```
+
+> `--context` replaces the old `--init` flag. The CLI still accepts `--init` as
+> a deprecated alias for now so existing scripts keep working.
 
 Drop into a REPL (streams by default):
 
@@ -189,7 +192,7 @@ You are a concise assistant. Greet the user and echo the input.
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./hello_world.deck.md --init '"Gambit"' --stream
+npx @bolt-foundry/gambit run ./hello_world.deck.md --context '"Gambit"' --stream
 ```
 
 ### Compute deck in TypeScript (no model call): `echo.deck.ts`
@@ -212,7 +215,7 @@ export default defineDeck({
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./echo.deck.ts --init '{"text":"ping"}'
+npx @bolt-foundry/gambit run ./echo.deck.ts --context '{"text":"ping"}'
 ```
 
 ### Deck with a child action (calls a TypeScript tool): `agent_with_time.deck.md`
@@ -250,7 +253,7 @@ export default defineDeck({
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./agent_with_time.deck.md --init '"hello"' --stream
+npx @bolt-foundry/gambit run ./agent_with_time.deck.md --context '"hello"' --stream
 ```
 
 ## Deno
@@ -273,7 +276,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli init my-project
 Run a deck:
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli run <deck> --init <json|string> --message <json|string>
+deno run -A jsr:@bolt-foundry/gambit/cli run <deck> --context <json|string> --message <json|string>
 ```
 
 Start the Debug UI:

@@ -1,6 +1,6 @@
 +++
 label = "Booking confirmation guard LLM"
-inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -43,4 +43,4 @@ Scoring rules:
 3. If no booking claims exist, output 0.
 4. If any claim lacks proof, output -3 with short quotes; otherwise +3.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

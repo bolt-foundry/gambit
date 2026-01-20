@@ -12,8 +12,8 @@ Key ideas:
    confidence scores (no external vector store required).
 2. **Policy-aware orchestration** – `policy_support_bot.deck.md` embeds persona,
    grounding, and refusal cards, calls `search_faq`, enforces citation
-   formatting, and uses `gambit://respond` with a schema so the UI/CLI always
-   receives structured envelopes.
+   formatting, and uses `gambit://cards/respond.card.md` with a schema so the
+   UI/CLI always receives structured envelopes.
 3. **Tests + demos** – `tests/faq_dataset.test.ts` guards the FAQ knowledge base
    (category headings, IDs, entry counts), while `demo-script.md` lists prompts
    for grounded answers, refusals, and edge cases that you can replay in the

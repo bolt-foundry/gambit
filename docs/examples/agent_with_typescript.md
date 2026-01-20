@@ -25,11 +25,12 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run init/examples/advanced/agent_with_typescript/agent_with_typescript.deck.md --init '"hi"' --stream`
+- `deno run -A src/cli.ts run init/examples/advanced/agent_with_typescript/agent_with_typescript.deck.md --context '"hi"' --stream`
 - Override model: `--model-force anthropic/claude-3-haiku`
 
 Try this input
 
-- `--init '"hello"'` → calls `get_time`, replies with greeting + ISO timestamp
-- `--init '"just checking time"'` → still calls `get_time`; echoes user text
+- `--context '"hello"'` → calls `get_time`, replies with greeting + ISO
+  timestamp
+- `--context '"just checking time"'` → still calls `get_time`; echoes user text
   with timestamp

@@ -41,8 +41,8 @@ set up a callback.
 
 ## Init workflow
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)
 
 ## Ending the call
 
-![end](gambit://end)
+![end](gambit://cards/end.card.md)

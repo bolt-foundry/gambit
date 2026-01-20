@@ -10,7 +10,7 @@ path = "./lookup_fact.deck.ts"
 description = "Return a short factoid to help answer the question."
 +++
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 You are an internal helper. Work in explicit phases and never skip or reorder
 them:

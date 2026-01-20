@@ -11,8 +11,10 @@ import {
 import type { FeedbackEntry, SavedState } from "@bolt-foundry/gambit-core";
 import type {
   LoadedDeck,
-  ModelMessage,
   ModelProvider,
+  OpenResponseCreateRequest,
+  OpenResponseEvent,
+  OpenResponseItem,
   TraceEvent,
 } from "@bolt-foundry/gambit-core";
 import type { ZodTypeAny } from "zod";
@@ -183,6 +185,99 @@ type OutgoingMessage =
 function randomId(prefix: string): string {
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   return `${prefix}-${suffix}`;
+}
+
+async function parseOpenResponseRequest(
+  req: Request,
+): Promise<OpenResponseCreateRequest | null> {
+  try {
+    return await req.json() as OpenResponseCreateRequest;
+  } catch {
+    return null;
+  }
+}
+
+function formatOpenResponseSseEvent(event: OpenResponseEvent): string {
+  return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+function formatOpenResponseDoneEvent(): string {
+  return "data: [DONE]\n\n";
+}
+
+function createOpenResponseStream(
+  req: Request,
+  provider: ModelProvider,
+  payload: OpenResponseCreateRequest,
+): Response {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      let completed = false;
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      };
+
+      const send = (chunk: string) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(chunk));
+      };
+
+      const sendDone = () => {
+        if (closed) return;
+        send(formatOpenResponseDoneEvent());
+        close();
+      };
+
+      const sendEvent = (event: OpenResponseEvent) => {
+        if (closed) return;
+        send(formatOpenResponseSseEvent(event));
+        if (event.type === "response.completed") {
+          completed = true;
+          sendDone();
+        }
+      };
+
+      req.signal.addEventListener("abort", () => {
+        close();
+      });
+
+      (async () => {
+        try {
+          const response = await provider.responses({
+            ...payload,
+            stream: true,
+            onStreamEvent: sendEvent,
+          });
+          if (!completed) {
+            sendEvent({ type: "response.completed", response });
+            sendDone();
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          sendEvent({
+            type: "error",
+            error: { code: "server_error", message },
+          });
+          sendDone();
+        }
+      })();
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 function resolveDefaultValue(raw: unknown): unknown {
@@ -716,6 +811,14 @@ export function startWebSocketSimulator(opts: {
   const stringifyContent = (value: unknown): string => {
     if (value === null || value === undefined) return "";
     if (typeof value === "string") return value;
+    if (Array.isArray(value)) {
+      return value
+        .map((part) =>
+          typeof part === "string" ? part : (part as { text?: string }).text ??
+            ""
+        )
+        .join("");
+    }
     try {
       return JSON.stringify(value);
     } catch {
@@ -790,7 +893,10 @@ export function startWebSocketSimulator(opts: {
       [];
     for (let i = 0; i < rawMessages.length; i++) {
       const msg = rawMessages[i];
-      if (msg?.role === "assistant" || msg?.role === "user") {
+      if (
+        msg?.type === "message" &&
+        (msg.role === "assistant" || msg.role === "user")
+      ) {
         const content = stringifyContent(msg.content).trim();
         if (!content) continue;
         const refId = refs[i]?.id;
@@ -802,11 +908,10 @@ export function startWebSocketSimulator(opts: {
         });
         continue;
       }
-      if (msg?.role === "tool") {
-        const actionCallId =
-          typeof (msg as { tool_call_id?: unknown }).tool_call_id === "string"
-            ? (msg as { tool_call_id?: string }).tool_call_id
-            : undefined;
+      if (msg?.type === "message" && msg.role === "tool") {
+        const actionCallId = typeof msg.tool_call_id === "string"
+          ? msg.tool_call_id
+          : undefined;
         const name = typeof msg.name === "string" ? msg.name : undefined;
         fallbackToolInserts.push({
           actionCallId,
@@ -966,11 +1071,11 @@ export function startWebSocketSimulator(opts: {
     let sessionEnded = false;
 
     const getLastAssistantMessage = (
-      history: Array<ModelMessage | null | undefined>,
+      history: Array<OpenResponseItem | null | undefined>,
     ): string | undefined => {
       for (let i = history.length - 1; i >= 0; i--) {
         const msg = history[i];
-        if (msg?.role === "assistant") {
+        if (msg?.type === "message" && msg.role === "assistant") {
           return stringifyContent(msg.content);
         }
       }
@@ -978,7 +1083,7 @@ export function startWebSocketSimulator(opts: {
     };
 
     const generateDeckBotUserMessage = async (
-      history: Array<ModelMessage | null | undefined>,
+      history: Array<OpenResponseItem | null | undefined>,
       streamOpts?: { onStreamText?: (chunk: string) => void },
     ): Promise<string> => {
       const assistantMessage = getLastAssistantMessage(history);
@@ -1250,6 +1355,46 @@ export function startWebSocketSimulator(opts: {
     { port, signal: opts.signal, onListen: () => {} },
     async (req) => {
       const url = new URL(req.url);
+      if (url.pathname === "/v1/responses") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const payload = await parseOpenResponseRequest(req);
+        if (!payload) {
+          return new Response("Invalid JSON payload", { status: 400 });
+        }
+        const model = payload.model ?? opts.model;
+        if (!model) {
+          return new Response("Missing model", { status: 400 });
+        }
+        const requestPayload: OpenResponseCreateRequest = {
+          ...payload,
+          model,
+          input: payload.input ?? null,
+        };
+        if (payload.stream) {
+          return createOpenResponseStream(
+            req,
+            opts.modelProvider,
+            requestPayload,
+          );
+        }
+        try {
+          const response = await opts.modelProvider.responses({
+            ...requestPayload,
+            stream: false,
+          });
+          return new Response(JSON.stringify(response), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
       if (url.pathname.startsWith("/api/durable-streams/stream/")) {
         return handleDurableStreamRequest(req);
       }
@@ -1308,11 +1453,13 @@ export function startWebSocketSimulator(opts: {
           })();
           const sessionPayload = {
             messages: Array.isArray(sessionState.messages)
-              ? sessionState.messages.map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-                name: msg.name,
-              }))
+              ? sessionState.messages
+                .filter((msg) => msg.type === "message")
+                .map((msg) => ({
+                  role: msg.role,
+                  content: msg.content,
+                  name: msg.name,
+                }))
               : undefined,
             meta: metaForGrading,
             notes: sessionState.notes
@@ -1808,6 +1955,7 @@ export function startWebSocketSimulator(opts: {
           const body = await req.json() as {
             maxTurns?: number;
             init?: unknown;
+            context?: unknown;
             botInput?: unknown;
             initialUserMessage?: unknown;
             botDeckPath?: string;
@@ -1817,7 +1965,12 @@ export function startWebSocketSimulator(opts: {
           ) {
             maxTurnsOverride = body.maxTurns;
           }
-          deckInput = body.init;
+          deckInput = body.context ?? body.init;
+          if (body.init !== undefined && body.context === undefined) {
+            logger.warn(
+              '[gambit] Received deprecated "init" field in test-bot API; use "context" instead.',
+            );
+          }
           botInput = body.botInput;
           await deckLoadPromise.catch(() => null);
           if (typeof body.botDeckPath === "string") {
@@ -2551,7 +2704,12 @@ export function startWebSocketSimulator(opts: {
                   ref?.id === messageRefId
                 );
                 if (idx >= 0) {
-                  messageContent = state.messages[idx]?.content;
+                  const item = state.messages[idx];
+                  if (item?.type === "message") {
+                    messageContent = stringifyContent(item.content);
+                  } else {
+                    messageContent = undefined;
+                  }
                 }
               }
               items.push({

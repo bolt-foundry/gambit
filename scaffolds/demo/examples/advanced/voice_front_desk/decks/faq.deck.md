@@ -26,4 +26,4 @@ Respond with JSON:
 { "facts": string[], "suggestedFollowUp"?: string }
 ```
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

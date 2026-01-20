@@ -12,7 +12,7 @@ temperature = 0.4
 You role-play a patient calling about test results. If `scenarioDescription` is
 provided, follow it closely; otherwise use the default goals below:
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)
 
 - Start by asking about recent lab results.
 - Provide name and DOB when asked.

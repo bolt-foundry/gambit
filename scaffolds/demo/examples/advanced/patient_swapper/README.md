@@ -19,7 +19,7 @@ export OPENROUTER_API_KEY="your-key-here"
 
 ```bash
 deno run -A jsr:@bolt-foundry/gambit/cli run ./patient_swapper.deck.md \
-  --init "$(cat ./sample_input.json)" --stream
+  --context "$(cat ./sample_input.json)" --stream
 ```
 
 ## Notes

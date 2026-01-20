@@ -75,8 +75,8 @@ export async function runDeckWithFallback(args: {
 export async function runTestBotLoop(opts: {
   rootDeckPath: string;
   botDeckPath: string;
-  init?: unknown;
-  initProvided: boolean;
+  context?: unknown;
+  contextProvided: boolean;
   initialUserMessage?: unknown;
   botInput?: unknown;
   maxTurns: number;
@@ -136,8 +136,8 @@ export async function runTestBotLoop(opts: {
   if (shouldRunRoot) {
     const initialResult = await runDeck({
       path: opts.rootDeckPath,
-      input: opts.init,
-      inputProvided: opts.initProvided,
+      input: opts.context,
+      inputProvided: opts.contextProvided,
       initialUserMessage: opts.initialUserMessage,
       modelProvider: opts.modelProvider,
       isRoot: true,
@@ -185,8 +185,8 @@ export async function runTestBotLoop(opts: {
     if (!userMessage) break;
     const rootResult = await runDeck({
       path: opts.rootDeckPath,
-      input: opts.init,
-      inputProvided: opts.initProvided,
+      input: opts.context,
+      inputProvided: opts.contextProvided,
       initialUserMessage: userMessage,
       modelProvider: opts.modelProvider,
       isRoot: true,

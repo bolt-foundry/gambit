@@ -22,4 +22,4 @@ description = "Ensures answers are grounded to FAQ results or refuse when missin
 If there is no user request yet, reply with: "Ask me an AcmeFlow account
 question."
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)

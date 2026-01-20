@@ -1,6 +1,6 @@
 +++
 label = "Patient swapper tool sequence guard LLM"
-inputSchema = "../../../../schemas/grader_input_conversation.zod.ts"
+inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
 outputSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
@@ -41,4 +41,4 @@ Scoring rules:
 3. Check the final assistant reply content and length.
 4. Score according to the rules above.
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

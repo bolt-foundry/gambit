@@ -27,6 +27,19 @@ if (!pkg.name || !pkg.version) {
 
 await emptyDir(distDir);
 
+async function copyDir(src: string, dest: string) {
+  await Deno.mkdir(dest, { recursive: true });
+  for await (const entry of Deno.readDir(src)) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+    if (entry.isDirectory) {
+      await copyDir(srcPath, destPath);
+    } else if (entry.isFile) {
+      await Deno.copyFile(srcPath, destPath);
+    }
+  }
+}
+
 const entryPoints = Object.entries(denoConfig.exports ?? {})
   .filter(([, value]) => typeof value === "string")
   .map(([name, path]) => ({
@@ -80,4 +93,17 @@ for (const filename of ["README.md", "LICENSE"]) {
   }
   const dest = join(distDir, filename);
   await Deno.copyFile(src, dest);
+}
+
+for (const assetDir of ["cards", "schemas"]) {
+  const srcDir = join(packageRoot, assetDir);
+  let info: Deno.FileInfo;
+  try {
+    info = await Deno.stat(srcDir);
+  } catch {
+    continue;
+  }
+  if (!info.isDirectory) continue;
+  const destDir = join(distDir, assetDir);
+  await copyDir(srcDir, destDir);
 }

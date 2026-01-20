@@ -14,4 +14,4 @@ You are the error handler. Always return a JSON object with:
 - `payload`: `{ notice, error }` where notice = "I couldn't complete
   <actionName>, but I handled the error. Please try again with different input."
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)

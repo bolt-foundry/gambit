@@ -11,12 +11,12 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   - Command help: `deno run -A src/cli.ts help <command>` (or
     `deno run -A src/cli.ts <command> -h`).
 - Run once:
-  `deno run -A src/cli.ts run <deck> [--init <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
+  `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.
 - Test bot (CLI):
-  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--init <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--verbose]`
+  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--verbose]`
 - Grade (CLI):
   `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]`
 - Export bundle (CLI):
@@ -30,12 +30,12 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 
   The WebSocket server streams turns, traces, and status updates.
 - Examples from a local clone:
-  `deno run -A src/cli.ts run gambit/hello.deck.md --init '"hi"'`.
+  `deno run -A src/cli.ts run gambit/hello.deck.md --context '"hi"'`.
 
 ## Inputs and models
 
-- `--init`: seeds `gambit_init` with raw payload (assistant-first). Omit to let
-  the assistant open.
+- `--context`: seeds `gambit_init` with raw payload (assistant-first). Omit to
+  let the assistant open. The deprecated `--init` alias still works for now.
 - `--message`: sends a first user turn before the assistant replies.
 - `--model`: default model; `--model-force`: override even if deck has
   `modelParams`.

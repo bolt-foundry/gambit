@@ -48,8 +48,8 @@ Why it’s structured this way
 
 How to run
 
-- `deno run -A src/cli.ts run init/examples/advanced/voice_front_desk/decks/root.deck.md --init "$(cat init/examples/advanced/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
+- `deno run -A src/cli.ts run init/examples/advanced/voice_front_desk/decks/root.deck.md --context "$(cat init/examples/advanced/voice_front_desk/sample_input.json)" --message '"Hi, this is Nina. I need to move my physical."' --stream`
 
 Try this input
 
-- `--init '{"callOriginNumber":"415-555-0198","callerNumber":"415-555-1010","currentDate":"2025-12-23"}' --message '"I hurt my knee over the weekend and need to see someone fast"'`
+- `--context '{"callOriginNumber":"415-555-0198","callerNumber":"415-555-1010","currentDate":"2025-12-23"}' --message '"I hurt my knee over the weekend and need to see someone fast"'`

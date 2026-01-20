@@ -18,17 +18,17 @@ safe/observable.
 
 ## Synthetic tools and envelopes
 
-- `gambit_init`: sent once when `--init` is provided; payload is the raw input.
-  Useful for assistant-first flows so the model can read input without a user
-  turn.
-- `gambit_respond`: enable with the `gambit://respond` marker in Markdown (or
-  `respond: true` in TypeScript decks). Required for LLM decks that should
-  finish with a structured envelope
+- `gambit_init`: sent once when `--context` (formerly `--init`) is provided;
+  payload is the raw input. Useful for assistant-first flows so the model can
+  read input without a user turn.
+- `gambit_respond`: enable with the `gambit://cards/respond.card.md` marker in
+  Markdown (or `respond: true` in TypeScript decks). Required for LLM decks that
+  should finish with a structured envelope
   `{ payload, status?, message?, code?, meta? }`.
 - `gambit_complete`: emitted automatically for child completions and handled
   errors so the parent can see
   `{ runId, actionCallId, source, status?, payload?, message?, code?, meta? }`.
-- `gambit_end`: enable with `![end](gambit://end)` in Markdown (or
+- `gambit_end`: enable with `![end](gambit://cards/end.card.md)` in Markdown (or
   `allowEnd: true` in TypeScript decks). Calling it returns a sentinel
   `{ __gambitEnd: true, payload?, status?, message?, code?, meta? }` so
   CLI/test-bot loops stop reinjecting the closing assistant turn.
@@ -37,8 +37,8 @@ safe/observable.
 
 - State files (`--state`) persist model messages; subsequent runs resume the
   same conversation. When resuming, `gambit_init` is skipped.
-- `--message` sends a first user turn before the assistant responds; `--init`
-  only seeds `gambit_init`.
+- `--message` sends a first user turn before the assistant responds; `--context`
+  only seeds `gambit_init` (the deprecated `--init` alias behaves the same).
 - Root decks can opt into string passthrough with `allowRootStringInput`
   (REPL/server use this so free-form text works).
 

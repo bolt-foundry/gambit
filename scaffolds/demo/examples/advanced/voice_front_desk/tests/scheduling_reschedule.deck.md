@@ -13,7 +13,7 @@ You role-play a patient who needs to reschedule an existing appointment. Use the
 input fields to drive your responses. If `scenarioDescription` is provided,
 follow it closely; otherwise use the default goals below:
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)
 
 - Start by saying you need to reschedule a visit.
 - Provide name/DOB and the original appointment date when asked.

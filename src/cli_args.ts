@@ -4,6 +4,7 @@ import { parse as parseToml } from "@std/toml";
 import { normalizeFlagList, parsePortValue } from "./cli_utils.ts";
 
 const logger = console;
+let initFlagWarningShown = false;
 
 const COMMANDS = [
   "demo",
@@ -47,9 +48,9 @@ type Args = {
   gradePaths?: Array<string>;
   botInput?: string;
   maxTurns?: number;
-  init?: string;
+  context?: string;
   message?: string;
-  initProvided: boolean;
+  contextProvided: boolean;
   model?: string;
   modelForce?: string;
   trace?: string;
@@ -191,6 +192,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     string: [
       "deck",
       "init",
+      "context",
       "message",
       "test-deck",
       "grade",
@@ -216,8 +218,20 @@ export function parseCliArgs(argv: Array<string>): Args {
   });
 
   if ((parsed as { input?: unknown }).input !== undefined) {
-    throw new Error("`--input` has been removed; use `--init` instead.");
+    throw new Error("`--input` has been removed; use `--context` instead.");
   }
+
+  const legacyInit = parsed.init as string | undefined;
+  const contextArg = parsed.context as string | undefined;
+  if (legacyInit !== undefined && contextArg !== undefined) {
+    throw new Error("Use either --context or --init, not both.");
+  }
+  if (legacyInit !== undefined && !initFlagWarningShown) {
+    initFlagWarningShown = true;
+    logger.warn('[gambit] "--init" is deprecated; use "--context" instead.');
+  }
+  const contextValue = contextArg ?? legacyInit;
+  const contextProvided = contextArg !== undefined || legacyInit !== undefined;
 
   const [cmdRaw, deckPathRaw] = parsed._;
   const hasBundleFlag = argv.includes("--bundle");
@@ -237,8 +251,8 @@ export function parseCliArgs(argv: Array<string>): Args {
     cmd,
     deckPath,
     exportDeckPath: parsed.deck as string | undefined,
-    init: parsed.init as string | undefined,
-    initProvided: parsed.init !== undefined,
+    context: contextValue,
+    contextProvided,
     message: parsed.message as string | undefined,
     testDeckPath: parsed["test-deck"] as string | undefined,
     graderPath: parsed.grader as string | undefined,

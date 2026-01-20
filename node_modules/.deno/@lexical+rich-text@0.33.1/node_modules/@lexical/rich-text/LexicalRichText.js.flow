@@ -1,0 +1,59 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ * @flow strict
+ */
+import type {
+  DOMConversionMap,
+  EditorConfig,
+  EditorState,
+  LexicalNode,
+  NodeKey,
+  ParagraphNode,
+  LexicalEditor,
+  LexicalCommand,
+  RangeSelection,
+} from 'lexical';
+import {ElementNode} from 'lexical';
+
+declare export var DRAG_DROP_PASTE: LexicalCommand<Array<File>>;
+declare export class QuoteNode extends ElementNode {
+  static getType(): string;
+  static clone(node: QuoteNode): QuoteNode;
+  constructor(key?: NodeKey): void;
+  createDOM(config: EditorConfig): HTMLElement;
+  insertNewAfter(
+    selection: RangeSelection,
+    restoreSelection?: boolean,
+  ): ParagraphNode;
+  collapseAtStart(): true;
+}
+declare export function $createQuoteNode(): QuoteNode;
+declare export function $isQuoteNode(
+  node: ?LexicalNode,
+): node is  QuoteNode;
+export type HeadingTagType = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
+declare export class HeadingNode extends ElementNode {
+  __tag: HeadingTagType;
+  static getType(): string;
+  static clone(node: HeadingNode): HeadingNode;
+  constructor(tag: HeadingTagType, key?: NodeKey): void;
+  getTag(): HeadingTagType;
+  createDOM(config: EditorConfig): HTMLElement;
+  static importDOM(): DOMConversionMap | null;
+  insertNewAfter(
+    selection: RangeSelection,
+    restoreSelection?: boolean,
+  ): ParagraphNode;
+  collapseAtStart(): true;
+}
+declare export function $createHeadingNode(
+  headingTag: HeadingTagType,
+): HeadingNode;
+declare export function $isHeadingNode(
+  node: ?LexicalNode,
+): node is  HeadingNode;
+declare export function registerRichText(editor: LexicalEditor): () => void;

@@ -12,7 +12,7 @@ maxPasses = 80
 
 ![routing_behaviors](../cards/routing_behaviors.card.md)
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 You receive the caller's ask plus the identity summary. Classify the request and
 point the root deck at the next service deck.

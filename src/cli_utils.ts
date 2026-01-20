@@ -1,7 +1,10 @@
 import * as path from "@std/path";
 import { GAMBIT_TOOL_INIT } from "@bolt-foundry/gambit-core";
-import type { ModelMessage } from "@bolt-foundry/gambit-core";
-import type { SavedState } from "@bolt-foundry/gambit-core";
+import type {
+  OpenResponseContentPart,
+  OpenResponseItem,
+  SavedState,
+} from "@bolt-foundry/gambit-core";
 
 export function parsePortValue(
   value: unknown,
@@ -83,7 +86,7 @@ export function enrichStateMeta(
   return { ...state, meta };
 }
 
-export function parseInit(raw?: string): unknown {
+export function parseContext(raw?: string): unknown {
   if (raw === undefined) return undefined;
   try {
     return JSON.parse(raw);
@@ -110,25 +113,47 @@ export function parseBotInput(raw?: string): unknown {
   }
 }
 
+function contentText(parts: Array<OpenResponseContentPart>): string {
+  return parts.map((part) => {
+    switch (part.type) {
+      case "input_text":
+      case "output_text":
+      case "text":
+      case "summary_text":
+      case "reasoning_text":
+        return part.text;
+      case "refusal":
+        return part.refusal;
+      default:
+        return "";
+    }
+  }).join("");
+}
+
 export function findLastAssistantMessage(
-  messages: Array<ModelMessage>,
+  messages: Array<OpenResponseItem>,
 ): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg?.role === "assistant") {
-      return typeof msg.content === "string"
-        ? msg.content
-        : JSON.stringify(msg.content ?? "");
+    if (msg?.type === "message" && msg.role === "assistant") {
+      if (typeof msg.content === "string") return msg.content;
+      if (Array.isArray(msg.content)) {
+        return contentText(msg.content);
+      }
+      return JSON.stringify(msg.content ?? "");
     }
   }
   return undefined;
 }
 
-export function extractInitInput(state?: SavedState): unknown {
+export function extractContextInput(state?: SavedState): unknown {
   if (!state?.messages) return undefined;
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
-    if (msg.role === "tool" && msg.name === GAMBIT_TOOL_INIT) {
+    if (
+      msg.type === "message" && msg.role === "tool" &&
+      msg.name === GAMBIT_TOOL_INIT
+    ) {
       const content = msg.content;
       if (typeof content !== "string") return undefined;
       try {

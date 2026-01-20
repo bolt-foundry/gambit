@@ -27,7 +27,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli serve ./decks/root.deck.md
 
 ```bash
 deno run -A jsr:@bolt-foundry/gambit/cli run ./decks/root.deck.md \
-  --init "$(cat ./sample_input.json)" \
+  --context "$(cat ./sample_input.json)" \
   --message '"Hi, this is Nina. I need to move my physical."' --stream
 ```
 

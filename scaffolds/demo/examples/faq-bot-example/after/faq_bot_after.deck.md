@@ -62,4 +62,4 @@ Workflow:
    at the start of a line.
 4. Reference only facts from the FAQ answer; do not add new details.
 
-![init](gambit://init)
+![init](gambit://cards/context.card.md)

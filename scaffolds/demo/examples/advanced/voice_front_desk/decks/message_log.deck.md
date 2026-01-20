@@ -12,7 +12,7 @@ path = "../actions/log_message.deck.ts"
 description = "Capture a voice-ready callback ticket with priority metadata."
 +++
 
-![respond](gambit://respond)
+![respond](gambit://cards/respond.card.md)
 
 Gather the summary, urgency, and audience for the callback ticket, then call
 `log_message`. Confirm to the caller what will happen next and when to expect a
