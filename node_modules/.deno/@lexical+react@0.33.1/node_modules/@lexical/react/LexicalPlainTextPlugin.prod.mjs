@@ -1,9 +1,0 @@
-/**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- *
- */
-
-import{useLexicalComposerContext as t}from"@lexical/react/LexicalComposerContext";import{useLexicalEditable as e}from"@lexical/react/useLexicalEditable";import{$canShowPlaceholderCurry as r}from"@lexical/text";import{mergeRegister as o}from"@lexical/utils";import{useLayoutEffect as n,useEffect as i,useState as c,useMemo as l,Suspense as a}from"react";import{flushSync as u,createPortal as m}from"react-dom";import{jsx as s,jsxs as d,Fragment as f}from"react/jsx-runtime";import{registerDragonSupport as p}from"@lexical/dragon";import{registerPlainText as x}from"@lexical/plain-text";const g="undefined"!=typeof window&&void 0!==window.document&&void 0!==window.document.createElement?n:i;function E(t){return t.getEditorState().read(r(t.isComposing()))}function h({contentEditable:e,placeholder:r=null,ErrorBoundary:n}){const[E]=t(),h=function(t,e){const[r,o]=c((()=>t.getDecorators()));return g((()=>t.registerDecoratorListener((t=>{u((()=>{o(t)}))}))),[t]),i((()=>{o(t.getDecorators())}),[t]),l((()=>{const o=[],n=Object.keys(r);for(let i=0;i<n.length;i++){const c=n[i],l=s(e,{onError:e=>t._onError(e),children:s(a,{fallback:null,children:r[c]})}),u=t.getElementByKey(c);null!==u&&o.push(m(l,u,c))}return o}),[e,r,t])}(E,n);return function(t){g((()=>o(x(t),p(t))),[t])}(E),d(f,{children:[e,s(w,{content:r}),h]})}function w({content:r}){const[n]=t(),i=function(t){const[e,r]=c((()=>E(t)));return g((()=>{function e(){const e=E(t);r(e)}return e(),o(t.registerUpdateListener((()=>{e()})),t.registerEditableListener((()=>{e()})))}),[t]),e}(n),l=e();return i?"function"==typeof r?r(l):r:null}export{h as PlainTextPlugin};

@@ -1,2 +1,0 @@
-export {};
-//# sourceMappingURL=configs.js.map
