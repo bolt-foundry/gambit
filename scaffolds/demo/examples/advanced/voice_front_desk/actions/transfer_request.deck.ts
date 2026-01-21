@@ -1,20 +1,20 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   reason: z.string(),
   urgency: z.enum(["routine", "soon", "urgent"]).default("routine"),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   instructions: z.string(),
   note: z.string(),
 });
 
 export default defineDeck({
   label: "transfer_request",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     if (ctx.input.urgency === "urgent") {
       return {

@@ -1,6 +1,6 @@
 +++
 label = "patient_swapper"
-inputSchema = "./schemas/patient_swapper_input.zod.ts"
+contextSchema = "./schemas/patient_swapper_input.zod.ts"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
 guardrails = { maxPasses = 20 }
 [[graderDecks]]

@@ -5,12 +5,12 @@ const opEnum = z.enum(["add", "subtract", "multiply", "divide"]);
 
 export default defineDeck({
   label: "basic_math",
-  inputSchema: z.object({
+  contextSchema: z.object({
     a: z.number().describe("First operand"),
     b: z.number().describe("Second operand"),
     op: opEnum.default("add").describe("Operation to perform"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     result: z.number(),
     op: opEnum,
   }),

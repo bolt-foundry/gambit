@@ -161,8 +161,8 @@ function classifyVisitType(reason: string): string {
 
 export default defineDeck({
   label: "scheduling_ops",
-  inputSchema: lookupScheduleInput,
-  outputSchema: lookupScheduleOutput,
+  contextSchema: lookupScheduleInput,
+  responseSchema: lookupScheduleOutput,
   run(ctx) {
     const visitType = classifyVisitType(ctx.input.reason);
     const provider = pickProvider(ctx.input.provider, visitType);

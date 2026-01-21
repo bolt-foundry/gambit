@@ -8,7 +8,29 @@ export function defineDeck<
   def:
     & Omit<
       DeckDefinition<z.infer<InputSchema>>,
-      "kind" | "inputSchema" | "outputSchema"
+      | "kind"
+      | "contextSchema"
+      | "responseSchema"
+      | "inputSchema"
+      | "outputSchema"
+    >
+    & {
+      contextSchema: InputSchema;
+      responseSchema?: OutputSchema;
+    },
+): DeckDefinition<z.infer<InputSchema>>;
+export function defineDeck<
+  InputSchema extends z.ZodTypeAny,
+  OutputSchema extends z.ZodTypeAny | undefined = undefined,
+>(
+  def:
+    & Omit<
+      DeckDefinition<z.infer<InputSchema>>,
+      | "kind"
+      | "contextSchema"
+      | "responseSchema"
+      | "inputSchema"
+      | "outputSchema"
     >
     & {
       inputSchema: InputSchema;

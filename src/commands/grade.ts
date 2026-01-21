@@ -111,6 +111,7 @@ export async function runGraderAgainstState(opts: {
   trace?: (
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
+  responsesMode?: boolean;
 }) {
   const state = loadState(opts.statePath);
   if (!state) {
@@ -165,6 +166,7 @@ export async function runGraderAgainstState(opts: {
           modelOverride: opts.modelForce,
           defaultModel: opts.model,
           trace: opts.trace,
+          responsesMode: opts.responsesMode,
         });
       }
 
@@ -181,6 +183,7 @@ export async function runGraderAgainstState(opts: {
           modelOverride: opts.modelForce,
           defaultModel: opts.model,
           trace: opts.trace,
+          responsesMode: opts.responsesMode,
         });
         turns.push({
           index: idx,

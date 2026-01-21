@@ -3,13 +3,13 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "followup_task",
-  inputSchema: z.object({
+  contextSchema: z.object({
     patientId: z.string(),
     updateField: z.string(),
     updateValue: z.string(),
     callingContext: z.string().optional(),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     status: z.string().describe("Mock status result"),
   }),
   run(ctx) {

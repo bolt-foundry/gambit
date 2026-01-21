@@ -48,7 +48,7 @@ label = "legacy-markers"
 
   assertEquals(deck.respond, true);
   assertEquals(deck.allowEnd, true);
-  assertStringIncludes(deck.body ?? "", "gambit_init");
+  assertStringIncludes(deck.body ?? "", "gambit_context");
   assertStringIncludes(deck.body ?? "", "gambit_respond");
   assertStringIncludes(deck.body ?? "", "gambit_end");
 });
@@ -61,7 +61,7 @@ Deno.test("markdown deck resolves gambit://schemas references", async () => {
     "builtin-schema.deck.md",
     `+++
 label = "builtin-schema"
-inputSchema = "gambit://schemas/graders/respond.ts"
+contextSchema = "gambit://schemas/graders/respond.ts"
 +++
 
 Schema deck.
@@ -70,7 +70,48 @@ Schema deck.
 
   const deck = await loadMarkdownDeck(deckPath);
 
-  assert(deck.inputSchema, "expected input schema to resolve");
-  const parsed = deck.inputSchema.parse({ status: "ok" });
+  assert(deck.contextSchema, "expected context schema to resolve");
+  const parsed = deck.contextSchema.parse({ status: "ok" });
   assertEquals(parsed, { status: "ok" });
+});
+
+Deno.test("markdown deck warns on legacy schema keys", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "legacy-schema.deck.md",
+    `+++
+label = "legacy-schema"
+inputSchema = "gambit://schemas/graders/respond.ts"
+outputSchema = "gambit://schemas/graders/respond.ts"
++++
+
+Schema deck.
+`,
+  );
+
+  const warnings: Array<string> = [];
+  // deno-lint-ignore no-console
+  const originalWarn = console.warn;
+  // deno-lint-ignore no-console
+  console.warn = (message?: unknown, ...rest: Array<unknown>) => {
+    warnings.push([message, ...rest].map(String).join(" "));
+  };
+  try {
+    const deck = await loadMarkdownDeck(deckPath);
+    assert(deck.contextSchema, "expected context schema to resolve");
+    assert(deck.responseSchema, "expected response schema to resolve");
+  } finally {
+    // deno-lint-ignore no-console
+    console.warn = originalWarn;
+  }
+
+  assert(
+    warnings.some((line) => line.includes('deprecated "inputSchema"')),
+    "expected legacy inputSchema warning",
+  );
+  assert(
+    warnings.some((line) => line.includes('deprecated "outputSchema"')),
+    "expected legacy outputSchema warning",
+  );
 });

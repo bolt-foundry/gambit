@@ -2,8 +2,8 @@ import { extract } from "@std/front-matter/any";
 import * as path from "@std/path";
 import {
   BUILTIN_TOOL_NAME_SET,
+  GAMBIT_TOOL_CONTEXT,
   GAMBIT_TOOL_END,
-  GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
   MAX_TOOL_NAME_LENGTH,
   RESERVED_TOOL_PREFIX,
@@ -34,9 +34,11 @@ const LEGACY_MARKER_WARNINGS: Record<"respond" | "init" | "end", boolean> = {
   init: false,
   end: false,
 };
+const LEGACY_SCHEMA_WARNINGS = new Set<string>();
+const LEGACY_FRAGMENT_WARNINGS = new Set<string>();
 
 const INIT_TEXT = `
-You will automatically receive a \`${GAMBIT_TOOL_INIT}\` tool result at the start that provides run/context info.
+You will automatically receive a \`${GAMBIT_TOOL_CONTEXT}\` tool result at the start that provides run/context info.
 `.trim();
 
 const RESPOND_TEXT = `
@@ -55,6 +57,32 @@ function warnLegacyMarker(
   LEGACY_MARKER_WARNINGS[marker] = true;
   logger.warn(
     `[gambit] "gambit://${marker}" is deprecated; use ${replacement} instead.`,
+  );
+}
+
+function warnLegacySchema(
+  resolvedPath: string,
+  legacy: "inputSchema" | "outputSchema",
+  replacement: "contextSchema" | "responseSchema",
+) {
+  const key = `${resolvedPath}:${legacy}`;
+  if (LEGACY_SCHEMA_WARNINGS.has(key)) return;
+  LEGACY_SCHEMA_WARNINGS.add(key);
+  logger.warn(
+    `[gambit] deck at ${resolvedPath} uses deprecated "${legacy}"; rename to "${replacement}"`,
+  );
+}
+
+function warnLegacyFragment(
+  resolvedPath: string,
+  legacy: "inputSchema" | "outputSchema",
+  replacement: "contextFragment" | "responseFragment",
+) {
+  const key = `${resolvedPath}:${legacy}`;
+  if (LEGACY_FRAGMENT_WARNINGS.has(key)) return;
+  LEGACY_FRAGMENT_WARNINGS.add(key);
+  logger.warn(
+    `[gambit] card at ${resolvedPath} uses deprecated "${legacy}"; rename to "${replacement}"`,
   );
 }
 
@@ -243,14 +271,24 @@ export async function loadMarkdownCard(
       );
     }
   });
-  const inputFragment = await maybeLoadSchema(
-    (attrs as { inputSchema?: unknown }).inputSchema,
+  const legacyInputSchema = (attrs as { inputSchema?: unknown }).inputSchema;
+  const legacyOutputSchema = (attrs as { outputSchema?: unknown }).outputSchema;
+  const contextFragment = await maybeLoadSchema(
+    (attrs as { contextFragment?: unknown }).contextFragment ??
+      legacyInputSchema,
     resolved,
   );
-  const outputFragment = await maybeLoadSchema(
-    (attrs as { outputSchema?: unknown }).outputSchema,
+  const responseFragment = await maybeLoadSchema(
+    (attrs as { responseFragment?: unknown }).responseFragment ??
+      legacyOutputSchema,
     resolved,
   );
+  if (legacyInputSchema !== undefined) {
+    warnLegacyFragment(resolved, "inputSchema", "contextFragment");
+  }
+  if (legacyOutputSchema !== undefined) {
+    warnLegacyFragment(resolved, "outputSchema", "responseFragment");
+  }
   const replaced = await expandEmbedsInBody({
     body,
     resolvedPath: resolved,
@@ -277,8 +315,10 @@ export async function loadMarkdownCard(
       resolved,
     ),
     cards: embeddedCards,
-    inputFragment,
-    outputFragment,
+    contextFragment,
+    responseFragment,
+    inputFragment: contextFragment,
+    outputFragment: responseFragment,
     respond: respondFlag || replaced.respond,
   };
 }
@@ -341,14 +381,25 @@ export async function loadMarkdownDeck(
   });
   const cards = replaced.embeds;
 
-  const inputSchema = await maybeLoadSchema(
-    (deckMeta as { inputSchema?: unknown }).inputSchema,
+  const legacyInputSchema = (deckMeta as { inputSchema?: unknown }).inputSchema;
+  const legacyOutputSchema =
+    (deckMeta as { outputSchema?: unknown }).outputSchema;
+  const contextSchema = await maybeLoadSchema(
+    (deckMeta as { contextSchema?: unknown }).contextSchema ??
+      legacyInputSchema,
     resolved,
   );
-  const outputSchema = await maybeLoadSchema(
-    (deckMeta as { outputSchema?: unknown }).outputSchema,
+  const responseSchema = await maybeLoadSchema(
+    (deckMeta as { responseSchema?: unknown }).responseSchema ??
+      legacyOutputSchema,
     resolved,
   );
+  if (legacyInputSchema !== undefined) {
+    warnLegacySchema(resolved, "inputSchema", "contextSchema");
+  }
+  if (legacyOutputSchema !== undefined) {
+    warnLegacySchema(resolved, "outputSchema", "responseSchema");
+  }
 
   const allCards = flattenCards(cards);
   const cleanedBody = replaced.body;
@@ -366,18 +417,20 @@ export async function loadMarkdownDeck(
     mergedActions[action.name] = action;
   }
 
-  let mergedInputSchema = inputSchema;
-  let mergedOutputSchema = outputSchema;
+  let mergedContextSchema = contextSchema;
+  let mergedResponseSchema = responseSchema;
   for (const card of allCards) {
-    mergedInputSchema = mergeZodObjects(
-      mergedInputSchema,
-      card.inputFragment,
+    mergedContextSchema = mergeZodObjects(
+      mergedContextSchema,
+      card.contextFragment,
     );
-    mergedOutputSchema = mergeZodObjects(
-      mergedOutputSchema,
-      card.outputFragment,
+    mergedResponseSchema = mergeZodObjects(
+      mergedResponseSchema,
+      card.responseFragment,
     );
   }
+  const mergedInputSchema = mergedContextSchema;
+  const mergedOutputSchema = mergedResponseSchema;
 
   const normalizeHandler = <
     T extends { path: string; repeatMs?: number; intervalMs?: number },
@@ -454,6 +507,8 @@ export async function loadMarkdownDeck(
     label: deckMeta.label,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
+    contextSchema: mergedContextSchema,
+    responseSchema: mergedResponseSchema,
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
     handlers,

@@ -18,7 +18,7 @@ Why it’s structured this way
 
 - The card keeps routing guidance separate from the deck body, making it
   reusable.
-- The TS action uses strict `inputSchema`/`outputSchema` to guarantee a
+- The TS action uses strict `contextSchema`/`responseSchema` to guarantee a
   deterministic payload from compute code.
 - Keeping the model temperature at 0 ensures it consistently calls the tool and
   formats responses.

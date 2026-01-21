@@ -12,7 +12,7 @@ const insuranceSchema = z.object({
   holder: z.string().optional(),
 }).optional();
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   firstName: z.string(),
   lastName: z.string(),
   dob: z.string(),
@@ -20,15 +20,15 @@ const inputSchema = z.object({
   insurance: insuranceSchema,
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   patientId: z.string(),
   insuranceStatus: z.enum(["captured", "missing"]),
 });
 
 export default defineDeck({
   label: "acquire_new_patient",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const patientId = `pt-new-${Date.now().toString(36)}`;
     const insuranceStatus = ctx.input.insurance ? "captured" : "missing";

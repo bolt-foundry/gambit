@@ -122,6 +122,14 @@ function toolName(tool: ToolDefinition): string {
   return tool.function?.name ?? "";
 }
 
+function resolveContextSchema(deck: LoadedDeck) {
+  return deck.contextSchema ?? deck.inputSchema;
+}
+
+function resolveResponseSchema(deck: LoadedDeck) {
+  return deck.responseSchema ?? deck.outputSchema;
+}
+
 function assertNoToolNameCollisions(args: {
   gambitTools: Array<ToolDefinition>;
   externalTools?: Array<ToolDefinition>;
@@ -155,15 +163,17 @@ async function buildGambitActionTools(deck: LoadedDeck): Promise<{
 
   for (const action of deck.actionDecks) {
     const child = await loadDeck(action.path, deck.path);
-    if (!child.inputSchema || !child.outputSchema) {
+    const contextSchema = resolveContextSchema(child);
+    const responseSchema = resolveResponseSchema(child);
+    if (!contextSchema || !responseSchema) {
       throw new Error(
-        `Deck ${child.path} must declare inputSchema and outputSchema (non-root)`,
+        `Deck ${child.path} must declare contextSchema and responseSchema (non-root)`,
       );
     }
-    assertZodSchema(child.inputSchema, "inputSchema");
-    assertZodSchema(child.outputSchema, "outputSchema");
+    assertZodSchema(contextSchema, "contextSchema");
+    assertZodSchema(responseSchema, "responseSchema");
 
-    const params = toJsonSchema(child.inputSchema as never);
+    const params = toJsonSchema(contextSchema as never);
     tools.push({
       type: "function",
       function: {

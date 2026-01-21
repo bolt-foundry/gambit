@@ -160,16 +160,18 @@ async function readMarkdownSchemaFiles(
   if (!filePath.endsWith(".md")) return [];
   const { attrs, baseDir } = await readMarkdownFrontMatter(filePath);
   if (!attrs) return [];
-  const out: Array<string> = [];
-  const inputSchema = attrs.inputSchema;
-  const outputSchema = attrs.outputSchema;
-  if (typeof inputSchema === "string") {
-    out.push(path.resolve(baseDir, inputSchema));
+  const out = new Set<string>();
+  const contextSchema = attrs.contextSchema ?? attrs.contextFragment ??
+    attrs.inputSchema;
+  const responseSchema = attrs.responseSchema ?? attrs.responseFragment ??
+    attrs.outputSchema;
+  if (typeof contextSchema === "string") {
+    out.add(path.resolve(baseDir, contextSchema));
   }
-  if (typeof outputSchema === "string") {
-    out.push(path.resolve(baseDir, outputSchema));
+  if (typeof responseSchema === "string") {
+    out.add(path.resolve(baseDir, responseSchema));
   }
-  return out;
+  return Array.from(out);
 }
 
 async function readMarkdownFrontMatter(
@@ -193,10 +195,18 @@ async function readSchemaRefs(
   const { attrs, baseDir } = await readMarkdownFrontMatter(filePath);
   if (!attrs) return {};
   const out: { input?: string; output?: string } = {};
-  if (typeof attrs.inputSchema === "string") {
+  if (typeof attrs.contextSchema === "string") {
+    out.input = path.resolve(baseDir, attrs.contextSchema);
+  } else if (typeof attrs.contextFragment === "string") {
+    out.input = path.resolve(baseDir, attrs.contextFragment);
+  } else if (typeof attrs.inputSchema === "string") {
     out.input = path.resolve(baseDir, attrs.inputSchema);
   }
-  if (typeof attrs.outputSchema === "string") {
+  if (typeof attrs.responseSchema === "string") {
+    out.output = path.resolve(baseDir, attrs.responseSchema);
+  } else if (typeof attrs.responseFragment === "string") {
+    out.output = path.resolve(baseDir, attrs.responseFragment);
+  } else if (typeof attrs.outputSchema === "string") {
     out.output = path.resolve(baseDir, attrs.outputSchema);
   }
   return out;

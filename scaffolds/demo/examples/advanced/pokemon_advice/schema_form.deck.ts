@@ -3,7 +3,7 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "schema_form_demo",
-  inputSchema: z.object({
+  contextSchema: z.object({
     trainerName: z.string().describe("Trainer name").default("Ash Ketchum"),
   }),
   modelParams: { model: "openai/gpt-4o-mini", temperature: 0.4 },

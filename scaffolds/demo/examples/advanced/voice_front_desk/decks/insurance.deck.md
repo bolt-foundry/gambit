@@ -1,7 +1,7 @@
 +++
 label = "insurance_service"
-inputSchema = "../schemas/service_request.zod.ts"
-outputSchema = "../schemas/service_response.zod.ts"
+contextSchema = "../schemas/service_request.zod.ts"
+responseSchema = "../schemas/service_response.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

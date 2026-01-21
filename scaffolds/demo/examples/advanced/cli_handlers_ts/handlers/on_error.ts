@@ -8,14 +8,14 @@ const sourceSchema = z.object({
 
 const handler = defineDeck({
   label: "on_error_handler_ts",
-  inputSchema: z.object({
+  contextSchema: z.object({
     kind: z.literal("error"),
     label: z.string().optional(),
     source: sourceSchema,
     error: z.object({ message: z.string() }),
     childInput: z.record(z.unknown()).optional(),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     message: z.string().optional(),
     code: z.string().optional(),
     status: z.number().optional(),

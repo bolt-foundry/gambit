@@ -1,7 +1,7 @@
 +++
 label = "faq_service"
-inputSchema = "../schemas/service_request.zod.ts"
-outputSchema = "../schemas/faq_context_output.zod.ts"
+contextSchema = "../schemas/service_request.zod.ts"
+responseSchema = "../schemas/faq_context_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

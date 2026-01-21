@@ -24,6 +24,78 @@ import type {
 } from "./types.ts";
 
 const logger = console;
+const LEGACY_SCHEMA_WARNINGS = new Set<string>();
+const LEGACY_FRAGMENT_WARNINGS = new Set<string>();
+
+function warnLegacySchema(
+  resolvedPath: string,
+  legacy: "inputSchema" | "outputSchema",
+  replacement: "contextSchema" | "responseSchema",
+) {
+  const key = `${resolvedPath}:${legacy}`;
+  if (LEGACY_SCHEMA_WARNINGS.has(key)) return;
+  LEGACY_SCHEMA_WARNINGS.add(key);
+  logger.warn(
+    `[gambit] deck at ${resolvedPath} uses deprecated "${legacy}"; rename to "${replacement}"`,
+  );
+}
+
+function warnLegacyFragment(
+  resolvedPath: string,
+  legacy: "inputFragment" | "outputFragment",
+  replacement: "contextFragment" | "responseFragment",
+) {
+  const key = `${resolvedPath}:${legacy}`;
+  if (LEGACY_FRAGMENT_WARNINGS.has(key)) return;
+  LEGACY_FRAGMENT_WARNINGS.add(key);
+  logger.warn(
+    `[gambit] card at ${resolvedPath} uses deprecated "${legacy}"; rename to "${replacement}"`,
+  );
+}
+
+function normalizeDeckSchemas(deck: DeckDefinition, resolvedPath: string): {
+  contextSchema?: DeckDefinition["contextSchema"];
+  responseSchema?: DeckDefinition["responseSchema"];
+  inputSchema?: DeckDefinition["inputSchema"];
+  outputSchema?: DeckDefinition["outputSchema"];
+} {
+  if (deck.inputSchema !== undefined) {
+    warnLegacySchema(resolvedPath, "inputSchema", "contextSchema");
+  }
+  if (deck.outputSchema !== undefined) {
+    warnLegacySchema(resolvedPath, "outputSchema", "responseSchema");
+  }
+  const contextSchema = deck.contextSchema ?? deck.inputSchema;
+  const responseSchema = deck.responseSchema ?? deck.outputSchema;
+  return {
+    contextSchema,
+    responseSchema,
+    inputSchema: contextSchema,
+    outputSchema: responseSchema,
+  };
+}
+
+function normalizeCardFragments(card: CardDefinition, resolvedPath: string): {
+  contextFragment?: CardDefinition["contextFragment"];
+  responseFragment?: CardDefinition["responseFragment"];
+  inputFragment?: CardDefinition["inputFragment"];
+  outputFragment?: CardDefinition["outputFragment"];
+} {
+  if (card.inputFragment !== undefined) {
+    warnLegacyFragment(resolvedPath, "inputFragment", "contextFragment");
+  }
+  if (card.outputFragment !== undefined) {
+    warnLegacyFragment(resolvedPath, "outputFragment", "responseFragment");
+  }
+  const contextFragment = card.contextFragment ?? card.inputFragment;
+  const responseFragment = card.responseFragment ?? card.outputFragment;
+  return {
+    contextFragment,
+    responseFragment,
+    inputFragment: contextFragment,
+    outputFragment: responseFragment,
+  };
+}
 
 function toFileUrl(p: string): string {
   const abs = path.resolve(p);
@@ -127,6 +199,7 @@ async function loadCardInternal(
   );
   actionDecks.forEach(checkReserved);
   const { label: _l, ...rest } = card as CardDefinition;
+  const fragments = normalizeCardFragments(card, resolved);
   return {
     ...rest,
     label: cardLabel,
@@ -136,6 +209,7 @@ async function loadCardInternal(
     graderDecks,
     path: resolved,
     cards: [],
+    ...fragments,
   };
 }
 
@@ -196,12 +270,19 @@ export async function loadDeck(
 
   const actionDecks = Object.values(mergedActions);
 
-  let inputSchema = deck.inputSchema;
-  let outputSchema = deck.outputSchema;
+  const schemaAliases = normalizeDeckSchemas(deck, resolved);
+  let inputSchema = schemaAliases.inputSchema;
+  let outputSchema = schemaAliases.outputSchema;
+  let contextSchema = schemaAliases.contextSchema;
+  let responseSchema = schemaAliases.responseSchema;
   for (const card of allCards) {
     inputSchema = mergeZodObjects(inputSchema, card.inputFragment);
     outputSchema = mergeZodObjects(outputSchema, card.outputFragment);
+    contextSchema = mergeZodObjects(contextSchema, card.contextFragment);
+    responseSchema = mergeZodObjects(responseSchema, card.responseFragment);
   }
+  inputSchema = contextSchema;
+  outputSchema = responseSchema;
 
   const executor = typeof deck.run === "function"
     ? deck.run
@@ -274,6 +355,8 @@ export async function loadDeck(
       deck.graderDecks,
       resolved,
     ),
+    contextSchema,
+    responseSchema,
     inputSchema,
     outputSchema,
     executor,

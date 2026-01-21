@@ -11,14 +11,14 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   - Command help: `deno run -A src/cli.ts help <command>` (or
     `deno run -A src/cli.ts <command> -h`).
 - Run once:
-  `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--verbose]`
+  `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--responses] [--verbose]`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.
 - Test bot (CLI):
-  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--verbose]`
+  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--responses] [--verbose]`
 - Grade (CLI):
-  `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]`
+  `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--responses] [--verbose]`
 - Export bundle (CLI):
   `deno run -A src/cli.ts export [<deck>] --state <file> --out <bundle.tar.gz>`
 - Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` then open
@@ -34,16 +34,24 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 
 ## Inputs and models
 
-- `--context`: seeds `gambit_init` with raw payload (assistant-first). Omit to
-  let the assistant open. The deprecated `--init` alias still works for now.
+- `--context`: seeds `gambit_context` with raw payload (assistant-first). Omit
+  to let the assistant open. The deprecated `--init` alias still works for now,
+  and `gambit_init` remains as a legacy tool name.
 - `--message`: sends a first user turn before the assistant replies.
 - `--model`: default model; `--model-force`: override even if deck has
   `modelParams`.
+- Responses mode is the default; set `GAMBIT_CHAT_FALLBACK=1` to force chat
+  fallback. Use `--responses` to force responses mode explicitly.
+- `--responses`: opt into Responses mode for runtime/state (stores response
+  items and uses `ModelProvider.responses` when available).
+- `GAMBIT_RESPONSES_MODE=1`: env alternative to `--responses` for runtime/state.
+- `GAMBIT_OPENROUTER_RESPONSES=1`: route OpenRouter calls through the Responses
+  API (experimental; chat remains the default path).
 
 ## State and tracing
 
 - `--state <file>` (run/test-bot/grade/export): load/persist messages so you can
-  continue a conversation; skips `gambit_init` on resume. `grade` writes
+  continue a conversation; skips `gambit_context` on resume. `grade` writes
   `meta.gradingRuns` back into the session state, while `export` reads the state
   file to build the bundle.
 - `--out <file>` (export): bundle output path (tar.gz).
@@ -72,7 +80,7 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - Incoming `stream` messages render incrementally; handler messages appear in
   the status lane.
 - Every WebSocket message echoes `runId` so you can correlate with traces.
-- Deck `inputSchema` is exposed at `/schema` and included in the `ready`
+- Deck `contextSchema` is exposed at `/schema` and included in the `ready`
   WebSocket message; the debug UI renders a schema-driven form with defaults
   (falling back to gambit/examples/advanced/description) plus a raw JSON tab for
   init input, stacked beneath the user message box. One “Send” submits init
@@ -90,7 +98,7 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   `[[testDecks]]` entries in your root deck (for example
   `gambit/examples/advanced/voice_front_desk/decks/root.deck.md`). Each entry’s
   `path` should point to a persona deck (Markdown or TS) that includes
-  `acceptsUserTurns = true`; the persona deck’s own `inputSchema` and defaults
+  `acceptsUserTurns = true`; the persona deck’s own `contextSchema` and defaults
   power the Scenario/Test Bot form (see
   `gambit/examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`).
   Editing those deck files is how you add/remove personas now—there is no

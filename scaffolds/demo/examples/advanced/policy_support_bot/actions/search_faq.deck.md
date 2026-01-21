@@ -1,8 +1,8 @@
 +++
 label = "search_faq"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-inputSchema = "../schemas/search_faq_input.zod.ts"
-outputSchema = "../schemas/search_faq_output.zod.ts"
+contextSchema = "../schemas/search_faq_input.zod.ts"
+responseSchema = "../schemas/search_faq_output.zod.ts"
 +++
 
 ![respond](gambit://cards/respond.card.md)

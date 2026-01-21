@@ -1,6 +1,6 @@
 +++
 label = "insurance_check"
-inputSchema = "./insurance_patient_input.zod.ts"
+contextSchema = "./insurance_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

@@ -1,7 +1,7 @@
 +++
 label = "appointment_orchestrator"
-inputSchema = "../schemas/appointment_input.zod.ts"
-outputSchema = "../schemas/appointment_output.zod.ts"
+contextSchema = "../schemas/appointment_input.zod.ts"
+responseSchema = "../schemas/appointment_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

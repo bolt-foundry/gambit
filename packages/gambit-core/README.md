@@ -22,7 +22,7 @@ authoring/runtime pieces that can live in any host.
 
 - Typed deck/card definitions with [`defineDeck`](src/definitions.ts) and
   [`defineCard`](src/definitions.ts) that enforce Zod
-  `inputSchema`/`outputSchema`.
+  `contextSchema`/`responseSchema`.
 - Loader that understands Markdown decks/cards, inline embeds, and companion
   decks (`actionDecks`, `testDecks`, `graderDecks`).
 - Guardrail-aware runtime (`runDeck`) that can mix LLM actions and pure compute
@@ -58,13 +58,13 @@ etc.).
 
 ## Core concepts
 
-- **Decks**: The primary executable unit. Decks declare a label, `inputSchema`,
-  `outputSchema`, optional `body`/`prompt`, handler hooks, and companion decks
-  (actions/tests/graders). Decks with `modelParams` render prompts, while decks
-  with `run`/`execute` are compute-only.
+- **Decks**: The primary executable unit. Decks declare a label,
+  `contextSchema`, `responseSchema`, optional `body`/`prompt`, handler hooks,
+  and companion decks (actions/tests/graders). Decks with `modelParams` render
+  prompts, while decks with `run`/`execute` are compute-only.
 - **Cards**: Reusable prompt fragments or schema fragments that can be embedded
   within decks or other cards. Cards can contribute
-  `inputFragment`/`outputFragment` that merge into a parent deck’s schema.
+  `contextFragment`/`responseFragment` that merge into a parent deck’s schema.
 - **Guardrails**: Limit recursion with `maxDepth`, `maxPasses`, and `timeoutMs`.
   Decks can override guardrails per definition; `runDeck` enforces them while
   spawning child decks.
@@ -86,8 +86,8 @@ import { z } from "zod";
 
 export default defineDeck({
   label: "Hello World",
-  inputSchema: z.object({ user: z.string() }),
-  outputSchema: z.object({ reply: z.string() }),
+  contextSchema: z.object({ user: z.string() }),
+  responseSchema: z.object({ reply: z.string() }),
   body: `
 You are a helpful assistant that greets the user by name.
 `,
@@ -107,7 +107,7 @@ import { z } from "zod";
 
 export default defineCard({
   label: "Shared context",
-  inputFragment: z.object({ customerId: z.string().uuid() }),
+  contextFragment: z.object({ customerId: z.string().uuid() }),
   body: "Always double check the account number before responding.",
 });
 ```
@@ -161,8 +161,8 @@ Embedded cards or system hints can be referenced with markdown image syntax.
 ```
 ---
 label: Support Triage
-inputSchema: ./schemas/triage_input.ts
-outputSchema: ./schemas/triage_output.ts
+contextSchema: ./schemas/triage_input.ts
+responseSchema: ./schemas/triage_output.ts
 actionDecks:
   - name: escalate
     description: Escalate to a manager
@@ -181,8 +181,8 @@ clarifying questions before choosing an action.
 `loadDeck` normalizes relative paths, merges card fragments, enforces unique
 action names, and warns about deprecated fields (`actions`,
 `handlers.onInterval`, `intervalMs`). The Markdown loader also injects helper
-text for built-in tools like `gambit_init`, `gambit_respond`, and `gambit_end`
-when you add `gambit://` markers.
+text for built-in tools like `gambit_context`, `gambit_respond`, and
+`gambit_end` when you add `gambit://` markers.
 
 ## Compatibility and utilities
 
@@ -197,9 +197,10 @@ when you add `gambit://` markers.
   (see `packages/gambit/src/providers/openrouter.ts`). Implement your own
   provider by conforming to the `responses()` signature in `ModelProvider`.
 - **Constants**:
-  [`GAMBIT_TOOL_INIT`, `GAMBIT_TOOL_RESPOND`, `GAMBIT_TOOL_END`](src/constants.ts)
-  define the reserved tool names the runtime expects when the assistant starts,
-  responds, and explicitly ends runs.
+  [`GAMBIT_TOOL_CONTEXT`, `GAMBIT_TOOL_RESPOND`, `GAMBIT_TOOL_END`](src/constants.ts)
+  (`GAMBIT_TOOL_INIT` remains as a deprecated alias). define the reserved tool
+  names the runtime expects when the assistant starts, responds, and explicitly
+  ends runs.
 
 ## Persisted state and traces
 

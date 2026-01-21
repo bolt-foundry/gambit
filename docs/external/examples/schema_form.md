@@ -1,6 +1,6 @@
 # schema_form
 
-Demonstrates a root deck with a `inputSchema` so you can see how the debug UI
+Demonstrates a root deck with a `contextSchema` so you can see how the debug UI
 renders a form from schema defaults. The example is a playful “trainer call”
 that only captures who’s calling (trainer name) in init; the trainer then
 describes their scenario in a follow-up message, and the assistant suggests

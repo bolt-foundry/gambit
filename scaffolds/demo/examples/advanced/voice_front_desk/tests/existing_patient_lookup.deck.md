@@ -1,6 +1,6 @@
 +++
 label = "existing_patient_lookup"
-inputSchema = "./patient_identity_input.zod.ts"
+contextSchema = "./patient_identity_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

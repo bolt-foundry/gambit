@@ -7,7 +7,8 @@ since = "769d3de436e4542ed7d0d80201f665657d93efb2"
 
 ## Unreleased (v0.8.2)
 
-- TBD
+- feat(gambit): default responses mode with chat fallback
+- fix(gambit): publish scaffolds for jsr demo/init commands
 
 ## v0.8.1
 

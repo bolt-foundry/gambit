@@ -1,14 +1,14 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   patientId: z.string().optional(),
   concern: z.string(),
   amount: z.string().optional(),
   invoiceId: z.string().optional(),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   answer: z.string(),
   followUp: z.string(),
   escalate: z.boolean().default(false),
@@ -16,8 +16,8 @@ const outputSchema = z.object({
 
 export default defineDeck({
   label: "billing_support",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const escalate = ctx.input.invoiceId === undefined;
     const answer = ctx.input.amount

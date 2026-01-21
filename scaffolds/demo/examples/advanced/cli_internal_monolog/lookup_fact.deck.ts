@@ -3,8 +3,8 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "lookup_fact",
-  inputSchema: z.object({ question: z.string() }),
-  outputSchema: z.object({ answer: z.string() }),
+  contextSchema: z.object({ question: z.string() }),
+  responseSchema: z.object({ answer: z.string() }),
   // Simple compute deck that fabricates a short fact.
   run(ctx) {
     const answer = `Here is a quick note on "${ctx.input.question}".`;

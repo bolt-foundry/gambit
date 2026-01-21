@@ -3,10 +3,10 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "error_simulator",
-  inputSchema: z.object({
+  contextSchema: z.object({
     reason: z.string().optional().describe("Optional test reason."),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     ok: z.boolean(),
   }),
   run(ctx) {

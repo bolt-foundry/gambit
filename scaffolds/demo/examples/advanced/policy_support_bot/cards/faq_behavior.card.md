@@ -4,7 +4,7 @@ label = "faq_behavior"
 
 Inputs:
 
-- `gambit_init` contains the latest user question.
+- `gambit_context` contains the latest user question.
 - Later user turns arrive as regular chat messages; always prioritize the most
   recent question.
 

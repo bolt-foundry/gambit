@@ -1,7 +1,7 @@
 +++
 label = "Friendliness (turn)"
-inputSchema = "../schemas/turn_by_turn_input.zod.ts"
-outputSchema = "../schemas/fact_verifier_output.zod.ts"
+contextSchema = "../schemas/turn_by_turn_input.zod.ts"
+responseSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0

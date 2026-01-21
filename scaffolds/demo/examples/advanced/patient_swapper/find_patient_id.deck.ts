@@ -8,11 +8,11 @@ function escapeSql(value: string): string {
 
 export default defineDeck({
   label: "find_patient_id",
-  inputSchema: z.object({
+  contextSchema: z.object({
     schema: z.string(),
     lookup: lookupSchema,
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     patientId: z.string().describe("Resolved patient identifier"),
     sql: z.string().describe("SQL used to locate the patient"),
   }),

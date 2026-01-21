@@ -52,8 +52,8 @@ import { z } from "zod";
 
 export default defineDeck({
   label: "echo",
-  inputSchema: z.object({ text: z.string() }),
-  outputSchema: z.object({ text: z.string(), length: z.number() }),
+  contextSchema: z.object({ text: z.string() }),
+  responseSchema: z.object({ text: z.string(), length: z.number() }),
   run(ctx) {
     return { text: ctx.input.text, length: ctx.input.text.length };
   },
@@ -62,12 +62,20 @@ export default defineDeck({
 
 ## Schemas and validation
 
-- Non-root decks must declare `inputSchema` and `outputSchema` (Zod). Roots
+- Non-root decks must declare `contextSchema` and `responseSchema` (Zod). Roots
   default to permissive string-ish input/output if omitted.
-- Card `inputFragment`/`outputFragment` merge into the deck’s schemas;
+- Card `contextFragment`/`responseFragment` merge into the deck’s schemas;
   deck-level definitions win on conflicts.
-- LLM outputs are validated against `outputSchema`; compute decks validate
+- LLM outputs are validated against `responseSchema`; compute decks validate
   returned payloads as well.
+
+Legacy `inputSchema`/`outputSchema` and `inputFragment`/`outputFragment` are
+deprecated aliases and will emit warnings. Use the new names going forward; to
+migrate a repository, run:
+
+```
+deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
+```
 
 ## Action decks, test decks, grader decks
 
@@ -90,9 +98,9 @@ export default defineDeck({
   ```
   The referenced deck (e.g.
   `init/examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`)
-  should set `acceptsUserTurns = true` and may declare its own `inputSchema`
-  (for example `inputSchema = "../schemas/my_persona_test.zod.ts"`) so the Test
-  tab renders a schema-driven “Scenario” form for that persona.
+  should set `acceptsUserTurns = true` and may declare its own `contextSchema`
+  (for example `contextSchema = "../schemas/my_persona_test.zod.ts"`) so the
+  Test tab renders a schema-driven “Scenario” form for that persona.
 - `graderDecks` describe calibration decks that score transcripts/artifacts. The
   simulator Calibrate page will run these decks against stored runs.
 - Configure `acceptsUserTurns` alongside these references:
@@ -104,8 +112,9 @@ export default defineDeck({
 
 ## Synthetic tools and handlers
 
-- `gambit_init`: injected automatically when `--context` (formerly `--init`) is
-  provided; carries the raw input as the first tool result.
+- `gambit_context`: injected automatically when `--context` (formerly `--init`)
+  is provided; carries the raw input as the first tool result. `gambit_init`
+  remains as a deprecated alias.
 - `gambit_respond`: enable by inserting the
   `![respond](gambit://cards/respond.card.md)` marker in Markdown decks (or
   `respond: true` in TypeScript). Required for LLM decks finish via a structured

@@ -18,6 +18,7 @@ export async function handleServeCommand(opts: {
   bundle?: boolean;
   sourcemap?: boolean;
   platform?: string;
+  responsesMode?: boolean;
 }) {
   const envMode = (Deno.env.get("GAMBIT_ENV") ?? Deno.env.get("NODE_ENV") ?? "")
     .toLowerCase();
@@ -53,6 +54,7 @@ export async function handleServeCommand(opts: {
       autoBundle,
       sourceMap,
       bundlePlatform,
+      responsesMode: opts.responsesMode,
     });
 
   if (!opts.watch) {

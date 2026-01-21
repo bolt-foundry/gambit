@@ -1,6 +1,6 @@
 +++
 label = "billing_question"
-inputSchema = "./billing_patient_input.zod.ts"
+contextSchema = "./billing_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

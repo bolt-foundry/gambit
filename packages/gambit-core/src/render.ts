@@ -1,7 +1,12 @@
 import { RESERVED_TOOL_PREFIX } from "./constants.ts";
 import { loadDeck } from "./loader.ts";
 import { assertZodSchema, toJsonSchema } from "./schema.ts";
-import type { ModelMessage, ModelParams, ToolDefinition } from "./types.ts";
+import type {
+  LoadedDeck,
+  ModelMessage,
+  ModelParams,
+  ToolDefinition,
+} from "./types.ts";
 
 export const logger = console;
 
@@ -125,6 +130,14 @@ function toolName(tool: ToolDefinition): string {
   return tool.function?.name ?? "";
 }
 
+function resolveContextSchema(deck: LoadedDeck) {
+  return deck.contextSchema ?? deck.inputSchema;
+}
+
+function resolveResponseSchema(deck: LoadedDeck) {
+  return deck.responseSchema ?? deck.outputSchema;
+}
+
 function assertNoToolNameCollisions(args: {
   gambitTools: Array<ToolDefinition>;
   externalTools?: Array<ToolDefinition>;
@@ -157,14 +170,16 @@ async function buildDeckActionTools(deckPath: string): Promise<{
 
   for (const action of deck.actionDecks) {
     const child = await loadDeck(action.path, deck.path);
-    if (!child.inputSchema || !child.outputSchema) {
+    const contextSchema = resolveContextSchema(child);
+    const responseSchema = resolveResponseSchema(child);
+    if (!contextSchema || !responseSchema) {
       throw new Error(
-        `Deck ${child.path} must declare inputSchema and outputSchema (non-root)`,
+        `Deck ${child.path} must declare contextSchema and responseSchema (non-root)`,
       );
     }
-    assertZodSchema(child.inputSchema, "inputSchema");
-    assertZodSchema(child.outputSchema, "outputSchema");
-    const params = toJsonSchema(child.inputSchema as never);
+    assertZodSchema(contextSchema, "contextSchema");
+    assertZodSchema(responseSchema, "responseSchema");
+    const params = toJsonSchema(contextSchema as never);
     tools.push({
       type: "function",
       function: {

@@ -1,6 +1,6 @@
 +++
 label = "cold_emailer"
-inputSchema = "./schemas/cold_emailer_input.zod.ts"
+contextSchema = "./schemas/cold_emailer_input.zod.ts"
 guardrails = { maxPasses = 200 }
 maxTurns = 4
 input = {

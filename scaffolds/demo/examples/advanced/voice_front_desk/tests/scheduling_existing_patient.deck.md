@@ -1,6 +1,6 @@
 +++
 label = "scheduling_existing_patient"
-inputSchema = "./scheduling_existing_input.zod.ts"
+contextSchema = "./scheduling_existing_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

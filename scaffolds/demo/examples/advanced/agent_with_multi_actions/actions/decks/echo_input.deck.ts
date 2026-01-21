@@ -3,10 +3,10 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "echo_input",
-  inputSchema: z.object({
+  contextSchema: z.object({
     text: z.string().describe("Text to echo back"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     text: z.string(),
   }),
   run(ctx) {

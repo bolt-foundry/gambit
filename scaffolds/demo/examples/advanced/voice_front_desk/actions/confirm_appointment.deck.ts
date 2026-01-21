@@ -1,7 +1,7 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   patientId: z.string().optional(),
   slotIso: z.string(),
   slotDisplay: z.string().optional(),
@@ -9,7 +9,7 @@ const inputSchema = z.object({
   location: z.string().optional(),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   status: z.enum(["confirmed", "failed"]),
   confirmationId: z.string().optional(),
   message: z.string(),
@@ -26,8 +26,8 @@ const outputSchema = z.object({
 
 export default defineDeck({
   label: "confirm_appointment",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const confirmationId = `apt-${Math.random().toString(36).slice(2, 8)}`;
     const display = ctx.input.slotDisplay ?? ctx.input.slotIso;

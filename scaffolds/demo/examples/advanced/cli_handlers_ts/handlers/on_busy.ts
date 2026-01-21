@@ -8,7 +8,7 @@ const sourceSchema = z.object({
 
 export default defineDeck({
   label: "on_busy_handler_ts",
-  inputSchema: z.object({
+  contextSchema: z.object({
     kind: z.union([z.literal("busy"), z.literal("suspense")]),
     label: z.string().optional(),
     source: sourceSchema,
@@ -18,7 +18,7 @@ export default defineDeck({
     }),
     childInput: z.record(z.unknown()).optional(),
   }),
-  outputSchema: z.string().min(1),
+  responseSchema: z.string().min(1),
   run(ctx) {
     const elapsed = Math.round(ctx.input.trigger.elapsedMs);
     return `Still working (TS) after ${elapsed}ms...`;

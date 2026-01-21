@@ -1,8 +1,8 @@
 +++
 label = "voice_critic"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0.2 }
-inputSchema = "./schemas/voice_critic_input.zod.ts"
-outputSchema = "./schemas/voice_critic_output.zod.ts"
+contextSchema = "./schemas/voice_critic_input.zod.ts"
+responseSchema = "./schemas/voice_critic_output.zod.ts"
 +++
 
 ![respond](gambit://cards/respond.card.md)

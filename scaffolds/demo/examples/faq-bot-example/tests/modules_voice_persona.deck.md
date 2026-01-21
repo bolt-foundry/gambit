@@ -1,6 +1,6 @@
 +++
 label = "Modules walkthrough persona"
-inputSchema = "./test_persona_input.zod.ts"
+contextSchema = "./test_persona_input.zod.ts"
 acceptsUserTurns = true
 maxTurns = 5
 [modelParams]

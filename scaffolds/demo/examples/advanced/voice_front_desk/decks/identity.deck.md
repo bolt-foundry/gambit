@@ -1,7 +1,7 @@
 +++
 label = "identity_orchestrator"
-inputSchema = "../schemas/identity_input.zod.ts"
-outputSchema = "../schemas/identity_output.zod.ts"
+contextSchema = "../schemas/identity_input.zod.ts"
+responseSchema = "../schemas/identity_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

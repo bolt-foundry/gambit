@@ -1,7 +1,7 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   patientId: z.string().optional(),
   medication: z.string(),
   dosage: z.string().optional(),
@@ -10,7 +10,7 @@ const inputSchema = z.object({
   lastVisitDate: z.string().optional(),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   status: z.enum(["eligible", "visit_required", "manual_review"]),
   message: z.string(),
   nextAction: z.enum(["place_refill", "schedule_visit", "route_nurse"]),
@@ -18,8 +18,8 @@ const outputSchema = z.object({
 
 export default defineDeck({
   label: "refill_ops",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const requiresVisit = !ctx.input.lastVisitDate;
     if (requiresVisit) {

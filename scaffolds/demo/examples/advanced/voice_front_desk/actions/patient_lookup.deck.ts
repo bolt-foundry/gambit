@@ -1,7 +1,7 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   clinicId: z.string().optional(),
   firstName: z.string(),
   lastName: z.string(),
@@ -16,7 +16,7 @@ const matchSchema = z.object({
   phone: z.string().optional(),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   status: z.enum(["matched", "ambiguous", "not_found"]),
   matches: z.array(matchSchema),
   query: z.object({
@@ -93,8 +93,8 @@ const fakeEhrFetch = async (query: {
 
 export default defineDeck({
   label: "patient_lookup",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   async run(ctx) {
     const query = {
       firstName: ctx.input.firstName.trim(),

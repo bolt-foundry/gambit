@@ -55,6 +55,7 @@ type Args = {
   modelForce?: string;
   trace?: string;
   stream?: boolean;
+  responses?: boolean;
   statePath?: string;
   outPath?: string;
   verbose?: boolean;
@@ -181,6 +182,7 @@ export function parseCliArgs(argv: Array<string>): Args {
   const parsed = parseArgs(argv, {
     boolean: [
       "stream",
+      "responses",
       "verbose",
       "help",
       "version",
@@ -265,6 +267,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     modelForce: parsed["model-force"] as string | undefined,
     trace: parsed.trace as string | undefined,
     stream: Boolean(parsed.stream),
+    responses: Boolean(parsed.responses),
     statePath: parsed.state as string | undefined,
     outPath: parsed.out as string | undefined,
     verbose: Boolean(parsed.verbose),

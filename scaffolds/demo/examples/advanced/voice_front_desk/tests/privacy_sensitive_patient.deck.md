@@ -1,6 +1,6 @@
 +++
 label = "privacy_sensitive_patient"
-inputSchema = "./privacy_sensitive_patient_input.zod.ts"
+contextSchema = "./privacy_sensitive_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

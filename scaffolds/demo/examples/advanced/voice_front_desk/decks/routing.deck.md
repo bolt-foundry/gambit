@@ -1,7 +1,7 @@
 +++
 label = "routing_orchestrator"
-inputSchema = "../schemas/routing_input.zod.ts"
-outputSchema = "../schemas/routing_output.zod.ts"
+contextSchema = "../schemas/routing_input.zod.ts"
+responseSchema = "../schemas/routing_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

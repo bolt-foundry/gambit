@@ -3,6 +3,7 @@ import {
   DEFAULT_GUARDRAILS,
   DEFAULT_STATUS_DELAY_MS,
   GAMBIT_TOOL_COMPLETE,
+  GAMBIT_TOOL_CONTEXT,
   GAMBIT_TOOL_END,
   GAMBIT_TOOL_INIT,
   GAMBIT_TOOL_RESPOND,
@@ -12,9 +13,12 @@ import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
 import type {
   ExecutionContext,
   Guardrails,
+  JSONValue,
   LoadedDeck,
   ModelMessage,
   ModelProvider,
+  ResponseItem,
+  ResponseToolDefinition,
   ToolCallResult,
   ToolDefinition,
 } from "./types.ts";
@@ -72,6 +76,7 @@ type RunOptions = {
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
   allowRootStringInput?: boolean;
+  responsesMode?: boolean;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -142,6 +147,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         state: opts.state,
         onStateUpdate: opts.onStateUpdate,
         onStreamText: opts.onStreamText,
+        responsesMode: opts.responsesMode,
       });
     }
 
@@ -164,6 +170,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       trace: opts.trace,
       stream: opts.stream,
       onStreamText: opts.onStreamText,
+      responsesMode: opts.responsesMode,
     });
   } finally {
     if (shouldEmitRun) {
@@ -195,15 +202,29 @@ function toProviderParams(
   return Object.keys(out).length ? out : undefined;
 }
 
+function resolveContextSchema(deck: LoadedDeck) {
+  return deck.contextSchema ?? deck.inputSchema;
+}
+
+function resolveResponseSchema(deck: LoadedDeck) {
+  return deck.responseSchema ?? deck.outputSchema;
+}
+
+function isContextToolName(name: string): boolean {
+  return name === GAMBIT_TOOL_CONTEXT || name === GAMBIT_TOOL_INIT;
+}
+
 function ensureSchemaPresence(deck: LoadedDeck, isRoot: boolean) {
   if (!isRoot) {
-    if (!deck.inputSchema || !deck.outputSchema) {
+    const contextSchema = resolveContextSchema(deck);
+    const responseSchema = resolveResponseSchema(deck);
+    if (!contextSchema || !responseSchema) {
       throw new Error(
-        `Deck ${deck.path} must declare inputSchema and outputSchema (non-root)`,
+        `Deck ${deck.path} must declare contextSchema and responseSchema (non-root)`,
       );
     }
-    assertZodSchema(deck.inputSchema, "inputSchema");
-    assertZodSchema(deck.outputSchema, "outputSchema");
+    assertZodSchema(contextSchema, "contextSchema");
+    assertZodSchema(responseSchema, "responseSchema");
   }
 }
 
@@ -217,11 +238,11 @@ function resolveInput(args: {
   if (args.input !== undefined) return args.input;
   if (!args.isRoot) return args.input;
 
-  const persisted = extractInitInput(args.state);
+  const persisted = extractContextInput(args.state);
   if (persisted !== undefined) return persisted;
 
   if (args.initialUserMessage !== undefined) {
-    const schema = args.deck.inputSchema as {
+    const schema = resolveContextSchema(args.deck) as {
       safeParse?: (v: unknown) => {
         success: boolean;
         data?: unknown;
@@ -244,11 +265,15 @@ function resolveInput(args: {
   return args.input;
 }
 
-function extractInitInput(state?: SavedState): unknown {
-  if (!state?.messages) return undefined;
+function extractContextInput(state?: SavedState): unknown {
+  if (!state) return undefined;
+  if (state.format === "responses" && Array.isArray(state.items)) {
+    return extractContextInputFromItems(state.items);
+  }
+  if (!state.messages) return undefined;
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
-    if (msg.role === "tool" && msg.name === GAMBIT_TOOL_INIT) {
+    if (msg.role === "tool" && isContextToolName(msg.name ?? "")) {
       const content = msg.content;
       if (typeof content !== "string") return undefined;
       try {
@@ -261,28 +286,180 @@ function extractInitInput(state?: SavedState): unknown {
   return undefined;
 }
 
+function extractContextInputFromItems(items: Array<ResponseItem>): unknown {
+  const contextToolNames = new Set([GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT]);
+  const callNameById = new Map<string, string>();
+  for (const item of items) {
+    if (item.type === "function_call") {
+      callNameById.set(item.call_id, item.name);
+    }
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type !== "function_call_output") continue;
+    const name = callNameById.get(item.call_id);
+    if (!name || !contextToolNames.has(name)) continue;
+    try {
+      return JSON.parse(item.output);
+    } catch {
+      return item.output;
+    }
+  }
+  return undefined;
+}
+
+function messagesFromResponseItems(
+  items: Array<ResponseItem>,
+): Array<ModelMessage> {
+  const messages: Array<ModelMessage> = [];
+  const callNameById = new Map<string, string>();
+  for (const item of items) {
+    if (item.type === "message") {
+      const text = item.content.map((part) => part.text).join("");
+      messages.push({
+        role: item.role,
+        content: text || null,
+      });
+      continue;
+    }
+    if (item.type === "function_call") {
+      callNameById.set(item.call_id, item.name);
+      messages.push({
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: item.call_id,
+          type: "function",
+          function: { name: item.name, arguments: item.arguments },
+        }],
+      });
+      continue;
+    }
+    if (item.type === "function_call_output") {
+      messages.push({
+        role: "tool",
+        name: callNameById.get(item.call_id),
+        tool_call_id: item.call_id,
+        content: item.output,
+      });
+    }
+  }
+  return messages;
+}
+
+function responseItemsFromMessages(
+  messages: Array<ModelMessage>,
+): Array<ResponseItem> {
+  const items: Array<ResponseItem> = [];
+  for (const message of messages) {
+    if (message.role === "tool") {
+      if (!message.tool_call_id || message.content === null) continue;
+      items.push({
+        type: "function_call_output",
+        call_id: message.tool_call_id,
+        output: String(message.content),
+      });
+      continue;
+    }
+    const contentText = message.content ?? "";
+    if (typeof contentText === "string" && contentText.length > 0) {
+      items.push({
+        type: "message",
+        role: message.role,
+        content: [{
+          type: message.role === "assistant" ? "output_text" : "input_text",
+          text: contentText,
+        }],
+      });
+    }
+    if (message.role === "assistant" && message.tool_calls) {
+      for (const call of message.tool_calls) {
+        items.push({
+          type: "function_call",
+          call_id: call.id,
+          name: call.function.name,
+          arguments: call.function.arguments,
+        });
+      }
+    }
+  }
+  return items;
+}
+
+function safeJsonArgs(value: string): Record<string, JSONValue> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object") {
+      return parsed as Record<string, JSONValue>;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function mapResponseOutput(
+  output: Array<ResponseItem>,
+): {
+  message: ModelMessage;
+  toolCalls?: Array<
+    { id: string; name: string; args: Record<string, JSONValue> }
+  >;
+} {
+  const toolCalls: Array<
+    { id: string; name: string; args: Record<string, JSONValue> }
+  > = [];
+  const textParts: Array<string> = [];
+  for (const item of output) {
+    if (item.type === "function_call") {
+      toolCalls.push({
+        id: item.call_id,
+        name: item.name,
+        args: safeJsonArgs(item.arguments),
+      });
+      continue;
+    }
+    if (item.type === "message" && item.role === "assistant") {
+      for (const part of item.content) {
+        if (part.type === "output_text") {
+          textParts.push(part.text);
+        }
+      }
+    }
+  }
+  return {
+    message: {
+      role: "assistant",
+      content: textParts.length ? textParts.join("") : null,
+    },
+    toolCalls: toolCalls.length ? toolCalls : undefined,
+  };
+}
+
 function validateInput(
   deck: LoadedDeck,
   input: unknown,
   isRoot: boolean,
   allowRootStringInput: boolean,
 ) {
-  if (deck.inputSchema) {
+  const contextSchema = resolveContextSchema(deck);
+  if (contextSchema) {
     if (isRoot && typeof input === "string" && allowRootStringInput) {
       try {
-        return validateWithSchema(deck.inputSchema as never, input);
+        return validateWithSchema(contextSchema as never, input);
       } catch {
         return input;
       }
     }
-    return validateWithSchema(deck.inputSchema as never, input);
+    return validateWithSchema(contextSchema as never, input);
   }
   if (isRoot) {
     if (input === undefined) return "";
     if (typeof input === "string") return input;
     return input;
   }
-  throw new Error(`Deck ${deck.path} requires inputSchema (non-root)`);
+  throw new Error(`Deck ${deck.path} requires contextSchema (non-root)`);
 }
 
 function validateOutput(
@@ -290,14 +467,15 @@ function validateOutput(
   output: unknown,
   isRoot: boolean,
 ): unknown {
-  if (deck.outputSchema) {
-    return validateWithSchema(deck.outputSchema as never, output);
+  const responseSchema = resolveResponseSchema(deck);
+  if (responseSchema) {
+    return validateWithSchema(responseSchema as never, output);
   }
   if (isRoot) {
     if (typeof output === "string") return output;
     return JSON.stringify(output);
   }
-  throw new Error(`Deck ${deck.path} requires outputSchema (non-root)`);
+  throw new Error(`Deck ${deck.path} requires responseSchema (non-root)`);
 }
 
 type RuntimeCtxBase = {
@@ -316,6 +494,7 @@ type RuntimeCtxBase = {
   state?: SavedState;
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
+  responsesMode?: boolean;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -378,6 +557,7 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         state: ctx.state,
         onStateUpdate: ctx.onStateUpdate,
         onStreamText: ctx.onStreamText,
+        responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
         inputProvided: true,
       });
@@ -410,15 +590,19 @@ async function runLlmDeck(
   const actionCallId = randomId("action");
   const start = performance.now();
   const respondEnabled = Boolean(deck.respond);
+  const useResponses = Boolean(ctx.responsesMode) ||
+    ctx.state?.format === "responses";
 
   const systemPrompt = buildSystemPrompt(deck);
 
   const refToolCallId = randomId("call");
-  const messages: Array<ModelMessage> = ctx.state?.messages
+  const messages: Array<ModelMessage> = ctx.state?.messages?.length
     ? ctx.state.messages.map(sanitizeMessage)
+    : ctx.state?.items?.length
+    ? messagesFromResponseItems(ctx.state.items).map(sanitizeMessage)
     : [];
   const resumed = messages.length > 0;
-  const sendInit = Boolean(inputProvided) && input !== undefined && !resumed;
+  const sendContext = Boolean(inputProvided) && input !== undefined && !resumed;
   const idleController = createIdleController({
     cfg: deck.handlers?.onIdle,
     deck,
@@ -433,6 +617,7 @@ async function runLlmDeck(
     stream: ctx.stream,
     onStreamText: ctx.onStreamText,
     pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
+    responsesMode: ctx.responsesMode,
   });
   let streamingBuffer = "";
   let streamingCommitted = false;
@@ -444,12 +629,12 @@ async function runLlmDeck(
   };
   if (!resumed) {
     messages.push(sanitizeMessage({ role: "system", content: systemPrompt }));
-    if (sendInit) {
+    if (sendContext) {
       ctx.trace?.({
         type: "tool.call",
         runId,
         actionCallId: refToolCallId,
-        name: GAMBIT_TOOL_INIT,
+        name: GAMBIT_TOOL_CONTEXT,
         args: {},
         parentActionCallId: actionCallId,
       });
@@ -461,14 +646,14 @@ async function runLlmDeck(
             id: refToolCallId,
             type: "function",
             function: {
-              name: GAMBIT_TOOL_INIT,
+              name: GAMBIT_TOOL_CONTEXT,
               arguments: "{}",
             },
           }],
         }),
         sanitizeMessage({
           role: "tool",
-          name: GAMBIT_TOOL_INIT,
+          name: GAMBIT_TOOL_CONTEXT,
           tool_call_id: refToolCallId,
           content: JSON.stringify(input),
         }),
@@ -477,7 +662,7 @@ async function runLlmDeck(
         type: "tool.result",
         runId,
         actionCallId: refToolCallId,
-        name: GAMBIT_TOOL_INIT,
+        name: GAMBIT_TOOL_CONTEXT,
         result: input as unknown as import("./types.ts").JSONValue,
         parentActionCallId: actionCallId,
       });
@@ -540,20 +725,62 @@ async function runLlmDeck(
         messages: messages.map(sanitizeMessage),
         tools,
         stateMessages,
+        mode: useResponses ? "responses" : "chat",
+        responseItems: useResponses
+          ? responseItemsFromMessages(messages)
+          : undefined,
         parentActionCallId: ctx.parentActionCallId,
       });
 
-      const result = await modelProvider.chat({
-        model,
-        messages,
-        tools,
-        stream: ctx.stream,
-        state: ctx.state,
-        params: toProviderParams(deck.modelParams),
-        onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
-          ? wrappedOnStreamText
-          : undefined,
-      });
+      let responseOutputItems: Array<ResponseItem> | undefined;
+      const responses = modelProvider.responses;
+      type ModelCallResult = Awaited<ReturnType<ModelProvider["chat"]>>;
+      const result: ModelCallResult = (useResponses && responses)
+        ? await (async () => {
+          const responseItems = responseItemsFromMessages(messages);
+          let sawDelta = false;
+          const response = await responses({
+            request: {
+              model,
+              input: responseItems,
+              tools: tools as Array<ResponseToolDefinition>,
+              stream: ctx.stream,
+              params: toProviderParams(deck.modelParams),
+            },
+            state: ctx.state,
+            onStreamEvent: (ctx.onStreamText || deck.handlers?.onIdle)
+              ? (event) => {
+                if (event.type === "response.output_text.delta") {
+                  sawDelta = true;
+                  wrappedOnStreamText(event.delta);
+                } else if (
+                  event.type === "response.output_text.done" && !sawDelta
+                ) {
+                  wrappedOnStreamText(event.text);
+                }
+              }
+              : undefined,
+          });
+          responseOutputItems = response.output ?? [];
+          const mapped = mapResponseOutput(responseOutputItems);
+          return {
+            message: mapped.message,
+            finishReason: mapped.toolCalls?.length ? "tool_calls" : "stop",
+            toolCalls: mapped.toolCalls,
+            updatedState: undefined,
+          };
+        })()
+        : await modelProvider.chat({
+          model,
+          messages,
+          tools,
+          stream: ctx.stream,
+          state: ctx.state,
+          params: toProviderParams(deck.modelParams),
+          onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
+            ? wrappedOnStreamText
+            : undefined,
+        });
       idleController.touch();
       const message = result.message;
       ctx.trace?.({
@@ -566,6 +793,8 @@ async function runLlmDeck(
         message: sanitizeMessage(message),
         toolCalls: result.toolCalls,
         stateMessages: result.updatedState?.messages?.length,
+        mode: useResponses ? "responses" : "chat",
+        responseItems: responseOutputItems,
         parentActionCallId: ctx.parentActionCallId,
       });
       const computeState = (updated?: SavedState): SavedState => {
@@ -574,6 +803,9 @@ async function runLlmDeck(
         const mergedMessages = base.messages && base.messages.length > 0
           ? base.messages.map(sanitizeMessage)
           : messages.map(sanitizeMessage);
+        const responseItems = useResponses
+          ? responseItemsFromMessages(mergedMessages)
+          : updated?.items ?? ctx.state?.items;
         const priorRefs = updated?.messageRefs ?? ctx.state?.messageRefs ?? [];
         const messageRefs: Array<MessageRef> = mergedMessages.map((m, idx) =>
           priorRefs[idx] ?? { id: randomId("msg"), role: m.role }
@@ -584,6 +816,10 @@ async function runLlmDeck(
           ...base,
           runId,
           messages: mergedMessages,
+          format: useResponses
+            ? "responses"
+            : updated?.format ?? ctx.state?.format,
+          items: responseItems,
           messageRefs,
           feedback,
           traces,
@@ -595,9 +831,11 @@ async function runLlmDeck(
         let respondValue: unknown;
         let endSignal: GambitEndSignal | undefined;
         const appendedMessages: Array<ModelMessage> = [];
-        if (!streamingCommitted && streamingBuffer) {
+        const toolCallText = streamingBuffer ||
+          (typeof message.content === "string" ? message.content : "");
+        if (!streamingCommitted && toolCallText) {
           messages.push(
-            sanitizeMessage({ role: "assistant", content: streamingBuffer }),
+            sanitizeMessage({ role: "assistant", content: toolCallText }),
           );
           streamingCommitted = true;
         }
@@ -771,6 +1009,7 @@ async function runLlmDeck(
             runStartedAt: start,
             inputProvided: true,
             idle: idleController,
+            responsesMode: ctx.responsesMode,
           });
           ctx.trace?.({
             type: "tool.result",
@@ -918,6 +1157,7 @@ async function handleToolCall(
     runStartedAt: number;
     inputProvided?: boolean;
     idle?: IdleController;
+    responsesMode?: boolean;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actionDecks.find((a) => a.name === call.name);
@@ -987,6 +1227,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
+        responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
       });
       return { ok: true, result };
@@ -1017,6 +1258,7 @@ async function handleToolCall(
         trace: ctx.trace,
         stream: ctx.stream,
         onStreamText: ctx.onStreamText,
+        responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
       });
       if (envelope.length) {
@@ -1101,6 +1343,7 @@ async function handleToolCall(
           trace: ctx.trace,
           stream: ctx.stream,
           onStreamText: ctx.onStreamText,
+          responsesMode: ctx.responsesMode,
           initialUserMessage: undefined,
         });
         if (envelope.length) {
@@ -1181,6 +1424,7 @@ async function runBusyHandler(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   initialUserMessage?: unknown;
+  responsesMode?: boolean;
 }): Promise<Array<ModelMessage>> {
   try {
     const input = {
@@ -1207,6 +1451,7 @@ async function runBusyHandler(args: {
       trace: args.trace,
       stream: args.stream,
       onStreamText: args.onStreamText,
+      responsesMode: args.responsesMode,
       initialUserMessage: args.initialUserMessage,
       inputProvided: true,
     });
@@ -1252,6 +1497,7 @@ function createIdleController(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   pushMessages: (msgs: Array<ModelMessage>) => void;
+  responsesMode?: boolean;
 }): IdleController {
   if (!args.cfg?.path) {
     return {
@@ -1297,6 +1543,7 @@ function createIdleController(args: {
           trace: args.trace,
           stream: args.stream,
           onStreamText: args.onStreamText,
+          responsesMode: args.responsesMode,
         });
         if (envelope.length) args.pushMessages(envelope.map(sanitizeMessage));
       } catch {
@@ -1346,6 +1593,7 @@ async function runIdleHandler(args: {
   trace?: (event: import("./types.ts").TraceEvent) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
+  responsesMode?: boolean;
 }): Promise<Array<ModelMessage>> {
   try {
     const input = {
@@ -1371,6 +1619,7 @@ async function runIdleHandler(args: {
       trace: args.trace,
       stream: args.stream,
       onStreamText: args.onStreamText,
+      responsesMode: args.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
     });
@@ -1417,6 +1666,7 @@ async function maybeHandleError(args: {
     trace?: (event: import("./types.ts").TraceEvent) => void;
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
+    responsesMode?: boolean;
   };
   action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -1452,6 +1702,7 @@ async function maybeHandleError(args: {
       trace: args.ctx.trace,
       stream: args.ctx.stream,
       onStreamText: args.ctx.onStreamText,
+      responsesMode: args.ctx.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
     });
@@ -1627,7 +1878,7 @@ async function buildToolDefs(deck: LoadedDeck): Promise<Array<ToolDefinition>> {
   for (const action of deck.actionDecks) {
     const child = await loadDeck(action.path, deck.path);
     ensureSchemaPresence(child, false);
-    const schema = child.inputSchema!;
+    const schema = resolveContextSchema(child)!;
     const params = toJsonSchema(schema as never);
     defs.push({
       type: "function",
