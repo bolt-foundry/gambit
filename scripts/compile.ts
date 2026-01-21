@@ -5,6 +5,35 @@ const packageRoot = path.dirname(
 );
 const denoBin = Deno.execPath();
 
+const normalizePath = (value: string) => value.replaceAll("\\", "/");
+
+const coreDirCandidates = [
+  path.resolve(packageRoot, "..", "gambit-core"),
+  path.resolve(packageRoot, "packages", "gambit-core"),
+];
+
+const resolveCoreDir = async (): Promise<string> => {
+  for (const candidate of coreDirCandidates) {
+    try {
+      await Deno.stat(candidate);
+      return candidate;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(
+    `Unable to find gambit-core; looked in ${coreDirCandidates.join(", ")}`,
+  );
+};
+
+const coreDir = await resolveCoreDir();
+const coreRel = normalizePath(path.relative(packageRoot, coreDir));
+const coreCards = normalizePath(path.join(coreRel, "cards"));
+const coreSchemas = normalizePath(path.join(coreRel, "schemas"));
+
 const baseArgs = [
   "compile",
   "-A",
@@ -13,9 +42,9 @@ const baseArgs = [
   "--include",
   "docs/cli/commands",
   "--include",
-  "../gambit-core/cards",
+  coreCards,
   "--include",
-  "../gambit-core/schemas",
+  coreSchemas,
   "--include",
   "scaffolds",
   "--include",
