@@ -2,6 +2,8 @@
 
 Current Gambit initiatives with concrete deliverables and timelines.
 
+Structure rules live in `./ABOUT.md`.
+
 ## What belongs here?
 
 - Feature development plans and launch trackers

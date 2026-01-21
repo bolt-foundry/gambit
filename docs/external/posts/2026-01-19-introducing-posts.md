@@ -4,7 +4,7 @@
 
 ## What changed
 
-- Created `docs/posts/` as the timeline for notable Gambit updates.
+- Created `docs/external/posts/` as the timeline for notable Gambit updates.
 - Added guidance on when to publish (launches, milestone wraps, research drops).
 - Wired posts to reference the new `docs/internal/` workspace so readers can
   jump from announcements to the living plans.
@@ -24,8 +24,8 @@ just the snapshot we share when something notable happens.
 
 ## Links
 
-- Memo guidelines: [docs/internal/README.md](../internal/README.md)
-- Posts guidelines: [docs/posts/README.md](./README.md)
+- Memo guidelines: [docs/internal/ABOUT.md](../../internal/ABOUT.md)
+- Posts guidelines: [docs/external/posts/README.md](./README.md)
 
 ## Next steps
 

@@ -87,7 +87,7 @@ function resolveBundledPath(specifier: string): string | null {
   return null;
 }
 
-const COMMAND_DOC_ROOT = "../docs/cli/commands";
+const COMMAND_DOC_ROOT = "../docs/external/reference/cli/commands";
 
 function resolveCommandDocPath(cmd: Command): string | null {
   return resolveBundledPath(`${COMMAND_DOC_ROOT}/${cmd}.md`);

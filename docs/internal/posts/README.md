@@ -5,6 +5,8 @@ Internal-only changelog entries that summarize what changed inside
 the weekly digest for leadership and collaborators who want to know how the memo
 layer is evolving.
 
+Structure rules live in `./ABOUT.md`.
+
 ## When to write one
 
 - A project memo hits a major milestone (kickoff, alpha, GA)
