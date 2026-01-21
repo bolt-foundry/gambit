@@ -114,7 +114,7 @@ export default defineDeck({
   results for the parent.
 - Optional handlers (deck-only): `handlers.onBusy`, `handlers.onIdle`,
   `handlers.onError` point to other decks. Inputs are structured (see
-  `docs/handlers.md`); errors inside handlers are swallowed.
+  `../reference/handlers.md`); errors inside handlers are swallowed.
 
 ## Embeds (cards)
 
@@ -167,6 +167,7 @@ export default defineDeck({
   `init/examples/advanced/agent_with_multi_actions/` (routing with multiple
   action decks), `init/examples/advanced/cli_handlers_*` (busy/idle/error
   handlers).
-- Hourglass prompting (context engineering) best practices: `docs/hourglass.md`.
-- Prompt structuring: `docs/hourglass.md`.
-- Handler details: `docs/handlers.md`.
+- Hourglass prompting (context engineering) best practices:
+  `../concepts/hourglass.md`.
+- Prompt structuring: `../concepts/hourglass.md`.
+- Handler details: `../reference/handlers.md`.

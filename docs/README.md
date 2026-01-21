@@ -5,15 +5,10 @@ workflows. You define decks in Markdown or TypeScript, run them locally with a
 CLI and simulator, and capture ground-truth artifacts like transcripts, traces,
 and grades. It is deterministic, portable, and stateless by design.
 
-- Internal work-in-progress docs now live under
-  [`./internal/`](./internal/README.md). Use them for project plans, cadences,
-  and research notes before the material graduates into the reference guides
-  below.
+Active docs:
 
-- [Authoring decks and cards](./authoring.md)
-- [Runtime and guardrails](./runtime.md)
-- [CLI, REPL, and debug UI](./cli.md)
-- [Examples guide](./examples.md)
-- [OpenAI Chat Completions compatibility](./openai-compat.md)
-- [Hourglass prompting (Context Engineering)](./hourglass.md)
-- [Handlers (error, busy, idle)](./handlers.md)
+- Internal execution docs: `./internal/`
+- External product docs: `./external/`
+- Public posts: `./external/posts/`
+
+Structure rules and metadata conventions live in `./ABOUT.md`.

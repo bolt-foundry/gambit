@@ -3,6 +3,8 @@
 Rolling responsibilities, cadences, and shared workspaces that keep Gambit
 humming between major projects.
 
+Structure rules live in `./ABOUT.md`.
+
 ## Use cases
 
 - Weekly status loops (support triage, release readiness, GTM alignment)
@@ -14,8 +16,9 @@ humming between major projects.
 
 Inside each area folder, keep:
 
-- `README.md` – purpose, DRI, and how success is measured
+- `README.md` – purpose and how success is measured
 - `cadence/` – agendas, notes, and rituals
 - `playbooks/` – lightweight guides unique to the area
+- `culture/` – historical notes and artifacts that define how the area works
 
 Areas can spawn projects; just link to the new project folder once it exists.

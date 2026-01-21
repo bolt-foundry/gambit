@@ -3,6 +3,15 @@
 Research notes, experiments, templates, and other reusable artifacts that
 support Gambit work but are not active projects.
 
+Structure rules live in `./ABOUT.md`.
+
+Suggested structure:
+
+- `research/` – experiments, investigations, and benchmarks.
+- `runbooks/` – operational playbooks and procedures.
+- `templates/` – reusable doc templates.
+- `references/` – stable definitions or reference material.
+
 ## Examples
 
 - Provider investigations or benchmarking results
