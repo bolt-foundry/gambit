@@ -1,7 +1,7 @@
 +++
 label = "Pokemon advice guard LLM"
-inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
-outputSchema = "../../../../schemas/grader_output.zod.ts"
+contextSchema = "gambit://schemas/graders/contexts/conversation.ts"
+responseSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0

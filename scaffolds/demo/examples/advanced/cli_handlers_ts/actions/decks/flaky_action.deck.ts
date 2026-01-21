@@ -3,12 +3,12 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "flaky_action_ts",
-  inputSchema: z.object({
+  contextSchema: z.object({
     text: z.string().describe("Text to process"),
     fail: z.boolean().default(false)
       .describe("If true, throw to trigger onError"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     echoed: z.string(),
   }),
   run(ctx) {

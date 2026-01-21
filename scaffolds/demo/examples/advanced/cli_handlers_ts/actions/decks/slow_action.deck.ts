@@ -3,12 +3,12 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "slow_action_ts",
-  inputSchema: z.object({
+  contextSchema: z.object({
     text: z.string().describe("Text to echo after a delay"),
     delayMs: z.number().min(0).max(120000).default(2000)
       .describe("Artificial delay in milliseconds"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     echoed: z.string(),
     delayMs: z.number(),
   }),

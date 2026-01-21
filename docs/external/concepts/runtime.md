@@ -9,18 +9,18 @@ safe/observable.
   with `guardrails`.
 - Compute vs LLM: a deck with `modelParams` runs as LLM; otherwise it must
   expose `run`/`execute` for compute.
-- Non-root decks must declare both `inputSchema` and `outputSchema`; roots allow
-  looser IO but should still use schemas.
+- Non-root decks must declare both `contextSchema` and `responseSchema`; roots
+  allow looser IO but should still use schemas.
 - Child calls use `actionDecks` (LLM tool calls) or `spawnAndWait` in compute
   decks; names must avoid the `gambit_` prefix.
-- Outputs are validated against `outputSchema`. Root defaults to string-ish
+- Outputs are validated against `responseSchema`. Root defaults to string-ish
   output if no schema is present; non-root always validates.
 
 ## Synthetic tools and envelopes
 
-- `gambit_init`: sent once when `--context` (formerly `--init`) is provided;
+- `gambit_context`: sent once when `--context` (formerly `--init`) is provided;
   payload is the raw input. Useful for assistant-first flows so the model can
-  read input without a user turn.
+  read input without a user turn. `gambit_init` remains as a deprecated alias.
 - `gambit_respond`: enable with the `gambit://cards/respond.card.md` marker in
   Markdown (or `respond: true` in TypeScript decks). Required for LLM decks that
   should finish with a structured envelope
@@ -36,9 +36,9 @@ safe/observable.
 ## State and turn order
 
 - State files (`--state`) persist model messages; subsequent runs resume the
-  same conversation. When resuming, `gambit_init` is skipped.
+  same conversation. When resuming, `gambit_context` is skipped.
 - `--message` sends a first user turn before the assistant responds; `--context`
-  only seeds `gambit_init` (the deprecated `--init` alias behaves the same).
+  only seeds `gambit_context` (the deprecated `--init` alias behaves the same).
 - Root decks can opt into string passthrough with `allowRootStringInput`
   (REPL/server use this so free-form text works).
 

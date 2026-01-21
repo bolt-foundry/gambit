@@ -1,6 +1,6 @@
 +++
 label = "refill_request"
-inputSchema = "./refill_patient_input.zod.ts"
+contextSchema = "./refill_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

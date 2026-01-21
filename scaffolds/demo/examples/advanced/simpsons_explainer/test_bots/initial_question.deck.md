@@ -1,6 +1,6 @@
 +++
 label = "initial_question_bot"
-inputSchema = "../schemas/test_bot_input.zod.ts"
+contextSchema = "../schemas/test_bot_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

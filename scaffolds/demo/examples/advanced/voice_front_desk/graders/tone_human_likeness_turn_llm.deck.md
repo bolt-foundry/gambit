@@ -1,7 +1,7 @@
 +++
 label = "tone_human_likeness_turn_llm"
-inputSchema = "gambit://schemas/graders/contexts/turn.ts"
-outputSchema = "../schemas/fact_verifier_output.zod.ts"
+contextSchema = "gambit://schemas/graders/contexts/turn.ts"
+responseSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0

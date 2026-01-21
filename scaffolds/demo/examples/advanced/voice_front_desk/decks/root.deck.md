@@ -1,6 +1,6 @@
 +++
 label = "Bolty Bot"
-inputSchema = "../schemas/voice_call_input.zod.ts"
+contextSchema = "../schemas/voice_call_input.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0.2

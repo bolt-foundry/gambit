@@ -1,5 +1,8 @@
 import * as path from "@std/path";
-import { GAMBIT_TOOL_INIT } from "@bolt-foundry/gambit-core";
+import {
+  GAMBIT_TOOL_CONTEXT,
+  GAMBIT_TOOL_INIT,
+} from "@bolt-foundry/gambit-core";
 import type { ModelMessage } from "@bolt-foundry/gambit-core";
 import type { SavedState } from "@bolt-foundry/gambit-core";
 
@@ -125,10 +128,15 @@ export function findLastAssistantMessage(
 }
 
 export function extractContextInput(state?: SavedState): unknown {
-  if (!state?.messages) return undefined;
+  if (!state) return undefined;
+  if (state.format === "responses" && Array.isArray(state.items)) {
+    return extractContextInputFromItems(state.items);
+  }
+  if (!state.messages) return undefined;
+  const contextToolNames = new Set([GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT]);
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
-    if (msg.role === "tool" && msg.name === GAMBIT_TOOL_INIT) {
+    if (msg.role === "tool" && contextToolNames.has(msg.name ?? "")) {
       const content = msg.content;
       if (typeof content !== "string") return undefined;
       try {
@@ -136,6 +144,30 @@ export function extractContextInput(state?: SavedState): unknown {
       } catch {
         return content;
       }
+    }
+  }
+  return undefined;
+}
+
+function extractContextInputFromItems(
+  items: NonNullable<SavedState["items"]>,
+): unknown {
+  const contextToolNames = new Set([GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT]);
+  const callNameById = new Map<string, string>();
+  for (const item of items) {
+    if (item.type === "function_call") {
+      callNameById.set(item.call_id, item.name);
+    }
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type !== "function_call_output") continue;
+    const name = callNameById.get(item.call_id);
+    if (!name || !contextToolNames.has(name)) continue;
+    try {
+      return JSON.parse(item.output);
+    } catch {
+      return item.output;
     }
   }
   return undefined;

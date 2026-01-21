@@ -3,7 +3,7 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "on_idle_handler_ts",
-  inputSchema: z.object({
+  contextSchema: z.object({
     kind: z.literal("idle"),
     label: z.string().optional(),
     source: z.object({ deckPath: z.string() }),
@@ -12,7 +12,7 @@ export default defineDeck({
       elapsedMs: z.number(),
     }),
   }),
-  outputSchema: z.string().min(1),
+  responseSchema: z.string().min(1),
   run(ctx) {
     const elapsed = Math.round(ctx.input.trigger.elapsedMs);
     return `Idle ping after ${elapsed}ms.`;

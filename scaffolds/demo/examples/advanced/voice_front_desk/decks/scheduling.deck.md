@@ -1,7 +1,7 @@
 +++
 label = "scheduling_service"
-inputSchema = "../schemas/scheduling_request.zod.ts"
-outputSchema = "../schemas/scheduling_response.zod.ts"
+contextSchema = "../schemas/scheduling_request.zod.ts"
+responseSchema = "../schemas/scheduling_response.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

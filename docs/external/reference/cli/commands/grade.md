@@ -1,13 +1,14 @@
 +++
 command = "grade"
 summary = "Grade a saved state file"
-usage = "gambit grade <grader-deck.(ts|md)> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--verbose]"
+usage = "gambit grade <grader-deck.(ts|md)> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--responses] [--verbose]"
 flags = [
   "--grader <path>         Grader deck path (overrides positional)",
   "--state <file>          Load/persist state",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--trace <file>          Write trace events to file (JSONL)",
+  "--responses             Run runtime/state in Responses mode (default; set GAMBIT_CHAT_FALLBACK=1 for chat)",
   "--verbose               Print trace events to console",
 ]
 +++

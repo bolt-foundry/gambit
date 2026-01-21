@@ -266,10 +266,10 @@ Deno.test("simulator preserves state and user input", async () => {
   assertEquals(calls.length, 2);
 
   const initMsg = calls[0].messages.find((m) =>
-    m.tool_calls?.some((t) => t.function.name === "gambit_init")
+    m.tool_calls?.some((t) => t.function.name === "gambit_context")
   );
   if (!initMsg || !initMsg.tool_calls?.length) {
-    throw new Error("missing gambit_init call");
+    throw new Error("missing gambit_context call");
   }
   const initArgs = JSON.parse(initMsg.tool_calls[0].function.arguments) as {
     input?: unknown;
@@ -278,10 +278,10 @@ Deno.test("simulator preserves state and user input", async () => {
   assertEquals(initArgs, {});
 
   const initTool = calls[0].messages.find((m) =>
-    m.role === "tool" && m.name === "gambit_init"
+    m.role === "tool" && m.name === "gambit_context"
   );
   if (!initTool || !initTool.content) {
-    throw new Error("missing gambit_init tool payload");
+    throw new Error("missing gambit_context tool payload");
   }
   const initPayload = JSON.parse(initTool.content) as unknown;
   assertEquals(initPayload, "hello");

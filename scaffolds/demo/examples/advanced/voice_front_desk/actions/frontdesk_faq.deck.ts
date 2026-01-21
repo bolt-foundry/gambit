@@ -1,12 +1,12 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   clinicId: z.string().optional(),
   question: z.string(),
 });
 
-const outputSchema = z.string();
+const responseSchema = z.string();
 
 const clinicFaqDocument = `
 Clinic FAQ
@@ -38,8 +38,8 @@ After-hours
 
 export default defineDeck({
   label: "frontdesk_faq",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   async run(ctx) {
     void ctx.input;
     await new Promise((resolve) => setTimeout(resolve, 120));

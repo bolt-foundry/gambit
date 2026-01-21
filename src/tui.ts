@@ -43,6 +43,7 @@ export async function startTui(opts: {
   initialContext?: unknown;
   initialMessage?: unknown;
   contextProvided?: boolean;
+  responsesMode?: boolean;
 }) {
   if (!Deno.stdin.isTerminal()) {
     throw new Error("tui requires an interactive TTY.");
@@ -213,6 +214,7 @@ export async function startTui(opts: {
         onStateUpdate: (s) => {
           state = s;
         },
+        responsesMode: opts.responsesMode,
         onStreamText: (chunk) => {
           if (!chunk) return;
           modelStreamedText = true;

@@ -46,6 +46,6 @@ export type { RenderDeckOptions } from "@bolt-foundry/gambit-core";
 /** Result data from rendering a deck. */
 export type { RenderDeckResult } from "@bolt-foundry/gambit-core";
 /** Provider factory for OpenRouter-backed model calls. */
-export { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
+export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
 /** Start the WebSocket simulator server for the Gambit UI. */
 export { startWebSocketSimulator } from "./src/server.ts";

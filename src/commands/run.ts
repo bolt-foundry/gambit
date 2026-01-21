@@ -18,6 +18,7 @@ export async function handleRunCommand(opts: {
   ) => void;
   stream?: boolean;
   statePath?: string;
+  responsesMode?: boolean;
 }) {
   const state = opts.statePath ? loadState(opts.statePath) : undefined;
   const onStateUpdate = opts.statePath
@@ -39,6 +40,7 @@ export async function handleRunCommand(opts: {
     stream: opts.stream,
     state,
     onStateUpdate,
+    responsesMode: opts.responsesMode,
   });
 
   if (isGambitEndSignal(result)) {

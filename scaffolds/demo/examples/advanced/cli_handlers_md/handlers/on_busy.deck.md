@@ -1,8 +1,8 @@
 +++
 label = "on_busy_handler_md"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-inputSchema = "./schemas/on_busy_input.zod.ts"
-outputSchema = "./schemas/on_busy_output.zod.ts"
+contextSchema = "./schemas/on_busy_input.zod.ts"
+responseSchema = "./schemas/on_busy_output.zod.ts"
 +++
 
 You are the busy handler. Return a short plain-text status update:

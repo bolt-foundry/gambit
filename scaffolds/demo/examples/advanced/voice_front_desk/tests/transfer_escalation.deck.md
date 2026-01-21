@@ -1,6 +1,6 @@
 +++
 label = "transfer_escalation"
-inputSchema = "./test_bot_input.zod.ts"
+contextSchema = "./test_bot_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

@@ -3,11 +3,11 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "random_number",
-  inputSchema: z.object({
+  contextSchema: z.object({
     min: z.number().optional().describe("Inclusive lower bound (default 0)"),
     max: z.number().optional().describe("Exclusive upper bound (default 100)"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     value: z.number().describe("Random integer in [min, max)"),
     min: z.number(),
     max: z.number(),

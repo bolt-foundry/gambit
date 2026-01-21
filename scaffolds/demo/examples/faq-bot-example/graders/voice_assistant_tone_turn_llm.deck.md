@@ -1,7 +1,7 @@
 +++
 label = "Voice assistant tone (turn) LLM"
-inputSchema = "gambit://schemas/graders/contexts/turn.ts"
-outputSchema = "../schemas/fact_verifier_output.zod.ts"
+contextSchema = "gambit://schemas/graders/contexts/turn.ts"
+responseSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

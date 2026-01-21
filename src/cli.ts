@@ -4,12 +4,12 @@
  *
  * @module
  */
-import { createOpenRouterProvider } from "@bolt-foundry/gambit-core";
 import { parse } from "@std/jsonc";
 import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
+import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
@@ -204,9 +204,14 @@ async function main() {
     if (!apiKey) {
       throw new Error("OPENROUTER_API_KEY is required");
     }
+    const chatFallback = Deno.env.get("GAMBIT_CHAT_FALLBACK") === "1";
+    const responsesMode = args.responses ||
+      (!chatFallback && Deno.env.get("GAMBIT_RESPONSES_MODE") !== "0");
     const provider = createOpenRouterProvider({
       apiKey,
       baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+      enableResponses: (args.responses || !chatFallback) &&
+        Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
     });
 
     const tracerFns: Array<
@@ -230,6 +235,7 @@ async function main() {
         modelProvider: provider,
         trace: tracer,
         verbose: args.verbose,
+        responsesMode,
         initialContext: args.context !== undefined
           ? parseContext(args.context)
           : undefined,
@@ -253,6 +259,7 @@ async function main() {
         bundle: args.bundle,
         sourcemap: args.sourcemap,
         platform: args.platform,
+        responsesMode,
       });
       return;
     }
@@ -281,6 +288,7 @@ async function main() {
         trace: tracer,
         verbose: args.verbose,
         statePath: args.statePath,
+        responsesMode,
       });
       logger.log(`Test bot session saved to ${statePath}`);
       if (args.gradePaths && args.gradePaths.length > 0) {
@@ -292,6 +300,7 @@ async function main() {
             modelForce: args.modelForce,
             modelProvider: provider,
             trace: tracer,
+            responsesMode,
           });
         }
       }
@@ -315,6 +324,7 @@ async function main() {
         modelForce: args.modelForce,
         modelProvider: provider,
         trace: tracer,
+        responsesMode,
       });
       return;
     }
@@ -330,6 +340,7 @@ async function main() {
       trace: tracer,
       stream: args.stream,
       statePath: args.statePath,
+      responsesMode,
     });
   } catch (err) {
     logger.error(err instanceof Error ? err.message : String(err));

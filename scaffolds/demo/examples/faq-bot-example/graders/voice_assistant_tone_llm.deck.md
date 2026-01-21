@@ -1,7 +1,7 @@
 +++
 label = "Voice assistant tone (conversation) LLM"
-inputSchema = "gambit://schemas/graders/contexts/conversation.ts"
-outputSchema = "../schemas/fact_verifier_output.zod.ts"
+contextSchema = "gambit://schemas/graders/contexts/conversation.ts"
+responseSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
 model = "openai/gpt-4o"
 temperature = 0

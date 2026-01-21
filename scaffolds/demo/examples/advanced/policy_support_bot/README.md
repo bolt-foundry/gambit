@@ -27,8 +27,8 @@ includes:
 To wire synthetic QA personas into the Test Bot tab, add `[[testDecks]]` entries
 to `policy_support_bot.deck.md` that point at persona decks (for example
 `./tests/new_account_persona.deck.md`). Those persona decks should set
-`acceptsUserTurns = true` and can declare an `inputSchema` so the Scenario form
-is auto-generated.
+`acceptsUserTurns = true` and can declare an `contextSchema` so the Scenario
+form is auto-generated.
 
 ## FAQ ingestion format
 

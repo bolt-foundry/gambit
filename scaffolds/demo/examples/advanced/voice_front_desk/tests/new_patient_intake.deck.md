@@ -1,6 +1,6 @@
 +++
 label = "new_patient_intake"
-inputSchema = "./new_patient_intake_input.zod.ts"
+contextSchema = "./new_patient_intake_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

@@ -3,11 +3,11 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "log_revision_plan",
-  inputSchema: z.object({
+  contextSchema: z.object({
     steps: z.array(z.string().min(1)).min(1)
       .describe("Revision steps derived from the critique"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     status: z.string().min(1).describe("Log status"),
   }),
   run(ctx) {

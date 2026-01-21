@@ -7,13 +7,13 @@ const insuranceDetails = z.object({
   holder: z.string().optional(),
 });
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   patientId: z.string().optional(),
   operation: z.enum(["verify_on_file", "collect_new"]),
   insurance: insuranceDetails,
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   eligibility: z.enum(["eligible", "ineligible", "unknown"]),
   summary: z.string(),
   nextSteps: z.string(),
@@ -21,8 +21,8 @@ const outputSchema = z.object({
 
 export default defineDeck({
   label: "insurance_check",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const eligible = ctx.input.insurance.carrier.toLowerCase() !== "unknown";
     return {

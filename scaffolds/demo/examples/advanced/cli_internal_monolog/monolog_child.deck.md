@@ -2,8 +2,8 @@
 label = "monolog_child"
 modelParams = { model = "openai/gpt-4o", temperature = 0 }
 guardrails = { maxPasses = 200 }
-inputSchema = "./schemas/child_input.zod.ts"
-outputSchema = "./schemas/child_output.zod.ts"
+contextSchema = "./schemas/child_input.zod.ts"
+responseSchema = "./schemas/child_output.zod.ts"
 [[actionDecks]]
 name = "lookup_fact"
 path = "./lookup_fact.deck.ts"

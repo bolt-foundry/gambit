@@ -7,12 +7,12 @@ function escapeSql(value: string): string {
 
 export default defineDeck({
   label: "update_patient_field",
-  inputSchema: z.object({
+  contextSchema: z.object({
     patientId: z.string(),
     updateField: z.string(),
     updateValue: z.string(),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     updated: z.boolean().describe("Whether the update was applied"),
     sql: z.string().describe("SQL used to update the patient"),
   }),

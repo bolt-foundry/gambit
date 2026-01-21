@@ -3,13 +3,13 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "send_email",
-  inputSchema: z.object({
+  contextSchema: z.object({
     to: z.string().min(1).describe("Recipient email or name"),
     subject: z.string().min(1).describe("Email subject"),
     body: z.string().min(1).describe("Email body"),
     sender: z.string().min(1).describe("Sender name or address"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     status: z.string().min(1).describe("Send status"),
     message: z.string().min(1).describe("Result message"),
   }),

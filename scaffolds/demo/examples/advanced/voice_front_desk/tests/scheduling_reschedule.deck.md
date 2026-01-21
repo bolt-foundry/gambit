@@ -1,6 +1,6 @@
 +++
 label = "scheduling_reschedule"
-inputSchema = "./scheduling_reschedule_input.zod.ts"
+contextSchema = "./scheduling_reschedule_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

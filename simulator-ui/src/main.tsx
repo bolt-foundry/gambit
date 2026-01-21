@@ -1399,13 +1399,14 @@ type ToolCallSummary = {
 
 function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
   const handled = new Map<string, string>();
+  const contextToolNames = new Set(["gambit_context", "gambit_init"]);
   for (const trace of traces) {
     if (!trace || typeof trace !== "object") continue;
     if (trace.type !== "tool.result") continue;
     const name = typeof (trace as { name?: unknown }).name === "string"
       ? (trace as { name?: string }).name
       : undefined;
-    if (name !== "gambit_init") continue;
+    if (!name || !contextToolNames.has(name)) continue;
     const result = (trace as { result?: unknown }).result as
       | Record<string, unknown>
       | undefined;
@@ -5360,7 +5361,7 @@ function TestBotApp(props: {
           <div className="editor-status">
             <code>{deckPath}</code>
           </div>
-          <strong>Init (gambit_init)</strong>
+          <strong>Context (gambit_context)</strong>
           {deckSchema.loading && (
             <div className="editor-status">Loading schema…</div>
           )}

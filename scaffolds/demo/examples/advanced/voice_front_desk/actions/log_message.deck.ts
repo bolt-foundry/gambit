@@ -12,8 +12,8 @@ function makeTicketId(callId: string): string {
 
 export default defineDeck({
   label: "log_message",
-  inputSchema: logMessageInput,
-  outputSchema: logMessageOutput,
+  contextSchema: logMessageInput,
+  responseSchema: logMessageOutput,
   run(ctx) {
     const ticketId = makeTicketId(ctx.input.callId);
     const queuedAt = new Date().toISOString();

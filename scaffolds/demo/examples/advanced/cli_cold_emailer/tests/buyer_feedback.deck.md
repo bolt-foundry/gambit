@@ -1,6 +1,6 @@
 +++
 label = "cold_emailer_buyer_feedback"
-inputSchema = "../schemas/cold_emailer_input.zod.ts"
+contextSchema = "../schemas/cold_emailer_input.zod.ts"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0.2

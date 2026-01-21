@@ -25,6 +25,20 @@ export type { Guardrails } from "./src/types.ts";
 export type { HandlersConfig } from "./src/types.ts";
 /** JSON-serializable value type used throughout Gambit. */
 export type { JSONValue } from "./src/types.ts";
+/** Open Responses content payload types. */
+export type {
+  CreateResponseRequest,
+  CreateResponseResponse,
+  ResponseEvent,
+  ResponseFunctionCallItem,
+  ResponseFunctionCallOutputItem,
+  ResponseItem,
+  ResponseMessageItem,
+  ResponseTextContent,
+  ResponseToolChoice,
+  ResponseToolDefinition,
+  ResponseUsage,
+} from "./src/types.ts";
 /** Test deck definition shape. */
 export type { TestDeckDefinition } from "./src/types.ts";
 /** Check if a value is an explicit end-of-run signal. */
@@ -48,7 +62,7 @@ export type { RenderDeckResult } from "./src/render.ts";
 /** Provider factory for OpenRouter-backed model calls. */
 export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
 /** Gambit CLI helpers and internal primitives. */
-export { GAMBIT_TOOL_INIT } from "./src/constants.ts";
+export { GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT } from "./src/constants.ts";
 /** Load a deck definition from disk. */
 export { loadDeck } from "./src/loader.ts";
 /** Persisted run state stored on disk. */

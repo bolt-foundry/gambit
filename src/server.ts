@@ -454,6 +454,7 @@ export function startWebSocketSimulator(opts: {
   autoBundle?: boolean;
   sourceMap?: boolean;
   bundlePlatform?: "deno" | "browser";
+  responsesMode?: boolean;
 }): ReturnType<typeof Deno.serve> {
   const port = opts.port ?? 8000;
   const initialContext = opts.initialContext;
@@ -1001,6 +1002,7 @@ export function startWebSocketSimulator(opts: {
         },
         stream: Boolean(streamOpts?.onStreamText),
         onStreamText: streamOpts?.onStreamText,
+        responsesMode: opts.responsesMode,
       });
       if (isGambitEndSignal(result)) {
         sessionEnded = true;
@@ -1025,6 +1027,7 @@ export function startWebSocketSimulator(opts: {
             state: savedState,
             allowRootStringInput: true,
             initialUserMessage: initialUserMessage || undefined,
+            responsesMode: opts.responsesMode,
             onStateUpdate: (state) => {
               const nextMeta = {
                 ...(savedState?.meta ?? {}),
@@ -1082,6 +1085,7 @@ export function startWebSocketSimulator(opts: {
             state: savedState,
             allowRootStringInput: true,
             initialUserMessage: userMessage,
+            responsesMode: opts.responsesMode,
             onStateUpdate: (state) => {
               const nextMeta = {
                 ...(savedState?.meta ?? {}),
@@ -1387,6 +1391,7 @@ export function startWebSocketSimulator(opts: {
                   allowRootStringInput: false,
                   initialUserMessage: undefined,
                   stream: false,
+                  responsesMode: opts.responsesMode,
                 });
               }
               const messages = sessionPayload.messages ?? [];
@@ -1433,6 +1438,7 @@ export function startWebSocketSimulator(opts: {
                   allowRootStringInput: false,
                   initialUserMessage: undefined,
                   stream: false,
+                  responsesMode: opts.responsesMode,
                 });
                 turns.push({
                   index: idx,
@@ -2096,6 +2102,7 @@ export function startWebSocketSimulator(opts: {
             trace: tracer,
             stream,
             state: simulatorSavedState,
+            responsesMode: opts.responsesMode,
             onStateUpdate: (state) => {
               const nextMeta = {
                 ...(simulatorSavedState?.meta ?? {}),
@@ -2943,6 +2950,7 @@ async function runDeckWithFallback(args: {
   onStateUpdate?: (state: SavedState) => void;
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
+  responsesMode?: boolean;
 }): Promise<unknown> {
   try {
     return await runDeck({
@@ -2956,6 +2964,7 @@ async function runDeckWithFallback(args: {
       onStateUpdate: args.onStateUpdate,
       stream: args.stream,
       onStreamText: args.onStreamText,
+      responsesMode: args.responsesMode,
     });
   } catch (error) {
     if (args.input === undefined && shouldRetryWithStringInput(error)) {
@@ -2970,6 +2979,7 @@ async function runDeckWithFallback(args: {
         onStateUpdate: args.onStateUpdate,
         stream: args.stream,
         onStreamText: args.onStreamText,
+        responsesMode: args.responsesMode,
       });
     }
     throw error;

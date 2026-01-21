@@ -1,13 +1,13 @@
 import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 
-const inputSchema = z.object({
+const contextSchema = z.object({
   patientId: z.string(),
   testName: z.string().default("recent lab"),
   requestedOn: z.string().optional(),
 });
 
-const outputSchema = z.object({
+const responseSchema = z.object({
   summary: z.string(),
   followUp: z.string(),
   provenance: z.string(),
@@ -15,8 +15,8 @@ const outputSchema = z.object({
 
 export default defineDeck({
   label: "results_lookup",
-  inputSchema,
-  outputSchema,
+  contextSchema,
+  responseSchema,
   run(ctx) {
     const summary =
       `Results for ${ctx.input.testName} are available and were reviewed by Dr. Chen.`;

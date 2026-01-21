@@ -3,8 +3,8 @@ import { z } from "npm:zod";
 
 export default defineDeck({
   label: "get_time",
-  inputSchema: z.object({}),
-  outputSchema: z.object({
+  contextSchema: z.object({}),
+  responseSchema: z.object({
     iso: z.string().describe("Current ISO timestamp"),
   }),
   run() {

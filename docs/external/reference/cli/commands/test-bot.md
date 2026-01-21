@@ -1,11 +1,11 @@
 +++
 command = "test-bot"
 summary = "Run a persona/test-bot loop"
-usage = "gambit test-bot <root-deck.(ts|md)> --test-deck <persona-deck.(ts|md)> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck.(ts|md)> ...] [--trace <file>] [--verbose]"
+usage = "gambit test-bot <root-deck.(ts|md)> --test-deck <persona-deck.(ts|md)> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck.(ts|md)> ...] [--trace <file>] [--responses] [--verbose]"
 flags = [
   "--test-deck <path>      Persona/test deck path",
   "--grade <path>          Grader deck path (repeatable)",
-  "--context <json|string> Context payload (seeds gambit_init; legacy --init still works)",
+  "--context <json|string> Context payload (seeds gambit_context; legacy --init still works)",
   "--bot-input <json|string> Input payload for the persona deck",
   "--message <json|string> Initial user message (sent before assistant speaks)",
   "--max-turns <n>         Max turns for test-bot (default: 12)",
@@ -13,6 +13,7 @@ flags = [
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--trace <file>          Write trace events to file (JSONL)",
+  "--responses             Run runtime/state in Responses mode (default; set GAMBIT_CHAT_FALLBACK=1 for chat)",
   "--verbose               Print trace events to console",
 ]
 +++

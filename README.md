@@ -153,7 +153,8 @@ http://localhost:8000/calibrate
 ```
 
 The Debug UI shows transcript lanes plus a trace/tools feed. If the deck has an\
-`inputSchema`, the UI renders a schema-driven form with defaults and a raw JSON\
+`contextSchema`, the UI renders a schema-driven form with defaults and a raw
+JSON\
 tab. Local-first state is stored under `.gambit/` (sessions, traces, notes).
 
 ## Using the Library
@@ -166,7 +167,7 @@ Import the helpers from JSR:
 import { defineDeck, defineCard } from "jsr:@bolt-foundry/gambit";
 ```
 
-Define `inputSchema`/`outputSchema` with Zod to validate IO, and implement\
+Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
 `run`/`execute` for compute decks. To call a child deck from code, use\
 `ctx.spawnAndWait({ path, input })`. Emit structured trace events with\
 `ctx.log(...)`.
@@ -204,8 +205,8 @@ import { z } from "zod";
 
 export default defineDeck({
   label: "echo",
-  inputSchema: z.object({ text: z.string() }),
-  outputSchema: z.object({ text: z.string(), length: z.number() }),
+  contextSchema: z.object({ text: z.string() }),
+  responseSchema: z.object({ text: z.string(), length: z.number() }),
   run(ctx) {
     return { text: ctx.input.text, length: ctx.input.text.length };
   },
@@ -242,8 +243,8 @@ import { z } from "zod";
 
 export default defineDeck({
   label: "get_time",
-  inputSchema: z.object({}), // no args
-  outputSchema: z.object({ iso: z.string() }),
+  contextSchema: z.object({}), // no args
+  responseSchema: z.object({ iso: z.string() }),
   run() {
     return { iso: new Date().toISOString() };
   },

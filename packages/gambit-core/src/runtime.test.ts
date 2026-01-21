@@ -1,8 +1,14 @@
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { loadDeck } from "./loader.ts";
+import { loadState } from "./state.ts";
 import { runDeck } from "./runtime.ts";
-import type { ModelMessage, ModelProvider, TraceEvent } from "./types.ts";
+import type {
+  ModelMessage,
+  ModelProvider,
+  ResponseItem,
+  TraceEvent,
+} from "./types.ts";
 
 const dummyProvider: ModelProvider = {
   chat() {
@@ -24,6 +30,33 @@ async function writeTempDeck(dir: string, filename: string, contents: string) {
   await Deno.writeTextFile(target, contents);
   return target;
 }
+
+Deno.test("deck loads contextSchema/responseSchema aliases", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "context-alias.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.object({ message: z.string() }),
+      responseSchema: z.string(),
+      label: "context_alias",
+      run(ctx: { input: { message: string } }) {
+        return ctx.input.message;
+      }
+    });
+    `,
+  );
+
+  const deck = await loadDeck(deckPath);
+  assert(deck.contextSchema, "expected contextSchema to be set");
+  assert(deck.responseSchema, "expected responseSchema to be set");
+  assert(deck.inputSchema, "expected legacy inputSchema alias to be set");
+  assert(deck.outputSchema, "expected legacy outputSchema alias to be set");
+});
 
 Deno.test("compute deck returns validated output", async () => {
   const dir = await Deno.makeTempDir();
@@ -819,7 +852,7 @@ Deno.test("LLM deck defaults input to empty string for message-only runs", async
   });
 
   const hasInit = lastMessages.some((m) =>
-    m.role === "tool" && m.name === "gambit_init"
+    m.role === "tool" && m.name === "gambit_context"
   );
   assertEquals(hasInit, false);
   const lastUser = [...lastMessages].reverse().find((m) => m.role === "user");
@@ -879,6 +912,105 @@ Deno.test("LLM deck reuses saved input when follow-up messages arrive without in
   });
 
   assertEquals(callCount, 2);
+});
+
+Deno.test("responses mode stores response items and calls responses()", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "responses_state.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let lastItems: Array<ResponseItem> = [];
+  let updatedState: import("./state.ts").SavedState | undefined;
+  const provider: ModelProvider = {
+    responses({ request }) {
+      lastItems = request.input;
+      return Promise.resolve({
+        id: "resp_1",
+        object: "response",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "ok" }],
+        }],
+      });
+    },
+    chat() {
+      throw new Error("chat should not be called in responses mode");
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: undefined,
+    inputProvided: false,
+    initialUserMessage: "hello",
+    modelProvider: provider,
+    isRoot: true,
+    responsesMode: true,
+    onStateUpdate: (state) => {
+      updatedState = state;
+    },
+  });
+
+  const hasUser = lastItems.some((item) =>
+    item.type === "message" && item.role === "user"
+  );
+  assertEquals(hasUser, true);
+  assertEquals(updatedState?.format, "responses");
+  assert((updatedState?.items?.length ?? 0) > 0);
+  assert((updatedState?.messages?.length ?? 0) > 0);
+});
+
+Deno.test("loadState derives messages when only response items are stored", async () => {
+  const dir = await Deno.makeTempDir();
+  const statePath = path.join(dir, "responses-only.json");
+
+  const state = {
+    runId: "run_1",
+    format: "responses",
+    items: [
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "hello" }],
+      },
+      {
+        type: "function_call",
+        call_id: "call_1",
+        name: "gambit_context",
+        arguments: "{}",
+      },
+      {
+        type: "function_call_output",
+        call_id: "call_1",
+        output: '{"topic":"saved"}',
+      },
+    ],
+  };
+
+  await Deno.writeTextFile(statePath, JSON.stringify(state));
+  const loaded = loadState(statePath);
+
+  assert(loaded);
+  assertEquals(loaded.format, "responses");
+  assertEquals(loaded.items?.length, 3);
+  assertEquals(loaded.messages?.length, 3);
+  assertEquals(loaded.messages?.[0]?.role, "assistant");
+  assertEquals(loaded.messages?.[0]?.content, "hello");
+  assertEquals(loaded.messages?.[2]?.role, "tool");
 });
 
 Deno.test("onError handler result surfaces via gambit_complete when an action fails", async () => {
@@ -1000,7 +1132,7 @@ Deno.test("onError handler result surfaces via gambit_complete when an action fa
   assertEquals(parsed.payload.notice, "fallback");
 });
 
-Deno.test("run.start traces input and gambit_init payload", async () => {
+Deno.test("run.start traces input and gambit_context payload", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -1045,18 +1177,18 @@ Deno.test("run.start traces input and gambit_init payload", async () => {
   assertEquals(start.input, input);
 
   const initCall = traces.find((t) =>
-    t.type === "tool.call" && t.name === "gambit_init"
+    t.type === "tool.call" && t.name === "gambit_context"
   ) as Extract<TraceEvent, { type: "tool.call" }>;
   assertEquals(initCall.args, {});
 
   const initResult = traces.find((t) =>
-    t.type === "tool.result" && t.name === "gambit_init"
+    t.type === "tool.result" && t.name === "gambit_context"
   ) as Extract<TraceEvent, { type: "tool.result" }>;
   const payload = initResult.result as unknown;
   assertEquals(payload, input);
 });
 
-Deno.test("gambit_init does not run when input is not provided", async () => {
+Deno.test("gambit_context does not run when input is not provided", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -1075,7 +1207,7 @@ Deno.test("gambit_init does not run when input is not provided", async () => {
   const provider: ModelProvider = {
     chat(input) {
       sawInit = input.messages.some((m) =>
-        m.tool_calls?.some((t) => t.function.name === "gambit_init")
+        m.tool_calls?.some((t) => t.function.name === "gambit_context")
       );
       return Promise.resolve({
         message: { role: "assistant", content: "ok" },
@@ -1277,7 +1409,7 @@ Deno.test("non-root missing schemas fails load", async () => {
         isRoot: false,
       }),
     Error,
-    "must declare inputSchema and outputSchema",
+    "must declare contextSchema and responseSchema",
   );
 });
 

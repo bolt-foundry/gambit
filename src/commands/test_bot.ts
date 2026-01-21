@@ -33,6 +33,7 @@ export async function runDeckWithFallback(args: {
   trace?: (
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
+  responsesMode?: boolean;
 }): Promise<unknown> {
   try {
     return await runDeck({
@@ -49,6 +50,7 @@ export async function runDeckWithFallback(args: {
       stream: args.stream,
       onStreamText: args.onStreamText,
       trace: args.trace,
+      responsesMode: args.responsesMode,
     });
   } catch (error) {
     if (args.input === undefined && shouldRetryWithStringInput(error)) {
@@ -66,6 +68,7 @@ export async function runDeckWithFallback(args: {
         stream: args.stream,
         onStreamText: args.onStreamText,
         trace: args.trace,
+        responsesMode: args.responsesMode,
       });
     }
     throw error;
@@ -86,6 +89,7 @@ export async function runTestBotLoop(opts: {
   trace?: (event: TraceEvent) => void;
   verbose?: boolean;
   statePath?: string;
+  responsesMode?: boolean;
 }): Promise<string> {
   let rootState:
     | import("@bolt-foundry/gambit-core").SavedState
@@ -147,6 +151,7 @@ export async function runTestBotLoop(opts: {
       stream: false,
       state: rootState,
       onStateUpdate: updateRootState,
+      responsesMode: opts.responsesMode,
     });
     if (isGambitEndSignal(initialResult)) {
       sessionEnded = true;
@@ -173,6 +178,7 @@ export async function runTestBotLoop(opts: {
       onStateUpdate: (state) => {
         botState = state;
       },
+      responsesMode: opts.responsesMode,
     });
     if (isGambitEndSignal(botResult)) {
       sessionEnded = true;
@@ -196,6 +202,7 @@ export async function runTestBotLoop(opts: {
       stream: false,
       state: rootState,
       onStateUpdate: updateRootState,
+      responsesMode: opts.responsesMode,
     });
     if (isGambitEndSignal(rootResult)) {
       sessionEnded = true;

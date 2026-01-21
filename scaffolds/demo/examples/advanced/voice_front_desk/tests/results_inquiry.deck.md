@@ -1,6 +1,6 @@
 +++
 label = "results_inquiry"
-inputSchema = "./results_patient_input.zod.ts"
+contextSchema = "./results_patient_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

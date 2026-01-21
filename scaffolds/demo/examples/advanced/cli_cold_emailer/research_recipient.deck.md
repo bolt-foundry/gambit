@@ -1,8 +1,8 @@
 +++
 label = "research_recipient"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0.2 }
-inputSchema = "./schemas/research_input.zod.ts"
-outputSchema = "./schemas/research_output.zod.ts"
+contextSchema = "./schemas/research_input.zod.ts"
+responseSchema = "./schemas/research_output.zod.ts"
 +++
 
 ![respond](gambit://cards/respond.card.md)

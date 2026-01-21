@@ -1,6 +1,6 @@
 +++
 label = "faq_first_caller"
-inputSchema = "./faq_first_caller_input.zod.ts"
+contextSchema = "./faq_first_caller_input.zod.ts"
 acceptsUserTurns = true
 [modelParams]
 model = "openai/gpt-4o-mini"

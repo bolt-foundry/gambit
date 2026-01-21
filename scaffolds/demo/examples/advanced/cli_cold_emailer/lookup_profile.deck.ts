@@ -46,13 +46,13 @@ const profiles: Record<string, Profile> = {
 
 export default defineDeck({
   label: "lookup_profile",
-  inputSchema: z.object({
+  contextSchema: z.object({
     name: z.string().min(1).describe("Recipient name"),
     details: z.string().min(1).describe("Recipient context and pitch details"),
     products: z.array(z.string().min(1)).min(1).optional()
       .describe("Products or offerings to position in the email"),
   }),
-  outputSchema: z.object({
+  responseSchema: z.object({
     summary: z.string().min(1).describe("Short profile summary"),
     role: z.string().min(1).describe("Recipient role"),
     company: z.string().min(1).describe("Recipient company"),
