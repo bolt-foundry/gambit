@@ -782,7 +782,7 @@ async function runLlmDeck(
             : undefined,
         });
       idleController.touch();
-      const message = result.message;
+      let message = result.message;
       ctx.trace?.({
         type: "model.result",
         runId,
@@ -1079,6 +1079,15 @@ async function runLlmDeck(
           return respondValue;
         }
         continue;
+      }
+
+      if (
+        !respondEnabled &&
+        result.finishReason === "stop" &&
+        (message.content === null || message.content === undefined) &&
+        (!result.toolCalls || result.toolCalls.length === 0)
+      ) {
+        message = { ...message, content: "" };
       }
 
       if (result.finishReason === "tool_calls") {

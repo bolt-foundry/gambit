@@ -3,7 +3,7 @@ label = "Patient swapper tool sequence guard LLM"
 contextSchema = "gambit://schemas/graders/contexts/conversation.ts"
 responseSchema = "../../../../schemas/grader_output.zod.ts"
 [modelParams]
-model = "openai/gpt-4o-mini"
+model = "openai/gpt-5-mini"
 temperature = 0
 +++
 
