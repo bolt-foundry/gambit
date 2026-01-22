@@ -9,7 +9,7 @@ area_owner = "engineering"
 
 Owner: engineering\
 Date: 2026-01-16\
-Status: blocked (Phase 4 incomplete)
+Status: deferred (prod bake; revisit after stability window)
 
 ## Purpose
 
@@ -57,3 +57,5 @@ Delete the legacy chat path once all consumers are on responses.
 ## Notes and updates
 
 - 2026-01-16: Phase doc created.
+- 2026-01-22: Phase 4 complete; Phase 5 deferred to allow responses mode to bake
+  in production. Project docs moved to resources for later pickup.
