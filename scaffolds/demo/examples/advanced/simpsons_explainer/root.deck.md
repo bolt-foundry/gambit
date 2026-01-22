@@ -1,5 +1,5 @@
 +++
-label = "demo_loan_totals"
+label = "Simpsons explainer"
 
 [modelParams]
 model = "openai/gpt-4o-mini"

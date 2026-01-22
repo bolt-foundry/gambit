@@ -2,7 +2,12 @@
 label = "demo_test_decks"
 
 [[testDecks]]
-label = "Initial question"
-path = "../test_bots/initial_question.deck.md"
+label = "Planets question"
+path = "../test_bots/planets.deck.md"
 description = "Test bot that asks a basic planets-orbit question, with optional initialQuestion override."
+
+[[testDecks]]
+label = "Quantum entanglement question"
+path = "../test_bots/quantum_entanglement.deck.md"
+description = "Test bot that asks about quantum entanglement, with optional initialQuestion override."
 +++
