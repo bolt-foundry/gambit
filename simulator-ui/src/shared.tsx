@@ -13,6 +13,7 @@ import {
   SCORE_VALUES,
   setPathValue,
 } from "./utils.ts";
+import Panel from "./gds/Panel.tsx";
 import type {
   FeedbackEntry,
   ModelMessage,
@@ -133,7 +134,7 @@ export function ConversationView(props: {
   }, [messages.length]);
 
   return (
-    <div className="chat-column" ref={containerRef}>
+    <Panel className="chat-column" ref={containerRef}>
       {header}
       {messages.map((entry, idx) => (
         <MessageBubble
@@ -150,7 +151,7 @@ export function ConversationView(props: {
           </div>
         )
       )}
-    </div>
+    </Panel>
   );
 }
 

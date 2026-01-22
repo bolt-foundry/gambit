@@ -1,7 +1,11 @@
 import React from "react";
 import { classNames } from "../utils.ts";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost";
+export type ButtonVariant =
+  | "primary"
+  | "primary-deemph"
+  | "secondary"
+  | "ghost";
 
 export default function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & {

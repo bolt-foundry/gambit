@@ -23,10 +23,10 @@
     "precommit": "deno fmt && deno lint && deno task guard:bfmono-imports && deno check && deno test -A",
     "e2e": "deno test -A simulator-ui/__tests__/e2e/*.e2e.ts",
     "e2e-logs": "deno run -A simulator-ui/__tests__/e2e/e2e-logs.ts",
-    "bundle:sim": "deno bundle --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
-    "bundle:sim:sourcemap": "deno bundle --sourcemap=external --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
-    "bundle:sim:web": "deno bundle --platform=browser --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
-    "bundle:sim:web:sourcemap": "deno bundle --platform=browser --sourcemap=external --output simulator-ui/dist/bundle.js simulator-ui/src/main.tsx",
+    "bundle:sim": "deno run -A scripts/bundle_simulator_ui.ts",
+    "bundle:sim:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --sourcemap=external",
+    "bundle:sim:web": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser",
+    "bundle:sim:web:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser --sourcemap=external",
     "build_npm": "deno run -A scripts/build_npm.ts"
   },
   "lint": {
@@ -86,7 +86,8 @@
       "deno.jsonc",
       "README.md",
       "CHANGELOG.md",
-      "LICENSE"
+      "LICENSE",
+      "simulator-ui/dist"
     ]
   },
   "deploy": {
