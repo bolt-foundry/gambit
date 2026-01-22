@@ -2,10 +2,10 @@
 
 Core runtime, definitions, and utilities for building Gambit decks outside of
 the CLI. It includes the loader for Markdown/TypeScript decks, guardrail-aware
-execution, OpenAI-compatible adapters, and helpers for persisting local run
-state. The [`@bolt-foundry/gambit`](../gambit/README.md) package re-exports
-these APIs plus the CLI, but `gambit-core` stays focused on the
-authoring/runtime pieces that can live in any host.
+execution, and helpers for persisting local run state. The
+[`@bolt-foundry/gambit`](../gambit/README.md) package re-exports these APIs plus
+the CLI, but `gambit-core` stays focused on the authoring/runtime pieces that
+can live in any host.
 
 > **Gambit vs. Gambit Core**
 >
@@ -27,8 +27,8 @@ authoring/runtime pieces that can live in any host.
   decks (`actionDecks`, `testDecks`, `graderDecks`).
 - Guardrail-aware runtime (`runDeck`) that can mix LLM actions and pure compute
   decks with structured tracing and execution context helpers.
-- Compatibility helpers for OpenAI Chat Completions plus a ready-to-use
-  OpenRouter provider factory.
+- Response-first runtime helpers that plug into any model provider implementing
+  the core `ModelProvider` interface.
 - State utilities (`loadState`/`saveState`) used by the Gambit simulator for
   local-first transcripts, feedback, and notes.
 
@@ -186,16 +186,12 @@ text for built-in tools like `gambit_context`, `gambit_respond`, and
 
 ## Compatibility and utilities
 
-- **Chat Completions bridge**: [`chatCompletionsWithDeck`](src/openai_compat.ts)
-  lets you present a single deck as an OpenAI-compatible endpoint. It normalizes
-  tool calls, enforces deck schemas, and returns Chat Completions–shaped
-  responses with a `gambit` metadata extension.
 - **Request rendering**: [`renderDeck`](src/render.ts) merges an existing Chat
   Completions request with the deck’s system prompt and tool schema, so you can
   debug what will actually reach the model or feed it into another orchestrator.
-- **Model providers**: the OpenRouter adapter lives in `@bolt-foundry/gambit`
-  (see `packages/gambit/src/providers/openrouter.ts`). Implement your own
-  provider by conforming to the `responses()` signature in `ModelProvider`.
+- **Model providers**: adapters live in `@bolt-foundry/gambit` (see
+  `packages/gambit/src/providers/openrouter.ts`). Implement your own provider by
+  conforming to the `responses()` signature in `ModelProvider`.
 - **Constants**:
   [`GAMBIT_TOOL_CONTEXT`, `GAMBIT_TOOL_RESPOND`, `GAMBIT_TOOL_END`](src/constants.ts)
   (`GAMBIT_TOOL_INIT` remains as a deprecated alias). define the reserved tool
@@ -224,6 +220,5 @@ deno task test     # run unit tests (allowing net/fs as required)
 deno task build_npm  # emit the npm bundle via dnt
 ```
 
-Tests exercise the Markdown loader, renderer, OpenAI compatibility layer, and
-runtime guardrails. Update snapshots/fixtures via `deno test -- --update` when
-necessary.
+Tests exercise the Markdown loader, renderer, and runtime guardrails. Update
+snapshots/fixtures via `deno test -- --update` when necessary.

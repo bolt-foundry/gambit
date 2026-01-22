@@ -9,7 +9,7 @@ area_owner = "engineering"
 
 Owner: engineering\
 Date: 2026-01-16\
-Status: in progress
+Status: in progress (default switch landed; validation pending)
 
 ## Purpose
 
@@ -24,26 +24,26 @@ keeping chat compat behind a fallback flag.
 
 ## Entry criteria
 
-- [ ] Phase 3 complete with stable responses mode.
+- [x] Phase 3 complete with stable responses mode.
 - [ ] All providers are response-capable with conformance coverage.
 - [ ] CLI/simulator smoke tests pass in responses mode.
 
 ## Exit criteria
 
-- [ ] Default mode is responses; chat mode is opt-in fallback.
-- [ ] Docs and CLI help updated.
+- [x] Default mode is responses; chat mode is opt-in fallback.
+- [x] Docs and CLI help updated.
 - [ ] Release tooling passes with responses adapters.
 
 ## Checklist
 
-- [ ] Identify the default-setting entrypoints (CLI, server, simulator) and set
+- [x] Identify the default-setting entrypoints (CLI, server, simulator) and set
       responses mode as the default.
-- [ ] Introduce `GAMBIT_CHAT_FALLBACK=1` (or equivalent) and wire it through CLI
+- [x] Introduce `GAMBIT_CHAT_FALLBACK=1` (or equivalent) and wire it through CLI
       and `packages/gambit` config to force chat mode.
-- [ ] Update CLI help text + docs to reflect new defaults and fallback flag.
+- [x] Update CLI help text + docs to reflect new defaults and fallback flag.
 - [ ] Run `bft precommit` with responses as default and verify chat fallback.
 - [ ] Run OpenRouter conformance tests for chat + responses.
-- [ ] Add a short release note + version bump plan for 0.8.2+.
+- [x] Add a short release note + version bump plan for 0.8.2+.
 
 ## Tests and validation
 
@@ -72,3 +72,5 @@ keeping chat compat behind a fallback flag.
 - 2026-01-16: Phase doc created.
 - 2026-01-22: Default responses mode + chat fallback flag wired; CLI smoke
   validated in both default and fallback modes, including `test-bot`.
+- 2026-01-22: CLI/help docs updated to mark responses as default; changelog note
+  added for the 0.8.2 release.

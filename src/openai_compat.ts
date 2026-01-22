@@ -1,14 +1,18 @@
-import { DEFAULT_GUARDRAILS, RESERVED_TOOL_PREFIX } from "./constants.ts";
-import { loadDeck } from "./loader.ts";
-import { assertZodSchema, toJsonSchema } from "./schema.ts";
-import { runDeck } from "./runtime.ts";
+import {
+  assertZodSchema,
+  DEFAULT_GUARDRAILS,
+  loadDeck,
+  RESERVED_TOOL_PREFIX,
+  runDeck,
+  toJsonSchema,
+} from "@bolt-foundry/gambit-core";
 import type {
   Guardrails,
   LoadedDeck,
   ModelMessage,
   ModelProvider,
   ToolDefinition,
-} from "./types.ts";
+} from "@bolt-foundry/gambit-core";
 
 export const logger = console;
 

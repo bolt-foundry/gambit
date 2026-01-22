@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { chatCompletionsWithDeck } from "../mod.ts";
 import { logger as openaiLogger } from "./openai_compat.ts";
-import type { ModelProvider, ToolDefinition } from "./types.ts";
+import type { ModelProvider, ToolDefinition } from "@bolt-foundry/gambit-core";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));

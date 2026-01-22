@@ -34,11 +34,11 @@ export { runDeck } from "@bolt-foundry/gambit-core";
 /** Signal for explicitly ending a Gambit run. */
 export type { GambitEndSignal } from "@bolt-foundry/gambit-core";
 /** OpenAI Chat Completions compatibility helper for a deck. */
-export { chatCompletionsWithDeck } from "@bolt-foundry/gambit-core";
+export { chatCompletionsWithDeck } from "./src/openai_compat.ts";
 /** OpenAI-compatible request payload. */
-export type { ChatCompletionsRequest } from "@bolt-foundry/gambit-core";
+export type { ChatCompletionsRequest } from "./src/openai_compat.ts";
 /** OpenAI-compatible response payload. */
-export type { ChatCompletionsResponse } from "@bolt-foundry/gambit-core";
+export type { ChatCompletionsResponse } from "./src/openai_compat.ts";
 /** Render a deck to a human-readable outline or debug view. */
 export { renderDeck } from "@bolt-foundry/gambit-core";
 /** Options for deck rendering. */
