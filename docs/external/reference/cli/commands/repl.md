@@ -7,7 +7,7 @@ flags = [
   "--message <json|string> Initial user message (sent before assistant speaks)",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
-  "--responses             Run runtime/state in Responses mode (default; set GAMBIT_CHAT_FALLBACK=1 for chat)",
+  "--responses             Run runtime/state in Responses mode",
   "--verbose               Print trace events to console",
 ]
 +++

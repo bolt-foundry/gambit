@@ -1,3 +1,10 @@
++++
+area_owner = "engineering"
+authority = "policy"
+lifecycle = "beta"
+scope = "Area"
++++
+
 # Areas
 
 Rolling responsibilities, cadences, and shared workspaces that keep Gambit

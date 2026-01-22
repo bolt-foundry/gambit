@@ -1,0 +1,17 @@
+# Gambit Init Onboarding – Feature Index
+
+- [init-chat-deck](./init-chat-deck/memo.md)
+  - [decisions](./init-chat-deck/decisions.md)
+  - [non-goals](./init-chat-deck/non-goals.md)
+  - [risks](./init-chat-deck/risks.md)
+  - [milestones](./init-chat-deck/milestones.md)
+- [init-file-tools](./init-file-tools/memo.md)
+  - [decisions](./init-file-tools/decisions.md)
+  - [non-goals](./init-file-tools/non-goals.md)
+  - [risks](./init-file-tools/risks.md)
+  - [milestones](./init-file-tools/milestones.md)
+- [init-command-flow](./init-command-flow/memo.md)
+  - [decisions](./init-command-flow/decisions.md)
+  - [non-goals](./init-command-flow/non-goals.md)
+  - [risks](./init-command-flow/risks.md)
+  - [milestones](./init-command-flow/milestones.md)

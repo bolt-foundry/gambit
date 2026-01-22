@@ -40,8 +40,6 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - `--message`: sends a first user turn before the assistant replies.
 - `--model`: default model; `--model-force`: override even if deck has
   `modelParams`.
-- Responses mode is the default; set `GAMBIT_CHAT_FALLBACK=1` to force chat
-  fallback. Use `--responses` to force responses mode explicitly.
 - `--responses`: opt into Responses mode for runtime/state (stores response
   items and uses `ModelProvider.responses` when available).
 - `GAMBIT_RESPONSES_MODE=1`: env alternative to `--responses` for runtime/state.

@@ -1,9 +1,9 @@
 # Gambit Documentation
 
 Welcome to Gambit, the agent harness for building, running, and verifying LLM
-workflows. Start here if you want to use Gambit or evaluate its capabilities.
+workflows. These docs focus on helping you ship assistants with confidence.
 
-Explore:
+Start here:
 
 - Getting started: `./getting-started/`
 - Concepts: `./concepts/`

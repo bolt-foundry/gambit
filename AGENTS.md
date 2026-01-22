@@ -89,7 +89,7 @@ Usually individual sessions will have a primary aim. Something like:
 ## Finding the right information
 
 Most of the time, if you're not sure where to look to find something, the best
-place to start is in the `./docs/README.md` file. It lays out helpful
+place to start is in the `./docs/ABOUT.md` file. It lays out helpful
 documentation that should be able to get you where you need to go.
 
 ## Doing actual work

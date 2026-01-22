@@ -5,10 +5,10 @@ workflows. You define decks in Markdown or TypeScript, run them locally with a
 CLI and simulator, and capture ground-truth artifacts like transcripts, traces,
 and grades. It is deterministic, portable, and stateless by design.
 
-Active docs:
+This folder holds all Gambit documentation sources.
 
-- Internal execution docs: `./internal/`
-- External product docs: `./external/`
-- Public posts: `./external/posts/`
+- Coworker execution docs live in `./internal/`.
+- User-facing docs live in `./external/`.
+- Public posts live in `./external/posts/`.
 
-Structure rules and metadata conventions live in `./ABOUT.md`.
+For structure rules and metadata conventions, see `./ABOUT.md`.

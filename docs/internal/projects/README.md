@@ -1,3 +1,10 @@
++++
+area_owner = "engineering"
+authority = "policy"
+lifecycle = "beta"
+scope = "Area"
++++
+
 # Projects
 
 Current Gambit initiatives with concrete deliverables and timelines.
