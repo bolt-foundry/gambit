@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -14,19 +15,27 @@ export type ListboxOption = {
   meta?: string | null;
 };
 
-export default function Listbox(props: {
+export type ListboxProps = {
   value?: string | null;
   options: ListboxOption[];
   placeholder?: string;
   disabled?: boolean;
   onChange: (value: string) => void;
-}) {
+  label?: string;
+  labelClassName?: string;
+  id?: string;
+};
+
+export default function Listbox(props: ListboxProps) {
   const {
     value,
     options,
     placeholder = "Select",
     disabled = false,
     onChange,
+    label,
+    labelClassName,
+    id,
   } = props;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -35,6 +44,12 @@ export default function Listbox(props: {
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties | null>(
     null,
   );
+  const autoId = useId();
+  const controlId = id ?? `listbox-${autoId}`;
+  const labelId = `${controlId}-label`;
+  const labelClasses = labelClassName
+    ? `gds-listbox-field-label ${labelClassName}`
+    : "gds-listbox-field-label";
   const selected = useMemo(
     () => options.find((option) => option.value === value) ?? null,
     [options, value],
@@ -92,11 +107,18 @@ export default function Listbox(props: {
 
   return (
     <div className="gds-listbox" ref={rootRef}>
+      {label && (
+        <label className={labelClasses} htmlFor={controlId} id={labelId}>
+          {label}
+        </label>
+      )}
       <button
+        id={controlId}
         type="button"
         className="gds-listbox-trigger"
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
+        aria-labelledby={label ? labelId : undefined}
         aria-expanded={open}
         disabled={disabled}
         ref={triggerRef}

@@ -72,6 +72,20 @@ const simulatorBundleSourceMapPath = path.resolve(
   "dist",
   "bundle.js.map",
 );
+const simulatorFaviconDistPath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "dist",
+  "favicon.ico",
+);
+const simulatorFaviconSrcPath = path.resolve(
+  moduleDir,
+  "..",
+  "simulator-ui",
+  "src",
+  "favicon.ico",
+);
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const TEST_BOT_STREAM_ID = "gambit-test-bot";
 const CALIBRATE_STREAM_ID = "gambit-calibrate";
@@ -1269,6 +1283,26 @@ export function startWebSocketSimulator(opts: {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/api/durable-streams/stream/")) {
         return handleDurableStreamRequest(req);
+      }
+      if (url.pathname === "/favicon.ico") {
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const data = await Deno.readFile(simulatorFaviconDistPath);
+          return new Response(req.method === "HEAD" ? null : data, {
+            headers: { "content-type": "image/x-icon" },
+          });
+        } catch {
+          try {
+            const data = await Deno.readFile(simulatorFaviconSrcPath);
+            return new Response(req.method === "HEAD" ? null : data, {
+              headers: { "content-type": "image/x-icon" },
+            });
+          } catch {
+            return new Response("Not found", { status: 404 });
+          }
+        }
       }
       if (url.pathname === "/api/calibrate") {
         if (req.method !== "GET") {

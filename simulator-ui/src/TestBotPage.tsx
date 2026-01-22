@@ -33,6 +33,9 @@ import {
   ToolCallBubble,
   useHttpSchema,
 } from "./shared.tsx";
+import PageGrid from "./gds/PageGrid.tsx";
+import PageShell from "./gds/PageShell.tsx";
+import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Listbox from "./gds/Listbox.tsx";
 
@@ -648,7 +651,7 @@ export default function TestBotPage(props: {
   useEffect(() => {
     if (!setNavActions) return;
     setNavActions(
-      <Button variant="primary" onClick={handleNewChat}>
+      <Button variant="secondary" onClick={handleNewChat}>
         New chat
       </Button>,
     );
@@ -721,19 +724,17 @@ export default function TestBotPage(props: {
     : "Idle";
 
   return (
-    <div className="editor-shell">
-      <div className="editor-main">
+    <PageShell>
+      <PageGrid as="main" className="editor-main">
         <div
+          className="flex-column gap-8"
           style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
             height: "100%",
             overflow: "hidden",
           }}
         >
-          <div
-            className="editor-panel test-bot-sidebar"
+          <Panel
+            className="test-bot-sidebar"
             style={{
               display: "flex",
               flexDirection: "column",
@@ -741,9 +742,9 @@ export default function TestBotPage(props: {
               overflowY: "auto",
             }}
           >
-            <strong>Test deck</strong>
             {testDecks.length > 0 && (
               <Listbox
+                label="Test deck"
                 value={selectedDeckId ?? ""}
                 onChange={handleDeckSelection}
                 options={testDecks.map((deck) => ({
@@ -753,6 +754,7 @@ export default function TestBotPage(props: {
                 }))}
               />
             )}
+            {testDecks.length === 0 && <strong>Test deck</strong>}
             {testDecks.length === 0 && (
               <div className="placeholder">
                 No deck-defined personas found. Add <code>[[testDecks]]</code>
@@ -763,9 +765,9 @@ export default function TestBotPage(props: {
             {botDescription && (
               <div className="placeholder">{botDescription}</div>
             )}
-          </div>
-          <div
-            className="editor-panel test-bot-sidebar"
+          </Panel>
+          <Panel
+            className="test-bot-sidebar"
             style={{
               flex: 1,
               display: "flex",
@@ -798,10 +800,10 @@ export default function TestBotPage(props: {
                 </div>
               )}
             </div>
-          </div>
+          </Panel>
         </div>
 
-        <div className="editor-panel flex-column gap-8">
+        <Panel className="flex-column gap-8">
           <div className="flex-row gap-8 items-center">
             <div className="flex-column flex-1 gap-4">
               <div className="flex-row items-center gap-8">
@@ -967,9 +969,8 @@ export default function TestBotPage(props: {
                 </div>
               )}
           </div>
-        </div>
-        <div
-          className="editor-panel"
+        </Panel>
+        <Panel
           style={{ display: "flex", flexDirection: "column", gap: 10 }}
         >
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -1018,8 +1019,8 @@ export default function TestBotPage(props: {
               No input schema found for this deck.
             </div>
           )}
-        </div>
-      </div>
-    </div>
+        </Panel>
+      </PageGrid>
+    </PageShell>
   );
 }
