@@ -6,7 +6,7 @@ flags = [
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--port <n>              Port for serve (default: 8000)",
-  "--responses             Run runtime/state in Responses mode (default; set GAMBIT_CHAT_FALLBACK=1 for chat)",
+  "--responses             Run runtime/state in Responses mode",
   "--watch                 Restart server on file changes (serve)",
   "--bundle                Force auto-bundling (serve; default in dev)",
   "--no-bundle             Disable auto-bundling for simulator UI (serve)",

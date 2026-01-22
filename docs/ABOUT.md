@@ -7,17 +7,16 @@ scope = "Area"
 
 # Gambit Docs Structure
 
-This folder is the source of truth for Gambit documentation. We keep a clear
-separation between internal execution docs and external user-facing docs so
-teams can move fast internally without leaking unfinished work.
+This docs tree is split by intent:
 
-## Structure
-
-- `internal/` – execution, decisions, and learning for coworkers.
-- `external/` – polished docs for users, developers, and partners.
+- **Internal**: execution, decisions, and learning for coworkers.
+  [`./internal/`](./internal/README.md)
+- **External**: polished, user-facing docs for adoption and usage.
+  [`./external/`](./external/README.md)
   - `external/posts/` – public updates and launch notes.
 
-Information flows one way by default: internal → external.
+Information flows one way by default: internal → external. Internal material is
+allowed to be messy; external docs should be stable and user-focused.
 
 ## README vs ABOUT
 

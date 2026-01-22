@@ -10,7 +10,7 @@ flags = [
   "--trace <file>          Write trace events to file (JSONL)",
   "--state <file>          Load/persist state",
   "--stream                Enable streaming responses",
-  "--responses             Run runtime/state in Responses mode (default; set GAMBIT_CHAT_FALLBACK=1 for chat)",
+  "--responses             Run runtime/state in Responses mode",
   "--verbose               Print trace events to console",
 ]
 +++

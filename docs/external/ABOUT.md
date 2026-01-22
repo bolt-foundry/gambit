@@ -7,19 +7,22 @@ area_owner = "engineering"
 
 # Gambit External Docs Structure
 
-`docs/external/` contains user-facing Gambit documentation. These docs are
-polished, opinionated, and safe to ship to customers and partners.
+Audience: users, developers, partners.
+
+These docs are polished, opinionated, and user-focused. They should not include
+internal debates, open risks, or execution details.
 
 ## Structure
 
 - `getting-started/` – first-run setup and quick wins.
 - `concepts/` – mental models and design intent.
 - `guides/` – task-oriented walkthroughs.
-- `reference/` – CLI, APIs, and specs.
-- `examples/` – curated example breakdowns.
+- `reference/` – APIs, CLI commands, and specs.
+- `examples/` – curated examples and patterns.
 - `posts/` – public updates and launch notes.
 
-## README vs ABOUT
+## Rules
 
-- `README.md` files orient readers to the active content in a folder.
-- `ABOUT.md` files explain structure rules and conventions.
+- Prefer stable guidance over internal context.
+- Derive from internal understanding (one-way by default).
+- Keep docs tight, actionable, and ready to ship.
