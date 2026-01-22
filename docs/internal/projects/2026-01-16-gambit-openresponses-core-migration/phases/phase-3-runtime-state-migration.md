@@ -56,11 +56,9 @@ behind an opt-in flag, while keeping chat the default.
 
 ## Decision points
 
-- Should `packages/gambit-core/src/openai_compat.ts` stay in core if core cannot
-  ship provider adapters?
-  - Recommendation: keep the core shim minimal for Phase 1 (types only), then
-    move the chat shim into `packages/gambit` by Phase 3, so core stays
-    provider-free.
+- Should chat compatibility stay in core if core cannot ship provider adapters?
+  - Decision: move `chatCompletionsWithDeck` into `packages/gambit` so core
+    remains provider-free.
 - How should `SavedState`/`TraceEvent` migrations be handled?
   - Recommendation: introduce a versioned schema with a small upgrader in
     `packages/gambit-core/src/state.ts`, plus a fallback flag to emit legacy

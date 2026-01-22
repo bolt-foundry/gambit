@@ -81,18 +81,19 @@ Gambit core, including whether it should be an adapter or the canonical format.
 
 ## Current state (core + gambit)
 
-- Chat-first runtime remains the default, but responses mode is available behind
-  `GAMBIT_RESPONSES_MODE=1` / `--responses`.
+- Responses mode is the default in the CLI; chat mode is opt-in via
+  `GAMBIT_CHAT_FALLBACK=1` or `GAMBIT_RESPONSES_MODE=0` (or by skipping
+  `--responses` with fallback enabled).
 - Open Responses v1 types + fixtures are exported from
   `packages/gambit-core/src/types.ts`, and runtime/state support responses mode
-  when flagged.
+  with `responsesMode` and `format: "responses"` in state.
 - Terminology cleanup is in place: `contextSchema`/`responseSchema` are
   canonical with legacy aliases + warnings; `gambit://cards/*` and
   `gambit://schemas/*` resolve; legacy markers expand with warnings.
-- OpenRouter responses adapter lives in `packages/gambit` behind
-  `GAMBIT_OPENROUTER_RESPONSES=1`; core still contains
-  `packages/gambit-core/src/openai_compat.ts` and
-  `packages/gambit-core/src/providers/openrouter.ts` for now.
+- OpenRouter responses adapter lives in `packages/gambit` and is enabled by
+  default (can be disabled via `GAMBIT_OPENROUTER_RESPONSES=0`); chat
+  compatibility and provider adapters now live in `packages/gambit` instead of
+  `gambit-core`.
 
 ## Goals
 
@@ -137,19 +138,14 @@ Gambit core, including whether it should be an adapter or the canonical format.
 - Update `packages/gambit-core/src/types.ts` to include items as core types.
 - Rework `packages/gambit-core/src/runtime.ts` to operate on items.
 - Adjust `packages/gambit-core/src/state.ts` storage schema.
-- Keep `packages/gambit-core/src/openai_compat.ts` as an adapter.
+- Move chat compatibility (`chatCompletionsWithDeck`) into `packages/gambit`.
 
 ## Next steps
 
-1. Add `ModelProvider.responses` (types-only) and export it from
-   `@bolt-foundry/gambit-core`.
-2. Implement the OpenRouter responses adapter in `packages/gambit` behind
-   `GAMBIT_OPENROUTER_RESPONSES=1`, and plan the move of the OpenRouter provider
-   out of core.
-3. Add provider conformance + CLI smoke tests for responses mode and document
-   the flag in the CLI/memo.
-4. Prepare the 0.8.2 release: update `packages/gambit/CHANGELOG.md` with the
-   default responses switch and plan the version bump.
+1. Run the full validation pass with responses as default (CLI smoke, provider
+   conformance, `bft precommit`), and record outcomes in Phase 4.
+2. Finalize the 0.8.2 release workflow (confirm changelog + version bump plan)
+   once Phase 4 validation is green.
 
 ## Specs
 

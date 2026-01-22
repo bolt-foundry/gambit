@@ -47,20 +47,18 @@ export { isGambitEndSignal } from "./src/runtime.ts";
 export { runDeck } from "./src/runtime.ts";
 /** Signal for explicitly ending a Gambit run. */
 export type { GambitEndSignal } from "./src/runtime.ts";
-/** OpenAI Chat Completions compatibility helper for a deck. */
-export { chatCompletionsWithDeck } from "./src/openai_compat.ts";
-/** OpenAI-compatible request payload. */
-export type { ChatCompletionsRequest } from "./src/openai_compat.ts";
-/** OpenAI-compatible response payload. */
-export type { ChatCompletionsResponse } from "./src/openai_compat.ts";
+/** Default guardrail settings applied to deck runs. */
+export { DEFAULT_GUARDRAILS } from "./src/constants.ts";
+/** Reserved tool name prefix for Gambit tools. */
+export { RESERVED_TOOL_PREFIX } from "./src/constants.ts";
 /** Render a deck to a human-readable outline or debug view. */
 export { renderDeck } from "./src/render.ts";
 /** Options for deck rendering. */
 export type { RenderDeckOptions } from "./src/render.ts";
 /** Result data from rendering a deck. */
 export type { RenderDeckResult } from "./src/render.ts";
-/** Provider factory for OpenRouter-backed model calls. */
-export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
+/** Schema helpers for ensuring Zod input/output shapes. */
+export { assertZodSchema, toJsonSchema } from "./src/schema.ts";
 /** Gambit CLI helpers and internal primitives. */
 export { GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT } from "./src/constants.ts";
 /** Load a deck definition from disk. */
@@ -77,5 +75,7 @@ export type { LoadedDeck } from "./src/types.ts";
 export type { ModelMessage } from "./src/types.ts";
 /** Model provider interface for LLM backends. */
 export type { ModelProvider } from "./src/types.ts";
+/** Tool definition passed to model providers. */
+export type { ToolDefinition } from "./src/types.ts";
 /** Trace events emitted during execution. */
 export type { TraceEvent } from "./src/types.ts";
