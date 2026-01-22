@@ -1,11 +1,17 @@
 +++
-scope = "Project"
+scope = "Resource"
 authority = "status"
 lifecycle = "beta"
 area_owner = "engineering"
 +++
 
 # Gambit Core Open Responses Migration
+
+## Current status
+
+Phase 4 is complete; Phase 5 is deferred to allow responses mode to bake in
+production. This project doc set now lives under resources until the team is
+ready to pick up Phase 5.
 
 ## Context
 
@@ -70,8 +76,8 @@ live in `packages/gambit`, not in `gambit-core`.
 - `phases/phase-1-type-foundations.md`
 - `phases/phase-2-openrouter-dual-path.md`
 - `phases/phase-3-runtime-state-migration.md`
-- `phases/phase-4-default-switch.md`
-- `phases/phase-5-remove-chat-compat.md`
+- `phases/phase-4-default-switch.md` (complete)
+- `phases/phase-5-remove-chat-compat.md` (deferred)
 
 ## Proposed Phased Approach (Decision-Aligned)
 
