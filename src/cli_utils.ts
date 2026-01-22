@@ -133,7 +133,10 @@ export function extractContextInput(state?: SavedState): unknown {
     return extractContextInputFromItems(state.items);
   }
   if (!state.messages) return undefined;
-  const contextToolNames = new Set([GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT]);
+  const contextToolNames = new Set<string>([
+    GAMBIT_TOOL_CONTEXT,
+    GAMBIT_TOOL_INIT,
+  ]);
   for (let i = state.messages.length - 1; i >= 0; i--) {
     const msg = state.messages[i];
     if (msg.role === "tool" && contextToolNames.has(msg.name ?? "")) {
@@ -152,7 +155,10 @@ export function extractContextInput(state?: SavedState): unknown {
 function extractContextInputFromItems(
   items: NonNullable<SavedState["items"]>,
 ): unknown {
-  const contextToolNames = new Set([GAMBIT_TOOL_CONTEXT, GAMBIT_TOOL_INIT]);
+  const contextToolNames = new Set<string>([
+    GAMBIT_TOOL_CONTEXT,
+    GAMBIT_TOOL_INIT,
+  ]);
   const callNameById = new Map<string, string>();
   for (const item of items) {
     if (item.type === "function_call") {
