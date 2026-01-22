@@ -3,7 +3,7 @@ label = "tone_human_likeness_llm"
 contextSchema = "gambit://schemas/graders/contexts/conversation.ts"
 responseSchema = "../schemas/fact_verifier_output.zod.ts"
 [modelParams]
-model = "openai/gpt-4o-mini"
+model = "openai/gpt-5-mini"
 temperature = 0
 +++
 

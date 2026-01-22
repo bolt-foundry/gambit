@@ -1,9 +1,9 @@
 +++
 label = "Friendliness (turn)"
-contextSchema = "../schemas/turn_by_turn_input.zod.ts"
-responseSchema = "../schemas/fact_verifier_output.zod.ts"
+contextSchema = "gambit://schemas/graders/contexts/turn.ts"
+responseSchema = "gambit://schemas/graders/grader_output.ts"
 [modelParams]
-model = "openai/gpt-4o-mini"
+model = "openai/gpt-5.1-chat"
 temperature = 0
 +++
 

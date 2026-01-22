@@ -974,6 +974,53 @@ Deno.test("responses mode stores response items and calls responses()", async ()
   assert((updatedState?.messages?.length ?? 0) > 0);
 });
 
+Deno.test("responses mode treats empty output as empty string", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "responses-empty.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      responseSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      guardrails: { maxPasses: 1 },
+    });
+    `,
+  );
+
+  let callCount = 0;
+  const provider: ModelProvider = {
+    responses() {
+      callCount += 1;
+      return Promise.resolve({
+        id: "resp_empty",
+        object: "response",
+        output: [],
+      });
+    },
+    chat() {
+      throw new Error("chat should not be called in responses mode");
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: undefined,
+    inputProvided: false,
+    initialUserMessage: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    responsesMode: true,
+  });
+
+  assertEquals(callCount, 1);
+  assertEquals(result, "");
+});
+
 Deno.test("loadState derives messages when only response items are stored", async () => {
   const dir = await Deno.makeTempDir();
   const statePath = path.join(dir, "responses-only.json");
