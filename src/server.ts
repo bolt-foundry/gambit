@@ -525,6 +525,7 @@ export function startWebSocketSimulator(opts: {
     appendDurableStreamEvent(TEST_BOT_STREAM_ID, payload);
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
+  let deckLabel: string | undefined = undefined;
   const enrichStateWithSession = (state: SavedState): {
     state: SavedState;
     dir?: string;
@@ -1159,6 +1160,9 @@ export function startWebSocketSimulator(opts: {
     .then((deck) => {
       resolvedDeckPath = deck.path;
       deckSlug = deckSlugFromPath(resolvedDeckPath);
+      deckLabel = typeof deck.label === "string"
+        ? deck.label
+        : toDeckLabel(deck.path);
       availableTestDecks = (deck.testDecks ?? []).map((testDeck, index) => {
         const label = testDeck.label && typeof testDeck.label === "string"
           ? testDeck.label
@@ -2678,9 +2682,14 @@ export function startWebSocketSimulator(opts: {
             { status: 500 },
           );
         }
-        return new Response(simulatorReactHtml(resolvedDeckPath), {
-          headers: { "content-type": "text/html; charset=utf-8" },
-        });
+        await deckLoadPromise.catch(() => null);
+        const resolvedLabel = deckLabel ?? toDeckLabel(resolvedDeckPath);
+        return new Response(
+          simulatorReactHtml(resolvedDeckPath, resolvedLabel),
+          {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        );
       }
 
       if (url.pathname === "/schema") {
@@ -2879,8 +2888,10 @@ async function readRemoteBundle(
   }
 }
 
-function simulatorReactHtml(deckPath: string): string {
-  const deckLabel = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
+  const safeDeckPath = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const safeDeckLabel =
+    deckLabel?.replaceAll("<", "&lt;").replaceAll(">", "&gt;") ?? null;
   const bundleStamp = (() => {
     try {
       const stat = Deno.statSync(simulatorBundlePath);
@@ -2907,7 +2918,8 @@ function simulatorReactHtml(deckPath: string): string {
 <body>
   <div id="root"></div>
   <script>
-    window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(deckLabel)};
+    window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(safeDeckPath)};
+    window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
   </script>
   <script type="module" src="${bundleUrl}"></script>
 </body>

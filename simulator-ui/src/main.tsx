@@ -8,459 +8,74 @@ import React, {
 import { createRoot } from "react-dom/client";
 import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
-import { classNames, formatTimestamp, formatTimestampShort } from "./utils.ts";
-
-type NormalizedSchema = {
-  kind:
-    | "string"
-    | "number"
-    | "boolean"
-    | "enum"
-    | "object"
-    | "array"
-    | "unknown";
-  optional: boolean;
-  description?: string;
-  example?: unknown;
-  defaultValue?: unknown;
-  enumValues?: Array<unknown>;
-  fields?: Record<string, NormalizedSchema>;
-  items?: NormalizedSchema;
-};
-
-type SchemaResponse = {
-  deck?: string;
-  schema?: NormalizedSchema;
-  defaults?: unknown;
-  error?: string;
-};
-
-type ModelMessage = {
-  role: string;
-  content: string | null;
-  name?: string;
-  tool_call_id?: string;
-  tool_calls?: Array<{
-    id: string;
-    type: "function";
-    function: { name: string; arguments: string };
-  }>;
-};
-
-type MessageRef = { id: string; role: string };
-
-type FeedbackEntry = {
-  id: string;
-  runId: string;
-  messageRefId: string;
-  score: number;
-  reason?: string;
-  createdAt?: string;
-};
-
-type SavedState = {
-  runId: string;
-  messages: ModelMessage[];
-  messageRefs?: MessageRef[];
-  feedback?: FeedbackEntry[];
-  traces?: TraceEvent[];
-  notes?: SessionNotes;
-  conversationScore?: SessionRating;
-  meta?: Record<string, unknown>;
-};
-
-type SessionNotes = {
-  text?: string;
-  updatedAt?: string;
-};
-
-type SessionRating = {
-  score: number;
-  updatedAt?: string;
-};
-
-type TraceEvent = {
-  type?: string;
-  runId?: string;
-  deckPath?: string;
-  message?: ModelMessage;
-  [key: string]: unknown;
-};
-
-type SessionMeta = {
-  id: string;
-  deck?: string;
-  deckSlug?: string;
-  testBotName?: string;
-  createdAt?: string;
-  sessionDir?: string;
-  statePath?: string;
-};
-
-type GraderDeckMeta = {
-  id: string;
-  label: string;
-  description?: string;
-  path: string;
-};
-
-type CalibrationRun = {
-  id: string;
-  graderId: string;
-  graderPath: string;
-  graderLabel?: string;
-  status: "running" | "completed" | "error";
-  runAt?: string;
-  referenceSample?: {
-    score: number;
-    reason: string;
-    evidence?: string[];
-  };
-  input?: unknown;
-  result?: unknown;
-  error?: string;
-};
-
-type GradingFlag = {
-  id: string;
-  refId: string;
-  runId?: string;
-  turnIndex?: number;
-  reason?: string;
-  createdAt?: string;
-};
-
-type SessionDetailResponse = {
-  sessionId: string;
-  messages: ModelMessage[];
-  messageRefs?: MessageRef[];
-  feedback?: FeedbackEntry[];
-  meta?: Record<string, unknown>;
-};
-
-type CalibrateSession = SessionMeta & {
-  gradingRuns?: Array<CalibrationRun>;
-};
-
-type CalibrateResponse = {
-  graderDecks?: Array<GraderDeckMeta>;
-  sessions?: Array<CalibrateSession>;
-};
-
-type CalibrateStreamMessage = {
-  type: "calibrateSession";
-  sessionId: string;
-  run: CalibrationRun;
-  session: CalibrateSession;
-};
-
-type CalibrateRef = {
-  runId?: string;
-  turnIndex?: number;
-};
-
-type TestBotRun = {
-  id?: string;
-  status: "idle" | "running" | "completed" | "error" | "canceled";
-  sessionId?: string;
-  error?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  maxTurns?: number;
-  messages: Array<{
-    role: string;
-    content: string;
-    messageRefId?: string;
-    feedback?: FeedbackEntry;
-  }>;
-  traces?: TraceEvent[];
-  toolInserts?: Array<{
-    actionCallId?: string;
-    parentActionCallId?: string;
-    name?: string;
-    index: number;
-  }>;
-};
-
-function countUserMessages(
-  messages: Array<{ role: string; content: string }>,
-) {
-  return messages.filter((m) => m.role === "user").length;
-}
-
-function countAssistantMessages(
-  messages: Array<{ role?: string; content?: unknown }>,
-) {
-  return messages.filter((m) => m.role === "assistant").length;
-}
-
-function extractScoreAndReason(result: unknown): {
-  score?: number;
-  reason?: string;
-} {
-  if (!result || typeof result !== "object") return {};
-  const record = result as Record<string, unknown>;
-  const payload = record.payload &&
-      typeof record.payload === "object" &&
-      record.payload !== null
-    ? record.payload as Record<string, unknown>
-    : record;
-  const score = typeof payload.score === "number" ? payload.score : undefined;
-  const reason = typeof payload.reason === "string"
-    ? payload.reason
-    : undefined;
-  return { score, reason };
-}
-
-function extractScoreAndReasonFromSample(sample?: {
-  score?: number;
-  reason?: string;
-}): { score?: number; reason?: string } {
-  if (!sample) return {};
-  return {
-    score: typeof sample.score === "number" ? sample.score : undefined,
-    reason: typeof sample.reason === "string" ? sample.reason : undefined,
-  };
-}
-
-function extractGradingFlags(meta?: Record<string, unknown>): GradingFlag[] {
-  if (!meta) return [];
-  const flags = (meta as { gradingFlags?: unknown }).gradingFlags;
-  if (!Array.isArray(flags)) return [];
-  return flags.filter((flag): flag is GradingFlag =>
-    Boolean(flag && typeof flag === "object" && "refId" in flag)
-  );
-}
-
-function formatSnippet(value: unknown, maxLength = 140): string {
-  if (value === null || value === undefined) return "";
-  const text = typeof value === "string" ? value : (() => {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  })();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1)}…`;
-}
-
-function getScoreClass(displayScore?: number): string {
-  if (displayScore === undefined) return "calibrate-score--empty";
-  if (displayScore > 0) return "calibrate-score--positive";
-  if (displayScore < 0) return "calibrate-score--negative";
-  return "calibrate-score--neutral";
-}
-
-function extractTurnContext(input?: unknown): {
-  priorUser?: string;
-  gradedAssistant?: string;
-} {
-  if (!input || typeof input !== "object") return {};
-  const record = input as Record<string, unknown>;
-  const session = record.session;
-  const messageToGrade = record.messageToGrade;
-  const gradedAssistant = messageToGrade &&
-      typeof messageToGrade === "object" &&
-      typeof (messageToGrade as { content?: unknown }).content === "string"
-    ? String((messageToGrade as { content?: string }).content)
-    : undefined;
-  const messages = session &&
-      typeof session === "object" &&
-      Array.isArray((session as { messages?: unknown }).messages)
-    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
-      .messages
-    : [];
-  let priorUser: string | undefined = undefined;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg || msg.role !== "user") continue;
-    if (typeof msg.content === "string") {
-      priorUser = msg.content;
-      break;
-    }
-  }
-  return { priorUser, gradedAssistant };
-}
-
-function extractTotalTurns(input?: unknown): number | undefined {
-  if (!input || typeof input !== "object") return undefined;
-  const record = input as Record<string, unknown>;
-  const session = record.session;
-  const messages = session &&
-      typeof session === "object" &&
-      Array.isArray((session as { messages?: unknown }).messages)
-    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
-      .messages
-    : Array.isArray((record as { messages?: unknown }).messages)
-    ? (record as { messages: Array<{ role?: string; content?: unknown }> })
-      .messages
-    : [];
-  const total = countAssistantMessages(messages);
-  return total > 0 ? total : undefined;
-}
-
-function extractTotalTurnsFromResult(result?: unknown): number | undefined {
-  if (!result || typeof result !== "object") return undefined;
-  const record = result as Record<string, unknown>;
-  if (record.mode !== "turns") return undefined;
-  const totalTurns = typeof record.totalTurns === "number"
-    ? record.totalTurns
-    : undefined;
-  const turns = Array.isArray(record.turns) ? record.turns : undefined;
-  if (typeof totalTurns === "number") return totalTurns;
-  return turns ? turns.length : undefined;
-}
-
-function isTurnsResult(result?: unknown): boolean {
-  if (!result || typeof result !== "object") return false;
-  return (result as { mode?: unknown }).mode === "turns";
-}
-
-function extractConversationContext(input?: unknown): {
-  latestUser?: string;
-  latestAssistant?: string;
-} {
-  if (!input || typeof input !== "object") return {};
-  const record = input as Record<string, unknown>;
-  const session = record.session;
-  const messages = session &&
-      typeof session === "object" &&
-      Array.isArray((session as { messages?: unknown }).messages)
-    ? (session as { messages: Array<{ role?: string; content?: unknown }> })
-      .messages
-    : [];
-  let latestUser: string | undefined = undefined;
-  let latestAssistant: string | undefined = undefined;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg) continue;
-    if (!latestAssistant && msg.role === "assistant") {
-      if (typeof msg.content === "string") {
-        latestAssistant = msg.content;
-      }
-    }
-    if (!latestUser && msg.role === "user") {
-      if (typeof msg.content === "string") {
-        latestUser = msg.content;
-      }
-    }
-    if (latestUser && latestAssistant) break;
-  }
-  return { latestUser, latestAssistant };
-}
-
-type TestBotStreamEvent = {
-  type: "testBotStream";
-  runId?: string;
-  role: "user" | "assistant";
-  chunk: string;
-  turn?: number;
-  ts?: number;
-};
-
-type TestBotStreamEndEvent = {
-  type: "testBotStreamEnd";
-  runId?: string;
-  role: "user" | "assistant";
-  turn?: number;
-  ts?: number;
-};
-
-type TestBotStatusEvent = {
-  type: "testBotStatus";
-  run?: TestBotRun;
-};
-
-type TestBotSocketMessage =
-  | TestBotStreamEvent
-  | TestBotStreamEndEvent
-  | TestBotStatusEvent;
-
-type TestDeckMeta = {
-  id: string;
-  label: string;
-  description?: string;
-  path: string;
-};
-
-type TestBotConfigResponse = {
-  botPath?: string | null;
-  botLabel?: string | null;
-  botDescription?: string | null;
-  selectedDeckId?: string | null;
-  testDecks?: Array<TestDeckMeta>;
-  inputSchema?: NormalizedSchema | null;
-  inputSchemaError?: string | null;
-  defaults?: { input?: unknown } | null;
-};
-
-type SimulatorMessage =
-  | {
-    type: "ready";
-    deck?: string;
-    port?: number;
-    schema?: NormalizedSchema;
-    defaults?: unknown;
-    schemaError?: string;
-  }
-  | { type: "state"; state: SavedState }
-  | { type: "trace"; event: TraceEvent }
-  | { type: "stream"; chunk: string; runId?: string }
-  | { type: "result"; result: unknown; runId?: string; streamed?: boolean }
-  | { type: "pong" }
-  | { type: "error"; message: string; runId?: string };
-
-const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
-
-const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
-  .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
-const normalizedDeckPath = normalizeFsPath(deckPath);
-const repoRootPath = guessRepoRoot(normalizedDeckPath);
-const deckDisplayPath = toRelativePath(normalizedDeckPath, repoRootPath) ??
-  normalizedDeckPath;
-const SESSIONS_BASE_PATH = "/sessions";
-const DOCS_PATH = "/docs";
-const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
-const DEFAULT_TEST_BOT_PATH = `${SESSIONS_BASE_PATH}/new/test-bot`;
-const CALIBRATE_PATH_SUFFIX = "/calibrate";
-const buildCalibratePath = (sessionId: string) =>
-  `${SESSIONS_BASE_PATH}/${
-    encodeURIComponent(sessionId)
-  }${CALIBRATE_PATH_SUFFIX}`;
-const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
-const SIMULATOR_STREAM_ID = "gambit-simulator";
-const TEST_BOT_STREAM_ID = "gambit-test-bot";
-const CALIBRATE_STREAM_ID = "gambit-calibrate";
-function getDurableStreamOffset(streamId: string): number {
-  try {
-    const raw = window.localStorage.getItem(
-      `gambit.durable-streams.offset.${streamId}`,
-    );
-    const parsed = raw ? Number(raw) : 0;
-    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function setDurableStreamOffset(streamId: string, offset: number) {
-  try {
-    window.localStorage.setItem(
-      `gambit.durable-streams.offset.${streamId}`,
-      String(offset),
-    );
-  } catch {
-    // ignore storage failures
-  }
-}
-
-function buildDurableStreamUrl(streamId: string, offset: number) {
-  const params = new URLSearchParams({ live: "sse", offset: String(offset) });
-  return `${DURABLE_STREAM_PREFIX}${
-    encodeURIComponent(streamId)
-  }?${params.toString()}`;
-}
+import Button from "./gds/Button.tsx";
+import {
+  buildCalibratePath,
+  buildDurableStreamUrl,
+  CALIBRATE_STREAM_ID,
+  classNames,
+  cloneValue,
+  deckDisplayPath,
+  deckLabel,
+  deckPath,
+  DEFAULT_SESSION_PATH,
+  DEFAULT_TEST_BOT_PATH,
+  deriveInitialFromSchema,
+  DOCS_PATH,
+  extractConversationContext,
+  extractGradingFlags,
+  extractInitFromTraces,
+  extractScoreAndReason,
+  extractScoreAndReasonFromSample,
+  extractTotalTurns,
+  extractTotalTurnsFromResult,
+  extractTurnContext,
+  findMissingRequiredFields,
+  formatSnippet,
+  formatTimestamp,
+  formatTimestampShort,
+  getCalibrateRefFromLocation,
+  getCalibrateSessionIdFromLocation,
+  getDurableStreamOffset,
+  getScoreClass,
+  getSessionIdFromPath,
+  isTurnsResult,
+  normalizeAppPath,
+  normalizeBasePath,
+  normalizedDeckPath,
+  normalizeFsPath,
+  parseGradingRef,
+  repoRootPath,
+  SCORE_VALUES,
+  SESSIONS_BASE_PATH,
+  setDurableStreamOffset,
+  SIMULATOR_STREAM_ID,
+  toDeckSlug,
+  toRelativePath,
+} from "./utils.ts";
+import type {
+  CalibrateRef,
+  CalibrateResponse,
+  CalibrateSession,
+  CalibrateStreamMessage,
+  CalibrationRun,
+  GraderDeckMeta,
+  GradingFlag,
+  ModelMessage,
+  SavedState,
+  SessionDetailResponse,
+  SessionMeta,
+  SimulatorMessage,
+  TraceEvent,
+} from "./utils.ts";
+import {
+  ConversationView,
+  CopyBadge,
+  InitPanel,
+  TraceList,
+  useHttpSchema,
+} from "./shared.tsx";
+import TestBotPage from "./TestBotPage.tsx";
 
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
@@ -750,855 +365,6 @@ function useSessions() {
   return { sessions, loading, error, refresh, deleteSession };
 }
 
-function toDeckSlug(input: string): string {
-  const base = input?.split(/[/\\]/).pop() || "deck";
-  const withoutExt = base.replace(/\.[^.]+$/, "");
-  const slug = withoutExt.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
-    /^-+|-+$/g,
-    "",
-  );
-  return slug || "session";
-}
-
-function normalizeBasePath(basePath: string): string {
-  if (basePath === "/") return "";
-  return basePath.replace(/\/+$/, "");
-}
-
-function getSessionIdFromPath(
-  pathname?: string,
-  basePath = SESSIONS_BASE_PATH,
-): string | null {
-  const target = typeof pathname === "string"
-    ? pathname
-    : window.location.pathname;
-  const normalizedTarget = target.replace(/\/+$/, "");
-  const canonical = normalizedTarget.match(
-    /^\/sessions\/([^/]+)(?:\/(debug|calibrate|test-bot))?$/,
-  );
-  if (canonical) {
-    const id = canonical[1];
-    if (id && id !== "new") return decodeURIComponent(id);
-    return null;
-  }
-  const bases = [basePath, "/debug", "/simulate", ""];
-  for (const base of bases) {
-    if (typeof base !== "string") continue;
-    const normalized = normalizeBasePath(base);
-    const prefix = `${normalized}/sessions/`.replace(/^\/\//, "/");
-    if (normalized === "" && !normalizedTarget.startsWith("/sessions/")) {
-      continue;
-    }
-    if (normalized !== "" && !normalizedTarget.startsWith(prefix)) {
-      continue;
-    }
-    const remainder = normalized === ""
-      ? normalizedTarget.slice("/sessions/".length)
-      : normalizedTarget.slice(prefix.length);
-    if (remainder.length > 0 && remainder !== "new") {
-      return decodeURIComponent(remainder);
-    }
-  }
-  return null;
-}
-
-function cloneValue<T>(value: T): T {
-  try {
-    // @ts-ignore structuredClone is available in modern browsers
-    return structuredClone(value);
-  } catch {
-    try {
-      return JSON.parse(JSON.stringify(value));
-    } catch {
-      return value;
-    }
-  }
-}
-
-function normalizeFsPath(input?: string | null): string {
-  if (!input) return "";
-  return input.replace(/\\/g, "/");
-}
-
-function guessRepoRoot(path: string): string | null {
-  const normalized = normalizeFsPath(path);
-  const marker = "/bfmono";
-  const idx = normalized.indexOf(marker);
-  if (idx === -1) return null;
-  return normalized.slice(0, idx + marker.length);
-}
-
-function toRelativePath(
-  path?: string | null,
-  repoRoot?: string | null,
-): string | null {
-  if (!path) return null;
-  const target = normalizeFsPath(path);
-  if (repoRoot) {
-    const normalizedRoot = normalizeFsPath(repoRoot);
-    if (target === normalizedRoot) return "";
-    if (target.startsWith(`${normalizedRoot}/`)) {
-      return target.slice(normalizedRoot.length + 1);
-    }
-  }
-  return target;
-}
-
-function getCalibrateSessionIdFromLocation(): string | null {
-  const pathMatch = window.location.pathname.match(
-    /^\/sessions\/([^/]+)\/calibrate/,
-  );
-  if (pathMatch) return decodeURIComponent(pathMatch[1]);
-  const legacyMatch = window.location.pathname.match(
-    /^\/calibrate\/sessions\/([^/]+)/,
-  );
-  if (legacyMatch) return decodeURIComponent(legacyMatch[1]);
-  const params = new URLSearchParams(window.location.search);
-  const param = params.get("sessionId");
-  return param ? decodeURIComponent(param) : null;
-}
-
-function getCalibrateRefFromLocation(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const ref = params.get("ref");
-  return ref && ref.trim().length ? ref.trim() : null;
-}
-
-function parseGradingRef(ref: string): {
-  runId?: string;
-  turnIndex?: number;
-} {
-  const match = ref.match(
-    /^gradingRun:([^#]+)(?:#turn:(\d+))?$/i,
-  );
-  if (!match) return {};
-  const runId = match[1];
-  const turnIndex = match[2] ? Number(match[2]) : undefined;
-  return {
-    runId: runId || undefined,
-    turnIndex: Number.isFinite(turnIndex) ? turnIndex : undefined,
-  };
-}
-
-function CopyBadge(props: {
-  label: string;
-  displayValue?: string | null;
-  copyValue?: string | null;
-  className?: string;
-}) {
-  const { label, displayValue, copyValue, className } = props;
-  const [copied, setCopied] = useState(false);
-  const timeoutRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
-  const copyTarget = copyValue ?? displayValue;
-  if (!copyTarget) return null;
-  const text = displayValue ?? copyTarget;
-
-  const handleCopy = useCallback(async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(copyTarget);
-      } else {
-        const temp = document.createElement("textarea");
-        temp.value = copyTarget;
-        temp.style.position = "fixed";
-        temp.style.opacity = "0";
-        document.body.appendChild(temp);
-        temp.select();
-        document.execCommand("copy");
-        document.body.removeChild(temp);
-      }
-      setCopied(true);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore copy failures silently
-    }
-  }, [copyTarget]);
-
-  return (
-    <button
-      type="button"
-      className={classNames("copy-badge", className, copied && "copied")}
-      onClick={handleCopy}
-      title={copied ? "Copied!" : `Click to copy ${label}`}
-    >
-      <span className="copy-label">{label}:</span>
-      <code>{text}</code>
-      {copied && <span className="copy-feedback">Copied</span>}
-    </button>
-  );
-}
-
-function getPathValue(value: unknown, path: string[]): unknown {
-  let current: unknown = value;
-  for (const segment of path) {
-    if (
-      !current || typeof current !== "object" ||
-      !(segment in (current as Record<string, unknown>))
-    ) {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-function setPathValue(
-  value: unknown,
-  path: string[],
-  nextValue: unknown,
-): unknown {
-  if (path.length === 0) return nextValue;
-  const root = value && typeof value === "object"
-    ? cloneValue(value as unknown)
-    : {};
-  let cursor = root as Record<string, unknown>;
-  for (let i = 0; i < path.length - 1; i++) {
-    const segment = path[i];
-    const existing = cursor[segment];
-    const next = existing && typeof existing === "object"
-      ? cloneValue(existing as unknown)
-      : {};
-    cursor[segment] = next;
-    cursor = next as Record<string, unknown>;
-  }
-  const last = path[path.length - 1];
-  if (nextValue === undefined) {
-    delete cursor[last];
-  } else {
-    cursor[last] = nextValue;
-  }
-  return root;
-}
-
-function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
-  if (!schema) return undefined;
-  if (schema.defaultValue !== undefined) return cloneValue(schema.defaultValue);
-  if (schema.example !== undefined) return cloneValue(schema.example);
-  switch (schema.kind) {
-    case "object": {
-      const out: Record<string, unknown> = {};
-      for (const [key, child] of Object.entries(schema.fields ?? {})) {
-        const v = deriveInitialFromSchema(child);
-        if (v !== undefined) out[key] = v;
-      }
-      return Object.keys(out).length ? out : {};
-    }
-    case "array": {
-      const item = schema.items
-        ? deriveInitialFromSchema(schema.items)
-        : undefined;
-      return item !== undefined ? [item] : [];
-    }
-    case "boolean":
-      return false;
-    case "number":
-      return undefined;
-    case "string":
-    case "unknown":
-    case "enum":
-    default:
-      return undefined;
-  }
-}
-
-function flattenSchemaLeaves(
-  schema?: NormalizedSchema,
-  prefix: string[] = [],
-): Array<{ path: string[]; schema: NormalizedSchema }> {
-  if (!schema) return [];
-  if (schema.kind === "object" && schema.fields) {
-    const out: Array<{ path: string[]; schema: NormalizedSchema }> = [];
-    for (const [key, child] of Object.entries(schema.fields)) {
-      out.push(...flattenSchemaLeaves(child, [...prefix, key]));
-    }
-    return out;
-  }
-  return [{ path: prefix, schema }];
-}
-
-function findMissingRequiredFields(
-  schema: NormalizedSchema | undefined,
-  value: unknown,
-  prefix: string[] = [],
-): string[] {
-  if (!schema) return [];
-  if (schema.optional) return [];
-
-  if (schema.kind === "object" && schema.fields) {
-    const missing: string[] = [];
-    const asObj = value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : undefined;
-    for (const [key, child] of Object.entries(schema.fields)) {
-      missing.push(
-        ...findMissingRequiredFields(
-          child,
-          asObj ? asObj[key] : undefined,
-          [...prefix, key],
-        ),
-      );
-    }
-    return missing;
-  }
-
-  const key = prefix.join(".") || "(root)";
-  if (value === undefined || value === null) return [key];
-
-  switch (schema.kind) {
-    case "string": {
-      if (typeof value !== "string") return [key];
-      if (value.trim() === "") return [key];
-      return [];
-    }
-    case "number":
-      return typeof value === "number" && Number.isFinite(value) ? [] : [key];
-    case "boolean":
-      return typeof value === "boolean" ? [] : [key];
-    case "enum":
-      return value === "" ? [key] : [];
-    case "array":
-      return Array.isArray(value) && value.length > 0 ? [] : [key];
-    case "unknown":
-      return [];
-    default:
-      return [];
-  }
-}
-
-function extractInitFromTraces(traces?: TraceEvent[]): unknown | undefined {
-  if (!Array.isArray(traces)) return undefined;
-  for (const event of traces) {
-    if (event?.type === "run.start" && "input" in event) {
-      const input = (event as { input?: unknown }).input;
-      if (input !== undefined) return input;
-    }
-  }
-  return undefined;
-}
-
-type ConversationMessage = {
-  id?: string;
-  message: ModelMessage;
-  feedback?: FeedbackEntry;
-};
-
-function ConversationView(props: {
-  messages: ConversationMessage[];
-  header?: React.ReactNode;
-  onScore: (messageRefId: string, score: number) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
-  emptyState?: React.ReactNode;
-}) {
-  const { messages, header, onScore, onReasonChange, emptyState } = props;
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [messages.length]);
-
-  return (
-    <div className="chat-column" ref={containerRef}>
-      {header}
-      {messages.map((entry, idx) => (
-        <MessageBubble
-          key={entry.id ?? idx}
-          entry={entry}
-          onScore={onScore}
-          onReasonChange={onReasonChange}
-        />
-      ))}
-      {messages.length === 0 && (
-        emptyState ?? (
-          <div className="empty-state">
-            <p>No conversation yet. Start a new chat to begin testing.</p>
-          </div>
-        )
-      )}
-    </div>
-  );
-}
-
-function MessageBubble(props: {
-  entry: ConversationMessage;
-  onScore: (messageRefId: string, score: number) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
-}) {
-  const { entry, onScore, onReasonChange } = props;
-  const role = entry.message.role;
-  const isTool = role === "tool";
-  const className = classNames(
-    "bubble",
-    role === "user" ? "bubble-user" : "bubble-assistant",
-  );
-  const messageRefId = entry.id;
-  const content = entry.message.content ?? "";
-  return (
-    <div className="chat-row">
-      <div className={className}>
-        <div className="bubble-role">{role}</div>
-        {content && !isTool && (
-          <div
-            className="bubble-text"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-          />
-        )}
-        {content && isTool && (
-          <pre className="bubble-json">
-            {content}
-          </pre>
-        )}
-        {!content && entry.message.tool_calls && (
-          <pre className="bubble-json">
-            {JSON.stringify(entry.message.tool_calls, null, 2)}
-          </pre>
-        )}
-        {messageRefId && role !== "user" && (
-          <FeedbackControls
-            messageRefId={messageRefId}
-            feedback={entry.feedback}
-            onScore={onScore}
-            onReasonChange={onReasonChange}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function renderMarkdown(text: string) {
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(
-    /\n/g,
-    "<br />",
-  );
-}
-
-function FeedbackControls(props: {
-  messageRefId: string;
-  feedback?: FeedbackEntry;
-  onScore: (messageRefId: string, score: number) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
-}) {
-  const { messageRefId, feedback, onScore, onReasonChange } = props;
-  const [reason, setReason] = useState(feedback?.reason ?? "");
-  const [opened, setOpened] = useState(false);
-  const [localScore, setLocalScore] = useState<number | null>(null);
-  const [status, setStatus] = useState<
-    "idle" | "unsaved" | "saving" | "saved"
-  >("idle");
-  const lastSentRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    setReason(feedback?.reason ?? "");
-    if (feedback?.reason !== undefined) {
-      setStatus("saved");
-    } else {
-      setStatus("idle");
-    }
-  }, [feedback?.reason]);
-
-  useEffect(() => {
-    if (typeof feedback?.score === "number") {
-      setLocalScore(feedback.score);
-      setOpened(true);
-    }
-  }, [feedback?.score]);
-
-  const effectiveScore = typeof feedback?.score === "number"
-    ? feedback.score
-    : localScore;
-
-  useEffect(() => {
-    if (typeof effectiveScore !== "number") return;
-    if (status !== "unsaved") return;
-    const handle = window.setTimeout(() => {
-      setStatus("saving");
-      lastSentRef.current = reason;
-      onReasonChange(messageRefId, effectiveScore, reason);
-    }, 650);
-    return () => window.clearTimeout(handle);
-  }, [effectiveScore, status, reason, onReasonChange, messageRefId]);
-
-  useEffect(() => {
-    if (status !== "saving") return;
-    if (feedback?.reason === reason && lastSentRef.current === reason) {
-      setStatus("saved");
-    }
-  }, [status, feedback?.reason, reason]);
-
-  const showReason = opened ||
-    typeof effectiveScore === "number" ||
-    (feedback?.reason !== undefined && feedback.reason.length > 0);
-
-  return (
-    <div className="feedback-controls">
-      <div className="feedback-scores">
-        {SCORE_VALUES.map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={classNames(
-              "score-button",
-              effectiveScore === value && "score-button-active",
-            )}
-            onClick={() => {
-              setOpened(true);
-              setLocalScore(value);
-              onScore(messageRefId, value);
-            }}
-          >
-            {value}
-          </button>
-        ))}
-      </div>
-      {showReason && (
-        <>
-          <textarea
-            className="feedback-reason"
-            placeholder="Why?"
-            value={reason}
-            onChange={(e) => {
-              setReason(e.target.value);
-              setStatus("unsaved");
-            }}
-            onBlur={() => {
-              if (typeof effectiveScore !== "number") return;
-              if (status !== "unsaved") return;
-              setStatus("saving");
-              lastSentRef.current = reason;
-              onReasonChange(messageRefId, effectiveScore, reason);
-            }}
-          />
-          <div
-            className={classNames(
-              "feedback-status",
-              status === "saving" && "saving",
-              status === "unsaved" && "unsaved",
-            )}
-          >
-            {status === "saving" && "Saving…"}
-            {status === "saved" && "Saved"}
-            {status === "unsaved" && "Unsaved changes…"}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function TraceList(props: { traces: TraceEvent[] }) {
-  const { traces } = props;
-  const ordered = traces;
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const entries = useMemo(() => {
-    const depthMap = new Map<string, number>();
-    return ordered.map((trace) => {
-      let depth = 0;
-      if (
-        "actionCallId" in trace &&
-        typeof trace.actionCallId === "string"
-      ) {
-        const parentId = "parentActionCallId" in trace &&
-            typeof trace.parentActionCallId === "string" &&
-            trace.parentActionCallId.length
-          ? trace.parentActionCallId
-          : undefined;
-        if (trace.type === "deck.start" || trace.type === "action.start") {
-          const parentDepth = parentId && depthMap.has(parentId)
-            ? depthMap.get(parentId)!
-            : -1;
-          depth = parentDepth + 1;
-          depthMap.set(trace.actionCallId, depth);
-        } else {
-          const existing = depthMap.get(trace.actionCallId);
-          if (existing !== undefined) {
-            depth = existing;
-          } else if (parentId && depthMap.has(parentId)) {
-            depth = depthMap.get(parentId)! + 1;
-          }
-        }
-      }
-      return { trace, depth };
-    });
-  }, [ordered]);
-
-  useEffect(() => {
-    const el = panelRef.current;
-    if (!el) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [traces.length]);
-
-  return (
-    <div className="trace-panel" ref={panelRef}>
-      <h3>Traces & Tools</h3>
-      <div className="trace-list">
-        {entries.map(({ trace, depth }, idx) => {
-          const isUser = trace.type === "message.user";
-          return (
-            <div
-              key={idx}
-              className={classNames("trace-row", isUser && "trace-row-user")}
-              style={depth > 0
-                ? {
-                  marginLeft: depth * 12,
-                  borderLeft: "2px solid #e2e8f0",
-                  paddingLeft: 8,
-                }
-                : undefined}
-            >
-              <strong>{trace.type ?? "trace"}</strong>
-              {trace.message?.content && (
-                <div className="trace-text">{trace.message.content}</div>
-              )}
-              {!trace.message?.content && (
-                <pre className="trace-json">
-                  {JSON.stringify(trace, null, 2)}
-                </pre>
-              )}
-            </div>
-          );
-        })}
-        {traces.length === 0 && (
-          <div className="trace-empty">No trace events yet.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-type ToolCallSummary = {
-  id: string;
-  name?: string;
-  status: "pending" | "running" | "completed" | "error";
-  args?: unknown;
-  result?: unknown;
-  error?: unknown;
-  handledError?: string;
-  parentActionCallId?: string;
-  depth?: number;
-};
-
-function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
-  const handled = new Map<string, string>();
-  const contextToolNames = new Set(["gambit_context", "gambit_init"]);
-  for (const trace of traces) {
-    if (!trace || typeof trace !== "object") continue;
-    if (trace.type !== "tool.result") continue;
-    const name = typeof (trace as { name?: unknown }).name === "string"
-      ? (trace as { name?: string }).name
-      : undefined;
-    if (!name || !contextToolNames.has(name)) continue;
-    const result = (trace as { result?: unknown }).result as
-      | Record<string, unknown>
-      | undefined;
-    if (!result || result.kind !== "error") continue;
-    const source = result.source as Record<string, unknown> | undefined;
-    const actionName = typeof source?.actionName === "string"
-      ? source.actionName
-      : undefined;
-    const errorObj = result.error as { message?: unknown } | undefined;
-    const errorMessage = typeof errorObj?.message === "string"
-      ? errorObj.message
-      : undefined;
-    if (actionName && errorMessage) {
-      handled.set(actionName, errorMessage);
-    }
-  }
-  return handled;
-}
-
-function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
-  const order: ToolCallSummary[] = [];
-  const byId = new Map<string, ToolCallSummary>();
-  const depthMap = new Map<string, number>();
-  for (const trace of traces) {
-    if (!trace || typeof trace !== "object") continue;
-    const type = typeof trace.type === "string" ? trace.type : "";
-    const actionCallId = typeof (trace as { actionCallId?: unknown })
-        .actionCallId === "string"
-      ? (trace as { actionCallId?: string }).actionCallId
-      : undefined;
-    const parentActionCallId = typeof (trace as {
-        parentActionCallId?: unknown;
-      }).parentActionCallId === "string"
-      ? (trace as { parentActionCallId?: string }).parentActionCallId
-      : undefined;
-    if (
-      (type === "deck.start" || type === "action.start") && actionCallId
-    ) {
-      const parentDepth = parentActionCallId && depthMap.has(parentActionCallId)
-        ? depthMap.get(parentActionCallId)!
-        : -1;
-      depthMap.set(actionCallId, parentDepth + 1);
-      continue;
-    }
-    if (!type.startsWith("tool.") || !actionCallId) continue;
-    let summary = byId.get(actionCallId);
-    if (!summary) {
-      summary = {
-        id: actionCallId,
-        name: typeof trace.name === "string" ? trace.name : undefined,
-        status: "pending",
-      };
-      byId.set(actionCallId, summary);
-      order.push(summary);
-    }
-    if (typeof trace.name === "string") summary.name = trace.name;
-    if (type === "tool.call") {
-      if ("args" in trace) {
-        summary.args = (trace as { args?: unknown }).args;
-      }
-      summary.status = "running";
-      summary.parentActionCallId = parentActionCallId;
-      const parentDepth = parentActionCallId && depthMap.has(parentActionCallId)
-        ? depthMap.get(parentActionCallId)!
-        : -1;
-      const nextDepth = parentDepth + 1;
-      summary.depth = summary.depth ?? nextDepth;
-      depthMap.set(actionCallId, nextDepth);
-    } else if (type === "tool.result") {
-      if ("result" in trace) {
-        summary.result = (trace as { result?: unknown }).result;
-      }
-      summary.status = "completed";
-    } else if (type === "tool.error") {
-      if ("error" in trace) {
-        summary.error = (trace as { error?: unknown }).error;
-      }
-      summary.status = "error";
-    }
-  }
-  const handled = findHandledErrors(traces);
-  order.forEach((summary) => {
-    if (!summary.name) return;
-    const errorMessage = handled.get(summary.name);
-    if (errorMessage) {
-      summary.handledError = errorMessage;
-    }
-  });
-  return order;
-}
-
-function ToolCallField(props: {
-  label: string;
-  value: unknown;
-  isError?: boolean;
-}) {
-  const { label, value, isError } = props;
-  let text: string;
-  if (typeof value === "string") {
-    text = value;
-  } else {
-    try {
-      text = JSON.stringify(value, null, 2);
-    } catch {
-      text = String(value);
-    }
-  }
-  return (
-    <div className="tool-call-field">
-      <div className="tool-call-field-label">{label}</div>
-      <pre
-        className={classNames(
-          "trace-json",
-          isError && "tool-call-error",
-        )}
-      >
-        {text}
-      </pre>
-    </div>
-  );
-}
-
-function ToolCallBubble(props: { call: ToolCallSummary }) {
-  const { call } = props;
-  const [open, setOpen] = useState(false);
-  const statusLabel = call.status === "completed"
-    ? "Completed"
-    : call.status === "error"
-    ? "Error"
-    : call.status === "running"
-    ? "Running"
-    : "Pending";
-  const indentStyle = call.depth && call.depth > 0
-    ? { marginLeft: call.depth * 12 }
-    : undefined;
-  return (
-    <div className="imessage-row left tool-call-row" style={indentStyle}>
-      <div className="imessage-bubble left tool-call-bubble">
-        <button
-          type="button"
-          className="tool-call-collapse"
-          onClick={() => setOpen((prev) => !prev)}
-        >
-          <div className="tool-call-header">
-            <div className="tool-call-title">
-              Tool call: <strong>{call.name ?? call.id}</strong>
-            </div>
-            <div
-              className={classNames(
-                "tool-call-status",
-                `status-${call.status}`,
-              )}
-            >
-              {statusLabel}
-            </div>
-            {call.handledError && (
-              <div className="tool-call-handled">Error handled</div>
-            )}
-          </div>
-          <div className="tool-call-id">{call.id}</div>
-          <div className="tool-call-expand">
-            {open ? "Hide details" : "Show details"}
-          </div>
-        </button>
-        {open && (
-          <div className="tool-call-detail">
-            {call.args !== undefined && (
-              <ToolCallField label="Arguments" value={call.args} />
-            )}
-            {call.result !== undefined && (
-              <ToolCallField label="Result" value={call.result} />
-            )}
-            {call.error !== undefined && (
-              <ToolCallField label="Error" value={call.error} isError />
-            )}
-            {call.handledError && (
-              <>
-                <div className="tool-call-divider" />
-                <ToolCallField
-                  label="Handled error"
-                  value={call.handledError}
-                  isError
-                />
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function SessionModal(props: {
   open: boolean;
   sessions: SessionMeta[];
@@ -1625,10 +391,10 @@ function SessionModal(props: {
       <div className="sessions-dialog">
         <header>
           <h2>Sessions</h2>
-          <button type="button" onClick={onClose}>Close</button>
+          <Button variant="ghost" onClick={onClose}>Close</Button>
         </header>
         <div className="sessions-body">
-          <button type="button" onClick={onRefresh}>Refresh</button>
+          <Button variant="secondary" onClick={onRefresh}>Refresh</Button>
           {loading && <p>Loading sessions…</p>}
           {error && <p className="error">{error}</p>}
           <ul>
@@ -1709,385 +475,20 @@ function RecentSessionsEmptyState(props: {
         </div>
       )}
       <div className="empty-state-actions">
-        <button type="button" className="ghost-btn" onClick={onOpenAll}>
+        <Button variant="ghost" onClick={onOpenAll}>
           View all sessions
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
-function useHttpSchema() {
-  const [schemaResponse, setSchemaResponse] = useState<SchemaResponse | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/schema");
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as SchemaResponse;
-      setSchemaResponse(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load schema");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  return { schemaResponse, loading, error, refresh };
-}
-
-function JsonInputField(props: {
-  value: unknown;
-  optional: boolean;
-  placeholder?: string;
-  onChange: (value: unknown) => void;
-  onErrorChange?: (error: string | null) => void;
-}) {
-  const { value, optional, placeholder, onChange, onErrorChange } = props;
-  const onChangeRef = useRef(onChange);
-  const onErrorChangeRef = useRef(onErrorChange);
-  const [text, setText] = useState(() => {
-    if (value === undefined) return "";
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  });
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    onChangeRef.current = onChange;
-    onErrorChangeRef.current = onErrorChange;
-  }, [onChange, onErrorChange]);
-
-  useEffect(() => {
-    if (dirty) return;
-    if (value === undefined) {
-      setText("");
-      return;
-    }
-    try {
-      setText(JSON.stringify(value, null, 2));
-    } catch {
-      setText(String(value));
-    }
-  }, [value, dirty]);
-
-  useEffect(() => {
-    onErrorChangeRef.current?.(error);
-  }, [error]);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const handle = window.setTimeout(() => {
-      const trimmed = text.trim();
-      if (trimmed === "") {
-        if (optional) {
-          setError(null);
-          onChangeRef.current(undefined);
-        } else {
-          setError("Required");
-        }
-        return;
-      }
-      try {
-        const parsed = JSON.parse(text);
-        setError(null);
-        onChangeRef.current(parsed);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Invalid JSON");
-      }
-    }, 500);
-    return () => window.clearTimeout(handle);
-  }, [dirty, text, optional]);
-
-  return (
-    <>
-      <textarea
-        value={text}
-        placeholder={placeholder}
-        onChange={(e) => {
-          setText(e.target.value);
-          setDirty(true);
-        }}
-      />
-      {error && <div className="error">{error}</div>}
-    </>
-  );
-}
-
-function InitForm(props: {
-  schema: NormalizedSchema;
-  value: unknown;
-  onChange: (next: unknown) => void;
-  onJsonErrorChange: (pathKey: string, error: string | null) => void;
-}) {
-  const { schema, value, onChange, onJsonErrorChange } = props;
-  const leaves = useMemo(() => flattenSchemaLeaves(schema), [schema]);
-
-  return (
-    <div className="init-grid">
-      {leaves.map(({ path, schema: fieldSchema }) => {
-        const pathKey = path.join(".");
-        const label = pathKey || "input";
-        const fieldValue = getPathValue(value, path);
-        const badgeText = fieldSchema.optional ? "optional" : "required";
-        const description = fieldSchema.description;
-
-        const setFieldValue = (nextFieldValue: unknown) => {
-          const nextRoot = setPathValue(value, path, nextFieldValue);
-          onChange(nextRoot);
-        };
-
-        return (
-          <div className="init-field" key={pathKey}>
-            <label>
-              <span>{label}</span>
-              <span className="badge">{badgeText}</span>
-            </label>
-            {description && <div className="secondary-note">{description}</div>}
-            {fieldSchema.kind === "string" && (
-              <input
-                value={typeof fieldValue === "string" ? fieldValue : ""}
-                placeholder={fieldSchema.optional ? "" : "required"}
-                onChange={(e) =>
-                  setFieldValue(
-                    e.target.value === "" && fieldSchema.optional
-                      ? undefined
-                      : e.target.value,
-                  )}
-              />
-            )}
-            {fieldSchema.kind === "number" && (
-              <input
-                type="number"
-                value={typeof fieldValue === "number" ? String(fieldValue) : ""}
-                placeholder={fieldSchema.optional ? "" : "required"}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === "" && fieldSchema.optional) {
-                    setFieldValue(undefined);
-                    return;
-                  }
-                  const parsed = Number(raw);
-                  setFieldValue(Number.isFinite(parsed) ? parsed : undefined);
-                }}
-              />
-            )}
-            {fieldSchema.kind === "boolean" && (
-              <label style={{ fontWeight: 600, justifyContent: "flex-start" }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(fieldValue)}
-                  onChange={(e) =>
-                    setFieldValue(e.target.checked)}
-                />
-                <span>{Boolean(fieldValue) ? "true" : "false"}</span>
-              </label>
-            )}
-            {fieldSchema.kind === "enum" && (
-              <select
-                value={fieldValue === undefined ? "" : String(fieldValue)}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === "" && fieldSchema.optional) {
-                    setFieldValue(undefined);
-                    return;
-                  }
-                  setFieldValue(raw);
-                }}
-              >
-                <option value="">
-                  {fieldSchema.optional ? "— optional —" : "Select"}
-                </option>
-                {(fieldSchema.enumValues ?? []).map((opt) => (
-                  <option key={String(opt)} value={String(opt)}>
-                    {String(opt)}
-                  </option>
-                ))}
-              </select>
-            )}
-            {(fieldSchema.kind === "array" || fieldSchema.kind === "unknown" ||
-              fieldSchema.kind === "object") &&
-              (
-                <JsonInputField
-                  value={fieldValue}
-                  optional={fieldSchema.optional}
-                  placeholder="JSON"
-                  onChange={(nextVal) => {
-                    onJsonErrorChange(pathKey, null);
-                    setFieldValue(nextVal);
-                  }}
-                  onErrorChange={(err) => onJsonErrorChange(pathKey, err)}
-                />
-              )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function InitPanel(props: {
-  schema: NormalizedSchema;
-  value: unknown;
-  lockedValue: unknown;
-  editable: boolean;
-  mode: "form" | "json";
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onModeChange: (mode: "form" | "json") => void;
-  missingRequired: string[];
-  jsonErrorCount: number;
-  rootJsonText: string;
-  rootJsonError: string | null;
-  onRootJsonChange: (
-    text: string,
-    error: string | null,
-    parsed?: unknown,
-  ) => void;
-  schemaError?: string;
-  onChange: (next: unknown) => void;
-  onJsonErrorChange: (pathKey: string, err: string | null) => void;
-}) {
-  const {
-    schema,
-    value,
-    lockedValue,
-    editable,
-    mode,
-    open,
-    onOpenChange,
-    onModeChange,
-    missingRequired,
-    jsonErrorCount,
-    rootJsonText,
-    rootJsonError,
-    onRootJsonChange,
-    schemaError,
-    onChange,
-    onJsonErrorChange,
-  } = props;
-
-  const summaryLabel = editable
-    ? "Init input (required before chat)"
-    : "Init input (locked)";
-  const summaryValue = editable ? value : lockedValue;
-
-  return (
-    <details
-      className="init-panel"
-      open={open}
-      onToggle={(e) =>
-        onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary>{summaryLabel}</summary>
-      {schemaError && <div className="error">Schema error: {schemaError}</div>}
-      <div className="hint">
-        Fields are generated from the deck input schema. You can use the form or
-        a raw JSON payload. Start a new chat to change init.
-      </div>
-      {editable && (
-        <>
-          <div className="panel-tabs" style={{ marginTop: 6 }}>
-            <button
-              type="button"
-              className={classNames("panel-tab", mode === "form" && "active")}
-              onClick={() => onModeChange("form")}
-            >
-              Form
-            </button>
-            <button
-              type="button"
-              className={classNames("panel-tab", mode === "json" && "active")}
-              onClick={() => onModeChange("json")}
-            >
-              JSON
-            </button>
-          </div>
-          {mode === "form"
-            ? (
-              <InitForm
-                schema={schema}
-                value={value}
-                onChange={onChange}
-                onJsonErrorChange={onJsonErrorChange}
-              />
-            )
-            : (
-              <div className="init-field">
-                <label>
-                  <span>Init JSON</span>
-                  <span className="badge">root</span>
-                </label>
-                <textarea
-                  className="json-input"
-                  value={rootJsonText}
-                  placeholder="Paste full init JSON payload"
-                  onChange={(e) => {
-                    const text = e.target.value;
-                    let error: string | null = null;
-                    let parsed: unknown = undefined;
-                    if (text.trim() === "") {
-                      parsed = undefined;
-                    } else {
-                      try {
-                        parsed = JSON.parse(text);
-                      } catch (err) {
-                        error = err instanceof Error
-                          ? err.message
-                          : "Invalid JSON";
-                      }
-                    }
-                    onRootJsonChange(text, error, parsed);
-                  }}
-                  style={{ minHeight: 140 }}
-                />
-                {rootJsonError && <div className="error">{rootJsonError}</div>}
-                {!rootJsonError && (
-                  <div className="secondary-note">
-                    Leave blank to unset init. Parsed JSON replaces the form.
-                  </div>
-                )}
-              </div>
-            )}
-          {(missingRequired.length > 0 || jsonErrorCount > 0) && (
-            <div className="init-missing">
-              {missingRequired.length > 0 && (
-                <div>
-                  Missing required: {missingRequired.slice(0, 6).join(", ")}
-                  {missingRequired.length > 6 ? "…" : ""}
-                </div>
-              )}
-              {jsonErrorCount > 0 && (
-                <div>Fix invalid JSON fields to continue.</div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-      {!editable && (
-        <pre className="init-summary-json">
-          {JSON.stringify(summaryValue ?? {}, null, 2)}
-        </pre>
-      )}
-    </details>
-  );
-}
-
-function SimulatorApp({ basePath }: { basePath: string }) {
+function SimulatorApp(
+  { basePath, setNavActions }: {
+    basePath: string;
+    setNavActions?: (actions: React.ReactNode | null) => void;
+  },
+) {
   const simulator = useSimulator();
   const httpSchema = useHttpSchema();
   const {
@@ -2434,6 +835,42 @@ function SimulatorApp({ basePath }: { basePath: string }) {
     ? pendingScoreRef.current
     : serverScore;
 
+  useEffect(() => {
+    if (!setNavActions) return;
+    setNavActions(
+      <>
+        {sessionId && (
+          <a
+            href={buildCalibratePath(sessionId)}
+            className="gds-button gds-button--ghost"
+            title="Open Calibrate tab for this session"
+          >
+            Calibrate session
+          </a>
+        )}
+        <Button variant="secondary" onClick={() => setSessionsOpen(true)}>
+          Sessions
+        </Button>
+        <Button
+          variant={pendingReset ? "primary" : "secondary"}
+          onClick={() => startNewChat()}
+        >
+          New Chat
+        </Button>
+        <div className={`status-indicator ${simulator.connectionStatus}`}>
+          {simulator.connectionStatus}
+        </div>
+      </>,
+    );
+    return () => setNavActions(null);
+  }, [
+    pendingReset,
+    setNavActions,
+    sessionId,
+    simulator.connectionStatus,
+    startNewChat,
+  ]);
+
   const deckSessions = useMemo(() => {
     return sessions.filter((session) => {
       if (!session) return false;
@@ -2457,36 +894,6 @@ function SimulatorApp({ basePath }: { basePath: string }) {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <h1>Gambit Debug</h1>
-          <div className="deck-path">{deckPath}</div>
-        </div>
-        <div className="header-actions">
-          {sessionId && (
-            <a
-              href={buildCalibratePath(sessionId)}
-              className="ghost-btn"
-              title="Open Calibrate tab for this session"
-            >
-              Calibrate session
-            </a>
-          )}
-          <button type="button" onClick={() => setSessionsOpen(true)}>
-            Sessions
-          </button>
-          <button
-            type="button"
-            onClick={() => startNewChat()}
-            className={pendingReset ? "primary" : ""}
-          >
-            New Chat
-          </button>
-          <div className={`status-indicator ${simulator.connectionStatus}`}>
-            {simulator.connectionStatus}
-          </div>
-        </div>
-      </header>
       <main className="app-main">
         <ConversationView
           messages={messages}
@@ -2640,17 +1047,17 @@ function SimulatorApp({ basePath }: { basePath: string }) {
           <div className="reset-note">Next message will start a new chat.</div>
         )}
         <div className="composer-actions">
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={handleSend}
             disabled={schema && initEditable && !canStartWithInit}
             data-testid="debug-send"
           >
             {schema && initEditable ? "Start chat" : "Send"}
-          </button>
-          <button type="button" onClick={simulator.reconnect}>
+          </Button>
+          <Button variant="secondary" onClick={simulator.reconnect}>
             Reconnect
-          </button>
+          </Button>
         </div>
         {simulator.errors.map((err, idx) => (
           <div key={idx} className="error">
@@ -2695,7 +1102,12 @@ function SimulatorApp({ basePath }: { basePath: string }) {
   );
 }
 
-function CalibrateApp() {
+function CalibrateApp(
+  { setNavActions, onAppPathChange }: {
+    setNavActions?: (actions: React.ReactNode | null) => void;
+    onAppPathChange?: (path: string) => void;
+  },
+) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [graders, setGraders] = useState<GraderDeckMeta[]>([]);
@@ -2740,7 +1152,8 @@ function CalibrateApp() {
       url.searchParams.delete("ref");
     }
     window.history.replaceState({}, "", url.toString());
-  }, []);
+    onAppPathChange?.(targetPath);
+  }, [onAppPathChange]);
 
   const loadCalibrateData = useCallback(async () => {
     try {
@@ -3298,26 +1711,22 @@ function CalibrateApp() {
 
   const canRun = Boolean(selectedSessionId && selectedGraderId && !running);
 
+  useEffect(() => {
+    if (!setNavActions) return;
+    setNavActions(
+      <Button
+        variant="ghost"
+        onClick={loadCalibrateData}
+        disabled={loading}
+      >
+        Refresh data
+      </Button>,
+    );
+    return () => setNavActions(null);
+  }, [loadCalibrateData, loading, setNavActions]);
+
   return (
     <div className="app-shell calibrate-shell">
-      <header className="app-header">
-        <div>
-          <h1>Gambit Calibrate</h1>
-          <div className="deck-path">
-            Run deck-defined graders against saved sessions.
-          </div>
-        </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            className="ghost-btn"
-            onClick={loadCalibrateData}
-            disabled={loading}
-          >
-            Refresh data
-          </button>
-        </div>
-      </header>
       <main className="calibrate-layout">
         <div className="chat-column calibrate-main-column">
           {error && <div className="error">{error}</div>}
@@ -3411,22 +1820,20 @@ function CalibrateApp() {
                       </div>
                     )}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        className="primary"
+                      <Button
+                        variant="primary"
                         onClick={runGrader}
                         disabled={!canRun}
                       >
                         {running ? "Running…" : "Run grader"}
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-btn"
+                      </Button>
+                      <Button
+                        variant="ghost"
                         onClick={loadCalibrateData}
                         disabled={loading}
                       >
                         Refresh sessions
-                      </button>
+                      </Button>
                     </div>
                   </div>
                   <div
@@ -3576,9 +1983,9 @@ function CalibrateApp() {
                                   : ""}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              className="ghost-btn calibrate-run-toggle"
+                            <Button
+                              variant="ghost"
+                              className="calibrate-run-toggle"
                               onClick={() =>
                                 setExpandedRunId((prev) =>
                                   prev === section.run.id
@@ -3587,7 +1994,7 @@ function CalibrateApp() {
                                 )}
                             >
                               {isExpanded ? "Collapse" : "Expand"}
-                            </button>
+                            </Button>
                           </div>
                           {isExpanded && (
                             <div className="calibrate-run-body">
@@ -3705,10 +2112,9 @@ function CalibrateApp() {
                                       </div>
                                       {!isPending && (
                                         <div className="calibrate-result-actions">
-                                          <button
-                                            type="button"
+                                          <Button
+                                            variant="ghost"
                                             className={classNames(
-                                              "ghost-btn",
                                               "calibrate-flag-btn",
                                               isFlagged && "active",
                                             )}
@@ -3720,10 +2126,10 @@ function CalibrateApp() {
                                               })}
                                           >
                                             {isFlagged ? "Flagged" : "Flag"}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="ghost-btn calibrate-ref-copy"
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            className="calibrate-ref-copy"
                                             onClick={() => {
                                               const basePath =
                                                 selectedSession?.statePath ??
@@ -3750,10 +2156,10 @@ function CalibrateApp() {
                                             {copiedRef === item.key
                                               ? "Copied"
                                               : "Copy ref"}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="ghost-btn calibrate-toggle"
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            className="calibrate-toggle"
                                             onClick={() =>
                                               setExpandedResults((prev) => {
                                                 const nextOpen = !isOpen;
@@ -3792,7 +2198,7 @@ function CalibrateApp() {
                                             {isOpen
                                               ? "Hide details"
                                               : "Show details"}
-                                          </button>
+                                          </Button>
                                         </div>
                                       )}
                                     </div>
@@ -3906,9 +2312,9 @@ function CalibrateApp() {
                                                       </div>
                                                     </div>
                                                   )}
-                                                <button
-                                                  type="button"
-                                                  className="ghost-btn calibrate-toggle"
+                                                <Button
+                                                  variant="ghost"
+                                                  className="calibrate-toggle"
                                                   onClick={() =>
                                                     setShowRawInputs((
                                                       prev,
@@ -3921,7 +2327,7 @@ function CalibrateApp() {
                                                   {showRawInputs[item.key]
                                                     ? "Hide raw input"
                                                     : "Show raw input"}
-                                                </button>
+                                                </Button>
                                                 {showRawInputs[item.key] && (
                                                   <pre className="trace-json">
                                                   {JSON.stringify(
@@ -3959,9 +2365,9 @@ function CalibrateApp() {
                                                     </div>
                                                   </div>
                                                 )}
-                                                <button
-                                                  type="button"
-                                                  className="ghost-btn calibrate-toggle"
+                                                <Button
+                                                  variant="ghost"
+                                                  className="calibrate-toggle"
                                                   onClick={() =>
                                                     setShowRawInputs((
                                                       prev,
@@ -3974,7 +2380,7 @@ function CalibrateApp() {
                                                   {showRawInputs[item.key]
                                                     ? "Hide raw input"
                                                     : "Show raw input"}
-                                                </button>
+                                                </Button>
                                                 {showRawInputs[item.key] && (
                                                   <pre className="trace-json">
                                                   {JSON.stringify(
@@ -4070,9 +2476,8 @@ function CalibrateApp() {
                                                 />
                                               </label>
                                               <div className="calibrate-reference-actions">
-                                                <button
-                                                  type="button"
-                                                  className="ghost-btn"
+                                                <Button
+                                                  variant="ghost"
                                                   onClick={async () => {
                                                     if (!selectedSessionId) {
                                                       return;
@@ -4133,10 +2538,9 @@ function CalibrateApp() {
                                                   }}
                                                 >
                                                   Agree with graded
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  className="primary"
+                                                </Button>
+                                                <Button
+                                                  variant="primary"
                                                   onClick={async () => {
                                                     if (!selectedSessionId) {
                                                       return;
@@ -4194,7 +2598,7 @@ function CalibrateApp() {
                                                   }}
                                                 >
                                                   Save reference
-                                                </button>
+                                                </Button>
                                               </div>
                                             </div>
                                           )}
@@ -4221,13 +2625,9 @@ function CalibrateApp() {
             <strong>Ratings & flags</strong>
             {selectedSession?.statePath && (
               <>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={handleCopyStatePath}
-                >
+                <Button variant="primary" onClick={handleCopyStatePath}>
                   {copiedStatePath ? "Copied" : "Copy state path"}
-                </button>
+                </Button>
                 <p className="calibrate-button-meta">
                   Paste this in your coding assistant to debug the agent.
                 </p>
@@ -4372,7 +2772,7 @@ function CalibrateApp() {
                   )}
                   {sessionDebugHref && (
                     <a
-                      className="ghost-btn"
+                      className="gds-button gds-button--ghost"
                       href={sessionDebugHref}
                       target="_blank"
                       rel="noreferrer"
@@ -4394,1091 +2794,13 @@ function CalibrateApp() {
   );
 }
 
-function TestBotApp(props: {
-  onNavigateToSession: (sessionId: string) => void;
-  onReplaceTestBotSession: (sessionId: string) => void;
-  onResetTestBotSession: () => void;
-  activeSessionId: string | null;
-}) {
-  const {
-    onNavigateToSession,
-    onReplaceTestBotSession,
-    onResetTestBotSession,
-    activeSessionId,
-  } = props;
-  const deckStorageKey = "gambit:test-bot:selected-deck";
-  const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
-  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
-  const [botLabel, setBotLabel] = useState<string | null>(null);
-  const [botDescription, setBotDescription] = useState<string | null>(null);
-  const [botInputSchema, setBotInputSchema] = useState<NormalizedSchema | null>(
-    null,
-  );
-  const [botInputSchemaError, setBotInputSchemaError] = useState<string | null>(
-    null,
-  );
-  const [botInputValue, setBotInputValue] = useState<unknown>(undefined);
-  const [botInputDirty, setBotInputDirty] = useState(false);
-  const [botInputJsonErrors, setBotInputJsonErrors] = useState<
-    Record<string, string | null>
-  >({});
-  const [botInputDefaults, setBotInputDefaults] = useState<unknown>(undefined);
-  const [initialUserMessage, setInitialUserMessage] = useState("");
-  const [run, setRun] = useState<TestBotRun>({
-    status: "idle",
-    messages: [],
-    traces: [],
-    toolInserts: [],
-  });
-  const runRef = useRef<TestBotRun>({
-    status: "idle",
-    messages: [],
-    traces: [],
-    toolInserts: [],
-  });
-  const lastRunMessageCountRef = useRef(0);
-  const [toolCallsOpen, setToolCallsOpen] = useState<
-    Record<number, boolean>
-  >({});
-  const [latencyByTurn, setLatencyByTurn] = useState<
-    Record<number, number>
-  >({});
-  const lastUserEndByTurnRef = useRef<Record<number, number>>({});
-  const firstAssistantTokenByTurnRef = useRef<Record<number, boolean>>({});
-
-  useEffect(() => {
-    lastRunMessageCountRef.current = 0;
-    setToolCallsOpen({});
-    setLatencyByTurn({});
-    lastUserEndByTurnRef.current = {};
-    firstAssistantTokenByTurnRef.current = {};
-  }, [run.id]);
-  const [streamingUser, setStreamingUser] = useState<
-    {
-      runId: string;
-      turn: number;
-      text: string;
-      expectedUserCount?: number;
-    } | null
-  >(null);
-  const [streamingAssistant, setStreamingAssistant] = useState<
-    {
-      runId: string;
-      turn: number;
-      text: string;
-    } | null
-  >(null);
-  const deckSchema = useHttpSchema();
-  const deckInputSchema = deckSchema.schemaResponse?.schema;
-  const deckSchemaDefaults = deckSchema.schemaResponse?.defaults;
-  const deckSchemaError = deckSchema.schemaResponse?.error ??
-    deckSchema.error ??
-    undefined;
-  const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
-  const [deckInitDirty, setDeckInitDirty] = useState(false);
-  const [deckJsonErrors, setDeckJsonErrors] = useState<
-    Record<string, string | null>
-  >({});
-  const [botPath, setBotPath] = useState<string | null>(null);
-  const pollRef = useRef<number | null>(null);
-  const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const runIdRef = useRef<string | undefined>(undefined);
-
-  const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
-    let storedDeckId: string | null = null;
-    try {
-      storedDeckId = localStorage.getItem(deckStorageKey);
-    } catch {
-      storedDeckId = null;
-    }
-    const requestedDeckId = opts?.deckId ?? storedDeckId ?? undefined;
-    const fetchTestBotConfig = async (deckId?: string) => {
-      const params = new URLSearchParams();
-      if (deckId) params.set("deckPath", deckId);
-      const query = params.toString() ? `?${params.toString()}` : "";
-      return fetch(`/api/test-bot${query}`);
-    };
-    try {
-      let res = await fetchTestBotConfig(requestedDeckId);
-      if (!res.ok && res.status === 400 && requestedDeckId) {
-        try {
-          localStorage.removeItem(deckStorageKey);
-        } catch {
-          // ignore storage failures
-        }
-        res = await fetchTestBotConfig();
-      }
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as TestBotConfigResponse;
-      const decks = Array.isArray(data.testDecks) ? data.testDecks : [];
-      setTestDecks(decks);
-      setBotLabel(typeof data.botLabel === "string" ? data.botLabel : null);
-      setBotDescription(
-        typeof data.botDescription === "string" ? data.botDescription : null,
-      );
-      setBotPath(typeof data.botPath === "string" ? data.botPath : null);
-      const nextDeckId = (() => {
-        if (!decks.length) return null;
-        const requested = data.selectedDeckId ?? requestedDeckId ?? null;
-        if (requested && decks.some((deck) => deck.id === requested)) {
-          return requested;
-        }
-        return decks[0]?.id ?? null;
-      })();
-      setSelectedDeckId(nextDeckId ?? null);
-      setBotInputSchema(data.inputSchema ?? null);
-      setBotInputSchemaError(
-        typeof data.inputSchemaError === "string"
-          ? data.inputSchemaError
-          : null,
-      );
-      setBotInputDirty(false);
-      setBotInputJsonErrors({});
-      setBotInputDefaults(data.defaults?.input);
-      setBotInputValue(data.defaults?.input);
-    } catch (err) {
-      console.error(err);
-    }
-  }, [deckStorageKey]);
-
-  useEffect(() => {
-    loadTestBot();
-  }, [loadTestBot]);
-
-  useEffect(() => {
-    runIdRef.current = run.id;
-    runRef.current = run;
-    setStreamingUser(null);
-    setStreamingAssistant(null);
-  }, [run.id]);
-
-  useEffect(() => {
-    if (!run.sessionId) return;
-    onReplaceTestBotSession(run.sessionId);
-  }, [onReplaceTestBotSession, run.sessionId]);
-
-  useEffect(() => {
-    if (!selectedDeckId) return;
-    try {
-      localStorage.setItem(deckStorageKey, selectedDeckId);
-    } catch {
-      // ignore storage failures
-    }
-  }, [deckStorageKey, selectedDeckId]);
-
-  useEffect(() => {
-    runRef.current = run;
-  }, [run]);
-
-  useEffect(() => {
-    const streamId = TEST_BOT_STREAM_ID;
-    const streamUrl = buildDurableStreamUrl(
-      streamId,
-      getDurableStreamOffset(streamId),
-    );
-    const source = new EventSource(streamUrl);
-
-    source.onopen = () => {
-      console.info("[test-bot] stream open", streamUrl);
-    };
-
-    source.onmessage = (event) => {
-      let envelope: { offset?: unknown; data?: unknown } | null = null;
-      try {
-        envelope = JSON.parse(event.data) as {
-          offset?: unknown;
-          data?: unknown;
-        };
-      } catch {
-        return;
-      }
-      if (
-        envelope &&
-        typeof envelope.offset === "number" &&
-        Number.isFinite(envelope.offset)
-      ) {
-        setDurableStreamOffset(streamId, envelope.offset + 1);
-      }
-      const msg = envelope?.data as TestBotSocketMessage | undefined;
-      if (!msg) return;
-      const activeRunId = runIdRef.current;
-      if (msg.type === "testBotStatus" && msg.run) {
-        if (activeRunId && msg.run.id === activeRunId) {
-          setRun({
-            ...msg.run,
-            messages: msg.run.messages ?? [],
-            traces: msg.run.traces ?? [],
-            toolInserts: msg.run.toolInserts ?? [],
-          });
-        }
-        return;
-      }
-      if (msg.type === "testBotStream") {
-        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
-        const streamRunId = msg.runId;
-        const turn = typeof msg.turn === "number" ? msg.turn : 0;
-        if (msg.role === "assistant") {
-          if (!firstAssistantTokenByTurnRef.current[turn]) {
-            firstAssistantTokenByTurnRef.current[turn] = true;
-            const userEnd = lastUserEndByTurnRef.current[turn];
-            if (typeof userEnd === "number" && typeof msg.ts === "number") {
-              const delta = msg.ts - userEnd;
-              setLatencyByTurn((prev) => ({
-                ...prev,
-                [turn]: delta,
-              }));
-            }
-          }
-        }
-        if (msg.role === "user") {
-          const expectedUserCount = countUserMessages(runRef.current.messages) +
-            1;
-          setStreamingUser((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? { ...prev, text: prev.text + msg.chunk }
-              : {
-                runId: streamRunId,
-                turn,
-                text: msg.chunk,
-                expectedUserCount,
-              }
-          );
-        } else {
-          setStreamingAssistant((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? { ...prev, text: prev.text + msg.chunk }
-              : { runId: streamRunId, turn, text: msg.chunk }
-          );
-        }
-        return;
-      }
-      if (msg.type === "testBotStreamEnd") {
-        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
-        const streamRunId = msg.runId;
-        const turn = typeof msg.turn === "number" ? msg.turn : 0;
-        if (msg.role === "user") {
-          lastUserEndByTurnRef.current[turn] = typeof msg.ts === "number"
-            ? msg.ts
-            : Date.now();
-          delete firstAssistantTokenByTurnRef.current[turn];
-        }
-        if (msg.role === "user") {
-          setStreamingUser((prev) => {
-            if (!prev || prev.runId !== streamRunId || prev.turn !== turn) {
-              return prev;
-            }
-            return prev.expectedUserCount ? prev : {
-              ...prev,
-              expectedUserCount: countUserMessages(runRef.current.messages) +
-                1,
-            };
-          });
-        } else {
-          setStreamingAssistant((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? null
-              : prev
-          );
-        }
-      }
-    };
-
-    source.onerror = (err) => {
-      console.warn("[test-bot] stream error", err);
-    };
-
-    return () => {
-      console.info("[test-bot] stream cleanup");
-      source.close();
-    };
-  }, []);
-
-  const refreshStatus = useCallback(async (
-    opts?: { runId?: string; sessionId?: string },
-  ) => {
-    try {
-      const runId = opts?.runId ?? run.id;
-      const sessionId = opts?.sessionId;
-      const params = new URLSearchParams();
-      if (runId) params.set("runId", runId);
-      if (sessionId) params.set("sessionId", sessionId);
-      const deckParam = testDecks.length
-        ? (selectedDeckId || testDecks[0]?.id || "")
-        : "";
-      if (deckParam) params.set("deckPath", deckParam);
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/test-bot/status${query}`);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as TestBotConfigResponse & {
-        run?: TestBotRun;
-      };
-      const nextRun = data.run ?? { status: "idle", messages: [] };
-      setRun({
-        ...nextRun,
-        messages: nextRun.messages ?? [],
-        traces: nextRun.traces ?? [],
-        toolInserts: nextRun.toolInserts ?? [],
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  }, [run.id, selectedDeckId, testDecks]);
-
-  useEffect(() => {
-    refreshStatus();
-  }, [refreshStatus]);
-
-  useEffect(() => {
-    if (!activeSessionId) return;
-    refreshStatus({ sessionId: activeSessionId });
-  }, [activeSessionId, refreshStatus]);
-
-  useEffect(() => {
-    if (!deckInputSchema) return;
-    if (deckInitDirty) return;
-    const nextInit = deckSchemaDefaults !== undefined
-      ? cloneValue(deckSchemaDefaults)
-      : deriveInitialFromSchema(deckInputSchema);
-    setDeckInitValue(nextInit);
-  }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
-
-  useEffect(() => {
-    if (!botInputSchema) return;
-    if (botInputDirty) return;
-    const nextBotInput = botInputDefaults !== undefined
-      ? cloneValue(botInputDefaults)
-      : deriveInitialFromSchema(botInputSchema);
-    setBotInputValue(nextBotInput);
-  }, [botInputSchema, botInputDirty, botInputDefaults]);
-
-  const missingBotInput = useMemo(() => {
-    if (!botInputSchema) return [];
-    return findMissingRequiredFields(botInputSchema, botInputValue);
-  }, [botInputSchema, botInputValue]);
-
-  const botJsonErrorCount = useMemo(() => {
-    return Object.values(botInputJsonErrors).filter((v) =>
-      typeof v === "string" && v
-    )
-      .length;
-  }, [botInputJsonErrors]);
-
-  const missingDeckInit = useMemo(() => {
-    if (!deckInputSchema) return [];
-    return findMissingRequiredFields(deckInputSchema, deckInitValue);
-  }, [deckInputSchema, deckInitValue]);
-
-  const deckJsonErrorCount = useMemo(() => {
-    return Object.values(deckJsonErrors).filter((v) =>
-      typeof v === "string" && v
-    )
-      .length;
-  }, [deckJsonErrors]);
-
-  const toolCallSummaries = useMemo(
-    () => summarizeToolCalls(run.traces ?? []),
-    [run.traces],
-  );
-
-  const toolBuckets = useMemo(() => {
-    const deriveInsertsFromTraces = (
-      traces: TraceEvent[],
-      messageCount: number,
-    ) => {
-      const inserts: Array<{
-        actionCallId?: string;
-        parentActionCallId?: string;
-        name?: string;
-        index: number;
-      }> = [];
-      let messageIndex = 0;
-      for (const trace of traces) {
-        if (!trace || typeof trace !== "object") continue;
-        const traceRecord = trace as Record<string, unknown>;
-        const type = typeof traceRecord.type === "string"
-          ? traceRecord.type
-          : "";
-        if (type === "message.user") {
-          messageIndex++;
-          continue;
-        }
-        if (type === "model.result") {
-          const finishReason = typeof traceRecord.finishReason === "string"
-            ? traceRecord.finishReason
-            : "";
-          if (finishReason !== "tool_calls") {
-            messageIndex++;
-          }
-          continue;
-        }
-        if (type === "tool.call") {
-          const actionCallId = typeof traceRecord.actionCallId === "string"
-            ? traceRecord.actionCallId
-            : undefined;
-          const parentActionCallId =
-            typeof traceRecord.parentActionCallId === "string"
-              ? traceRecord.parentActionCallId
-              : undefined;
-          const name = typeof traceRecord.name === "string"
-            ? traceRecord.name
-            : undefined;
-          inserts.push({
-            actionCallId,
-            parentActionCallId,
-            name,
-            index: Math.min(messageIndex, messageCount),
-          });
-        }
-      }
-      return inserts;
-    };
-    const map = new Map<number, ToolCallSummary[]>();
-    if (!toolCallSummaries.length) return map;
-    const traceInserts = Array.isArray(run.traces) && run.traces.length > 0
-      ? deriveInsertsFromTraces(run.traces, run.messages.length)
-      : [];
-    const insertMap = new Map<
-      string,
-      { index: number; name?: string; parentActionCallId?: string }
-    >();
-    const inserts = traceInserts.length > 0 ? traceInserts : run.toolInserts ??
-      [];
-    inserts.forEach((insert) => {
-      if (
-        typeof insert?.index === "number" &&
-        insert.index >= 0 &&
-        insert.actionCallId
-      ) {
-        insertMap.set(insert.actionCallId, {
-          index: insert.index,
-          name: insert.name ?? undefined,
-          parentActionCallId: insert.parentActionCallId ?? undefined,
-        });
-      }
-    });
-    for (const call of toolCallSummaries) {
-      const insert = call.id ? insertMap.get(call.id) : undefined;
-      const index = insert?.index ?? run.messages.length;
-      const enriched = insert
-        ? {
-          ...call,
-          name: call.name ?? insert.name,
-          parentActionCallId: call.parentActionCallId ??
-            insert.parentActionCallId,
-        }
-        : call;
-      const bucket = map.get(index);
-      if (bucket) {
-        bucket.push(enriched);
-      } else {
-        map.set(index, [enriched]);
-      }
-    }
-    return map;
-  }, [toolCallSummaries, run.toolInserts, run.traces, run.messages.length]);
-  const assistantLatencyByMessageIndex = useMemo(() => {
-    const map: Record<number, number> = {};
-    let assistantTurn = 0;
-    run.messages.forEach((msg, index) => {
-      if (msg.role !== "assistant") return;
-      const latency = latencyByTurn[assistantTurn];
-      if (typeof latency === "number") {
-        map[index] = latency;
-      }
-      assistantTurn += 1;
-    });
-    return map;
-  }, [run.messages, latencyByTurn]);
-  const canRunPersona = testDecks.length > 0;
-  const hasPersonaSelection = canRunPersona && Boolean(selectedDeckId);
-  const canStart = hasPersonaSelection &&
-    (!botInputSchema || missingBotInput.length === 0) &&
-    (!deckInputSchema || missingDeckInit.length === 0) &&
-    botJsonErrorCount === 0 &&
-    deckJsonErrorCount === 0;
-
-  useEffect(() => {
-    if (run.status !== "running") {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-      return;
-    }
-    pollRef.current = window.setInterval(() => {
-      refreshStatus();
-    }, 1500);
-    return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
-    };
-  }, [run.status, refreshStatus]);
-
-  useEffect(() => {
-    if (
-      streamingUser?.expectedUserCount !== undefined &&
-      streamingUser.runId === run.id &&
-      countUserMessages(run.messages) >= streamingUser.expectedUserCount
-    ) {
-      setStreamingUser(null);
-    }
-    if (run.status !== "running" && streamingUser) {
-      setStreamingUser(null);
-    }
-    const el = transcriptRef.current;
-    if (!el) return;
-    const shouldScroll = run.messages.length > lastRunMessageCountRef.current ||
-      Boolean(streamingUser?.text || streamingAssistant?.text);
-    lastRunMessageCountRef.current = run.messages.length;
-    if (!shouldScroll) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    run.id,
-    run.messages.length,
-    run.status,
-    streamingUser,
-    streamingAssistant?.text,
-  ]);
-
-  const startRun = useCallback(async () => {
-    try {
-      const res = await fetch("/api/test-bot/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          init: deckInitValue,
-          botInput: botInputValue,
-          initialUserMessage,
-          botDeckPath: selectedDeckId ?? undefined,
-        }),
-      });
-      const data = await res.json() as { run?: TestBotRun };
-      if (data.run) {
-        setRun({
-          ...data.run,
-          messages: data.run.messages ?? [],
-          traces: data.run.traces ?? [],
-          toolInserts: data.run.toolInserts ?? [],
-        });
-      } else {
-        setRun({
-          status: "running",
-          messages: [],
-          traces: [],
-          toolInserts: [],
-        });
-      }
-      refreshStatus({ runId: data.run?.id });
-    } catch (err) {
-      console.error(err);
-    }
-  }, [
-    deckInitValue,
-    botInputValue,
-    initialUserMessage,
-    refreshStatus,
-    selectedDeckId,
-  ]);
-
-  const stopRun = useCallback(async () => {
-    if (!run.id) return;
-    try {
-      await fetch("/api/test-bot/stop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: run.id }),
-      });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      refreshStatus({ runId: run.id });
-    }
-  }, [refreshStatus, run.id]);
-
-  const handleNewChat = useCallback(async () => {
-    if (run.status === "running") {
-      await stopRun();
-    }
-    setRun({
-      status: "idle",
-      messages: [],
-      traces: [],
-      toolInserts: [],
-    });
-    onResetTestBotSession();
-  }, [onResetTestBotSession, run.status, stopRun]);
-
-  const saveTestBotFeedback = useCallback(
-    async (messageRefId: string, score: number, reason?: string) => {
-      if (!run.sessionId) return;
-      try {
-        const res = await fetch("/api/session/feedback", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: run.sessionId,
-            messageRefId,
-            score,
-            reason,
-          }),
-        });
-        if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json() as { feedback?: FeedbackEntry };
-        if (data.feedback) {
-          setRun((prev) => ({
-            ...prev,
-            messages: prev.messages.map((msg) =>
-              msg.messageRefId === messageRefId
-                ? { ...msg, feedback: data.feedback }
-                : msg
-            ),
-          }));
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    },
-    [run.sessionId],
-  );
-
-  const handleTestBotScore = useCallback(
-    (messageRefId: string, score: number) => {
-      saveTestBotFeedback(messageRefId, score);
-    },
-    [saveTestBotFeedback],
-  );
-
-  const handleTestBotReason = useCallback(
-    (messageRefId: string, score: number, reason: string) => {
-      saveTestBotFeedback(messageRefId, score, reason);
-    },
-    [saveTestBotFeedback],
-  );
-
-  const handleDeckSelection = useCallback(async (nextId: string) => {
-    if (!nextId) return;
-    if (nextId === selectedDeckId) return;
-    await handleNewChat();
-    setSelectedDeckId(nextId);
-    loadTestBot({ deckId: nextId });
-  }, [handleNewChat, loadTestBot, selectedDeckId]);
-
-  const runStatusLabel = run.status === "running"
-    ? "Running test bot…"
-    : run.status === "completed"
-    ? "Completed"
-    : run.status === "error"
-    ? "Failed"
-    : run.status === "canceled"
-    ? "Stopped"
-    : "Idle";
-
-  return (
-    <div className="editor-shell">
-      <div className="editor-header">
-        <div>
-          <h1 className="editor-title">Test Bot</h1>
-          <div className="editor-status">
-            Active deck: <code>{deckPath}</code>
-          </div>
-        </div>
-        <div className="header-actions">
-          <button type="button" className="primary" onClick={handleNewChat}>
-            New chat
-          </button>
-        </div>
-      </div>
-      <div className="editor-main">
-        <div
-          className="editor-panel test-bot-sidebar"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <strong>Persona deck</strong>
-          {testDecks.length > 0 && (
-            <select
-              value={selectedDeckId ?? ""}
-              onChange={(e) => handleDeckSelection(e.target.value)}
-              style={{
-                width: "100%",
-                borderRadius: 10,
-                border: "1px solid #cbd5e1",
-                padding: 8,
-                fontFamily: "inherit",
-              }}
-            >
-              {testDecks.map((deck) => (
-                <option key={deck.id} value={deck.id}>
-                  {deck.label}
-                </option>
-              ))}
-            </select>
-          )}
-          {testDecks.length === 0 && (
-            <div className="placeholder">
-              No deck-defined personas found. Add <code>[[testDecks]]</code>
-              {" "}
-              to your deck front matter to drive the Test Bot.
-            </div>
-          )}
-          <div className="editor-status">
-            {botLabel ?? "Persona"} · <code>{botPath ?? "unknown path"}</code>
-          </div>
-          {botDescription && <div className="placeholder">{botDescription}
-          </div>}
-          <strong>Scenario (Test Bot input)</strong>
-          {botInputSchemaError && (
-            <div className="error">{botInputSchemaError}</div>
-          )}
-          {botInputSchema && (
-            <InitForm
-              schema={botInputSchema}
-              value={botInputValue}
-              onChange={(next) => {
-                setBotInputValue(next);
-                setBotInputDirty(true);
-              }}
-              onJsonErrorChange={(pathKey, err) =>
-                setBotInputJsonErrors((prev) =>
-                  prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
-                )}
-            />
-          )}
-          {!botInputSchema && (
-            <div className="placeholder">
-              No test bot input schema configured.
-            </div>
-          )}
-          <strong>Initial user message (optional)</strong>
-          <textarea
-            data-testid="testbot-initial-message"
-            value={initialUserMessage}
-            onChange={(e) => setInitialUserMessage(e.target.value)}
-            style={{
-              width: "100%",
-              minHeight: 90,
-              resize: "vertical",
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #cbd5e1",
-              fontFamily: "inherit",
-            }}
-            placeholder="If provided, this is sent as the first user message."
-          />
-          <div className="placeholder">
-            Persona content is managed by the selected deck. Edit{" "}
-            <code>{botPath ?? "the referenced deck"}</code>{" "}
-            to change its behavior.
-          </div>
-        </div>
-        <div
-          className="editor-panel"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <div style={{ display: "flex", flexDirection: "row", gap: 8 }}>
-            <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-              <strong>Latest test run</strong>
-              <div className="editor-status">{runStatusLabel}</div>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "row-reverse",
-                gap: 8,
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                type="button"
-                className="primary"
-                onClick={startRun}
-                disabled={!canStart}
-                data-testid="testbot-run"
-              >
-                Run test bot
-              </button>
-              <button
-                type="button"
-                className="ghost-btn"
-                onClick={stopRun}
-                disabled={run.status !== "running"}
-                data-testid="testbot-stop"
-              >
-                Stop
-              </button>
-            </div>
-          </div>
-          {run.error && <div className="error">{run.error}</div>}
-          {run.sessionId && (
-            <div className="editor-status">
-              Session:{" "}
-              <code data-testid="testbot-session-id">{run.sessionId}</code>
-            </div>
-          )}
-          {run.sessionId && (
-            <button
-              type="button"
-              className="ghost-btn"
-              onClick={() => onNavigateToSession(run.sessionId!)}
-            >
-              Open in debug
-            </button>
-          )}
-          {!canStart && canRunPersona && (
-            <div className="error">
-              {!hasPersonaSelection
-                ? "Select a persona deck to run."
-                : botJsonErrorCount > 0 || deckJsonErrorCount > 0
-                ? "Fix invalid JSON fields to run."
-                : missingBotInput.length > 0
-                ? `Missing required bot inputs: ${
-                  missingBotInput.slice(0, 6).join(", ")
-                }${missingBotInput.length > 6 ? "…" : ""}`
-                : missingDeckInit.length > 0
-                ? `Missing required init fields: ${
-                  missingDeckInit.slice(0, 6).join(", ")
-                }${missingDeckInit.length > 6 ? "…" : ""}`
-                : ""}
-            </div>
-          )}
-          <div
-            className="imessage-thread"
-            ref={transcriptRef}
-          >
-            {run.messages.length === 0 && (
-              <div className="placeholder">No messages yet.</div>
-            )}
-            {(() => {
-              const rows: React.ReactNode[] = [];
-              const renderToolBucket = (index: number) => {
-                const bucket = toolBuckets.get(index);
-                if (!bucket || bucket.length === 0) return;
-                const isOpen = Boolean(toolCallsOpen[index]);
-                let latencyLabel: string | null = null;
-                for (let i = index; i < run.messages.length; i += 1) {
-                  if (run.messages[i]?.role === "assistant") {
-                    const latency = assistantLatencyByMessageIndex[i];
-                    if (typeof latency === "number") {
-                      latencyLabel = `${Math.max(0, Math.round(latency))}ms`;
-                    }
-                    break;
-                  }
-                }
-                rows.push(
-                  <div
-                    key={`tool-bucket-${index}`}
-                    className="tool-calls-collapsible"
-                  >
-                    <button
-                      type="button"
-                      className="tool-calls-toggle"
-                      onClick={() =>
-                        setToolCallsOpen((prev) => ({
-                          ...prev,
-                          [index]: !prev[index],
-                        }))}
-                    >
-                      <span className="tool-calls-toggle-label">
-                        Tool calls ({bucket.length})
-                        {latencyLabel ? ` · ${latencyLabel}` : ""} ·{" "}
-                        {isOpen ? "Hide" : "Show"}
-                      </span>
-                    </button>
-                    {isOpen && (
-                      <div className="tool-calls-list">
-                        {bucket.map((call, callIdx) => (
-                          <ToolCallBubble
-                            key={`tool-${call.id}-${index}-${callIdx}`}
-                            call={call}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>,
-                );
-              };
-              renderToolBucket(0);
-              run.messages.forEach((m, idx) => {
-                rows.push(
-                  <div
-                    key={`${m.role}-${idx}`}
-                    className={`imessage-row ${
-                      m.role === "user" ? "left" : "right"
-                    }`}
-                  >
-                    <div
-                      className={`imessage-bubble ${
-                        m.role === "user" ? "right" : "left"
-                      }`}
-                      title={m.role}
-                    >
-                      {m.content}
-                      {m.messageRefId && run.sessionId && (
-                        <FeedbackControls
-                          messageRefId={m.messageRefId}
-                          feedback={m.feedback}
-                          onScore={handleTestBotScore}
-                          onReasonChange={handleTestBotReason}
-                        />
-                      )}
-                    </div>
-                  </div>,
-                );
-                renderToolBucket(idx + 1);
-              });
-              return rows;
-            })()}
-            {streamingUser?.text && streamingUser.runId === run.id &&
-              (streamingUser.expectedUserCount === undefined ||
-                countUserMessages(run.messages) <
-                  streamingUser.expectedUserCount) &&
-              (
-                <div className="imessage-row left">
-                  <div
-                    className="imessage-bubble right imessage-bubble-muted"
-                    title="user"
-                  >
-                    {streamingUser.text}
-                  </div>
-                </div>
-              )}
-            {streamingAssistant?.text && streamingAssistant.runId === run.id &&
-              (
-                <div className="imessage-row right">
-                  <div
-                    className="imessage-bubble left imessage-bubble-muted"
-                    title="assistant"
-                  >
-                    {streamingAssistant.text}
-                  </div>
-                </div>
-              )}
-          </div>
-        </div>
-        <div
-          className="editor-panel"
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
-          <strong>Deck to test</strong>
-          <div className="editor-status">
-            <code>{deckPath}</code>
-          </div>
-          <strong>Context (gambit_context)</strong>
-          {deckSchema.loading && (
-            <div className="editor-status">Loading schema…</div>
-          )}
-          {deckSchemaError && <div className="error">{deckSchemaError}</div>}
-          {deckInputSchema && (
-            <>
-              <InitForm
-                schema={deckInputSchema}
-                value={deckInitValue}
-                onChange={(next) => {
-                  setDeckInitValue(next);
-                  setDeckInitDirty(true);
-                }}
-                onJsonErrorChange={(pathKey, err) =>
-                  setDeckJsonErrors((prev) =>
-                    prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
-                  )}
-              />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => {
-                    setDeckInitDirty(false);
-                    setDeckJsonErrors({});
-                    const nextInit = deckSchemaDefaults !== undefined
-                      ? cloneValue(deckSchemaDefaults)
-                      : deriveInitialFromSchema(deckInputSchema);
-                    setDeckInitValue(nextInit);
-                  }}
-                >
-                  Reset init
-                </button>
-                <button
-                  type="button"
-                  className="ghost-btn"
-                  onClick={() => deckSchema.refresh()}
-                >
-                  Refresh schema
-                </button>
-              </div>
-            </>
-          )}
-          {!deckInputSchema && !deckSchema.loading && (
-            <div className="placeholder">
-              No input schema found for this deck.
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function normalizeAppPath(input: string): string {
-  const trimmed = input.replace(/\/+$/, "") || "/";
-  if (trimmed === "/" || trimmed === "") {
-    if (window.location.pathname !== DOCS_PATH) {
-      window.history.replaceState({}, "", DOCS_PATH);
-    }
-    return DOCS_PATH;
-  }
-  if (trimmed === DOCS_PATH) {
-    if (window.location.pathname !== DOCS_PATH) {
-      window.history.replaceState({}, "", DOCS_PATH);
-    }
-    return DOCS_PATH;
-  }
-  if (trimmed === "/test-bot") {
-    if (window.location.pathname !== DEFAULT_TEST_BOT_PATH) {
-      window.history.replaceState({}, "", DEFAULT_TEST_BOT_PATH);
-    }
-    return DEFAULT_TEST_BOT_PATH;
-  }
-  if (
-    trimmed === "/debug" || trimmed === "/simulate" ||
-    trimmed === SESSIONS_BASE_PATH
-  ) {
-    if (window.location.pathname !== DEFAULT_SESSION_PATH) {
-      window.history.replaceState({}, "", DEFAULT_SESSION_PATH);
-    }
-    return DEFAULT_SESSION_PATH;
-  }
-  if (/^\/sessions\/[^/]+\/(debug|test-bot|calibrate)$/.test(trimmed)) {
-    return trimmed;
-  }
-  if (/^\/sessions\/[^/]+\/calibrate/.test(trimmed)) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("/debug/sessions/")) {
-    const raw = trimmed.slice("/debug/sessions/".length);
-    const decoded = decodeURIComponent(raw);
-    const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
-    window.history.replaceState({}, "", next);
-    return next;
-  }
-  if (
-    trimmed.startsWith("/sessions/") && !trimmed.includes("/debug") &&
-    trimmed !== DEFAULT_SESSION_PATH
-  ) {
-    const remainder = trimmed.slice("/sessions/".length);
-    if (remainder && remainder !== "new") {
-      const decoded = decodeURIComponent(remainder);
-      const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
-      window.history.replaceState({}, "", next);
-      return next;
-    }
-  }
-  return trimmed || DEFAULT_SESSION_PATH;
-}
-
 function App() {
   const simulatorBasePath = SESSIONS_BASE_PATH;
   const [path, setPath] = useState(() =>
     normalizeAppPath(window.location.pathname)
   );
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
+  const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const activeSessionId = getSessionIdFromPath(path);
 
   useEffect(() => {
@@ -5516,6 +2838,9 @@ function App() {
     window.history.replaceState({}, "", next);
     setPath(next);
   }, [path]);
+  const handleAppPathChange = useCallback((next: string) => {
+    setPath(normalizeAppPath(next));
+  }, []);
 
   const isDocs = path === DOCS_PATH;
   const isTestBot = !isDocs && /\/test-bot$/.test(path);
@@ -5544,45 +2869,46 @@ function App() {
       <div className="app-root">
         <div className="top-nav">
           <div className="top-nav-buttons">
-            <button
-              type="button"
-              className={currentPage === "docs" ? "active" : ""}
+            <Button
+              variant={currentPage === "docs" ? "primary" : "secondary"}
               onClick={() => navigate(DOCS_PATH)}
               data-testid="nav-docs"
             >
               Docs
-            </button>
-            <button
-              type="button"
-              className={currentPage === "test-bot" ? "active" : ""}
+            </Button>
+            <Button
+              variant={currentPage === "test-bot" ? "primary" : "secondary"}
               onClick={() => navigate(testBotPath)}
               data-testid="nav-test-bot"
             >
               Test Bot
-            </button>
-            <button
-              type="button"
-              className={currentPage === "calibrate" ? "active" : ""}
+            </Button>
+            <Button
+              variant={currentPage === "calibrate" ? "primary" : "secondary"}
               onClick={() => navigate(calibratePath)}
               data-testid="nav-calibrate"
             >
               Calibrate
-            </button>
-            <button
-              type="button"
-              className={classNames(
-                "top-nav-link",
-                currentPage === "debug" && "active",
-              )}
+            </Button>
+            <Button
+              variant={currentPage === "debug" ? "primary" : "ghost"}
               onClick={() => navigate(debugPath)}
               data-testid="nav-debug"
             >
               Debug
-            </button>
+            </Button>
           </div>
-          <div className="top-nav-info">
+          <div className="top-nav-center">
+            <span className="top-nav-deck" title={deckPath}>
+              {deckLabel}
+            </span>
+          </div>
+          <div className="top-nav-right">
+            {navActions && <div className="top-nav-actions">{navActions}</div>}
             {bundleStamp && (
-              <span className="bundle-stamp">Bundle: {bundleStamp}</span>
+              <div className="top-nav-info">
+                <span className="bundle-stamp">Bundle: {bundleStamp}</span>
+              </div>
             )}
           </div>
         </div>
@@ -5590,16 +2916,15 @@ function App() {
           {currentPage === "docs"
             ? <DocsPage />
             : currentPage === "debug"
-            ? <SimulatorApp basePath={simulatorBasePath} />
+            ? (
+              <SimulatorApp
+                basePath={simulatorBasePath}
+                setNavActions={setNavActions}
+              />
+            )
             : currentPage === "test-bot"
             ? (
-              <TestBotApp
-                onNavigateToSession={(sessionId) =>
-                  navigate(
-                    `${simulatorBasePath}/${
-                      encodeURIComponent(sessionId)
-                    }/debug`,
-                  )}
+              <TestBotPage
                 onReplaceTestBotSession={(sessionId) =>
                   replacePath(
                     `${simulatorBasePath}/${
@@ -5608,9 +2933,15 @@ function App() {
                   )}
                 onResetTestBotSession={() => replacePath(DEFAULT_TEST_BOT_PATH)}
                 activeSessionId={activeSessionId}
+                setNavActions={setNavActions}
               />
             )
-            : <CalibrateApp />}
+            : (
+              <CalibrateApp
+                setNavActions={setNavActions}
+                onAppPathChange={handleAppPathChange}
+              />
+            )}
         </div>
       </div>
     </>

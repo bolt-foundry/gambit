@@ -32,7 +32,10 @@ export default function DocsPage() {
             >
               <span className="docs-icon">🤖</span>
               Start here:
-              <a className="docs-primary-btn" href={DEFAULT_TEST_BOT_PATH}>
+              <a
+                className="gds-button gds-button--primary"
+                href={DEFAULT_TEST_BOT_PATH}
+              >
                 Open Test Bot
               </a>
             </h2>

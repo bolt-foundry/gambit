@@ -94,21 +94,6 @@ body {
   color: #475569;
   font-size: 14px;
 }
-.docs-primary-btn {
-  border-radius: 12px;
-  padding: 10px 18px;
-  background: linear-gradient(135deg, #1d4ed8, #2563eb);
-  color: white;
-  font-weight: 600;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-}
-.docs-primary-btn:hover {
-  background: linear-gradient(135deg, #1e40af, #1d4ed8);
-}
 .docs-callout-body h3 {
   margin: 0 0 8px 0;
   font-size: 16px;
@@ -282,55 +267,6 @@ code:not(pre *) {
   background: white;
   cursor: pointer;
   font-weight: 600;
-}
-button.ghost-btn,
-a.ghost-btn {
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 8px 14px;
-  background: transparent;
-  cursor: pointer;
-  font-weight: 600;
-  text-decoration: none;
-  color: inherit;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-button.ghost-btn:hover,
-a.ghost-btn:hover {
-  border: 1px solid #cbd5e1;
-  background: #f1f5f9;
-}
-button.primary,
-a.primary {
-  border: 1px solid #0b93f6;
-  border-radius: 10px;
-  padding: 8px 14px;
-  background: #0b93f6;
-  color: white;
-  cursor: pointer;
-  font-weight: 600;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-button.primary:hover,
-a.primary:hover {
-  background: #0a83e0;
-  border-color: #0a83e0;
-}
-button.primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.header-actions button.primary {
-  background: #0b93f6;
-  color: white;
-  border-color: #0b93f6;
 }
 .copy-badge {
   display: inline-flex;
@@ -544,10 +480,6 @@ button.primary:disabled {
   font-size: 13px;
   color: #475569;
 }
-.calibrate-drawer .ghost-btn {
-  width: 100%;
-  justify-content: center;
-}
 .calibrate-summary-list {
   display: flex;
   flex-direction: column;
@@ -728,6 +660,26 @@ button.primary:disabled {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
+}
+.badge--idle {
+  background: #e2e8f0;
+  color: #475569;
+}
+.badge--running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.badge--completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+.badge--error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.badge--canceled {
+  background: #fef3c7;
+  color: #b45309;
 }
 .init-field input,
 .init-field select,
@@ -997,8 +949,6 @@ button.primary:disabled {
   font-size: 11px;
 }
 .calibrate-flag-btn {
-  padding: 4px 8px;
-  font-size: 11px;
   border-color: #f59e0b;
   color: #b45309;
 }
@@ -1431,7 +1381,7 @@ button.primary:disabled {
 }
 .top-nav {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 16px;
@@ -1446,31 +1396,34 @@ button.primary:disabled {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 1;
 }
-.top-nav button {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
+.top-nav-center {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: center;
+  min-width: 160px;
+}
+.top-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1;
+  justify-content: flex-end;
+}
+.top-nav-deck {
   font-weight: 600;
-}
-.top-nav button.top-nav-link {
-  border-color: transparent;
-  background: transparent;
   color: #0f172a;
+  font-size: 14px;
 }
-.top-nav button.top-nav-link:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
-}
-.top-nav button.active {
-  background: #0b93f6;
-  color: white;
-  border-color: #0b93f6;
+.top-nav-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 .top-nav-info {
-  margin-left: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1531,8 +1484,14 @@ button.primary:disabled {
   margin: 0;
   font-size: 22px;
 }
+.editor-title-meta {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #64748b;
+}
 .editor-status {
-  font-size: 13px;
+  font-size: 12px;
   color: #475569;
 }
 .editor-main {
@@ -1553,6 +1512,147 @@ button.primary:disabled {
 }
 .editor-panel.test-bot-sidebar {
   overflow-y: auto;
+}
+.flex-row {
+  display: flex;
+  flex-direction: row;
+}
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+.flex-1 {
+  flex: 1;
+}
+.items-center {
+  align-items: center;
+}
+.items-baseline {
+  align-items: baseline;
+}
+.gap-4 {
+  gap: 4px;
+}
+.gap-6 {
+  gap: 6px;
+}
+.gap-8 {
+  gap: 8px;
+}
+.row-reverse {
+  flex-direction: row-reverse;
+}
+.wrap {
+  flex-wrap: wrap;
+}
+.gds-listbox {
+  position: relative;
+}
+.gds-listbox-trigger {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  padding: 8px 30px 8px 10px;
+  font-family: inherit;
+  background: white;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  position: relative;
+}
+.gds-listbox-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.gds-listbox-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+}
+.gds-listbox-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+.gds-listbox-caret {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #64748b;
+}
+.gds-listbox-popover {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  z-index: 20;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.gds-listbox-option {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: inherit;
+  border-radius: 8px;
+  margin: 2px 6px;
+}
+.gds-listbox-option:hover {
+  background: #f1f5f9;
+}
+.gds-listbox-option[aria-selected="true"] {
+  background: #e2e8f0;
+}
+.gds-listbox-option-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f172a;
+}
+.gds-listbox-option-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+.gds-button {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 14px;
+  background: white;
+  cursor: pointer;
+  font-weight: 600;
+  font-family: inherit;
+  text-decoration: none;
+  text-align: center;
+}
+.gds-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.gds-button--primary {
+  background: #0b93f6;
+  color: white;
+  border-color: #0b93f6;
+}
+.gds-button--secondary {
+  background: #f8fafc;
+  color: #0f172a;
+}
+.gds-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #0f172a;
+}
+.gds-button--ghost:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
 .imessage-thread {
   flex: 1;
