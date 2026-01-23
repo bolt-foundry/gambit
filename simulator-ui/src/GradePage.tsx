@@ -6,37 +6,29 @@ import React, {
   useState,
 } from "react";
 import Button from "./gds/Button.tsx";
+import Icon from "./gds/Icon.tsx";
 import Listbox from "./gds/Listbox.tsx";
 import {
   botFilename,
-  buildCalibratePath,
   buildDurableStreamUrl,
-  CALIBRATE_STREAM_ID,
+  buildGradePath,
   classNames,
-  deckDisplayPath,
-  extractConversationContext,
   extractGradingFlags,
   extractScoreAndReason,
-  extractScoreAndReasonFromSample,
   extractTotalTurns,
   extractTotalTurnsFromResult,
   extractTurnContext,
   formatSnippet,
   formatTimestamp,
   formatTimestampShort,
-  getCalibrateRefFromLocation,
-  getCalibrateSessionIdFromLocation,
   getDurableStreamOffset,
+  getGradeRefFromLocation,
+  getGradeSessionIdFromLocation,
   getScoreClass,
+  GRADE_STREAM_ID,
   isTurnsResult,
-  normalizedDeckPath,
-  normalizeFsPath,
   parseGradingRef,
-  repoRootPath,
-  SCORE_VALUES,
-  SESSIONS_BASE_PATH,
   setDurableStreamOffset,
-  toRelativePath,
 } from "./utils.ts";
 import type {
   CalibrateRef,
@@ -49,12 +41,11 @@ import type {
   ModelMessage,
   SessionDetailResponse,
 } from "./utils.ts";
-import { CopyBadge } from "./shared.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 
-function CalibratePage(
+function GradePage(
   { setNavActions, onAppPathChange }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
@@ -78,11 +69,11 @@ function CalibratePage(
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const [copiedStatePath, setCopiedStatePath] = useState(false);
   const initialCalibrateSessionRef = useRef<string | null>(
-    getCalibrateSessionIdFromLocation(),
+    getGradeSessionIdFromLocation(),
   );
   const initialCalibrateRef = useRef<CalibrateRef>(
     (() => {
-      const ref = getCalibrateRefFromLocation();
+      const ref = getGradeRefFromLocation();
       return ref ? parseGradingRef(ref) : {};
     })(),
   );
@@ -91,7 +82,7 @@ function CalibratePage(
     sessionId: string | null,
     opts?: { ref?: string | null },
   ) => {
-    const targetPath = sessionId ? buildCalibratePath(sessionId) : "/calibrate";
+    const targetPath = sessionId ? buildGradePath(sessionId) : "/grade";
     if (window.location.pathname === targetPath) return;
     const url = new URL(window.location.href);
     url.pathname = targetPath;
@@ -153,7 +144,7 @@ function CalibratePage(
   }, [loadCalibrateData]);
 
   useEffect(() => {
-    const streamId = CALIBRATE_STREAM_ID;
+    const streamId = GRADE_STREAM_ID;
     const streamUrl = buildDurableStreamUrl(
       streamId,
       getDurableStreamOffset(streamId),
@@ -249,29 +240,6 @@ function CalibratePage(
     () => graders.find((grader) => grader.id === selectedGraderId) ?? null,
     [graders, selectedGraderId],
   );
-  const sessionDeckDisplay = useMemo(() => {
-    if (!selectedSession?.deck) return null;
-    return toRelativePath(selectedSession.deck, repoRootPath) ??
-      normalizeFsPath(selectedSession.deck);
-  }, [selectedSession]);
-  const sessionDirDisplay = useMemo(() => {
-    if (!selectedSession?.sessionDir) return null;
-    return toRelativePath(selectedSession.sessionDir, repoRootPath) ??
-      normalizeFsPath(selectedSession.sessionDir);
-  }, [selectedSession]);
-  const sessionStateDisplay = useMemo(() => {
-    if (!selectedSession?.statePath) return null;
-    return toRelativePath(selectedSession.statePath, repoRootPath) ??
-      normalizeFsPath(selectedSession.statePath);
-  }, [selectedSession]);
-  const sessionCreatedLabel = useMemo(() => {
-    return selectedSession?.createdAt
-      ? formatTimestamp(selectedSession.createdAt)
-      : null;
-  }, [selectedSession]);
-  const sessionDebugHref = selectedSession
-    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(selectedSession.id)}/debug`
-    : null;
   const sessionRuns = useMemo(() => {
     if (!selectedSession?.gradingRuns) return [];
     return [...selectedSession.gradingRuns].reverse();
@@ -292,11 +260,6 @@ function CalibratePage(
         turnNumber?: number;
         refId: string;
         pending?: boolean;
-        referenceSample?: {
-          score: number;
-          reason: string;
-          evidence?: string[];
-        };
       }> = [];
       const result = run.result;
       if (
@@ -309,11 +272,6 @@ function CalibratePage(
             index?: number;
             input?: unknown;
             result?: unknown;
-            referenceSample?: {
-              score: number;
-              reason: string;
-              evidence?: string[];
-            };
           }>;
         const turnsDescending = [...turns].reverse();
         turnsDescending.forEach((turn, idx) => {
@@ -331,7 +289,6 @@ function CalibratePage(
             turnIndex: turn.index ?? idx,
             turnNumber: assistantTurnNumber,
             refId: `gradingRun:${run.id}#turn:${turn.index ?? idx}`,
-            referenceSample: turn.referenceSample,
           });
         });
         if (run.status === "running") {
@@ -358,7 +315,6 @@ function CalibratePage(
             result: run.result,
             runId: run.id,
             refId: `gradingRun:${run.id}`,
-            referenceSample: run.referenceSample,
           });
         }
       } else {
@@ -383,7 +339,6 @@ function CalibratePage(
             result: run.result,
             runId: run.id,
             refId: `gradingRun:${run.id}`,
-            referenceSample: run.referenceSample,
           });
         }
       }
@@ -460,21 +415,10 @@ function CalibratePage(
   const [highlightedResult, setHighlightedResult] = useState<string | null>(
     null,
   );
-  const [copiedRef, setCopiedRef] = useState<string | null>(null);
   const [flagReasonDrafts, setFlagReasonDrafts] = useState<
     Record<string, string>
   >({});
   const flagReasonTimeoutsRef = useRef<Record<string, number>>({});
-  const [referenceDrafts, setReferenceDrafts] = useState<
-    Record<
-      string,
-      { score: number; reason: string; evidenceText: string }
-    >
-  >({});
-  const [showRawInputs, setShowRawInputs] = useState<Record<string, boolean>>(
-    {},
-  );
-
   useEffect(() => {
     const ref = initialCalibrateRef.current;
     if (!ref.runId) return;
@@ -704,7 +648,7 @@ function CalibratePage(
           <strong>Run a grader</strong>
           {sessions.length === 0 && (
             <div className="placeholder">
-              No sessions found. Run the Test Bot to capture a session before
+              No sessions found. Run the Test view to capture a session before
               calibrating.
             </div>
           )}
@@ -776,10 +720,11 @@ function CalibratePage(
           )}
           {!loading && (
             <>
-              <strong>
-                Recent results {selectedSession &&
-                  `(Session ${selectedSession.id})`}
-              </strong>
+              <div className="flex-column gap-4">
+                <div className="flex-row items-center gap-8">
+                  <strong>Grader runs</strong>
+                </div>
+              </div>
               {runItems.length === 0 && (
                 <div className="placeholder">
                   No grader runs for this session yet.
@@ -832,18 +777,21 @@ function CalibratePage(
                     }
                     if (item) {
                       const graded = extractScoreAndReason(item.result);
-                      const reference = extractScoreAndReasonFromSample(
-                        item.referenceSample,
-                      );
-                      const displayScore = reference.score ??
-                        graded.score;
+                      const displayScore = graded.score;
                       const scoreClass = getScoreClass(displayScore);
+                      const isFlagged = Boolean(
+                        item.refId && flaggedRefSet.has(item.refId),
+                      );
                       return (
                         <span
                           key={`${section.run.id}-turn-${turnLabel}`}
                           className={`calibrate-run-turn ${scoreClass}`}
-                          title={`Turn ${turnLabel}: ${displayScore ?? "—"}`}
-                        />
+                          title={`Turn ${turnLabel}: ${displayScore ?? "—"}${
+                            isFlagged ? " (flagged)" : ""
+                          }`}
+                        >
+                          {isFlagged && <Icon name="flag" size={10} />}
+                        </span>
                       );
                     }
                     return (
@@ -873,18 +821,21 @@ function CalibratePage(
                     }
                     if (item) {
                       const graded = extractScoreAndReason(item.result);
-                      const reference = extractScoreAndReasonFromSample(
-                        item.referenceSample,
-                      );
-                      const displayScore = reference.score ??
-                        graded.score;
+                      const displayScore = graded.score;
                       const scoreClass = getScoreClass(displayScore);
+                      const isFlagged = Boolean(
+                        item.refId && flaggedRefSet.has(item.refId),
+                      );
                       return [
                         <span
                           key={`${section.run.id}-result`}
                           className={`calibrate-run-turn ${scoreClass}`}
-                          title={`Result: ${displayScore ?? "—"}`}
-                        />,
+                          title={`Result: ${displayScore ?? "—"}${
+                            isFlagged ? " (flagged)" : ""
+                          }`}
+                        >
+                          {isFlagged && <Icon name="flag" size={10} />}
+                        </span>,
                       ];
                     }
                     return [];
@@ -928,35 +879,16 @@ function CalibratePage(
                           const graded = extractScoreAndReason(
                             item.result,
                           );
-                          const reference = extractScoreAndReasonFromSample(
-                            item.referenceSample,
-                          );
-                          const displayScore = reference.score ??
-                            graded.score;
-                          const displayReason = reference.reason ??
-                            graded.reason;
+                          const displayScore = graded.score;
+                          const displayReason = graded.reason;
                           const turnContext = extractTurnContext(
                             item.input,
                           );
-                          const conversationContext =
-                            extractConversationContext(item.input);
                           const isPending = Boolean(item.pending);
-                          const delta = reference.score !== undefined &&
-                              graded.score !== undefined
-                            ? reference.score - graded.score
-                            : undefined;
-                          const polarityFlip = graded.score !==
-                              undefined &&
-                            reference.score !== undefined &&
-                            graded.score !== 0 &&
-                            reference.score !== 0 &&
-                            (graded.score > 0) !==
-                              (reference.score > 0);
                           const scoreClass = getScoreClass(displayScore);
                           const isOpen = !isPending && Boolean(
                             expandedResults[item.key],
                           );
-                          const draft = referenceDrafts[item.key];
                           const isFlagged = flaggedRefSet.has(item.refId);
                           return (
                             <div
@@ -999,33 +931,10 @@ function CalibratePage(
                                           formatTimestampShort(item.runAt)
                                         }`
                                         : ""}
-                                      {reference.score !== undefined && (
-                                        <span className="calibrate-score-chip">
-                                          ref
-                                        </span>
-                                      )}
-                                      {delta !== undefined && (
-                                        <span className="calibrate-delta-chip">
-                                          {delta >= 0
-                                            ? `+${delta}`
-                                            : `${delta}`}
-                                        </span>
-                                      )}
-                                      {polarityFlip && (
-                                        <span className="calibrate-alert-chip">
-                                          !
-                                        </span>
-                                      )}
                                     </div>
                                     {displayReason && !isPending && (
                                       <div className="calibrate-result-reason">
                                         {displayReason}
-                                      </div>
-                                    )}
-                                    {reference.score !== undefined &&
-                                      graded.score !== undefined && (
-                                      <div className="calibrate-result-secondary">
-                                        Graded score: {graded.score}
                                       </div>
                                     )}
                                     {isPending && (
@@ -1038,11 +947,15 @@ function CalibratePage(
                                 {!isPending && (
                                   <div className="calibrate-result-actions">
                                     <Button
-                                      variant="ghost"
+                                      variant={isFlagged
+                                        ? "primary-deemph"
+                                        : "ghost"}
                                       className={classNames(
+                                        "flex-1",
                                         "calibrate-flag-btn",
                                         isFlagged && "active",
                                       )}
+                                      aria-label={isFlagged ? "Unflag" : "Flag"}
                                       onClick={() =>
                                         toggleFlag({
                                           refId: item.refId,
@@ -1050,74 +963,27 @@ function CalibratePage(
                                           turnIndex: item.turnIndex,
                                         })}
                                     >
+                                      <Icon name="flag" size={14} />
                                       {isFlagged ? "Flagged" : "Flag"}
                                     </Button>
                                     <Button
-                                      variant="ghost"
-                                      className="calibrate-ref-copy"
-                                      onClick={() => {
-                                        const basePath =
-                                          selectedSession?.statePath ??
-                                            selectedSession?.sessionDir ??
-                                            "";
-                                        const refPath = basePath
-                                          ? `${basePath}#${item.refId}`
-                                          : item.refId;
-                                        navigator.clipboard?.writeText(
-                                          refPath,
-                                        );
-                                        setCopiedRef(item.key);
-                                        window.setTimeout(
-                                          () =>
-                                            setCopiedRef((prev) =>
-                                              prev === item.key ? null : prev
-                                            ),
-                                          1200,
-                                        );
-                                      }}
-                                    >
-                                      {copiedRef === item.key
-                                        ? "Copied"
-                                        : "Copy ref"}
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      className="calibrate-toggle"
+                                      variant={isOpen
+                                        ? "primary-deemph"
+                                        : "ghost"}
+                                      className="flex-1 calibrate-toggle"
+                                      aria-label={isOpen
+                                        ? "Hide raw input"
+                                        : "Show raw input"}
                                       onClick={() =>
-                                        setExpandedResults((prev) => {
-                                          const nextOpen = !isOpen;
-                                          if (
-                                            nextOpen &&
-                                            !referenceDrafts[item.key]
-                                          ) {
-                                            const seedScore = reference.score ??
-                                              NaN;
-                                            const seedReason =
-                                              reference.reason ?? "";
-                                            const seedEvidence =
-                                              item.referenceSample
-                                                  ?.evidence
-                                                ? item.referenceSample
-                                                  .evidence.join("\n")
-                                                : "";
-                                            setReferenceDrafts((
-                                              drafts,
-                                            ) => ({
-                                              ...drafts,
-                                              [item.key]: {
-                                                score: seedScore,
-                                                reason: seedReason,
-                                                evidenceText: seedEvidence,
-                                              },
-                                            }));
-                                          }
-                                          return {
-                                            ...prev,
-                                            [item.key]: nextOpen,
-                                          };
-                                        })}
+                                        setExpandedResults((prev) => ({
+                                          ...prev,
+                                          [item.key]: !isOpen,
+                                        }))}
                                     >
-                                      {isOpen ? "Hide details" : "Show details"}
+                                      <Icon name="circleInfo" size={16} />
+                                      {isOpen
+                                        ? "Hide raw input"
+                                        : "Show raw input"}
                                     </Button>
                                   </div>
                                 )}
@@ -1158,6 +1024,20 @@ function CalibratePage(
                               {item.error && (
                                 <div className="error">{item.error}</div>
                               )}
+                              {isOpen && (
+                                <div className="calibrate-result-details">
+                                  <div className="calibrate-section-title">
+                                    Raw input
+                                  </div>
+                                  <pre className="trace-json">
+                                        {JSON.stringify(
+                                          item.input ?? null,
+                                          null,
+                                          2,
+                                        )}
+                                  </pre>
+                                </div>
+                              )}
                               {item.turnIndex !== undefined &&
                                 !isPending && (
                                 <div className="calibrate-context calibrate-context-compact">
@@ -1183,340 +1063,6 @@ function CalibratePage(
                                   )}
                                 </div>
                               )}
-                              {isOpen && (
-                                <div className="calibrate-result-details">
-                                  <div>
-                                    <div className="calibrate-section-title">
-                                      Graded sample
-                                    </div>
-                                    <pre className="trace-json">
-                                          {JSON.stringify(
-                                            item.result ?? null,
-                                            null,
-                                            2,
-                                          )}
-                                    </pre>
-                                  </div>
-                                  <div>
-                                    <div className="calibrate-section-title">
-                                      Input
-                                    </div>
-                                    {typeof item.messageIndex ===
-                                        "number" && (
-                                      <div className="calibrate-result-meta-line">
-                                        Message index: {item.messageIndex}
-                                      </div>
-                                    )}
-                                    {item.turnIndex !== undefined
-                                      ? (
-                                        <div className="calibrate-context">
-                                          {turnContext.priorUser && (
-                                            <div className="calibrate-context-row">
-                                              <div className="calibrate-context-label">
-                                                Prior user
-                                              </div>
-                                              <div className="calibrate-context-bubble calibrate-context-user">
-                                                {turnContext.priorUser}
-                                              </div>
-                                            </div>
-                                          )}
-                                          {turnContext.gradedAssistant &&
-                                            (
-                                              <div className="calibrate-context-row">
-                                                <div className="calibrate-context-label">
-                                                  Graded assistant
-                                                </div>
-                                                <div className="calibrate-context-bubble calibrate-context-assistant">
-                                                  {turnContext
-                                                    .gradedAssistant}
-                                                </div>
-                                              </div>
-                                            )}
-                                          <Button
-                                            variant="ghost"
-                                            className="calibrate-toggle"
-                                            onClick={() =>
-                                              setShowRawInputs((
-                                                prev,
-                                              ) => ({
-                                                ...prev,
-                                                [item.key]: !prev[item.key],
-                                              }))}
-                                          >
-                                            {showRawInputs[item.key]
-                                              ? "Hide raw input"
-                                              : "Show raw input"}
-                                          </Button>
-                                          {showRawInputs[item.key] && (
-                                            <pre className="trace-json">
-                                                  {JSON.stringify(
-                                                    item.input ?? null,
-                                                    null,
-                                                    2,
-                                                  )}
-                                            </pre>
-                                          )}
-                                        </div>
-                                      )
-                                      : (
-                                        <div className="calibrate-context">
-                                          {conversationContext
-                                            .latestUser && (
-                                            <div className="calibrate-context-row">
-                                              <div className="calibrate-context-label">
-                                                Latest user
-                                              </div>
-                                              <div className="calibrate-context-bubble calibrate-context-user">
-                                                {conversationContext
-                                                  .latestUser}
-                                              </div>
-                                            </div>
-                                          )}
-                                          {conversationContext
-                                            .latestAssistant && (
-                                            <div className="calibrate-context-row">
-                                              <div className="calibrate-context-label">
-                                                Latest assistant
-                                              </div>
-                                              <div className="calibrate-context-bubble calibrate-context-assistant">
-                                                {conversationContext
-                                                  .latestAssistant}
-                                              </div>
-                                            </div>
-                                          )}
-                                          <Button
-                                            variant="ghost"
-                                            className="calibrate-toggle"
-                                            onClick={() =>
-                                              setShowRawInputs((
-                                                prev,
-                                              ) => ({
-                                                ...prev,
-                                                [item.key]: !prev[item.key],
-                                              }))}
-                                          >
-                                            {showRawInputs[item.key]
-                                              ? "Hide raw input"
-                                              : "Show raw input"}
-                                          </Button>
-                                          {showRawInputs[item.key] && (
-                                            <pre className="trace-json">
-                                                  {JSON.stringify(
-                                                    item.input ?? null,
-                                                    null,
-                                                    2,
-                                                  )}
-                                            </pre>
-                                          )}
-                                        </div>
-                                      )}
-                                  </div>
-                                  <div>
-                                    <div className="calibrate-section-title">
-                                      Reference sample
-                                    </div>
-                                    {item.referenceSample
-                                      ? (
-                                        <pre className="trace-json">
-                                              {JSON.stringify(
-                                                item.referenceSample,
-                                                null,
-                                                2,
-                                              )}
-                                        </pre>
-                                      )
-                                      : (
-                                        <div className="placeholder">
-                                          No reference sample yet.
-                                        </div>
-                                      )}
-                                    {draft && (
-                                      <div className="calibrate-reference-form">
-                                        <div className="calibrate-score-buttons">
-                                          {SCORE_VALUES.map((value) => (
-                                            <button
-                                              key={value}
-                                              type="button"
-                                              className={Number.isNaN(
-                                                  draft.score,
-                                                )
-                                                ? "score-btn"
-                                                : value === draft.score
-                                                ? "score-btn score-btn-active"
-                                                : "score-btn"}
-                                              onClick={() =>
-                                                setReferenceDrafts(
-                                                  (prev) => ({
-                                                    ...prev,
-                                                    [item.key]: {
-                                                      ...draft,
-                                                      score: value,
-                                                    },
-                                                  }),
-                                                )}
-                                            >
-                                              {value}
-                                            </button>
-                                          ))}
-                                        </div>
-                                        <label>
-                                          Reason
-                                          <textarea
-                                            value={draft.reason}
-                                            onChange={(e) =>
-                                              setReferenceDrafts(
-                                                (prev) => ({
-                                                  ...prev,
-                                                  [item.key]: {
-                                                    ...draft,
-                                                    reason: e.target
-                                                      .value,
-                                                  },
-                                                }),
-                                              )}
-                                          />
-                                        </label>
-                                        <label>
-                                          Evidence (one per line)
-                                          <textarea
-                                            value={draft.evidenceText}
-                                            onChange={(e) =>
-                                              setReferenceDrafts(
-                                                (prev) => ({
-                                                  ...prev,
-                                                  [item.key]: {
-                                                    ...draft,
-                                                    evidenceText: e
-                                                      .target.value,
-                                                  },
-                                                }),
-                                              )}
-                                          />
-                                        </label>
-                                        <div className="calibrate-reference-actions">
-                                          <Button
-                                            variant="ghost"
-                                            onClick={async () => {
-                                              if (!selectedSessionId) {
-                                                return;
-                                              }
-                                              if (
-                                                graded.score === undefined
-                                              ) {
-                                                setError(
-                                                  "No graded score available to agree with.",
-                                                );
-                                                return;
-                                              }
-                                              const payload = {
-                                                sessionId: selectedSessionId,
-                                                runId: item.runId,
-                                                turnIndex: item.turnIndex,
-                                                referenceSample: {
-                                                  score: graded.score,
-                                                  reason: graded.reason ??
-                                                    "",
-                                                },
-                                              };
-                                              setReferenceDrafts(
-                                                (prev) => ({
-                                                  ...prev,
-                                                  [item.key]: {
-                                                    ...draft,
-                                                    score: graded.score!,
-                                                    reason: graded.reason ??
-                                                      "",
-                                                    evidenceText: "",
-                                                  },
-                                                }),
-                                              );
-                                              const res = await fetch(
-                                                "/api/grading/reference",
-                                                {
-                                                  method: "POST",
-                                                  headers: {
-                                                    "content-type":
-                                                      "application/json",
-                                                  },
-                                                  body: JSON.stringify(
-                                                    payload,
-                                                  ),
-                                                },
-                                              );
-                                              if (!res.ok) {
-                                                const message = await res
-                                                  .text();
-                                                setError(
-                                                  message ||
-                                                    "Failed to save reference",
-                                                );
-                                              }
-                                            }}
-                                          >
-                                            Agree with graded
-                                          </Button>
-                                          <Button
-                                            variant="primary"
-                                            onClick={async () => {
-                                              if (!selectedSessionId) {
-                                                return;
-                                              }
-                                              const evidence = draft
-                                                .evidenceText
-                                                .split("\n")
-                                                .map((line) => line.trim())
-                                                .filter(Boolean);
-                                              if (
-                                                Number.isNaN(draft.score)
-                                              ) {
-                                                setError(
-                                                  "Select a reference score.",
-                                                );
-                                                return;
-                                              }
-                                              const payload = {
-                                                sessionId: selectedSessionId,
-                                                runId: item.runId,
-                                                turnIndex: item.turnIndex,
-                                                referenceSample: {
-                                                  score: draft.score,
-                                                  reason: draft.reason,
-                                                  evidence: evidence.length
-                                                    ? evidence
-                                                    : undefined,
-                                                },
-                                              };
-                                              const res = await fetch(
-                                                "/api/grading/reference",
-                                                {
-                                                  method: "POST",
-                                                  headers: {
-                                                    "content-type":
-                                                      "application/json",
-                                                  },
-                                                  body: JSON.stringify(
-                                                    payload,
-                                                  ),
-                                                },
-                                              );
-                                              if (!res.ok) {
-                                                const message = await res
-                                                  .text();
-                                                setError(
-                                                  message ||
-                                                    "Failed to save reference",
-                                                );
-                                              }
-                                            }}
-                                          >
-                                            Save reference
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           );
                         })}
@@ -1529,12 +1075,15 @@ function CalibratePage(
           )}
         </Panel>
         <Panel as="aside" className="calibrate-drawer">
-          <h3>Deck & session</h3>
           <div className="drawer-section">
             <strong>Ratings & flags</strong>
             {selectedSession?.statePath && (
               <>
                 <Button variant="secondary" onClick={handleCopyStatePath}>
+                  <Icon
+                    name={copiedStatePath ? "copied" : "copy"}
+                    size={14}
+                  />
                   {copiedStatePath ? "Copied" : "Copy state path"}
                 </Button>
                 <p className="calibrate-button-meta">
@@ -1634,73 +1183,10 @@ function CalibratePage(
               </div>
             )}
           </div>
-          <div className="drawer-section">
-            <strong>Deck reference</strong>
-            <CopyBadge
-              label="Deck path"
-              displayValue={deckDisplayPath}
-              copyValue={normalizedDeckPath}
-            />
-          </div>
-          <div className="drawer-section">
-            <strong>Selected session</strong>
-            {selectedSession
-              ? (
-                <>
-                  <CopyBadge
-                    label="Session ID"
-                    displayValue={selectedSession.id}
-                  />
-                  {sessionDeckDisplay && (
-                    <CopyBadge
-                      label="Session deck"
-                      displayValue={sessionDeckDisplay}
-                      copyValue={selectedSession.deck ?? sessionDeckDisplay}
-                    />
-                  )}
-                  {sessionDirDisplay && (
-                    <CopyBadge
-                      label="Session folder"
-                      displayValue={sessionDirDisplay}
-                      copyValue={selectedSession.sessionDir ??
-                        sessionDirDisplay}
-                    />
-                  )}
-                  {sessionStateDisplay && (
-                    <CopyBadge
-                      label="State file"
-                      displayValue={sessionStateDisplay}
-                      copyValue={selectedSession.statePath ??
-                        sessionStateDisplay}
-                    />
-                  )}
-                  {sessionCreatedLabel && (
-                    <div className="drawer-meta">
-                      Created {sessionCreatedLabel}
-                    </div>
-                  )}
-                  {sessionDebugHref && (
-                    <a
-                      className="gds-button gds-button--ghost"
-                      href={sessionDebugHref}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open session debug
-                    </a>
-                  )}
-                </>
-              )
-              : (
-                <div className="placeholder">
-                  Select a session to view file paths and metadata.
-                </div>
-              )}
-          </div>
         </Panel>
       </PageGrid>
     </PageShell>
   );
 }
 
-export default CalibratePage;
+export default GradePage;

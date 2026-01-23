@@ -32,9 +32,9 @@ deno run -A jsr:@bolt-foundry/gambit/cli run ./agent_with_multi_actions.deck.md 
 
 ## Run a test bot (UI)
 
-1. Open the simulator UI and go to the "Test bot" tab.
-2. Choose the "Multi-actions test bot" persona.
-3. Click "Run test bot".
+1. Open the simulator UI and go to the "Test" tab.
+2. Choose the "Multi-actions test" persona.
+3. Click "Run test".
 
 ## Notes
 

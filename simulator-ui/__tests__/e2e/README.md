@@ -15,7 +15,6 @@ deno task e2e
 
 ## Demo Video Runner (Playwright)
 
-The demo runner records a full Gambit UI walkthrough (Test Bot → Calibrate →
 Debug) as a video artifact. It uses Playwright Core with a nix-managed browser.
 
 From `packages/gambit`:
