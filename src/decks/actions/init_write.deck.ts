@@ -1,0 +1,47 @@
+import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { z } from "npm:zod";
+import { resolveInitPath } from "./init_fs.ts";
+
+export default defineDeck({
+  label: "init_write",
+  contextSchema: z.object({
+    path: z.string().describe("Relative path under the project root."),
+    contents: z.string().describe("Full file contents to write."),
+  }),
+  responseSchema: z.object({
+    status: z.number().optional(),
+    message: z.string().optional(),
+    payload: z.object({
+      path: z.string(),
+    }).optional(),
+  }),
+  async run(ctx) {
+    let resolved;
+    try {
+      resolved = await resolveInitPath(ctx.input.path);
+    } catch (err) {
+      return {
+        status: 400,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    try {
+      await Deno.writeTextFile(resolved.fullPath, ctx.input.contents, {
+        createNew: true,
+      });
+      return { status: 200, payload: { path: resolved.relativePath } };
+    } catch (err) {
+      if (err instanceof Deno.errors.AlreadyExists) {
+        return { status: 409, message: "path already exists" };
+      }
+      if (err instanceof Deno.errors.NotFound) {
+        return { status: 404, message: "parent directory does not exist" };
+      }
+      return {
+        status: 500,
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  },
+});

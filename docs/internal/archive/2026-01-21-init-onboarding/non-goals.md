@@ -4,5 +4,5 @@
 - Resume support for interrupted init sessions.
 - Per-file preview/confirm prompts before writes.
 - File ops beyond `write`, `exists`, `mkdir`.
-- Flexible output filenames (v1 hardcodes `./root.deck.md` and
-  `./tests/first.test.deck.md`).
+- Flexible output filenames (v1 hardcodes `<target>/root.deck.md` and
+  `<target>/tests/first.test.deck.md`).

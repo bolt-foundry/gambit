@@ -7,15 +7,15 @@ and generates a first bot.
 
 ## End State
 
-- A packaged init deck runs in REPL and guides users to produce `./root.deck.md`
-  and `./tests/first.test.deck.md`.
+- A packaged init deck runs in REPL and guides users to produce
+  `<target>/root.deck.md` and `<target>/tests/first.test.deck.md`.
 - The deck keeps the conversation lightweight (purpose + 2–3 example prompts).
 - The deck can call init-only file tools to write files during the chat.
 
 ## Constraints
 
 - Markdown deck for v1.
-- Opinionated model: `openai/gpt-5-chat`.
+- Opinionated model: `openai/gpt-5.1-chat`.
 - No per-file confirmation in v1.
 - Hardcode filenames in v1.
 
@@ -26,7 +26,7 @@ and generates a first bot.
 
 ## Allowed Changes
 
-- Add new scaffold location for the init deck in the package.
+- Add the init deck under `packages/gambit/src/decks/`.
 - Adjust prompt and system instructions to improve outcomes.
 
 ## Risk Tolerance
@@ -36,6 +36,6 @@ and generates a first bot.
 
 ## Stop Conditions
 
-- Running the init deck in REPL can produce working `root.deck.md` and test deck
-  using file tools.
+- Running the init deck in REPL can produce working `<target>/root.deck.md` and
+  `<target>/tests/first.test.deck.md` using file tools.
 - The deck behaves predictably with minimal user input.
