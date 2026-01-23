@@ -9,7 +9,8 @@ Gambit bot without writing code.
 
 - `gambit init` drops directly into an init chat (REPL) that guides creation of
   a first bot.
-- By the end, the project has `./root.deck.md` and `./tests/first.test.deck.md`.
+- By the end, the project has `<target>/root.deck.md` and
+  `<target>/tests/first.test.deck.md`.
 - The experience is opinionated but lets users override choices during the chat.
 - Users can iterate until they quit (Ctrl-C).
 
@@ -21,9 +22,10 @@ Gambit bot without writing code.
 - Network access stays within allowlisted domains (boltfoundry.com, openrouter).
 - File ops in v1 are limited to `write`, `exists`, `mkdir` (no delete/append).
 - `gambit init` without a path still defaults to `./gambit/`.
-- If `OPENROUTER_API_KEY` is missing, prompt for a pasted key (signup flow
-  deferred).
-- Default model for init chat is `openai/gpt-5-chat` via OpenRouter.
+- If `OPENROUTER_API_KEY` is missing in env and `<target>/.env`, prompt for a
+  pasted key (signup flow deferred) and write `<target>/.env`.
+- Default model for init chat is `openai/gpt-5.1-chat` via OpenRouter.
+- Do not overwrite existing output files; require a clean target directory.
 
 ## Tradeoffs
 
@@ -33,7 +35,7 @@ Gambit bot without writing code.
 
 ## Allowed Changes
 
-- Add an init deck to the package (new scaffolds path).
+- Add an init deck to the package under `packages/gambit/src/decks/`.
 - Extend CLI with init-only file tools and scoped permissions.
 - Update `gambit init` command flow to launch the init REPL after minimal setup.
 - Add minimal docs for the init flow if needed.
@@ -46,8 +48,11 @@ Gambit bot without writing code.
 
 ## Stop Conditions
 
-- `gambit init` reliably launches an init chat using `openai/gpt-5-chat`.
-- The chat can create `./root.deck.md` and `./tests/first.test.deck.md`.
+- `gambit init` reliably launches an init chat using `openai/gpt-5.1-chat`.
+- The chat can create `<target>/root.deck.md` and
+  `<target>/tests/first.test.deck.md`.
 - File ops are permission-scoped to the project root.
-- Missing `OPENROUTER_API_KEY` path prompts for a pasted key and succeeds.
+- Missing `OPENROUTER_API_KEY` in env and `<target>/.env` prompts for a pasted
+  key and succeeds.
+- Existing output files cause a safe, explicit exit without overwriting.
 - User can continue iterating until they quit (Ctrl-C).
