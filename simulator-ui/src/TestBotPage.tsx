@@ -37,6 +37,7 @@ import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
+import Badge from "./gds/Badge.tsx";
 import Listbox from "./gds/Listbox.tsx";
 
 export default function TestBotPage(props: {
@@ -808,9 +809,7 @@ export default function TestBotPage(props: {
             <div className="flex-column flex-1 gap-4">
               <div className="flex-row items-center gap-8">
                 <strong>Latest test run</strong>
-                <span className={`badge badge--${run.status}`}>
-                  {runStatusLabel}
-                </span>
+                <Badge variant={run.status}>{runStatusLabel}</Badge>
               </div>
             </div>
             <div className="flex-row row-reverse gap-8 wrap">

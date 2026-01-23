@@ -7,7 +7,7 @@ type IconProps = React.SVGProps<SVGSVGElement> & {
 export function ChevronDownIcon({ title, ...props }: IconProps) {
   return (
     <svg
-      viewBox="0 0 8 5"
+      viewBox="0 0 7 3"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
