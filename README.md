@@ -1,6 +1,7 @@
 # <img src="./gambit_1color_bg.png" alt="Gambit logo" height="50" />
 
-Gambit helps you build reliable LLM workflows by composing small, typed “decks”\
+Gambit is an open-source, developer-first framework that helps you build\
+reliable LLM workflows by composing small, typed “decks”\
 with clear inputs/outputs and guardrails. Run decks locally, stream traces, and\
 debug with a built-in UI.
 
