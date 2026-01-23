@@ -124,11 +124,11 @@ export default function Listbox(props: ListboxProps) {
         disabled={disabled}
         ref={triggerRef}
       >
-        <span className="gds-listbox-label">
+        <span className="gds-listbox-label ellipsis">
           {selected?.label ?? placeholder}
         </span>
         {selected?.meta && (
-          <span className="gds-listbox-meta">{selected.meta}</span>
+          <span className="gds-listbox-meta ellipsis">{selected.meta}</span>
         )}
         <span className="gds-listbox-caret" aria-hidden="true">
           <Icon name="chevronDown" size={8} />
@@ -156,11 +156,11 @@ export default function Listbox(props: ListboxProps) {
                     onChange(option.value);
                   }}
                 >
-                  <span className="gds-listbox-option-label">
+                  <span className="gds-listbox-option-label ellipsis">
                     {option.label}
                   </span>
                   {option.meta && (
-                    <span className="gds-listbox-option-meta">
+                    <span className="gds-listbox-option-meta ellipsis">
                       {option.meta}
                     </span>
                   )}

@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import Button from "./gds/Button.tsx";
+import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
 import Listbox from "./gds/Listbox.tsx";
 import {
@@ -392,13 +393,24 @@ function GradePage(
     });
     return map;
   }, [sessionDetail?.messageRefs, sessionDetail?.messages]);
+  const messageRoleByRefId = useMemo(() => {
+    const map = new Map<string, string>();
+    const refs = sessionDetail?.messageRefs ?? [];
+    refs.forEach((ref) => {
+      if (!ref?.id || !ref.role) return;
+      map.set(ref.id, ref.role);
+    });
+    return map;
+  }, [sessionDetail?.messageRefs]);
   const feedbackItems = useMemo(() => {
     const feedback = sessionDetail?.feedback ?? [];
     const items = feedback.map((entry) => {
       const message = messageByRefId.get(entry.messageRefId);
+      const role = message?.role ?? messageRoleByRefId.get(entry.messageRefId);
       return {
         entry,
         message,
+        role,
       };
     });
     return items.sort((a, b) => {
@@ -406,7 +418,7 @@ function GradePage(
       const bKey = b.entry.createdAt ?? "";
       return bKey.localeCompare(aKey);
     });
-  }, [sessionDetail?.feedback, messageByRefId]);
+  }, [sessionDetail?.feedback, messageByRefId, messageRoleByRefId]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const prevRunIdsRef = useRef<string[]>([]);
   const [expandedResults, setExpandedResults] = useState<
@@ -699,6 +711,7 @@ function GradePage(
                   variant="primary"
                   onClick={runGrader}
                   disabled={!canRun}
+                  style={{ width: "100%" }}
                 >
                   {running ? "Running…" : "Run grader"}
                 </Button>
@@ -778,6 +791,10 @@ function GradePage(
                     if (item) {
                       const graded = extractScoreAndReason(item.result);
                       const displayScore = graded.score;
+                      const scoreLabel = displayScore !== undefined &&
+                          displayScore > 0
+                        ? `+${displayScore}`
+                        : displayScore;
                       const scoreClass = getScoreClass(displayScore);
                       const isFlagged = Boolean(
                         item.refId && flaggedRefSet.has(item.refId),
@@ -786,7 +803,7 @@ function GradePage(
                         <span
                           key={`${section.run.id}-turn-${turnLabel}`}
                           className={`calibrate-run-turn ${scoreClass}`}
-                          title={`Turn ${turnLabel}: ${displayScore ?? "—"}${
+                          title={`Turn ${turnLabel}: ${scoreLabel ?? "—"}${
                             isFlagged ? " (flagged)" : ""
                           }`}
                         >
@@ -822,6 +839,10 @@ function GradePage(
                     if (item) {
                       const graded = extractScoreAndReason(item.result);
                       const displayScore = graded.score;
+                      const scoreLabel = displayScore !== undefined &&
+                          displayScore > 0
+                        ? `+${displayScore}`
+                        : displayScore;
                       const scoreClass = getScoreClass(displayScore);
                       const isFlagged = Boolean(
                         item.refId && flaggedRefSet.has(item.refId),
@@ -830,7 +851,7 @@ function GradePage(
                         <span
                           key={`${section.run.id}-result`}
                           className={`calibrate-run-turn ${scoreClass}`}
-                          title={`Result: ${displayScore ?? "—"}${
+                          title={`Result: ${scoreLabel ?? "—"}${
                             isFlagged ? " (flagged)" : ""
                           }`}
                         >
@@ -845,7 +866,28 @@ function GradePage(
                     key={section.run.id}
                     className="calibrate-run-card"
                   >
-                    <div className="calibrate-run-header">
+                    <div
+                      className={classNames(
+                        "calibrate-run-header",
+                        isExpanded && "active",
+                      )}
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
+                      aria-controls={`calibrate-run-body-${section.run.id}`}
+                      onClick={() =>
+                        setExpandedRunId((prev) =>
+                          prev === section.run.id ? null : section.run.id
+                        )}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setExpandedRunId((prev) =>
+                            prev === section.run.id ? null : section.run.id
+                          );
+                        }
+                      }}
+                    >
                       <div>
                         <div className="calibrate-run-title-row">
                           <div className="calibrate-run-title">
@@ -856,31 +898,36 @@ function GradePage(
                           </div>
                         </div>
                         <div className="calibrate-run-subtitle">
-                          {section.run.status}
+                          <Badge status={section.run.status}>
+                            {section.run.status}
+                          </Badge>
                           {section.run.runAt
                             ? ` · ${formatTimestampShort(section.run.runAt)}`
                             : ""}
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        className="calibrate-run-toggle"
-                        onClick={() =>
-                          setExpandedRunId((prev) =>
-                            prev === section.run.id ? null : section.run.id
-                          )}
-                      >
-                        {isExpanded ? "Collapse" : "Expand"}
-                      </Button>
+                      <div className="calibrate-run-toggle-icon">
+                        <Icon
+                          name="chevronDown"
+                          size={10}
+                        />
+                      </div>
                     </div>
                     {isExpanded && (
-                      <div className="calibrate-run-body">
+                      <div
+                        className="calibrate-run-body"
+                        id={`calibrate-run-body-${section.run.id}`}
+                      >
                         {section.items.map((item) => {
                           const graded = extractScoreAndReason(
                             item.result,
                           );
                           const displayScore = graded.score;
                           const displayReason = graded.reason;
+                          const scoreLabel = displayScore !== undefined &&
+                              displayScore > 0
+                            ? `+${displayScore}`
+                            : displayScore;
                           const turnContext = extractTurnContext(
                             item.input,
                           );
@@ -890,6 +937,8 @@ function GradePage(
                             expandedResults[item.key],
                           );
                           const isFlagged = flaggedRefSet.has(item.refId);
+                          const showStatusBadge = item.status === "error" ||
+                            !item.turnNumber;
                           return (
                             <div
                               key={item.key}
@@ -917,20 +966,22 @@ function GradePage(
                                         />
                                       )
                                       : displayScore !== undefined
-                                      ? displayScore
+                                      ? scoreLabel
                                       : "—"}
                                   </div>
                                   <div className="calibrate-result-meta">
                                     <div className="calibrate-result-title">
                                       {item.label}
-                                    </div>
-                                    <div className="calibrate-result-subtitle">
-                                      {item.status}
-                                      {item.runAt
-                                        ? ` · ${
-                                          formatTimestampShort(item.runAt)
-                                        }`
-                                        : ""}
+                                      {showStatusBadge && (
+                                        <Badge
+                                          status={item.status}
+                                          title={item.runAt
+                                            ? formatTimestampShort(item.runAt)
+                                            : undefined}
+                                        >
+                                          {item.status}
+                                        </Badge>
+                                      )}
                                     </div>
                                     {displayReason && !isPending && (
                                       <div className="calibrate-result-reason">
@@ -1076,7 +1127,7 @@ function GradePage(
         </Panel>
         <Panel as="aside" className="calibrate-drawer">
           <div className="drawer-section">
-            <strong>Ratings & flags</strong>
+            <strong>Calibrate</strong>
             {selectedSession?.statePath && (
               <>
                 <Button variant="secondary" onClick={handleCopyStatePath}>
@@ -1091,6 +1142,7 @@ function GradePage(
                 </p>
               </>
             )}
+            <h3>Ratings & flags</h3>
             {sessionDetailLoading && (
               <div className="placeholder">Loading ratings and flags…</div>
             )}
@@ -1107,31 +1159,47 @@ function GradePage(
             )}
             {feedbackItems.length > 0 && (
               <div className="calibrate-summary-list">
-                {feedbackItems.map(({ entry, message }) => (
-                  <div
-                    key={`${entry.id}-${entry.messageRefId}`}
-                    className="calibrate-summary-card"
-                  >
-                    <div className="calibrate-summary-title">
-                      Rating {entry.score}
+                {feedbackItems.map(({ entry, message, role }) => {
+                  const roleLabel = role === "assistant"
+                    ? "Assistant message"
+                    : "Test bot message";
+                  const displayScore = entry.score;
+                  const scoreLabel = displayScore > 0
+                    ? `+${displayScore}`
+                    : displayScore;
+                  const scoreClass = getScoreClass(displayScore);
+                  return (
+                    <div
+                      key={`${entry.id}-${entry.messageRefId}`}
+                      className="calibrate-summary-card"
+                    >
+                      <div
+                        className="calibrate-summary-title"
+                        title={entry.createdAt &&
+                          formatTimestampShort(entry.createdAt)}
+                      >
+                        {roleLabel}
+                      </div>
+                      <div className="calibrate-summary-score-row">
+                        <div
+                          className={`calibrate-score-badge calibrate-score-badge--small ${scoreClass}`}
+                        >
+                          {scoreLabel}
+                        </div>
+                        {entry.reason && (
+                          <div className="calibrate-summary-reason ellipsis">
+                            {entry.reason}
+                          </div>
+                        )}
+                      </div>
+                      {message?.content && (
+                        <div className="calibrate-summary-meta ellipsis">
+                          {formatSnippet(message.content)}
+                        </div>
+                      )}
                     </div>
-                    {entry.reason && (
-                      <div className="calibrate-summary-reason ellipsis">
-                        {entry.reason}
-                      </div>
-                    )}
-                    {message?.content && (
-                      <div className="calibrate-summary-meta ellipsis">
-                        {formatSnippet(message.content)}
-                      </div>
-                    )}
-                    {entry.createdAt && (
-                      <div className="calibrate-summary-meta ellipsis">
-                        {formatTimestampShort(entry.createdAt)}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {gradingFlags.length > 0 && (
@@ -1142,39 +1210,44 @@ function GradePage(
                     : undefined;
                   const flaggedItem = runItemByRefId.get(flag.refId);
                   const turnLabel = flaggedItem?.turnNumber
-                    ? `Turn ${flaggedItem.turnNumber}`
+                    ? `Assistant turn ${flaggedItem.turnNumber}`
                     : undefined;
+                  const gradedAssistant = extractTurnContext(
+                    flaggedItem?.input,
+                  ).gradedAssistant;
                   return (
                     <div
                       key={flag.id}
                       className="calibrate-summary-card calibrate-flag-card"
                     >
-                      <div className="calibrate-summary-title">
-                        Flagged grader
+                      {(runLabel || turnLabel)
+                        ? (
+                          <div
+                            className="calibrate-summary-title"
+                            title={flag.createdAt &&
+                              formatTimestampShort(flag.createdAt)}
+                          >
+                            {runLabel}
+                            {runLabel && turnLabel && " • "}
+                            {turnLabel}
+                          </div>
+                        )
+                        : "Flagged grader"}
+                      <div className="calibrate-summary-score-row">
+                        <div
+                          className={`calibrate-score-badge calibrate-score-badge--small`}
+                        >
+                          <Icon name="flag" size={10} />
+                        </div>
+                        {flag.reason && (
+                          <div className="calibrate-summary-reason ellipsis">
+                            {flag.reason}
+                          </div>
+                        )}
                       </div>
-                      {runLabel && (
+                      {gradedAssistant && (
                         <div className="calibrate-summary-meta ellipsis">
-                          {runLabel}
-                        </div>
-                      )}
-                      {turnLabel && (
-                        <div className="calibrate-summary-meta ellipsis">
-                          {turnLabel}
-                        </div>
-                      )}
-                      {!runLabel && (
-                        <div className="calibrate-summary-meta ellipsis">
-                          {flag.refId}
-                        </div>
-                      )}
-                      {flag.reason && (
-                        <div className="calibrate-summary-reason ellipsis">
-                          {flag.reason}
-                        </div>
-                      )}
-                      {flag.createdAt && (
-                        <div className="calibrate-summary-meta ellipsis ">
-                          {formatTimestampShort(flag.createdAt)}
+                          {formatSnippet(gradedAssistant)}
                         </div>
                       )}
                     </div>

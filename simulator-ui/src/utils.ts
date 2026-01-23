@@ -286,6 +286,27 @@ export function classNames(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
+export function formatJson(value: unknown): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const looksLikeStructuredJson = trimmed.startsWith("{") ||
+      trimmed.startsWith("[");
+    if (!looksLikeStructuredJson) return value;
+    try {
+      const parsed = JSON.parse(value);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return value;
+    }
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 export function formatTimestamp(iso?: string) {
   if (!iso) return "";
   const date = new Date(iso);

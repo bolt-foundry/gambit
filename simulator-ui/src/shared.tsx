@@ -8,11 +8,13 @@ import React, {
 import {
   classNames,
   flattenSchemaLeaves,
+  formatJson,
   getPathValue,
   renderMarkdown,
   SCORE_VALUES,
   setPathValue,
 } from "./utils.ts";
+import Badge from "./gds/Badge.tsx";
 import Panel from "./gds/Panel.tsx";
 import type {
   FeedbackEntry,
@@ -181,12 +183,12 @@ export function MessageBubble(props: {
         )}
         {content && isTool && (
           <pre className="bubble-json">
-            {content}
+            {formatJson(content)}
           </pre>
         )}
         {!content && entry.message.tool_calls && (
           <pre className="bubble-json">
-            {JSON.stringify(entry.message.tool_calls, null, 2)}
+            {formatJson(entry.message.tool_calls)}
           </pre>
         )}
         {messageRefId && role !== "user" && (
@@ -384,7 +386,7 @@ export function TraceList(props: { traces: TraceEvent[] }) {
               )}
               {!trace.message?.content && (
                 <pre className="trace-json">
-                  {JSON.stringify(trace, null, 2)}
+                  {formatJson(trace)}
                 </pre>
               )}
             </div>
@@ -404,16 +406,7 @@ export function ToolCallField(props: {
   isError?: boolean;
 }) {
   const { label, value, isError } = props;
-  let text: string;
-  if (typeof value === "string") {
-    text = value;
-  } else {
-    try {
-      text = JSON.stringify(value, null, 2);
-    } catch {
-      text = String(value);
-    }
-  }
+  const text = formatJson(value);
   return (
     <div className="tool-call-field">
       <div className="tool-call-field-label">{label}</div>
@@ -443,30 +436,22 @@ export function ToolCallBubble(props: { call: ToolCallSummary }) {
     ? { marginLeft: call.depth * 12 }
     : undefined;
   return (
-    <div className="imessage-row left tool-call-row" style={indentStyle}>
-      <div className="imessage-bubble left tool-call-bubble">
+    <div className="imessage-row tool-call-row" style={indentStyle}>
+      <div className="imessage-bubble tool-call-bubble">
         <button
           type="button"
           className="tool-call-collapse"
           onClick={() => setOpen((prev) => !prev)}
         >
           <div className="tool-call-header">
-            <div className="tool-call-title">
+            <div className="tool-call-title" title={call.id}>
               Tool call: <strong>{call.name ?? call.id}</strong>
             </div>
-            <div
-              className={classNames(
-                "tool-call-status",
-                `status-${call.status}`,
-              )}
-            >
-              {statusLabel}
-            </div>
+            <Badge status={call.status}>{statusLabel}</Badge>
             {call.handledError && (
               <div className="tool-call-handled">Error handled</div>
             )}
           </div>
-          <div className="tool-call-id">{call.id}</div>
           <div className="tool-call-expand">
             {open ? "Hide details" : "Show details"}
           </div>
@@ -507,15 +492,20 @@ export function JsonInputField(props: {
   onErrorChange?: (error: string | null) => void;
 }) {
   const { value, optional, placeholder, onChange, onErrorChange } = props;
+  const formatInputValue = (input: unknown) => {
+    if (input === undefined) return "";
+    if (typeof input === "string") return input;
+    try {
+      return JSON.stringify(input, null, 2);
+    } catch {
+      return String(input);
+    }
+  };
   const onChangeRef = useRef(onChange);
   const onErrorChangeRef = useRef(onErrorChange);
   const [text, setText] = useState(() => {
     if (value === undefined) return "";
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
+    return formatInputValue(value);
   });
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -531,11 +521,7 @@ export function JsonInputField(props: {
       setText("");
       return;
     }
-    try {
-      setText(JSON.stringify(value, null, 2));
-    } catch {
-      setText(String(value));
-    }
+    setText(formatInputValue(value));
   }, [value, dirty]);
 
   useEffect(() => {
@@ -608,7 +594,7 @@ export function InitForm(props: {
           <div className="init-field" key={pathKey}>
             <label>
               <span>{label}</span>
-              <span className="badge">{badgeText}</span>
+              <Badge>{badgeText}</Badge>
             </label>
             {description && <div className="secondary-note">{description}</div>}
             {fieldSchema.kind === "string" && (
@@ -783,7 +769,7 @@ export function InitPanel(props: {
               <div className="init-field">
                 <label>
                   <span>Init JSON</span>
-                  <span className="badge">root</span>
+                  <Badge>root</Badge>
                 </label>
                 <textarea
                   className="json-input"
@@ -833,7 +819,7 @@ export function InitPanel(props: {
       )}
       {!editable && (
         <pre className="init-summary-json">
-          {JSON.stringify(summaryValue ?? {}, null, 2)}
+          {formatJson(summaryValue ?? {})}
         </pre>
       )}
     </details>

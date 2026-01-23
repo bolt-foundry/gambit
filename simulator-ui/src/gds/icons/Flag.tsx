@@ -7,7 +7,7 @@ type IconProps = React.SVGProps<SVGSVGElement> & {
 export function FlagIcon({ title, ...props }: IconProps) {
   return (
     <svg
-      viewBox="0 0 13 17"
+      viewBox="0 0 11 17"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       {...props}
