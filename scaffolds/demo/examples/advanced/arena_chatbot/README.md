@@ -32,7 +32,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli run ./active.deck.md \
 
 ## Run a test bot (UI)
 
-1. Open the simulator UI and go to the "Test bot" tab.
+1. Open the simulator UI and go to the "Test" tab.
 2. Choose the "Arena challenger" persona.
 3. Click "Run test bot".
 

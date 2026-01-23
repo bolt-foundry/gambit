@@ -25,12 +25,12 @@ deno run -A jsr:@bolt-foundry/gambit@^0.5.3-dev/cli serve demo.deck.md
 
 ## Run a test bot (UI)
 
-1. Open the simulator UI and go to the "Test bot" tab.
+1. Open the simulator UI and go to the "Test" tab.
 2. Click "Run test bot".
-3. Switch to the "Calibrate" tab and click "Run grader".
-4. After the grader completes, click "Copy ref" on run 2 (expect a -3 score).
-5. Paste the ref into Codex and ask it to fix the prompt.
-6. Run the test bot and grader again to confirm the change.
+3. Switch to the "Grade" tab and click "Run grader".
+4. After the grader completes, review run 2 (expect a -3 score).
+5. Share the failing run details with Codex and ask it to fix the prompt.
+6. Run the test and grader again to confirm the change.
 
 ## Notes
 

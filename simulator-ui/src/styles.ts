@@ -401,7 +401,9 @@ code:not(pre *) {
   width: 16px;
   height: 16px;
   border-radius: 5px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .calibrate-run-turn--pending {
   display: inline-flex;
@@ -744,8 +746,7 @@ code:not(pre *) {
 }
 .calibrate-result-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
 }
 .calibrate-result-main {
@@ -948,15 +949,6 @@ code:not(pre *) {
   padding: 4px 8px;
   font-size: 11px;
 }
-.calibrate-flag-btn {
-  border-color: #f59e0b;
-  color: #b45309;
-}
-.calibrate-flag-btn.active {
-  background: #f59e0b;
-  border-color: #f59e0b;
-  color: #ffffff;
-}
 .trace-row-highlight {
   border-color: #0b93f6;
   box-shadow: 0 0 0 2px rgba(11, 147, 246, 0.15);
@@ -969,16 +961,29 @@ code:not(pre *) {
   letter-spacing: 0.02em;
   margin-bottom: 4px;
 }
+.calibrate-review-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.calibrate-review-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .calibrate-toggle {
   padding: 6px 10px;
   font-size: 12px;
 }
 .calibrate-result-actions {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  align-self: center;
 }
 .calibrate-flag-reason {
   margin-top: 8px;
@@ -1415,7 +1420,7 @@ code:not(pre *) {
 .top-nav-deck {
   font-weight: 600;
   color: #0f172a;
-  font-size: 14px;
+  font-size: 16px;
 }
 .top-nav-actions {
   display: flex;
@@ -1620,7 +1625,11 @@ code:not(pre *) {
   font-weight: 600;
   font-family: inherit;
   text-decoration: none;
-  text-align: center;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px
 }
 .gds-button:disabled {
   opacity: 0.6;

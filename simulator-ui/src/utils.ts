@@ -248,16 +248,14 @@ export const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
 export const SESSIONS_BASE_PATH = "/sessions";
 export const DOCS_PATH = "/docs";
 export const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
-export const DEFAULT_TEST_BOT_PATH = `${SESSIONS_BASE_PATH}/new/test-bot`;
-export const CALIBRATE_PATH_SUFFIX = "/calibrate";
-export const buildCalibratePath = (sessionId: string) =>
-  `${SESSIONS_BASE_PATH}/${
-    encodeURIComponent(sessionId)
-  }${CALIBRATE_PATH_SUFFIX}`;
+export const DEFAULT_TEST_PATH = `${SESSIONS_BASE_PATH}/new/test`;
+export const GRADE_PATH_SUFFIX = "/grade";
+export const buildGradePath = (sessionId: string) =>
+  `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}${GRADE_PATH_SUFFIX}`;
 export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 export const SIMULATOR_STREAM_ID = "gambit-simulator";
-export const TEST_BOT_STREAM_ID = "gambit-test-bot";
-export const CALIBRATE_STREAM_ID = "gambit-calibrate";
+export const GRADE_STREAM_ID = "gambit-grade";
+export const TEST_STREAM_ID = "gambit-test";
 
 export const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
   .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
@@ -338,17 +336,6 @@ export function extractScoreAndReason(result: unknown): {
     ? payload.reason
     : undefined;
   return { score, reason };
-}
-
-export function extractScoreAndReasonFromSample(sample?: {
-  score?: number;
-  reason?: string;
-}): { score?: number; reason?: string } {
-  if (!sample) return {};
-  return {
-    score: typeof sample.score === "number" ? sample.score : undefined,
-    reason: typeof sample.reason === "string" ? sample.reason : undefined,
-  };
 }
 
 export function extractGradingFlags(
@@ -536,7 +523,7 @@ export function getSessionIdFromPath(
     : window.location.pathname;
   const normalizedTarget = target.replace(/\/+$/, "");
   const canonical = normalizedTarget.match(
-    /^\/sessions\/([^/]+)(?:\/(debug|calibrate|test-bot))?$/,
+    /^\/sessions\/([^/]+)(?:\/(debug|grade|test))?$/,
   );
   if (canonical) {
     const id = canonical[1];
@@ -606,21 +593,17 @@ export function toRelativePath(
   return target;
 }
 
-export function getCalibrateSessionIdFromLocation(): string | null {
+export function getGradeSessionIdFromLocation(): string | null {
   const pathMatch = window.location.pathname.match(
-    /^\/sessions\/([^/]+)\/calibrate/,
+    /^\/sessions\/([^/]+)\/grade/,
   );
   if (pathMatch) return decodeURIComponent(pathMatch[1]);
-  const legacyMatch = window.location.pathname.match(
-    /^\/calibrate\/sessions\/([^/]+)/,
-  );
-  if (legacyMatch) return decodeURIComponent(legacyMatch[1]);
   const params = new URLSearchParams(window.location.search);
   const param = params.get("sessionId");
   return param ? decodeURIComponent(param) : null;
 }
 
-export function getCalibrateRefFromLocation(): string | null {
+export function getGradeRefFromLocation(): string | null {
   const params = new URLSearchParams(window.location.search);
   const ref = params.get("ref");
   return ref && ref.trim().length ? ref.trim() : null;
@@ -917,11 +900,11 @@ export function normalizeAppPath(input: string): string {
     }
     return DOCS_PATH;
   }
-  if (trimmed === "/test-bot") {
-    if (window.location.pathname !== DEFAULT_TEST_BOT_PATH) {
-      window.history.replaceState({}, "", DEFAULT_TEST_BOT_PATH);
+  if (trimmed === "/test") {
+    if (window.location.pathname !== DEFAULT_TEST_PATH) {
+      window.history.replaceState({}, "", DEFAULT_TEST_PATH);
     }
-    return DEFAULT_TEST_BOT_PATH;
+    return DEFAULT_TEST_PATH;
   }
   if (
     trimmed === "/debug" || trimmed === "/simulate" ||
@@ -932,10 +915,10 @@ export function normalizeAppPath(input: string): string {
     }
     return DEFAULT_SESSION_PATH;
   }
-  if (/^\/sessions\/[^/]+\/(debug|test-bot|calibrate)$/.test(trimmed)) {
+  if (/^\/sessions\/[^/]+\/(debug|test|grade)$/.test(trimmed)) {
     return trimmed;
   }
-  if (/^\/sessions\/[^/]+\/calibrate/.test(trimmed)) {
+  if (/^\/sessions\/[^/]+\/grade/.test(trimmed)) {
     return trimmed;
   }
   if (trimmed.startsWith("/debug/sessions/")) {

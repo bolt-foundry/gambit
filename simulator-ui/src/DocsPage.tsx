@@ -2,9 +2,9 @@ const GAMBIT_PACKAGE_README =
   "https://github.com/bolt-foundry/gambit/blob/main/README.md";
 const GAMBIT_CLI_DOC =
   "https://github.com/bolt-foundry/gambit/blob/main/docs/cli.md";
-const DEFAULT_TEST_BOT_PATH = "/sessions/new/test-bot";
+const DEFAULT_TEST_PATH = "/sessions/new/test";
 const DEFAULT_DEBUG_PATH = "/sessions/new/debug";
-const DEFAULT_CALIBRATE_PATH = "/calibrate";
+const DEFAULT_GRADE_PATH = "/grade";
 
 export default function DocsPage() {
   return (
@@ -34,23 +34,23 @@ export default function DocsPage() {
               Start here:
               <a
                 className="gds-button gds-button--primary"
-                href={DEFAULT_TEST_BOT_PATH}
+                href={DEFAULT_TEST_PATH}
               >
-                Open Test Bot
+                Open Test
               </a>
             </h2>
           </div>
         </header>
         <div className="docs-callout-body">
           <p>
-            The Test Bot lets you interact with your agent like a real user
+            The Test view lets you interact with your agent like a real user
             would.
           </p>
           <div className="docs-divider" />
           <h3>What to do</h3>
           <ul>
             <li>
-              Some examples have a Test Bot input, these are usually optional.
+              Some examples have a Test input, these are usually optional.
             </li>
             <li>Click "Run test bot" to start the conversation.</li>
             <li>Review the agent's response.</li>
@@ -60,9 +60,9 @@ export default function DocsPage() {
             <li>Leave a quick rating and a short note explaining why.</li>
             <li>Failures get captured for evaluation.</li>
           </ul>
-          <h3>Calibrate the agent</h3>
+          <h3>Grade the agent</h3>
           <ul>
-            <li>Click the "Calibrate" tab to see all test bot runs.</li>
+            <li>Click the "Grade" tab to see all test bot runs.</li>
             <li>Run graders to measure quality and identify issues.</li>
             <li>Flag grader results you want to keep track of.</li>
           </ul>
@@ -83,8 +83,8 @@ export default function DocsPage() {
         </header>
         <div className="docs-tab-card">
           <div className="docs-tab-row">
-            <a className="docs-tab-pill" href={DEFAULT_TEST_BOT_PATH}>
-              Test Bot
+            <a className="docs-tab-pill" href={DEFAULT_TEST_PATH}>
+              Test
             </a>
             <p>
               Use this whenever you want to{" "}
@@ -95,9 +95,9 @@ export default function DocsPage() {
           <div className="docs-tab-row">
             <a
               className="docs-tab-pill docs-tab-pill--gold"
-              href={DEFAULT_CALIBRATE_PATH}
+              href={DEFAULT_GRADE_PATH}
             >
-              Calibrate
+              Grade
             </a>
             <p>
               Use this once you care about{" "}

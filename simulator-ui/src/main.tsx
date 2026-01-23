@@ -10,14 +10,14 @@ import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
 import {
-  buildCalibratePath,
   buildDurableStreamUrl,
+  buildGradePath,
   classNames,
   cloneValue,
   deckLabel,
   deckPath,
   DEFAULT_SESSION_PATH,
-  DEFAULT_TEST_BOT_PATH,
+  DEFAULT_TEST_PATH,
   deriveInitialFromSchema,
   DOCS_PATH,
   extractInitFromTraces,
@@ -45,7 +45,7 @@ import {
   TraceList,
   useHttpSchema,
 } from "./shared.tsx";
-import CalibratePage from "./CalibratePage.tsx";
+import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
@@ -1117,36 +1117,36 @@ function App() {
   const handleReplaceTestBotSession = useCallback(
     (sessionId: string) =>
       replacePath(
-        `${simulatorBasePath}/${encodeURIComponent(sessionId)}/test-bot`,
+        `${simulatorBasePath}/${encodeURIComponent(sessionId)}/test`,
       ),
     [replacePath, simulatorBasePath],
   );
   const handleResetTestBotSession = useCallback(
-    () => replacePath(DEFAULT_TEST_BOT_PATH),
+    () => replacePath(DEFAULT_TEST_PATH),
     [replacePath],
   );
 
   const isDocs = path === DOCS_PATH;
-  const isTestBot = !isDocs && /\/test-bot$/.test(path);
-  const isCalibrate = !isDocs &&
-    (path.startsWith("/calibrate") ||
-      /^\/sessions\/[^/]+\/calibrate/.test(path));
+  const isTestBot = !isDocs && /\/test$/.test(path);
+  const isGrade = !isDocs &&
+    (path.startsWith("/grade") ||
+      /^\/sessions\/[^/]+\/grade/.test(path));
   const currentPage = isDocs
     ? "docs"
     : isTestBot
-    ? "test-bot"
-    : isCalibrate
-    ? "calibrate"
+    ? "test"
+    : isGrade
+    ? "grade"
     : "debug";
   const testBotPath = activeSessionId
-    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/test-bot`
-    : DEFAULT_TEST_BOT_PATH;
+    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/test`
+    : DEFAULT_TEST_PATH;
   const debugPath = activeSessionId
     ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/debug`
     : DEFAULT_SESSION_PATH;
-  const calibratePath = activeSessionId
-    ? buildCalibratePath(activeSessionId)
-    : "/calibrate";
+  const gradePath = activeSessionId
+    ? buildGradePath(activeSessionId)
+    : "/grade";
 
   return (
     <>
@@ -1161,25 +1161,21 @@ function App() {
               Docs
             </Button>
             <Button
-              variant={currentPage === "test-bot"
-                ? "primary-deemph"
-                : "secondary"}
+              variant={currentPage === "test" ? "primary-deemph" : "secondary"}
               onClick={() => navigate(testBotPath)}
-              data-testid="nav-test-bot"
+              data-testid="nav-test"
             >
-              Test bot
+              Test
             </Button>
             <Button
-              variant={currentPage === "calibrate"
-                ? "primary-deemph"
-                : "secondary"}
-              onClick={() => navigate(calibratePath)}
-              data-testid="nav-calibrate"
+              variant={currentPage === "grade" ? "primary-deemph" : "secondary"}
+              onClick={() => navigate(gradePath)}
+              data-testid="nav-grade"
             >
-              Calibrate
+              Grade
             </Button>
             <Button
-              variant={currentPage === "debug" ? "primary" : "ghost"}
+              variant={currentPage === "debug" ? "primary-deemph" : "ghost"}
               onClick={() => navigate(debugPath)}
               data-testid="nav-debug"
             >
@@ -1210,7 +1206,7 @@ function App() {
                 setNavActions={setNavActions}
               />
             )
-            : currentPage === "test-bot"
+            : currentPage === "test"
             ? (
               <TestBotPage
                 onReplaceTestBotSession={handleReplaceTestBotSession}
@@ -1220,7 +1216,7 @@ function App() {
               />
             )
             : (
-              <CalibratePage
+              <GradePage
                 setNavActions={setNavActions}
                 onAppPathChange={handleAppPathChange}
               />

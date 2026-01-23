@@ -148,8 +148,8 @@ http://localhost:8000/
 It also serves:
 
 ```
-http://localhost:8000/test-bot
-http://localhost:8000/calibrate
+http://localhost:8000/test
+http://localhost:8000/grade
 ```
 
 The Debug UI shows transcript lanes plus a trace/tools feed. If the deck has an\

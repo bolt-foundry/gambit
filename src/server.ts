@@ -87,8 +87,8 @@ const simulatorFaviconSrcPath = path.resolve(
   "favicon.ico",
 );
 const SIMULATOR_STREAM_ID = "gambit-simulator";
-const TEST_BOT_STREAM_ID = "gambit-test-bot";
-const CALIBRATE_STREAM_ID = "gambit-calibrate";
+const GRADE_STREAM_ID = "gambit-grade";
+const TEST_STREAM_ID = "gambit-test";
 type AvailableTestDeck = {
   id: string;
   label: string;
@@ -536,7 +536,7 @@ export function startWebSocketSimulator(opts: {
   };
   const testBotRuns = new Map<string, TestBotRunEntry>();
   const broadcastTestBot = (payload: unknown) => {
-    appendDurableStreamEvent(TEST_BOT_STREAM_ID, payload);
+    appendDurableStreamEvent(TEST_STREAM_ID, payload);
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   let deckLabel: string | undefined = undefined;
@@ -1399,7 +1399,7 @@ export function startWebSocketSimulator(opts: {
               },
             });
             const sessionMeta = buildSessionMeta(sessionId, nextState);
-            appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+            appendDurableStreamEvent(GRADE_STREAM_ID, {
               type: "calibrateSession",
               sessionId,
               run: nextEntry,
@@ -1593,7 +1593,7 @@ export function startWebSocketSimulator(opts: {
             },
           });
           const sessionMeta = buildSessionMeta(body.sessionId, updated);
-          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+          appendDurableStreamEvent(GRADE_STREAM_ID, {
             type: "calibrateSession",
             sessionId: body.sessionId,
             session: sessionMeta,
@@ -1662,7 +1662,7 @@ export function startWebSocketSimulator(opts: {
             },
           });
           const sessionMeta = buildSessionMeta(body.sessionId, updated);
-          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+          appendDurableStreamEvent(GRADE_STREAM_ID, {
             type: "calibrateSession",
             sessionId: body.sessionId,
             session: sessionMeta,
@@ -1771,7 +1771,7 @@ export function startWebSocketSimulator(opts: {
             },
           });
           const sessionMeta = buildSessionMeta(body.sessionId, nextState);
-          appendDurableStreamEvent(CALIBRATE_STREAM_ID, {
+          appendDurableStreamEvent(GRADE_STREAM_ID, {
             type: "calibrateSession",
             sessionId: body.sessionId,
             run: nextRun,
@@ -1795,7 +1795,7 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      if (url.pathname === "/api/test-bot") {
+      if (url.pathname === "/api/test") {
         if (req.method === "GET") {
           await deckLoadPromise.catch(() => null);
           const requestedDeck = url.searchParams.get("deckPath");
@@ -1848,7 +1848,7 @@ export function startWebSocketSimulator(opts: {
         return new Response("Method not allowed", { status: 405 });
       }
 
-      if (url.pathname === "/api/test-bot/run") {
+      if (url.pathname === "/api/test/run") {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
@@ -1874,7 +1874,7 @@ export function startWebSocketSimulator(opts: {
           deckInput = body.context ?? body.init;
           if (body.init !== undefined && body.context === undefined) {
             logger.warn(
-              '[gambit] Received deprecated "init" field in test-bot API; use "context" instead.',
+              '[gambit] Received deprecated "init" field in test API; use "context" instead.',
             );
           }
           botInput = body.botInput;
@@ -1932,7 +1932,7 @@ export function startWebSocketSimulator(opts: {
         );
       }
 
-      if (url.pathname === "/api/test-bot/status") {
+      if (url.pathname === "/api/test/status") {
         const runId = url.searchParams.get("runId") ?? undefined;
         const sessionId = url.searchParams.get("sessionId") ?? undefined;
         let entry = runId ? testBotRuns.get(runId) : undefined;
@@ -2018,7 +2018,7 @@ export function startWebSocketSimulator(opts: {
         );
       }
 
-      if (url.pathname === "/api/test-bot/stop") {
+      if (url.pathname === "/api/test/stop") {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
@@ -2706,8 +2706,8 @@ export function startWebSocketSimulator(opts: {
         url.pathname.startsWith("/debug") ||
         url.pathname.startsWith("/editor") ||
         url.pathname.startsWith("/docs") ||
-        url.pathname.startsWith("/test-bot") ||
-        url.pathname.startsWith("/calibrate")
+        url.pathname.startsWith("/test") ||
+        url.pathname.startsWith("/grade")
       ) {
         const hasBundle = await canServeReactBundle();
         if (!hasBundle) {

@@ -16,7 +16,7 @@ import {
   getDurableStreamOffset,
   setDurableStreamOffset,
   summarizeToolCalls,
-  TEST_BOT_STREAM_ID,
+  TEST_STREAM_ID,
 } from "./utils.ts";
 import type {
   FeedbackEntry,
@@ -51,7 +51,7 @@ export default function TestBotPage(props: {
     activeSessionId,
     setNavActions,
   } = props;
-  const deckStorageKey = "gambit:test-bot:selected-deck";
+  const deckStorageKey = "gambit:test:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [botDescription, setBotDescription] = useState<string | null>(null);
@@ -139,7 +139,7 @@ export default function TestBotPage(props: {
       const params = new URLSearchParams();
       if (deckId) params.set("deckPath", deckId);
       const query = params.toString() ? `?${params.toString()}` : "";
-      return fetch(`/api/test-bot${query}`);
+      return fetch(`/api/test${query}`);
     };
     try {
       let res = await fetchTestBotConfig(requestedDeckId);
@@ -212,7 +212,7 @@ export default function TestBotPage(props: {
   }, [run]);
 
   useEffect(() => {
-    const streamId = TEST_BOT_STREAM_ID;
+    const streamId = TEST_STREAM_ID;
     const streamUrl = buildDurableStreamUrl(
       streamId,
       getDurableStreamOffset(streamId),
@@ -220,7 +220,7 @@ export default function TestBotPage(props: {
     const source = new EventSource(streamUrl);
 
     source.onopen = () => {
-      console.info("[test-bot] stream open", streamUrl);
+      console.info("[test] stream open", streamUrl);
     };
 
     source.onmessage = (event) => {
@@ -325,11 +325,11 @@ export default function TestBotPage(props: {
     };
 
     source.onerror = (err) => {
-      console.warn("[test-bot] stream error", err);
+      console.warn("[test] stream error", err);
     };
 
     return () => {
-      console.info("[test-bot] stream cleanup");
+      console.info("[test] stream cleanup");
       source.close();
     };
   }, [deckPath]);
@@ -348,7 +348,7 @@ export default function TestBotPage(props: {
         : "";
       if (deckParam) params.set("deckPath", deckParam);
       const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/test-bot/status${query}`);
+      const res = await fetch(`/api/test/status${query}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as TestBotConfigResponse & {
         run?: TestBotRun;
@@ -582,7 +582,7 @@ export default function TestBotPage(props: {
 
   const startRun = useCallback(async () => {
     try {
-      const res = await fetch("/api/test-bot/run", {
+      const res = await fetch("/api/test/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -623,7 +623,7 @@ export default function TestBotPage(props: {
   const stopRun = useCallback(async () => {
     if (!run.id) return;
     try {
-      await fetch("/api/test-bot/stop", {
+      await fetch("/api/test/stop", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ runId: run.id }),
@@ -812,12 +812,6 @@ export default function TestBotPage(props: {
                   {runStatusLabel}
                 </span>
               </div>
-              {run.sessionId && (
-                <div className="editor-status">
-                  Session:{" "}
-                  <code data-testid="testbot-session-id">{run.sessionId}</code>
-                </div>
-              )}
             </div>
             <div className="flex-row row-reverse gap-8 wrap">
               <Button

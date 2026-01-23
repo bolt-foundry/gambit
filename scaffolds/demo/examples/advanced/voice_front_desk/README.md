@@ -33,7 +33,7 @@ deno run -A jsr:@bolt-foundry/gambit/cli run ./decks/root.deck.md \
 
 ## Run a test bot (UI)
 
-1. Open the simulator UI and go to the "Test bot" tab.
+1. Open the simulator UI and go to the "Test" tab.
 2. Pick a persona from the list (for example, "New patient intake").
 3. Click "Run test bot".
 
