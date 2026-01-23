@@ -1,7 +1,8 @@
 # Gambit Documentation
 
-Welcome to Gambit, the agent harness for building, running, and verifying LLM
-workflows. These docs focus on helping you ship assistants with confidence.
+Welcome to Gambit, the open-source, developer-first agent harness for building,
+running, and verifying LLM workflows. These docs focus on helping you ship
+assistants with confidence.
 
 Start here:
 
