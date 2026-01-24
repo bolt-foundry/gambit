@@ -28,6 +28,10 @@ import {
   printShortUsage,
   printUsage,
 } from "./cli_args.ts";
+import {
+  createModelAliasResolver,
+  loadProjectConfig,
+} from "./project_config.ts";
 
 const logger = console;
 const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
@@ -232,6 +236,42 @@ async function main() {
       Deno.exit(1);
     }
 
+    const configHint = deckPath || args.graderPath || args.testDeckPath ||
+      args.exportDeckPath || Deno.cwd();
+    let projectConfig: Awaited<ReturnType<typeof loadProjectConfig>> = null;
+    try {
+      projectConfig = await loadProjectConfig(configHint);
+    } catch (err) {
+      logger.error(
+        `Failed to load gambit.toml: ${(err as Error).message}`,
+      );
+      Deno.exit(1);
+    }
+    const modelAliasResolver = createModelAliasResolver(
+      projectConfig?.config,
+    );
+    const warnedMissingAliases = new Set<string>();
+    const applyModelAlias = (
+      model?: string,
+      params?: Record<string, unknown>,
+    ): { model?: string; params?: Record<string, unknown> } => {
+      const resolution = modelAliasResolver(model);
+      if (
+        resolution.missingAlias &&
+        model &&
+        !warnedMissingAliases.has(model)
+      ) {
+        logger.warn(
+          `[gambit] Model alias "${model}" is not defined in gambit.toml; using literal value.`,
+        );
+        warnedMissingAliases.add(model);
+      }
+      const mergedParams = resolution.params
+        ? { ...resolution.params, ...(params ?? {}) }
+        : params;
+      return { model: resolution.model ?? model, params: mergedParams };
+    };
+
     if (args.cmd === "grade") {
       const graderPath = args.graderPath ?? deckPath;
       if (!graderPath) {
@@ -282,6 +322,7 @@ async function main() {
         openRouterBaseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
         ollamaApiKey: Deno.env.get("OLLAMA_API_KEY") ?? undefined,
         ollamaBaseURL: Deno.env.get("OLLAMA_BASE_URL") ?? undefined,
+        modelResolver: modelAliasResolver,
       });
       return;
     }
@@ -304,10 +345,12 @@ async function main() {
       baseURL: ollamaBaseURL,
     });
     const ollamaPrefix = "ollama/";
-    const ollamaModels = [
+    const flagModels = [
       args.model ?? undefined,
       args.modelForce ?? undefined,
-    ]
+    ].filter((model): model is string => Boolean(model));
+    const ollamaModels = flagModels
+      .map((model) => applyModelAlias(model).model)
       .filter((model): model is string => Boolean(model))
       .filter((model) => model.startsWith(ollamaPrefix))
       .map((model) => model.slice(ollamaPrefix.length));
@@ -322,8 +365,20 @@ async function main() {
           event: import("@bolt-foundry/gambit-core").ResponseEvent,
         ) => void;
       }) => {
-        if (input.request.model.startsWith(ollamaPrefix)) {
-          const trimmedModel = input.request.model.slice(ollamaPrefix.length);
+        const applied = applyModelAlias(
+          input.request.model,
+          input.request.params,
+        );
+        const request = {
+          ...input.request,
+          model: applied.model ?? input.request.model,
+          params: applied.params,
+        };
+        if (!request.model) {
+          throw new Error("Model is required.");
+        }
+        if (request.model.startsWith(ollamaPrefix)) {
+          const trimmedModel = request.model.slice(ollamaPrefix.length);
           const ollamaResponses = ollamaProvider.responses;
           if (!ollamaResponses) {
             throw new Error("Ollama responses are not configured.");
@@ -331,7 +386,7 @@ async function main() {
           return await ollamaResponses({
             ...input,
             request: {
-              ...input.request,
+              ...request,
               model: trimmedModel,
             },
           });
@@ -341,7 +396,10 @@ async function main() {
             "OPENROUTER_API_KEY is required for non-ollama models.",
           );
         }
-        return await openRouterProvider.responses(input);
+        return await openRouterProvider.responses({
+          ...input,
+          request,
+        });
       },
       chat: async (input: {
         model: string;
@@ -352,16 +410,25 @@ async function main() {
         onStreamText?: (chunk: string) => void;
         params?: Record<string, unknown>;
       }) => {
-        if (input.model.startsWith(ollamaPrefix)) {
-          const model = input.model.slice(ollamaPrefix.length);
-          return await ollamaProvider.chat({ ...input, model });
+        const applied = applyModelAlias(input.model, input.params);
+        const request = {
+          ...input,
+          model: applied.model ?? input.model,
+          params: applied.params,
+        };
+        if (!request.model) {
+          throw new Error("Model is required.");
+        }
+        if (request.model.startsWith(ollamaPrefix)) {
+          const model = request.model.slice(ollamaPrefix.length);
+          return await ollamaProvider.chat({ ...request, model });
         }
         if (!openRouterProvider) {
           throw new Error(
             "OPENROUTER_API_KEY is required for non-ollama models.",
           );
         }
-        return await openRouterProvider.chat(input);
+        return await openRouterProvider.chat(request);
       },
     };
 

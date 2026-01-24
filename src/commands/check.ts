@@ -1,5 +1,6 @@
 import * as path from "@std/path";
 import { loadDeck } from "@bolt-foundry/gambit-core";
+import type { ModelAliasResolver } from "../project_config.ts";
 
 const logger = console;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -109,10 +110,14 @@ function collectDeckRefs(deck: LoadedDeck): Array<string> {
   return refs;
 }
 
-async function collectDeckModels(rootDeckPath: string): Promise<Set<string>> {
+async function collectDeckModels(
+  rootDeckPath: string,
+  resolver?: ModelAliasResolver,
+): Promise<{ models: Set<string>; missingAliases: Set<string> }> {
   const resolvedRoot = path.resolve(rootDeckPath);
   const seenDecks = new Set<string>();
   const models = new Set<string>();
+  const missingAliases = new Set<string>();
   const queue: Array<string> = [resolvedRoot];
 
   while (queue.length > 0) {
@@ -122,7 +127,15 @@ async function collectDeckModels(rootDeckPath: string): Promise<Set<string>> {
     const deck = await loadDeck(deckPath);
     seenDecks.add(deck.path);
     if (deck.modelParams?.model) {
-      models.add(deck.modelParams.model);
+      const resolution = resolver
+        ? resolver(deck.modelParams.model)
+        : { model: deck.modelParams.model, applied: false };
+      if (resolution.missingAlias && deck.modelParams.model) {
+        missingAliases.add(deck.modelParams.model);
+      }
+      if (resolution.model) {
+        models.add(resolution.model);
+      }
     }
     const refs = collectDeckRefs(deck);
     for (const ref of refs) {
@@ -132,7 +145,7 @@ async function collectDeckModels(rootDeckPath: string): Promise<Set<string>> {
     }
   }
 
-  return models;
+  return { models, missingAliases };
 }
 
 async function fetchProviderModels(opts: {
@@ -182,14 +195,21 @@ export async function handleCheckCommand(opts: {
   openRouterBaseURL?: string;
   ollamaApiKey?: string;
   ollamaBaseURL?: string;
+  modelResolver?: ModelAliasResolver;
 }) {
-  const models = await collectDeckModels(opts.deckPath);
-  if (models.size === 0) {
+  const collected = await collectDeckModels(opts.deckPath, opts.modelResolver);
+  if (collected.missingAliases.size > 0) {
+    const missing = Array.from(collected.missingAliases).join(", ");
+    throw new Error(
+      `Unknown model aliases: ${missing}. Define them in gambit.toml or update the deck.`,
+    );
+  }
+  if (collected.models.size === 0) {
     logger.log("No explicit models found in deck tree.");
     return;
   }
 
-  const resolved = Array.from(models, resolveModelProvider);
+  const resolved = Array.from(collected.models, resolveModelProvider);
   const grouped = new Map<ModelProviderKey, Array<DeckModelInfo>>();
   for (const model of resolved) {
     const entry = grouped.get(model.provider) ?? [];

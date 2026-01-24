@@ -4,3 +4,10 @@ actions = "actions"
 graders = "graders"
 tests = "tests"
 schemas = "schemas"
+
+[models.aliases.default]
+model = "openrouter/openai/gpt-4o-mini"
+description = "Workspace default model alias."
+
+[models.aliases.default.params]
+temperature = 0.2

@@ -23,3 +23,21 @@ Notes:
   Ollama, so the actual model name is `llama3.1`.
 - To point at a non-local instance, set `OLLAMA_BASE_URL` (defaults to
   `http://localhost:11434/v1`).
+
+## Model aliases
+
+Instead of hard-coding the `ollama/...` string in every deck, define an alias in
+`gambit.toml`:
+
+```toml
+[models.aliases.randall]
+model = "ollama/llama3.1"
+
+[models.aliases.randall.params]
+temperature = 0.2
+```
+
+Decks can now set `model = "randall"` inside `[modelParams]`. The CLI resolves
+the alias before calling Ollama, automatically merging the default params
+(`temperature = 0.2` above). CLI flags such as `--model randall` also use the
+alias, so swapping the target model only requires editing `gambit.toml`.
