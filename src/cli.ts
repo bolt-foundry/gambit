@@ -9,7 +9,9 @@ import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
+import { createOllamaProvider } from "./providers/ollama.ts";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
+import { handleCheckCommand } from "./commands/check.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
@@ -28,6 +30,75 @@ import {
 } from "./cli_args.ts";
 
 const logger = console;
+const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
+
+type OllamaTagsResponse = {
+  models?: Array<{ name?: string }>;
+};
+
+async function ensureOllamaModel(
+  model: string,
+  baseURL: string | undefined,
+) {
+  const origin = new URL(baseURL ?? DEFAULT_OLLAMA_BASE_URL).origin;
+  const tagsUrl = new URL("/api/tags", origin);
+  const tagsResponse = await fetch(tagsUrl);
+  if (!tagsResponse.ok) {
+    throw new Error(
+      `Failed to list Ollama models (${tagsResponse.status} ${tagsResponse.statusText}).`,
+    );
+  }
+  const tags = (await tagsResponse.json()) as OllamaTagsResponse;
+  const models = tags.models ?? [];
+  const modelNames = new Set(
+    models
+      .map((entry) => entry.name?.trim())
+      .filter((name): name is string => Boolean(name)),
+  );
+  if (modelNames.has(model)) {
+    return;
+  }
+
+  logger.log(`Ollama model "${model}" not found; pulling from Ollama...`);
+  const pullUrl = new URL("/api/pull", origin);
+  const pullResponse = await fetch(pullUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: model }),
+  });
+  if (!pullResponse.ok || !pullResponse.body) {
+    throw new Error(
+      `Failed to pull Ollama model "${model}" (${pullResponse.status} ${pullResponse.statusText}).`,
+    );
+  }
+
+  const decoder = new TextDecoder();
+  const reader = pullResponse.body.getReader();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as { status?: string; error?: string };
+        if (event.error) {
+          throw new Error(event.error);
+        }
+        if (event.status) {
+          logger.log(`[ollama] ${event.status}`);
+        }
+      } catch (err) {
+        throw new Error(
+          `Failed to parse Ollama pull response: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+}
 
 async function readVersionFromConfig(
   configPath: string,
@@ -200,19 +271,99 @@ async function main() {
       return;
     }
 
-    const apiKey = Deno.env.get("OPENROUTER_API_KEY");
-    if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY is required");
+    if (args.cmd === "check") {
+      if (!deckPath) {
+        logger.error("check requires a deck path.");
+        Deno.exit(1);
+      }
+      await handleCheckCommand({
+        deckPath,
+        openRouterApiKey: Deno.env.get("OPENROUTER_API_KEY") ?? undefined,
+        openRouterBaseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+        ollamaApiKey: Deno.env.get("OLLAMA_API_KEY") ?? undefined,
+        ollamaBaseURL: Deno.env.get("OLLAMA_BASE_URL") ?? undefined,
+      });
+      return;
     }
+
+    const apiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
     const chatFallback = Deno.env.get("GAMBIT_CHAT_FALLBACK") === "1";
     const responsesMode = args.responses ||
       (!chatFallback && Deno.env.get("GAMBIT_RESPONSES_MODE") !== "0");
-    const provider = createOpenRouterProvider({
-      apiKey,
-      baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
-      enableResponses: (args.responses || !chatFallback) &&
-        Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
+    const openRouterProvider = apiKey
+      ? createOpenRouterProvider({
+        apiKey,
+        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+        enableResponses: (args.responses || !chatFallback) &&
+          Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
+      })
+      : null;
+    const ollamaBaseURL = Deno.env.get("OLLAMA_BASE_URL") ?? undefined;
+    const ollamaProvider = createOllamaProvider({
+      apiKey: Deno.env.get("OLLAMA_API_KEY")?.trim() || undefined,
+      baseURL: ollamaBaseURL,
     });
+    const ollamaPrefix = "ollama/";
+    const ollamaModels = [
+      args.model ?? undefined,
+      args.modelForce ?? undefined,
+    ]
+      .filter((model): model is string => Boolean(model))
+      .filter((model) => model.startsWith(ollamaPrefix))
+      .map((model) => model.slice(ollamaPrefix.length));
+    for (const model of new Set(ollamaModels)) {
+      await ensureOllamaModel(model, ollamaBaseURL);
+    }
+    const provider: import("@bolt-foundry/gambit-core").ModelProvider = {
+      responses: async (input: {
+        request: import("@bolt-foundry/gambit-core").CreateResponseRequest;
+        state?: import("@bolt-foundry/gambit-core").SavedState;
+        onStreamEvent?: (
+          event: import("@bolt-foundry/gambit-core").ResponseEvent,
+        ) => void;
+      }) => {
+        if (input.request.model.startsWith(ollamaPrefix)) {
+          const trimmedModel = input.request.model.slice(ollamaPrefix.length);
+          const ollamaResponses = ollamaProvider.responses;
+          if (!ollamaResponses) {
+            throw new Error("Ollama responses are not configured.");
+          }
+          return await ollamaResponses({
+            ...input,
+            request: {
+              ...input.request,
+              model: trimmedModel,
+            },
+          });
+        }
+        if (!openRouterProvider?.responses) {
+          throw new Error(
+            "OPENROUTER_API_KEY is required for non-ollama models.",
+          );
+        }
+        return await openRouterProvider.responses(input);
+      },
+      chat: async (input: {
+        model: string;
+        messages: Array<import("@bolt-foundry/gambit-core").ModelMessage>;
+        tools?: Array<import("@bolt-foundry/gambit-core").ToolDefinition>;
+        stream?: boolean;
+        state?: import("@bolt-foundry/gambit-core").SavedState;
+        onStreamText?: (chunk: string) => void;
+        params?: Record<string, unknown>;
+      }) => {
+        if (input.model.startsWith(ollamaPrefix)) {
+          const model = input.model.slice(ollamaPrefix.length);
+          return await ollamaProvider.chat({ ...input, model });
+        }
+        if (!openRouterProvider) {
+          throw new Error(
+            "OPENROUTER_API_KEY is required for non-ollama models.",
+          );
+        }
+        return await openRouterProvider.chat(input);
+      },
+    };
 
     const tracerFns: Array<
       (

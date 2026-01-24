@@ -10,6 +10,7 @@ Per-example docs:
 - [schema_form](./schema_form.md)
 - [cold_emailer](./cold_emailer.md)
 - [voice_front_desk](./voice_front_desk.md)
+- [ollama](./ollama.md)
 
 Notes:
 
