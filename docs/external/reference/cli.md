@@ -12,6 +12,7 @@ How to run Gambit, the agent harness framework, locally and observe runs.
     `deno run -A src/cli.ts <command> -h`).
 - Run once:
   `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--responses] [--verbose]`
+- Check models: `deno run -A src/cli.ts check <deck>`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.

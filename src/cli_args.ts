@@ -7,6 +7,7 @@ const logger = console;
 let initFlagWarningShown = false;
 
 const COMMANDS = [
+  "check",
   "demo",
   "init",
   "run",
@@ -24,6 +25,7 @@ function isKnownCommand(cmd?: string): cmd is Command {
 }
 
 const HELP_COMMANDS = [
+  "check",
   "demo",
   "init",
   "run",
