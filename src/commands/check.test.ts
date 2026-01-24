@@ -1,6 +1,7 @@
 import { assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { handleCheckCommand } from "./check.ts";
+import { createModelAliasResolver } from "../project_config.ts";
 
 async function writeDeck(dir: string, filename: string, contents: string) {
   const target = path.join(dir, filename);
@@ -199,4 +200,73 @@ Handler deck.`,
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+Deno.test("check resolves model aliases", async () => {
+  const dir = await Deno.makeTempDir();
+  const rootDeck = await writeDeck(
+    dir,
+    "root.deck.md",
+    `+++
+label = "root"
+[modelParams]
+model = "randall"
++++
+
+Root deck.`,
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input: Request | URL | string) => {
+    const url = resolveUrl(input);
+    if (url.includes("ollama.test")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ data: [{ id: "llama3" }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return Promise.resolve(new Response("not found", { status: 404 }));
+  };
+  try {
+    await handleCheckCommand({
+      deckPath: rootDeck,
+      ollamaBaseURL: "http://ollama.test/v1",
+      modelResolver: createModelAliasResolver({
+        models: {
+          aliases: {
+            randall: { model: "ollama/llama3" },
+          },
+        },
+      }),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("check errors on missing aliases", async () => {
+  const dir = await Deno.makeTempDir();
+  const rootDeck = await writeDeck(
+    dir,
+    "root.deck.md",
+    `+++
+label = "root"
+[modelParams]
+model = "randall"
++++
+
+Root deck.`,
+  );
+  await assertRejects(
+    () =>
+      handleCheckCommand({
+        deckPath: rootDeck,
+        modelResolver: createModelAliasResolver({
+          models: { aliases: { other: { model: "openrouter/foo" } } },
+        }),
+      }),
+    Error,
+    "Unknown model aliases",
+  );
 });

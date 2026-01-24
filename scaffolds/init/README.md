@@ -34,6 +34,6 @@ workspace with opinionated folders, ready for your own decks/actions/graders.
 - `tests/` – synthetic personas/test bots.
 - `schemas/` – Zod schemas shared across decks/tests.
 - `.gambit/` – local sessions/traces (safe to clear, usually ignored by git).
-- `gambit.toml` – workspace configuration for tools/automation.
+- `gambit.toml` – workspace configuration (folders + model aliases).
 
 Happy building!
