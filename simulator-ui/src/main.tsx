@@ -10,6 +10,7 @@ import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
 import {
+  buildConversationEntries,
   buildDurableStreamUrl,
   buildGradePath,
   classNames,
@@ -571,18 +572,7 @@ function SimulatorApp(
   }, [initEditable]);
 
   const messages = useMemo(() => {
-    if (!simulator.savedState) return [];
-    const feedbackByRef = new Map(
-      simulator.savedState.feedback?.map((f) => [f.messageRefId, f]) ?? [],
-    );
-    return simulator.savedState.messages.map((message, idx) => {
-      const ref = simulator.savedState?.messageRefs?.[idx];
-      return {
-        id: ref?.id,
-        message,
-        feedback: ref ? feedbackByRef.get(ref.id) : undefined,
-      };
-    });
+    return buildConversationEntries(simulator.savedState);
   }, [simulator.savedState]);
 
   const missingRequired = useMemo(() => {

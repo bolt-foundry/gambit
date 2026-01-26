@@ -20,6 +20,7 @@ import type {
   FeedbackEntry,
   ModelMessage,
   NormalizedSchema,
+  RespondInfo,
   SchemaResponse,
   ToolCallSummary,
   TraceEvent,
@@ -29,6 +30,7 @@ export type ConversationMessage = {
   id?: string;
   message: ModelMessage;
   feedback?: FeedbackEntry;
+  respond?: RespondInfo;
 };
 
 export function useHttpSchema() {
@@ -164,7 +166,8 @@ export function MessageBubble(props: {
 }) {
   const { entry, onScore, onReasonChange } = props;
   const role = entry.message.role;
-  const isTool = role === "tool";
+  const isRespond = Boolean(entry.respond);
+  const isTool = role === "tool" && !isRespond;
   const className = classNames(
     "bubble",
     role === "user" ? "bubble-user" : "bubble-assistant",
@@ -175,13 +178,48 @@ export function MessageBubble(props: {
     <div className="chat-row">
       <div className={className}>
         <div className="bubble-role">{role}</div>
-        {content && !isTool && (
+        {isRespond && (
+          <div className="respond-summary">
+            <div className="respond-meta">
+              <Badge>gambit_respond</Badge>
+              {typeof entry.respond?.status === "number" && (
+                <Badge variant="ghost">
+                  status {entry.respond.status}
+                </Badge>
+              )}
+              {entry.respond?.code && (
+                <Badge variant="ghost">
+                  code {entry.respond.code}
+                </Badge>
+              )}
+            </div>
+            {entry.respond?.message && (
+              <div className="respond-message">
+                {entry.respond.message}
+              </div>
+            )}
+            {entry.respond?.payload !== undefined && (
+              <pre className="bubble-json">
+                {formatJson(entry.respond.payload)}
+              </pre>
+            )}
+            {entry.respond?.meta && (
+              <details className="respond-meta-details">
+                <summary>Meta</summary>
+                <pre className="bubble-json">
+                  {formatJson(entry.respond.meta)}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+        {!isRespond && content && !isTool && (
           <div
             className="bubble-text"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
           />
         )}
-        {content && isTool && (
+        {!isRespond && content && isTool && (
           <pre className="bubble-json">
             {formatJson(content)}
           </pre>

@@ -17,6 +17,8 @@ import type {
 } from "@bolt-foundry/gambit-core";
 import type { ZodTypeAny } from "zod";
 
+const GAMBIT_TOOL_RESPOND = "gambit_respond";
+
 const logger = console;
 const moduleLocation = (() => {
   const directoryFromUrl = (url?: string): string | undefined => {
@@ -520,6 +522,11 @@ export function startWebSocketSimulator(opts: {
       content: string;
       messageRefId?: string;
       feedback?: FeedbackEntry;
+      respondStatus?: number;
+      respondCode?: string;
+      respondMessage?: string;
+      respondPayload?: unknown;
+      respondMeta?: Record<string, unknown>;
     }>;
     traces?: Array<TraceEvent>;
     toolInserts?: Array<{
@@ -744,6 +751,66 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
+  const safeParseJson = (text: string | null | undefined): unknown => {
+    if (typeof text !== "string" || text.trim().length === 0) return undefined;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
+    }
+  };
+
+  type RespondSummary = {
+    status?: number;
+    code?: string;
+    message?: string;
+    meta?: Record<string, unknown>;
+    payload?: unknown;
+    displayText: string;
+  };
+
+  const summarizeRespondCall = (
+    message: ModelMessage | null | undefined,
+  ): RespondSummary | null => {
+    if (!message || message.role !== "tool") return null;
+    const name = typeof message.name === "string" ? message.name : undefined;
+    if (name !== GAMBIT_TOOL_RESPOND) return null;
+    const parsed = safeParseJson(
+      typeof message.content === "string" ? message.content : "",
+    ) as Record<string, unknown> | undefined;
+    const payload = parsed && typeof parsed === "object"
+      ? ("payload" in parsed
+        ? (parsed as { payload?: unknown }).payload
+        : parsed)
+      : undefined;
+    const status = typeof parsed?.status === "number"
+      ? parsed.status as number
+      : undefined;
+    const code = typeof parsed?.code === "string"
+      ? parsed.code as string
+      : undefined;
+    const respondMessage = typeof parsed?.message === "string"
+      ? parsed.message as string
+      : undefined;
+    const meta = parsed && typeof parsed.meta === "object"
+      ? parsed.meta as Record<string, unknown>
+      : undefined;
+    const summary: Record<string, unknown> = {};
+    if (status !== undefined) summary.status = status;
+    if (code !== undefined) summary.code = code;
+    if (respondMessage !== undefined) summary.message = respondMessage;
+    if (meta !== undefined) summary.meta = meta;
+    summary.payload = payload ?? null;
+    return {
+      status,
+      code,
+      message: respondMessage,
+      meta,
+      payload,
+      displayText: JSON.stringify(summary, null, 2),
+    };
+  };
+
   const updateTestDeckRegistry = (list: Array<AvailableTestDeck>) => {
     testDeckByPath.clear();
     testDeckById.clear();
@@ -811,15 +878,30 @@ export function startWebSocketSimulator(opts: {
       [];
     for (let i = 0; i < rawMessages.length; i++) {
       const msg = rawMessages[i];
+      const refId = refs[i]?.id;
       if (msg?.role === "assistant" || msg?.role === "user") {
         const content = stringifyContent(msg.content).trim();
         if (!content) continue;
-        const refId = refs[i]?.id;
         messages.push({
           role: msg.role,
           content,
           messageRefId: refId,
           feedback: refId ? feedbackByRef.get(refId) : undefined,
+        });
+        continue;
+      }
+      const respondSummary = summarizeRespondCall(msg);
+      if (respondSummary) {
+        messages.push({
+          role: "assistant",
+          content: respondSummary.displayText,
+          messageRefId: refId,
+          feedback: refId ? feedbackByRef.get(refId) : undefined,
+          respondStatus: respondSummary.status,
+          respondCode: respondSummary.code,
+          respondMessage: respondSummary.message,
+          respondPayload: respondSummary.payload,
+          respondMeta: respondSummary.meta,
         });
         continue;
       }
@@ -846,6 +928,35 @@ export function startWebSocketSimulator(opts: {
         ? traceToolInserts
         : fallbackToolInserts,
     };
+  };
+
+  const buildConversationMessages = (
+    state: SavedState,
+  ): Array<ModelMessage> => {
+    const rawMessages = state.messages ?? [];
+    const conversation: Array<ModelMessage> = [];
+    for (const msg of rawMessages) {
+      if (msg?.role === "assistant" || msg?.role === "user") {
+        const content = stringifyContent(msg.content).trim();
+        if (!content) continue;
+        conversation.push({
+          role: msg.role,
+          content,
+          name: msg.name,
+          tool_calls: msg.tool_calls,
+        });
+        continue;
+      }
+      const respondSummary = summarizeRespondCall(msg);
+      if (respondSummary) {
+        conversation.push({
+          role: "assistant",
+          content: respondSummary.displayText,
+          name: GAMBIT_TOOL_RESPOND,
+        });
+      }
+    }
+    return conversation;
   };
 
   const deriveToolInsertsFromTraces = (
@@ -1357,9 +1468,10 @@ export function startWebSocketSimulator(opts: {
             delete next.gradingRuns;
             return next;
           })();
+          const conversationMessages = buildConversationMessages(sessionState);
           const sessionPayload = {
-            messages: Array.isArray(sessionState.messages)
-              ? sessionState.messages.map((msg) => ({
+            messages: conversationMessages.length > 0
+              ? conversationMessages.map((msg) => ({
                 role: msg.role,
                 content: msg.content,
                 name: msg.name,
@@ -1857,6 +1969,8 @@ export function startWebSocketSimulator(opts: {
         let botInput: unknown = undefined;
         let initialUserMessage: string | undefined = undefined;
         let botDeckSelection: AvailableTestDeck | undefined;
+        let inheritBotInput = false;
+        let userProvidedDeckInput = false;
         try {
           const body = await req.json() as {
             maxTurns?: number;
@@ -1865,6 +1979,7 @@ export function startWebSocketSimulator(opts: {
             botInput?: unknown;
             initialUserMessage?: unknown;
             botDeckPath?: string;
+            inheritBotInput?: unknown;
           };
           if (
             typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
@@ -1872,12 +1987,18 @@ export function startWebSocketSimulator(opts: {
             maxTurnsOverride = body.maxTurns;
           }
           deckInput = body.context ?? body.init;
+          if (body.context !== undefined || body.init !== undefined) {
+            userProvidedDeckInput = true;
+          }
           if (body.init !== undefined && body.context === undefined) {
             logger.warn(
               '[gambit] Received deprecated "init" field in test API; use "context" instead.',
             );
           }
           botInput = body.botInput;
+          if (typeof body.inheritBotInput === "boolean") {
+            inheritBotInput = body.inheritBotInput;
+          }
           await deckLoadPromise.catch(() => null);
           if (typeof body.botDeckPath === "string") {
             const resolved = resolveTestDeck(body.botDeckPath);
@@ -1912,6 +2033,11 @@ export function startWebSocketSimulator(opts: {
           } catch {
             // ignore; keep undefined
           }
+        }
+        if (
+          !userProvidedDeckInput && inheritBotInput && botInput !== undefined
+        ) {
+          deckInput = cloneValue(botInput);
         }
         if (!botDeckSelection) {
           return new Response(
