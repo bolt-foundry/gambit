@@ -13,6 +13,7 @@ import {
   deckPath,
   deriveInitialFromSchema,
   findMissingRequiredFields,
+  formatJson,
   getDurableStreamOffset,
   setDurableStreamOffset,
   summarizeToolCalls,
@@ -119,6 +120,7 @@ export default function TestBotPage(props: {
   const deckSchemaError = deckSchema.schemaResponse?.error ??
     deckSchema.error ??
     undefined;
+  const [inheritPersonaInit, setInheritPersonaInit] = useState(true);
   const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
   const [deckInitDirty, setDeckInitDirty] = useState(false);
   const [deckJsonErrors, setDeckJsonErrors] = useState<
@@ -385,6 +387,21 @@ export default function TestBotPage(props: {
   }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
 
   useEffect(() => {
+    if (!inheritPersonaInit) return;
+    if (deckInitDirty) return;
+    if (botInputValue === undefined) return;
+    setDeckInitValue(cloneValue(botInputValue));
+  }, [inheritPersonaInit, botInputValue, deckInitDirty]);
+
+  const handleDeckInitChange = useCallback((next: unknown) => {
+    if (inheritPersonaInit) {
+      setInheritPersonaInit(false);
+    }
+    setDeckInitValue(next);
+    setDeckInitDirty(true);
+  }, [inheritPersonaInit]);
+
+  useEffect(() => {
     if (!botInputSchema) return;
     if (botInputDirty) return;
     const nextBotInput = botInputDefaults !== undefined
@@ -583,15 +600,19 @@ export default function TestBotPage(props: {
 
   const startRun = useCallback(async () => {
     try {
+      const payload: Record<string, unknown> = {
+        botInput: botInputValue,
+        initialUserMessage,
+        botDeckPath: selectedDeckId ?? undefined,
+        inheritBotInput: inheritPersonaInit,
+      };
+      if (!inheritPersonaInit) {
+        payload.context = deckInitValue;
+      }
       const res = await fetch("/api/test/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          init: deckInitValue,
-          botInput: botInputValue,
-          initialUserMessage,
-          botDeckPath: selectedDeckId ?? undefined,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json() as { run?: TestBotRun };
       if (data.run) {
@@ -616,6 +637,7 @@ export default function TestBotPage(props: {
   }, [
     deckInitValue,
     botInputValue,
+    inheritPersonaInit,
     initialUserMessage,
     refreshStatus,
     selectedDeckId,
@@ -920,7 +942,49 @@ export default function TestBotPage(props: {
                       }`}
                       title={m.role}
                     >
-                      {m.content}
+                      {(
+                          m.respondPayload !== undefined ||
+                          m.respondMeta !== undefined ||
+                          typeof m.respondStatus === "number" ||
+                          typeof m.respondMessage === "string" ||
+                          typeof m.respondCode === "string"
+                        )
+                        ? (
+                          <div className="respond-summary">
+                            <div className="respond-meta">
+                              <Badge>gambit_respond</Badge>
+                              {typeof m.respondStatus === "number" && (
+                                <Badge variant="ghost">
+                                  status {m.respondStatus}
+                                </Badge>
+                              )}
+                              {m.respondCode && (
+                                <Badge variant="ghost">
+                                  code {m.respondCode}
+                                </Badge>
+                              )}
+                            </div>
+                            {m.respondMessage && (
+                              <div className="respond-message">
+                                {m.respondMessage}
+                              </div>
+                            )}
+                            {m.respondPayload !== undefined && (
+                              <pre className="bubble-json">
+                                {formatJson(m.respondPayload)}
+                              </pre>
+                            )}
+                            {m.respondMeta && (
+                              <details className="respond-meta-details">
+                                <summary>Meta</summary>
+                                <pre className="bubble-json">
+                                  {formatJson(m.respondMeta)}
+                                </pre>
+                              </details>
+                            )}
+                          </div>
+                        )
+                        : m.content}
                       {m.messageRefId && run.sessionId && (
                         <FeedbackControls
                           messageRefId={m.messageRefId}
@@ -975,13 +1039,45 @@ export default function TestBotPage(props: {
           {deckSchemaError && <div className="error">{deckSchemaError}</div>}
           {deckInputSchema && (
             <>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  marginBottom: 8,
+                }}
+              >
+                <label
+                  style={{ display: "flex", gap: 8, alignItems: "center" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={inheritPersonaInit}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setInheritPersonaInit(next);
+                      if (next) {
+                        setDeckInitDirty(false);
+                        setDeckJsonErrors({});
+                        if (botInputValue !== undefined) {
+                          setDeckInitValue(cloneValue(botInputValue));
+                        }
+                      }
+                    }}
+                  />
+                  Use test deck input for init
+                </label>
+                {inheritPersonaInit && (
+                  <span style={{ fontSize: 12, color: "#64748b" }}>
+                    Persona fields will auto-populate deck init until you edit
+                    them.
+                  </span>
+                )}
+              </div>
               <InitForm
                 schema={deckInputSchema}
                 value={deckInitValue}
-                onChange={(next) => {
-                  setDeckInitValue(next);
-                  setDeckInitDirty(true);
-                }}
+                onChange={handleDeckInitChange}
                 onJsonErrorChange={(pathKey, err) =>
                   setDeckJsonErrors((prev) =>
                     prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }

@@ -258,6 +258,26 @@ Run it:
 npx @bolt-foundry/gambit run ./agent_with_time.deck.md --context '"hello"' --stream
 ```
 
+### Respond flow demo (non-root decks + grading)
+
+Need a turnkey scenario that hits personas → init → non-root `gambit_respond`
+payloads → graders? Use the example in `packages/gambit/examples/respond_flow/`.
+
+```
+cd packages/gambit
+npx @bolt-foundry/gambit serve ./examples/respond_flow/decks/root.deck.ts --port 8000
+```
+
+Then:
+
+1. Open `http://localhost:8000/test`, pick the **Escalation persona**, and run
+   it. Leave the “Use test deck input for init” toggle on to see persona data
+   seed the init form automatically.
+2. Switch to the Debug tab to inspect the session—the child deck emits a
+   `gambit_respond` payload that now shows up as a structured assistant turn.
+3. Head to the Calibrate tab and run the **Respond payload grader** to exercise
+   grading on the non-root respond output.
+
 ## Deno
 
 If you prefer Deno, use the Deno commands below.

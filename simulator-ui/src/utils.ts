@@ -160,6 +160,11 @@ export type TestBotRun = {
     content: string;
     messageRefId?: string;
     feedback?: FeedbackEntry;
+    respondStatus?: number;
+    respondCode?: string;
+    respondMessage?: string;
+    respondPayload?: unknown;
+    respondMeta?: Record<string, unknown>;
   }>;
   traces?: TraceEvent[];
   toolInserts?: Array<{
@@ -905,6 +910,131 @@ export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
     }
   });
   return order;
+}
+
+export type RespondInfo = {
+  status?: number;
+  code?: string;
+  message?: string;
+  meta?: Record<string, unknown>;
+  payload?: unknown;
+};
+
+const RESPOND_TOOL_NAME = "gambit_respond";
+
+const stringifyMessageContent = (value: unknown): string => {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const safeParseJson = (text: string | null | undefined): unknown => {
+  if (typeof text !== "string" || text.trim().length === 0) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+const summarizeRespondMessage = (
+  message: ModelMessage | null | undefined,
+): RespondInfo & { displayText: string } | null => {
+  if (!message || message.role !== "tool") return null;
+  const name = typeof message.name === "string" ? message.name : undefined;
+  if (name !== RESPOND_TOOL_NAME) return null;
+  const parsed = safeParseJson(
+    typeof message.content === "string" ? message.content : "",
+  ) as Record<string, unknown> | undefined;
+  const payload = parsed && typeof parsed === "object"
+    ? ("payload" in parsed ? (parsed as { payload?: unknown }).payload : parsed)
+    : undefined;
+  const status = typeof parsed?.status === "number"
+    ? parsed.status as number
+    : undefined;
+  const code = typeof parsed?.code === "string"
+    ? parsed.code as string
+    : undefined;
+  const respondMessage = typeof parsed?.message === "string"
+    ? parsed.message as string
+    : undefined;
+  const meta = parsed && typeof parsed.meta === "object"
+    ? parsed.meta as Record<string, unknown>
+    : undefined;
+  const summary: Record<string, unknown> = {};
+  if (status !== undefined) summary.status = status;
+  if (code !== undefined) summary.code = code;
+  if (respondMessage !== undefined) summary.message = respondMessage;
+  if (meta !== undefined) summary.meta = meta;
+  summary.payload = payload ?? null;
+  return {
+    status,
+    code,
+    message: respondMessage,
+    meta,
+    payload,
+    displayText: JSON.stringify(summary, null, 2),
+  };
+};
+
+export type ConversationEntry = {
+  id?: string;
+  message: ModelMessage;
+  feedback?: FeedbackEntry;
+  respond?: RespondInfo;
+};
+
+export function buildConversationEntries(
+  state?: SavedState | null,
+): ConversationEntry[] {
+  if (!state) return [];
+  const entries: ConversationEntry[] = [];
+  const rawMessages = state.messages ?? [];
+  const refs = state.messageRefs ?? [];
+  const feedbackByRef = new Map(
+    state.feedback?.map((entry) => [entry.messageRefId, entry]) ?? [],
+  );
+  for (let idx = 0; idx < rawMessages.length; idx++) {
+    const msg = rawMessages[idx];
+    const ref = refs[idx];
+    if (!msg) continue;
+    const respondSummary = summarizeRespondMessage(msg);
+    if (respondSummary) {
+      entries.push({
+        id: ref?.id,
+        message: {
+          role: "assistant",
+          content: respondSummary.displayText,
+          name: RESPOND_TOOL_NAME,
+        },
+        feedback: ref ? feedbackByRef.get(ref.id) : undefined,
+        respond: {
+          status: respondSummary.status,
+          code: respondSummary.code,
+          message: respondSummary.message,
+          meta: respondSummary.meta,
+          payload: respondSummary.payload,
+        },
+      });
+      continue;
+    }
+    if (msg.role !== "assistant" && msg.role !== "user") continue;
+    const content = stringifyMessageContent(msg.content).trim();
+    if (!content) continue;
+    entries.push({
+      id: ref?.id,
+      message: {
+        ...msg,
+        content,
+      },
+      feedback: ref ? feedbackByRef.get(ref.id) : undefined,
+    });
+  }
+  return entries;
 }
 
 export function normalizeAppPath(input: string): string {
