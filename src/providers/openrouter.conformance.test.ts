@@ -115,7 +115,7 @@ Deno.test("openrouter responses request mapping (conformance)", async () => {
   });
 
   assert(result);
-  assertEquals(received?.["model"], "openrouter/gpt-4o");
+  assertEquals(received?.["model"], "gpt-4o");
   assertEquals(received?.["max_output_tokens"], 128);
   const metadata = received?.["metadata"] as
     | Record<string, unknown>

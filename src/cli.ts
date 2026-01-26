@@ -9,8 +9,16 @@ import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
-import { createOllamaProvider } from "./providers/ollama.ts";
-import { createOpenRouterProvider } from "./providers/openrouter.ts";
+import {
+  createOllamaProvider,
+  ensureOllamaModel,
+  fetchOllamaTags,
+  OLLAMA_PREFIX,
+} from "./providers/ollama.ts";
+import {
+  createOpenRouterProvider,
+  OPENROUTER_PREFIX,
+} from "./providers/openrouter.ts";
 import { handleCheckCommand } from "./commands/check.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
@@ -34,74 +42,35 @@ import {
 } from "./project_config.ts";
 
 const logger = console;
-const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
+const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-type OllamaTagsResponse = {
-  models?: Array<{ name?: string }>;
+type ModelCandidate = {
+  model: string;
+  params?: Record<string, unknown>;
+  alias?: string;
 };
 
-async function ensureOllamaModel(
-  model: string,
-  baseURL: string | undefined,
-) {
-  const origin = new URL(baseURL ?? DEFAULT_OLLAMA_BASE_URL).origin;
-  const tagsUrl = new URL("/api/tags", origin);
-  const tagsResponse = await fetch(tagsUrl);
-  if (!tagsResponse.ok) {
-    throw new Error(
-      `Failed to list Ollama models (${tagsResponse.status} ${tagsResponse.statusText}).`,
-    );
-  }
-  const tags = (await tagsResponse.json()) as OllamaTagsResponse;
-  const models = tags.models ?? [];
-  const modelNames = new Set(
-    models
-      .map((entry) => entry.name?.trim())
-      .filter((name): name is string => Boolean(name)),
-  );
-  if (modelNames.has(model)) {
-    return;
-  }
+type ProviderAvailability = {
+  available: boolean;
+  reason?: string;
+};
 
-  logger.log(`Ollama model "${model}" not found; pulling from Ollama...`);
-  const pullUrl = new URL("/api/pull", origin);
-  const pullResponse = await fetch(pullUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: model }),
-  });
-  if (!pullResponse.ok || !pullResponse.body) {
-    throw new Error(
-      `Failed to pull Ollama model "${model}" (${pullResponse.status} ${pullResponse.statusText}).`,
-    );
-  }
+type ProviderCapability = {
+  name: string;
+  matches: (model: string) => boolean;
+  isAvailable: (model: string, opts: { allowPull: boolean }) => Promise<
+    ProviderAvailability
+  >;
+};
 
-  const decoder = new TextDecoder();
-  const reader = pullResponse.body.getReader();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line) as { status?: string; error?: string };
-        if (event.error) {
-          throw new Error(event.error);
-        }
-        if (event.status) {
-          logger.log(`[ollama] ${event.status}`);
-        }
-      } catch (err) {
-        throw new Error(
-          `Failed to parse Ollama pull response: ${(err as Error).message}`,
-        );
-      }
-    }
+function mergeParams(
+  aliasParams?: Record<string, unknown>,
+  baseParams?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (aliasParams && baseParams) {
+    return { ...aliasParams, ...baseParams };
   }
+  return baseParams ?? aliasParams;
 }
 
 async function readVersionFromConfig(
@@ -251,25 +220,58 @@ async function main() {
       projectConfig?.config,
     );
     const warnedMissingAliases = new Set<string>();
-    const applyModelAlias = (
-      model?: string,
+    const expandModelCandidates = (
+      model: string | Array<string> | undefined,
       params?: Record<string, unknown>,
-    ): { model?: string; params?: Record<string, unknown> } => {
-      const resolution = modelAliasResolver(model);
-      if (
-        resolution.missingAlias &&
-        model &&
-        !warnedMissingAliases.has(model)
-      ) {
-        logger.warn(
-          `[gambit] Model alias "${model}" is not defined in gambit.toml; using literal value.`,
-        );
-        warnedMissingAliases.add(model);
+    ): {
+      candidates: Array<ModelCandidate>;
+      allowPull: boolean;
+    } => {
+      if (!model) return { candidates: [], allowPull: false };
+      const baseParams = params;
+      const entries = Array.isArray(model) ? model : [model];
+      const allowPull = !Array.isArray(model);
+      const candidates: Array<ModelCandidate> = [];
+      for (const entry of entries) {
+        if (typeof entry !== "string" || !entry.trim()) continue;
+        const resolution = modelAliasResolver(entry);
+        if (
+          resolution.missingAlias &&
+          !warnedMissingAliases.has(entry)
+        ) {
+          logger.warn(
+            `[gambit] Model alias "${entry}" is not defined in gambit.toml; using literal value.`,
+          );
+          warnedMissingAliases.add(entry);
+        }
+        if (resolution.applied) {
+          const resolvedModel = resolution.model;
+          const mergedParams = mergeParams(resolution.params, baseParams);
+          if (Array.isArray(resolvedModel)) {
+            for (const candidate of resolvedModel) {
+              if (!candidate.trim()) continue;
+              candidates.push({
+                model: candidate,
+                params: mergedParams,
+                alias: resolution.alias,
+              });
+            }
+          } else if (resolvedModel) {
+            candidates.push({
+              model: resolvedModel,
+              params: mergedParams,
+              alias: resolution.alias,
+            });
+          }
+        } else {
+          candidates.push({
+            model: entry,
+            params: baseParams,
+          });
+        }
       }
-      const mergedParams = resolution.params
-        ? { ...resolution.params, ...(params ?? {}) }
-        : params;
-      return { model: resolution.model ?? model, params: mergedParams };
+      const allowPullForSingle = allowPull && candidates.length <= 1;
+      return { candidates, allowPull: allowPullForSingle };
     };
 
     if (args.cmd === "grade") {
@@ -327,14 +329,16 @@ async function main() {
       return;
     }
 
-    const apiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
+    const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
     const chatFallback = Deno.env.get("GAMBIT_CHAT_FALLBACK") === "1";
     const responsesMode = args.responses ||
       (!chatFallback && Deno.env.get("GAMBIT_RESPONSES_MODE") !== "0");
-    const openRouterProvider = apiKey
+    const openRouterBaseURL = Deno.env.get("OPENROUTER_BASE_URL") ??
+      DEFAULT_OPENROUTER_BASE_URL;
+    const openRouterProvider = openRouterApiKey
       ? createOpenRouterProvider({
-        apiKey,
-        baseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
+        apiKey: openRouterApiKey,
+        baseURL: openRouterBaseURL ?? undefined,
         enableResponses: (args.responses || !chatFallback) &&
           Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
       })
@@ -344,20 +348,122 @@ async function main() {
       apiKey: Deno.env.get("OLLAMA_API_KEY")?.trim() || undefined,
       baseURL: ollamaBaseURL,
     });
-    const ollamaPrefix = "ollama/";
-    const flagModels = [
-      args.model ?? undefined,
-      args.modelForce ?? undefined,
-    ].filter((model): model is string => Boolean(model));
-    const ollamaModels = flagModels
-      .map((model) => applyModelAlias(model).model)
-      .filter((model): model is string => Boolean(model))
-      .filter((model) => model.startsWith(ollamaPrefix))
-      .map((model) => model.slice(ollamaPrefix.length));
-    for (const model of new Set(ollamaModels)) {
-      await ensureOllamaModel(model, ollamaBaseURL);
-    }
+    const ollamaPrefix = OLLAMA_PREFIX;
+    const ollamaTagsCache: { promise: Promise<Set<string>> | null } = {
+      promise: null,
+    };
+    const getOllamaTags = async (): Promise<Set<string>> => {
+      if (!ollamaTagsCache.promise) {
+        ollamaTagsCache.promise = fetchOllamaTags(ollamaBaseURL);
+      }
+      return await ollamaTagsCache.promise;
+    };
+    const providerCapabilities: Array<ProviderCapability> = [
+      {
+        name: "ollama",
+        matches: (model) => model.startsWith(ollamaPrefix),
+        isAvailable: async (model, opts) => {
+          const trimmed = model.slice(ollamaPrefix.length);
+          if (!trimmed) {
+            return { available: false, reason: "missing Ollama model name" };
+          }
+          if (opts.allowPull) {
+            try {
+              await ensureOllamaModel(trimmed, ollamaBaseURL);
+              return { available: true };
+            } catch (err) {
+              return {
+                available: false,
+                reason: err instanceof Error ? err.message : String(err),
+              };
+            }
+          }
+          try {
+            const tags = await getOllamaTags();
+            if (tags.has(trimmed)) {
+              return { available: true };
+            }
+            return {
+              available: false,
+              reason: `Ollama model "${trimmed}" not installed`,
+            };
+          } catch (err) {
+            return {
+              available: false,
+              reason: err instanceof Error ? err.message : String(err),
+            };
+          }
+        },
+      },
+      {
+        name: "openrouter",
+        matches: (model) =>
+          model.startsWith(OPENROUTER_PREFIX) ||
+          !model.startsWith(ollamaPrefix),
+        isAvailable: (_model, _opts) =>
+          Promise.resolve(
+            openRouterApiKey ? { available: true } : {
+              available: false,
+              reason: "OPENROUTER_API_KEY is not set",
+            },
+          ),
+      },
+    ];
+    const resolveModelSelection = async (
+      model: string | Array<string>,
+      params?: Record<string, unknown>,
+      deckPath?: string,
+    ): Promise<{ model: string; params?: Record<string, unknown> }> => {
+      const { candidates, allowPull } = expandModelCandidates(model, params);
+      if (candidates.length === 0) {
+        throw new Error(
+          deckPath
+            ? `No model configured for deck ${deckPath}`
+            : "No model configured.",
+        );
+      }
+      const failures: Array<string> = [];
+      for (const candidate of candidates) {
+        const provider = providerCapabilities.find((cap) =>
+          cap.matches(candidate.model)
+        );
+        const availability = provider
+          ? await provider.isAvailable(candidate.model, { allowPull })
+          : {
+            available: false,
+            reason: "no provider registered for model",
+          };
+        if (availability.available) {
+          return {
+            model: candidate.model,
+            params: candidate.params,
+          };
+        }
+        const label = provider ? provider.name : "unknown";
+        const reason = availability.reason ? `: ${availability.reason}` : "";
+        failures.push(`${candidate.model} (${label}${reason})`);
+      }
+      const suffix = failures.length ? ` Tried: ${failures.join(", ")}.` : "";
+      throw new Error(
+        deckPath
+          ? `No available model found for deck ${deckPath}.${suffix}`
+          : `No available model found.${suffix}`,
+      );
+    };
+    const shouldResolveModel = (
+      model: string | Array<string>,
+    ): boolean => {
+      if (Array.isArray(model)) return true;
+      const resolution = modelAliasResolver(model);
+      return Boolean(resolution.applied || resolution.missingAlias);
+    };
     const provider: import("@bolt-foundry/gambit-core").ModelProvider = {
+      resolveModel: async (input) =>
+        await resolveModelSelection(
+          input.model,
+          input.params,
+          input.deckPath,
+        ),
       responses: async (input: {
         request: import("@bolt-foundry/gambit-core").CreateResponseRequest;
         state?: import("@bolt-foundry/gambit-core").SavedState;
@@ -365,10 +471,12 @@ async function main() {
           event: import("@bolt-foundry/gambit-core").ResponseEvent,
         ) => void;
       }) => {
-        const applied = applyModelAlias(
-          input.request.model,
-          input.request.params,
-        );
+        const applied = shouldResolveModel(input.request.model)
+          ? await resolveModelSelection(
+            input.request.model,
+            input.request.params,
+          )
+          : { model: input.request.model, params: input.request.params };
         const request = {
           ...input.request,
           model: applied.model ?? input.request.model,
@@ -410,7 +518,9 @@ async function main() {
         onStreamText?: (chunk: string) => void;
         params?: Record<string, unknown>;
       }) => {
-        const applied = applyModelAlias(input.model, input.params);
+        const applied = shouldResolveModel(input.model)
+          ? await resolveModelSelection(input.model, input.params)
+          : { model: input.model, params: input.params };
         const request = {
           ...input,
           model: applied.model ?? input.model,

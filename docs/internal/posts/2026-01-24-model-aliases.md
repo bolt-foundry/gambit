@@ -10,7 +10,7 @@
 - `gambit.toml` now supports `[models.aliases]` entries so teams can name models
   (e.g., `randall`) once and reuse them across decks/CLI flags.
 - The CLI automatically resolves aliases, merges default params, and warns when
-  a deck references an undefined alias.
+  a deck references an undefined alias (including multi-model fallback lists).
 - `gambit check` validates decks using the resolved models and fails fast if an
   alias is missing.
 - Demo/init scaffolds include a starter alias plus docs describing how to route

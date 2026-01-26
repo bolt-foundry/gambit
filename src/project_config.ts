@@ -10,7 +10,7 @@ export type WorkspaceConfig = {
 };
 
 export type ModelAliasConfig = {
-  model?: string;
+  model?: string | Array<string>;
   description?: string;
   params?: Record<string, unknown>;
 };
@@ -86,7 +86,7 @@ export async function loadProjectConfig(
 }
 
 export type ModelAliasResolution = {
-  model?: string;
+  model?: string | Array<string>;
   params?: Record<string, unknown>;
   alias?: string;
   applied: boolean;
@@ -99,7 +99,7 @@ export function createModelAliasResolver(
   config?: GambitConfig | null,
 ): ModelAliasResolver {
   const resolved = new Map<string, {
-    model: string;
+    model: string | Array<string>;
     params?: Record<
       string,
       unknown
@@ -109,7 +109,16 @@ export function createModelAliasResolver(
   if (isPlainObject(aliases)) {
     for (const [name, raw] of Object.entries(aliases)) {
       if (!isPlainObject(raw)) continue;
-      const model = typeof raw.model === "string" ? raw.model.trim() : "";
+      let model: string | Array<string> | undefined;
+      if (typeof raw.model === "string") {
+        const trimmed = raw.model.trim();
+        if (trimmed) model = trimmed;
+      } else if (Array.isArray(raw.model)) {
+        const entries = raw.model
+          .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+          .filter(Boolean);
+        if (entries.length > 0) model = entries;
+      }
       if (!model) continue;
       const params = isPlainObject(raw.params)
         ? structuredClone(raw.params)

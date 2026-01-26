@@ -41,3 +41,11 @@ Decks can now set `model = "randall"` inside `[modelParams]`. The CLI resolves
 the alias before calling Ollama, automatically merging the default params
 (`temperature = 0.2` above). CLI flags such as `--model randall` also use the
 alias, so swapping the target model only requires editing `gambit.toml`.
+
+Aliases can list multiple models (first available wins), which is helpful for
+falling back to OpenRouter when Ollama is offline:
+
+```toml
+[models.aliases.randall]
+model = ["ollama/llama3.1", "openrouter/openai/gpt-4o-mini"]
+```

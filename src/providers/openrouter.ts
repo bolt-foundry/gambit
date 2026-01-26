@@ -18,6 +18,7 @@ import {
 } from "@bolt-foundry/gambit-core";
 
 const logger = console;
+export const OPENROUTER_PREFIX = "openrouter/";
 
 type OpenAIClient = {
   chat: {
@@ -29,6 +30,12 @@ type OpenAIClient = {
     create: (params: unknown) => Promise<unknown>;
   };
 };
+
+function normalizeOpenRouterModel(model: string): string {
+  return model.startsWith(OPENROUTER_PREFIX)
+    ? model.slice(OPENROUTER_PREFIX.length)
+    : model;
+}
 
 function normalizeMessage(
   content: OpenAI.Chat.Completions.ChatCompletionMessage,
@@ -404,7 +411,7 @@ async function createResponse(
   onStreamEvent?: (event: ResponseEvent) => void,
 ): Promise<CreateResponseResponse> {
   const baseParams: Record<string, unknown> = {
-    model: request.model,
+    model: normalizeOpenRouterModel(request.model),
     input: toOpenAIInputItems(request.input),
     instructions: request.instructions,
     tools: undefined,
@@ -545,7 +552,7 @@ export function createOpenRouterProvider(opts: {
         const response = await createResponse(
           client,
           {
-            model: input.model,
+            model: normalizeOpenRouterModel(input.model),
             input: chatMessagesToResponseItems(input.messages),
             tools: input.tools as Array<ResponseToolDefinition> | undefined,
             stream: input.stream,
@@ -576,7 +583,7 @@ export function createOpenRouterProvider(opts: {
         }
 
         const stream = await client.chat.completions.create({
-          model: input.model,
+          model: normalizeOpenRouterModel(input.model),
           messages: input
             .messages as Array<
               OpenAI.Chat.Completions.ChatCompletionMessageParam
@@ -687,7 +694,7 @@ export function createOpenRouterProvider(opts: {
       }
 
       const response = await client.chat.completions.create({
-        model: input.model,
+        model: normalizeOpenRouterModel(input.model),
         messages: input
           .messages as unknown as Array<
             OpenAI.Chat.Completions.ChatCompletionMessageParam

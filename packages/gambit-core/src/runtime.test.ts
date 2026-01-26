@@ -1795,3 +1795,45 @@ Deck.
     "handlers",
   );
 });
+
+Deno.test("runDeck resolves model arrays via modelProvider", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "root.deck.md",
+    `
++++
+modelParams = { model = ["ollama/llama3.1", "openrouter/openai/gpt-4o-mini"] }
++++
+
+Deck.
+`.trim(),
+  );
+  let resolvedInput: { model?: string | Array<string> } = {};
+  const provider: ModelProvider = {
+    resolveModel: (input) => {
+      resolvedInput = { model: input.model };
+      return Promise.resolve({
+        model: "openrouter/openai/gpt-4o-mini",
+        params: { temp: 1 },
+      });
+    },
+    chat: (input) => {
+      assertEquals(input.model, "openrouter/openai/gpt-4o-mini");
+      assertEquals(input.params?.temp, 1);
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assert(Array.isArray(resolvedInput.model));
+});

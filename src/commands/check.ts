@@ -18,6 +18,10 @@ type DeckModelInfo = {
   name: string;
 };
 
+type DeckModelSpec = {
+  candidates: Array<string>;
+};
+
 type DeckRef = { path: string };
 
 type LoadedCard = {
@@ -29,7 +33,7 @@ type LoadedCard = {
 
 type LoadedDeck = {
   path: string;
-  modelParams?: { model?: string };
+  modelParams?: { model?: string | Array<string> };
   handlers?: {
     onError?: DeckRef;
     onBusy?: DeckRef;
@@ -113,10 +117,10 @@ function collectDeckRefs(deck: LoadedDeck): Array<string> {
 async function collectDeckModels(
   rootDeckPath: string,
   resolver?: ModelAliasResolver,
-): Promise<{ models: Set<string>; missingAliases: Set<string> }> {
+): Promise<{ specs: Array<DeckModelSpec>; missingAliases: Set<string> }> {
   const resolvedRoot = path.resolve(rootDeckPath);
   const seenDecks = new Set<string>();
-  const models = new Set<string>();
+  const specs: Array<DeckModelSpec> = [];
   const missingAliases = new Set<string>();
   const queue: Array<string> = [resolvedRoot];
 
@@ -127,14 +131,13 @@ async function collectDeckModels(
     const deck = await loadDeck(deckPath);
     seenDecks.add(deck.path);
     if (deck.modelParams?.model) {
-      const resolution = resolver
-        ? resolver(deck.modelParams.model)
-        : { model: deck.modelParams.model, applied: false };
-      if (resolution.missingAlias && deck.modelParams.model) {
-        missingAliases.add(deck.modelParams.model);
-      }
-      if (resolution.model) {
-        models.add(resolution.model);
+      const candidates = expandModelCandidates(
+        deck.modelParams.model,
+        resolver,
+        missingAliases,
+      );
+      if (candidates.length > 0) {
+        specs.push({ candidates });
       }
     }
     const refs = collectDeckRefs(deck);
@@ -145,7 +148,40 @@ async function collectDeckModels(
     }
   }
 
-  return { models, missingAliases };
+  return { specs, missingAliases };
+}
+
+function expandModelCandidates(
+  model: string | Array<string>,
+  resolver: ModelAliasResolver | undefined,
+  missingAliases: Set<string>,
+): Array<string> {
+  const entries = Array.isArray(model) ? model : [model];
+  const candidates: Array<string> = [];
+  for (const entry of entries) {
+    if (typeof entry !== "string" || !entry.trim()) continue;
+    const resolution = resolver
+      ? resolver(entry)
+      : { model: entry, applied: false };
+    if (resolution.missingAlias) {
+      missingAliases.add(entry);
+    }
+    if (resolution.applied) {
+      const resolvedModel = resolution.model;
+      if (Array.isArray(resolvedModel)) {
+        for (const candidate of resolvedModel) {
+          if (typeof candidate === "string" && candidate.trim()) {
+            candidates.push(candidate);
+          }
+        }
+      } else if (typeof resolvedModel === "string" && resolvedModel.trim()) {
+        candidates.push(resolvedModel);
+      }
+    } else {
+      candidates.push(entry);
+    }
+  }
+  return candidates;
 }
 
 async function fetchProviderModels(opts: {
@@ -204,21 +240,23 @@ export async function handleCheckCommand(opts: {
       `Unknown model aliases: ${missing}. Define them in gambit.toml or update the deck.`,
     );
   }
-  if (collected.models.size === 0) {
+  if (collected.specs.length === 0) {
     logger.log("No explicit models found in deck tree.");
     return;
   }
 
-  const resolved = Array.from(collected.models, resolveModelProvider);
   const grouped = new Map<ModelProviderKey, Array<DeckModelInfo>>();
-  for (const model of resolved) {
-    const entry = grouped.get(model.provider) ?? [];
-    entry.push(model);
-    grouped.set(model.provider, entry);
+  for (const spec of collected.specs) {
+    for (const candidate of spec.candidates) {
+      const resolved = resolveModelProvider(candidate);
+      const entry = grouped.get(resolved.provider) ?? [];
+      entry.push(resolved);
+      grouped.set(resolved.provider, entry);
+    }
   }
 
-  const missingByProvider = new Map<ModelProviderKey, Array<string>>();
-  for (const [provider, modelsList] of grouped.entries()) {
+  const availableByProvider = new Map<ModelProviderKey, Set<string>>();
+  for (const [provider] of grouped.entries()) {
     const baseURL = provider === "openrouter"
       ? opts.openRouterBaseURL ?? DEFAULT_OPENROUTER_BASE_URL
       : opts.ollamaBaseURL ?? DEFAULT_OLLAMA_BASE_URL;
@@ -230,19 +268,27 @@ export async function handleCheckCommand(opts: {
       apiKey,
       provider,
     });
-    for (const model of modelsList) {
-      if (!available.has(model.name) && !available.has(model.original)) {
-        const missing = missingByProvider.get(provider) ?? [];
-        missing.push(model.original);
-        missingByProvider.set(provider, missing);
-      }
+    availableByProvider.set(provider, available);
+  }
+
+  const missingSpecs: Array<string> = [];
+  for (const spec of collected.specs) {
+    const candidates = spec.candidates;
+    const found = candidates.some((candidate) => {
+      const resolved = resolveModelProvider(candidate);
+      const available = availableByProvider.get(resolved.provider);
+      if (!available) return false;
+      return available.has(resolved.name) || available.has(resolved.original);
+    });
+    if (!found) {
+      missingSpecs.push(candidates.join(" | "));
     }
   }
 
-  if (missingByProvider.size > 0) {
+  if (missingSpecs.length > 0) {
     const lines = ["Missing models detected:"];
-    for (const [provider, modelsList] of missingByProvider.entries()) {
-      lines.push(`- ${provider}: ${modelsList.join(", ")}`);
+    for (const spec of missingSpecs) {
+      lines.push(`- ${spec}`);
     }
     throw new Error(lines.join("\n"));
   }

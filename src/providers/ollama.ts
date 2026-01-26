@@ -18,12 +18,98 @@ import {
 } from "@bolt-foundry/gambit-core";
 
 const logger = console;
+export const OLLAMA_PREFIX = "ollama/";
+export const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
 
 type OpenAIClient = {
   responses: {
     create: (params: unknown) => Promise<unknown>;
   };
 };
+
+type OllamaTagsResponse = {
+  models?: Array<{ name?: string }>;
+};
+
+function buildOllamaApiBase(baseURL: string | undefined): URL {
+  const url = new URL(baseURL ?? DEFAULT_OLLAMA_BASE_URL);
+  url.pathname = url.pathname.replace(/\/v1\/?$/, "/");
+  if (!url.pathname.endsWith("/")) {
+    url.pathname += "/";
+  }
+  return url;
+}
+
+export async function fetchOllamaTags(
+  baseURL: string | undefined,
+): Promise<Set<string>> {
+  const apiBase = buildOllamaApiBase(baseURL);
+  const tagsUrl = new URL("api/tags", apiBase);
+  const tagsResponse = await fetch(tagsUrl);
+  if (!tagsResponse.ok) {
+    throw new Error(
+      `Failed to list Ollama models (${tagsResponse.status} ${tagsResponse.statusText}).`,
+    );
+  }
+  const tags = (await tagsResponse.json()) as OllamaTagsResponse;
+  const models = tags.models ?? [];
+  return new Set(
+    models
+      .map((entry) => entry.name?.trim())
+      .filter((name): name is string => Boolean(name)),
+  );
+}
+
+export async function ensureOllamaModel(
+  model: string,
+  baseURL: string | undefined,
+): Promise<void> {
+  const tags = await fetchOllamaTags(baseURL);
+  if (tags.has(model)) {
+    return;
+  }
+
+  logger.log(`Ollama model "${model}" not found; pulling from Ollama...`);
+  const apiBase = buildOllamaApiBase(baseURL);
+  const pullUrl = new URL("api/pull", apiBase);
+  const pullResponse = await fetch(pullUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: model }),
+  });
+  if (!pullResponse.ok || !pullResponse.body) {
+    throw new Error(
+      `Failed to pull Ollama model "${model}" (${pullResponse.status} ${pullResponse.statusText}).`,
+    );
+  }
+
+  const decoder = new TextDecoder();
+  const reader = pullResponse.body.getReader();
+  let buffer = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as { status?: string; error?: string };
+        if (event.error) {
+          throw new Error(event.error);
+        }
+        if (event.status) {
+          logger.log(`[ollama] ${event.status}`);
+        }
+      } catch (err) {
+        throw new Error(
+          `Failed to parse Ollama pull response: ${(err as Error).message}`,
+        );
+      }
+    }
+  }
+}
 
 function safeJson(input: string): Record<string, JSONValue> {
   try {

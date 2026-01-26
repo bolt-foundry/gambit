@@ -85,7 +85,7 @@ Deno.test("openrouter responses maps output and usage", async () => {
   });
 
   assert(result);
-  assertEquals(received?.["model"], "openrouter/gpt-4o");
+  assertEquals(received?.["model"], "gpt-4o");
   assertEquals(result.output[0].type, "message");
   assertEquals(result.output[1].type, "function_call");
   assertEquals(result.usage, {

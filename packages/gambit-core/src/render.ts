@@ -200,7 +200,13 @@ function mergeModelParams(
 ): RenderChatCompletionsRequest {
   const out: RenderChatCompletionsRequest = { ...req };
   if (!deckParams) return out;
-  if (out.model === undefined && deckParams.model) out.model = deckParams.model;
+  if (out.model === undefined && deckParams.model) {
+    out.model = Array.isArray(deckParams.model)
+      ? deckParams.model.find((entry) =>
+        typeof entry === "string" && entry.trim().length > 0
+      )
+      : deckParams.model;
+  }
   if (out.temperature === undefined && deckParams.temperature !== undefined) {
     out.temperature = deckParams.temperature;
   }
@@ -279,7 +285,12 @@ export async function renderDeck(
     tools = mergedReq.tools;
   }
 
-  const model = String(mergedReq.model ?? "").trim();
+  const resolvedModel = Array.isArray(mergedReq.model)
+    ? mergedReq.model.find((entry) =>
+      typeof entry === "string" && entry.trim().length > 0
+    )
+    : mergedReq.model;
+  const model = String(resolvedModel ?? "").trim();
   if (!model) {
     throw new Error(
       `renderDeck requires request.model (or deck.modelParams.model): ${deck.path}`,
