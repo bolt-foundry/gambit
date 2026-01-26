@@ -2,7 +2,7 @@
 label = "gambit_init"
 
 [modelParams]
-model = "openai/gpt-5.1-chat"
+model = ["ollama/hf.co/LiquidAI/LFM2-1.2B-Tool-GGUF:latest", "openrouter/openai/gpt-5.1-chat"]
 temperature = 0.2
 
 [[actionDecks]]

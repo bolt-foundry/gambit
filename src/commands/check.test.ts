@@ -270,3 +270,48 @@ Root deck.`,
     "Unknown model aliases",
   );
 });
+
+Deno.test("check accepts model fallbacks when one candidate exists", async () => {
+  const dir = await Deno.makeTempDir();
+  const rootDeck = await writeDeck(
+    dir,
+    "root.deck.md",
+    `+++
+label = "root"
+[modelParams]
+model = ["ollama/missing", "openrouter/openai/gpt-4o-mini"]
++++
+
+Root deck.`,
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (input: Request | URL | string) => {
+    const url = resolveUrl(input);
+    if (url.includes("openrouter.test")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ data: [{ id: "openai/gpt-4o-mini" }] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    if (url.includes("ollama.test")) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ data: [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    }
+    return Promise.resolve(new Response("not found", { status: 404 }));
+  };
+  try {
+    await handleCheckCommand({
+      deckPath: rootDeck,
+      openRouterBaseURL: "https://openrouter.test/v1",
+      ollamaBaseURL: "http://ollama.test/v1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

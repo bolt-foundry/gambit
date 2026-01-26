@@ -57,6 +57,24 @@ Deno.test("createModelAliasResolver resolves aliases with params", () => {
   assertEquals(resolution.params, { temperature: 0.2, max_tokens: 512 });
 });
 
+Deno.test("createModelAliasResolver supports array models", () => {
+  const resolver = createModelAliasResolver({
+    models: {
+      aliases: {
+        randall: {
+          model: ["ollama/llama3.1", "openrouter/openai/gpt-4o-mini"],
+        },
+      },
+    },
+  });
+  const resolution = resolver("randall");
+  assertEquals(resolution.applied, true);
+  assertEquals(resolution.model, [
+    "ollama/llama3.1",
+    "openrouter/openai/gpt-4o-mini",
+  ]);
+});
+
 Deno.test("createModelAliasResolver flags missing aliases", () => {
   const resolver = createModelAliasResolver({
     models: {

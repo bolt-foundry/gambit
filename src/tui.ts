@@ -40,6 +40,7 @@ export async function startTui(opts: {
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
   verbose?: boolean;
+  initialSystemMessage?: string;
   initialContext?: unknown;
   initialMessage?: unknown;
   contextProvided?: boolean;
@@ -50,6 +51,9 @@ export async function startTui(opts: {
   }
 
   const messages: Array<Message> = [];
+  if (opts.initialSystemMessage) {
+    messages.push({ role: "system", text: opts.initialSystemMessage });
+  }
   let input = "";
   let state: SavedState | undefined;
   let closed = false;
@@ -63,6 +67,7 @@ export async function startTui(opts: {
   let ttftStartAt: number | null = null;
   let ttftRecorded = false;
   let modelStreamedText = false;
+  let currentModel: string | undefined;
 
   const scheduleRender = () => {
     if (renderPending || closed) return;
@@ -96,8 +101,9 @@ export async function startTui(opts: {
     const { columns, rows } = getConsoleSize();
     const width = Math.max(20, columns);
     const height = Math.max(10, rows);
+    const modelLabel = currentModel ? ` | model: ${currentModel}` : "";
     const header = clampLine(
-      `Gambit TUI - ${deckLabel}${running ? " (running)" : ""}`,
+      `Gambit TUI - ${deckLabel}${running ? " (running)" : ""}${modelLabel}`,
       width,
     );
     const tipText = "Tip: ctrl+c/d to exit • \\ + enter for newline";
@@ -148,11 +154,13 @@ export async function startTui(opts: {
       scheduleRender();
     } else if (event.type === "model.call") {
       modelStreamedText = false;
+      if (event.model) currentModel = event.model;
     } else if (event.type === "model.result") {
       if (event.finishReason === "tool_calls" && modelStreamedText) {
         ttftStartAt = Date.now();
         ttftRecorded = false;
       }
+      if (event.model) currentModel = event.model;
     } else if (event.type === "tool.result") {
       const key = `${event.actionCallId}:${event.name}`;
       activeTools.delete(key);

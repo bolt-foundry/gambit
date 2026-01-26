@@ -20,7 +20,7 @@ export type LogEntry = {
 };
 
 export type ModelParams = {
-  model?: string;
+  model?: string | Array<string>;
   temperature?: number;
   top_p?: number;
   frequency_penalty?: number;
@@ -291,6 +291,14 @@ export type ModelProvider = {
     state?: SavedState;
     onStreamEvent?: (event: ResponseEvent) => void;
   }) => Promise<CreateResponseResponse>;
+  resolveModel?: (input: {
+    model: string | Array<string>;
+    params?: Record<string, unknown>;
+    deckPath?: string;
+  }) => Promise<{
+    model: string;
+    params?: Record<string, unknown>;
+  }>;
   chat: (input: {
     model: string;
     messages: Array<ModelMessage>;

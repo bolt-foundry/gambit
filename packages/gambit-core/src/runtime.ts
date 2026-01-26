@@ -202,6 +202,35 @@ function toProviderParams(
   return Object.keys(out).length ? out : undefined;
 }
 
+async function resolveModelChoice(args: {
+  model: string | Array<string>;
+  params?: Record<string, unknown>;
+  modelProvider: ModelProvider;
+  deckPath: string;
+}): Promise<{ model: string; params?: Record<string, unknown> }> {
+  const resolver = args.modelProvider.resolveModel;
+  if (resolver) {
+    return await resolver({
+      model: args.model,
+      params: args.params,
+      deckPath: args.deckPath,
+    });
+  }
+  if (Array.isArray(args.model)) {
+    const first = args.model.find((entry) =>
+      typeof entry === "string" && entry.trim().length > 0
+    );
+    if (!first) {
+      throw new Error(`No model configured for deck ${args.deckPath}`);
+    }
+    return { model: first, params: args.params };
+  }
+  if (!args.model || !args.model.trim()) {
+    throw new Error(`No model configured for deck ${args.deckPath}`);
+  }
+  return { model: args.model, params: args.params };
+}
+
 function resolveContextSchema(deck: LoadedDeck) {
   return deck.contextSchema ?? deck.inputSchema;
 }
@@ -703,7 +732,7 @@ async function runLlmDeck(
       }
       streamingBuffer = "";
       streamingCommitted = false;
-      const model = ctx.modelOverride ??
+      const modelCandidate = ctx.modelOverride ??
         deck.modelParams?.model ??
         ctx.defaultModel ??
         (() => {
@@ -711,6 +740,14 @@ async function runLlmDeck(
             `No model configured for deck ${deck.path} and no --model provided`,
           );
         })();
+      const resolved = await resolveModelChoice({
+        model: modelCandidate,
+        params: toProviderParams(deck.modelParams),
+        modelProvider,
+        deckPath: deck.path,
+      });
+      const model = resolved.model;
+      const providerParams = resolved.params;
 
       const stateMessages = ctx.state?.messages?.length;
       ctx.trace?.({
@@ -745,7 +782,7 @@ async function runLlmDeck(
               input: responseItems,
               tools: tools as Array<ResponseToolDefinition>,
               stream: ctx.stream,
-              params: toProviderParams(deck.modelParams),
+              params: providerParams,
             },
             state: ctx.state,
             onStreamEvent: (ctx.onStreamText || deck.handlers?.onIdle)
@@ -776,7 +813,7 @@ async function runLlmDeck(
           tools,
           stream: ctx.stream,
           state: ctx.state,
-          params: toProviderParams(deck.modelParams),
+          params: providerParams,
           onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
             ? wrappedOnStreamText
             : undefined,
