@@ -1,23 +1,12 @@
 import * as path from "@std/path";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import type { ModelAliasResolver } from "../project_config.ts";
+import { GOOGLE_PREFIX } from "../providers/google.ts";
+import { fetchOllamaTags, OLLAMA_PREFIX } from "../providers/ollama.ts";
+import { OPENROUTER_PREFIX } from "../providers/openrouter.ts";
+import type { ProviderKey } from "../providers/router.ts";
 
 const logger = console;
-const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
-
-type ModelProviderKey = "ollama" | "openrouter";
-
-type ModelsListResponse = {
-  data?: Array<{ id?: string }>;
-};
-
-type DeckModelInfo = {
-  original: string;
-  provider: ModelProviderKey;
-  name: string;
-};
-
 type DeckModelSpec = {
   candidates: Array<string>;
 };
@@ -45,28 +34,6 @@ type LoadedDeck = {
   graderDecks?: Array<DeckRef>;
   cards?: Array<LoadedCard>;
 };
-
-function resolveModelProvider(model: string): DeckModelInfo {
-  if (model.startsWith("ollama/")) {
-    return {
-      original: model,
-      provider: "ollama",
-      name: model.slice("ollama/".length),
-    };
-  }
-  if (model.startsWith("openrouter/")) {
-    return {
-      original: model,
-      provider: "openrouter",
-      name: model.slice("openrouter/".length),
-    };
-  }
-  return {
-    original: model,
-    provider: "openrouter",
-    name: model,
-  };
-}
 
 function collectCardDeckRefs(card: LoadedCard): Array<string> {
   const refs: Array<string> = [];
@@ -184,55 +151,19 @@ function expandModelCandidates(
   return candidates;
 }
 
-async function fetchProviderModels(opts: {
-  baseURL: string;
-  apiKey?: string;
-  provider: ModelProviderKey;
-}): Promise<Set<string>> {
-  const base = opts.baseURL.endsWith("/") ? opts.baseURL : `${opts.baseURL}/`;
-  const modelsUrl = new URL("./models", base);
-  const headers: HeadersInit = {};
-  if (opts.apiKey) {
-    headers.Authorization = `Bearer ${opts.apiKey}`;
-  }
-  const response = await fetch(modelsUrl, { headers });
-  if (!response.ok) {
-    if ((response.status === 401 || response.status === 403) && !opts.apiKey) {
-      throw new Error(
-        `Missing API key for ${opts.provider}; set ${
-          opts.provider === "openrouter"
-            ? "OPENROUTER_API_KEY"
-            : "OLLAMA_API_KEY"
-        }.`,
-      );
-    }
-    throw new Error(
-      `Failed to list ${opts.provider} models (${response.status} ${response.statusText}).`,
-    );
-  }
-  const json = (await response.json()) as ModelsListResponse;
-  const ids = new Set<string>();
-  for (const entry of json.data ?? []) {
-    if (!entry?.id) continue;
-    ids.add(entry.id);
-    if (opts.provider === "openrouter") {
-      ids.add(`openrouter/${entry.id}`);
-    }
-    if (opts.provider === "ollama") {
-      ids.add(`ollama/${entry.id}`);
-    }
-  }
-  return ids;
-}
-
 export async function handleCheckCommand(opts: {
   deckPath: string;
-  openRouterApiKey?: string;
-  openRouterBaseURL?: string;
-  ollamaApiKey?: string;
-  ollamaBaseURL?: string;
   modelResolver?: ModelAliasResolver;
+  fallbackProvider?: ProviderKey | null;
+  checkOnline?: boolean;
+  openRouterApiKey?: string;
+  googleApiKey?: string;
+  ollamaBaseURL?: string;
 }) {
+  const effectiveFallbackProvider = opts.fallbackProvider === undefined
+    ? "openrouter"
+    : opts.fallbackProvider;
+  const shouldCheckRemote = Boolean(opts.checkOnline);
   const collected = await collectDeckModels(opts.deckPath, opts.modelResolver);
   if (collected.missingAliases.size > 0) {
     const missing = Array.from(collected.missingAliases).join(", ");
@@ -244,54 +175,141 @@ export async function handleCheckCommand(opts: {
     logger.log("No explicit models found in deck tree.");
     return;
   }
+  const uniqueModels = new Set<string>();
+  for (const spec of collected.specs) {
+    spec.candidates.forEach((candidate) => uniqueModels.add(candidate));
+  }
+  const skippedRemote = new Set<string>();
+  const failures: Array<string> = [];
+  let ollamaTags: Promise<Set<string>> | null = null;
 
-  const grouped = new Map<ModelProviderKey, Array<DeckModelInfo>>();
+  const getOllamaTags = async (): Promise<Set<string>> => {
+    if (!ollamaTags) {
+      ollamaTags = fetchOllamaTags(opts.ollamaBaseURL);
+    }
+    return await ollamaTags;
+  };
+
+  const parseProvider = (model: string): {
+    providerKey?: ProviderKey;
+    strippedModel: string;
+  } => {
+    if (model.startsWith(OPENROUTER_PREFIX)) {
+      return {
+        providerKey: "openrouter",
+        strippedModel: model.slice(OPENROUTER_PREFIX.length),
+      };
+    }
+    if (model.startsWith(OLLAMA_PREFIX)) {
+      return {
+        providerKey: "ollama",
+        strippedModel: model.slice(OLLAMA_PREFIX.length),
+      };
+    }
+    if (model.startsWith(GOOGLE_PREFIX)) {
+      return {
+        providerKey: "google",
+        strippedModel: model.slice(GOOGLE_PREFIX.length),
+      };
+    }
+    return { strippedModel: model };
+  };
+
+  const checkCandidate = async (candidate: string): Promise<{
+    available: boolean;
+    skipped?: boolean;
+  }> => {
+    const parsed = parseProvider(candidate);
+    const prefixed = Boolean(parsed.providerKey);
+    let providerKey = parsed.providerKey;
+    let resolvedModel = parsed.strippedModel;
+    if (!providerKey) {
+      if (effectiveFallbackProvider === null) {
+        failures.push(`${candidate} (no fallback provider configured)`);
+        return { available: false };
+      }
+      providerKey = effectiveFallbackProvider;
+      resolvedModel = candidate;
+    }
+
+    if (providerKey === "ollama") {
+      if (!resolvedModel.trim()) {
+        failures.push(`${candidate} (ollama: missing model name)`);
+        return { available: false };
+      }
+      try {
+        const tags = await getOllamaTags();
+        if (!tags.has(resolvedModel)) {
+          failures.push(`${candidate} (ollama: model not installed)`);
+          return { available: false };
+        }
+        return { available: true };
+      } catch (err) {
+        failures.push(
+          `${candidate} (ollama: ${(err as Error).message})`,
+        );
+        return { available: false };
+      }
+    }
+
+    if (providerKey === "openrouter") {
+      if (!resolvedModel.trim()) {
+        failures.push(`${candidate} (openrouter: missing model name)`);
+        return { available: false };
+      }
+      if (!shouldCheckRemote) {
+        skippedRemote.add(candidate);
+        return { available: true, skipped: true };
+      }
+      if (!opts.openRouterApiKey) {
+        failures.push(`${candidate} (openrouter: OPENROUTER_API_KEY not set)`);
+        return { available: false };
+      }
+      return { available: true };
+    }
+
+    if (providerKey === "google") {
+      if (!resolvedModel.trim()) {
+        failures.push(`${candidate} (google: missing model name)`);
+        return { available: false };
+      }
+      if (!shouldCheckRemote) {
+        skippedRemote.add(candidate);
+        return { available: true, skipped: true };
+      }
+      if (opts.googleApiKey) {
+        return { available: true };
+      }
+      if (
+        prefixed && effectiveFallbackProvider === "openrouter" &&
+        opts.openRouterApiKey
+      ) {
+        return { available: true };
+      }
+      failures.push(`${candidate} (google: GOOGLE_API_KEY not set)`);
+      return { available: false };
+    }
+
+    failures.push(`${candidate} (unknown provider)`);
+    return { available: false };
+  };
+
   for (const spec of collected.specs) {
     for (const candidate of spec.candidates) {
-      const resolved = resolveModelProvider(candidate);
-      const entry = grouped.get(resolved.provider) ?? [];
-      entry.push(resolved);
-      grouped.set(resolved.provider, entry);
+      await checkCandidate(candidate);
     }
   }
 
-  const availableByProvider = new Map<ModelProviderKey, Set<string>>();
-  for (const [provider] of grouped.entries()) {
-    const baseURL = provider === "openrouter"
-      ? opts.openRouterBaseURL ?? DEFAULT_OPENROUTER_BASE_URL
-      : opts.ollamaBaseURL ?? DEFAULT_OLLAMA_BASE_URL;
-    const apiKey = provider === "openrouter"
-      ? opts.openRouterApiKey
-      : opts.ollamaApiKey;
-    const available = await fetchProviderModels({
-      baseURL,
-      apiKey,
-      provider,
-    });
-    availableByProvider.set(provider, available);
+  if (failures.length > 0) {
+    throw new Error(`Model availability check failed: ${failures.join("; ")}`);
   }
 
-  const missingSpecs: Array<string> = [];
-  for (const spec of collected.specs) {
-    const candidates = spec.candidates;
-    const found = candidates.some((candidate) => {
-      const resolved = resolveModelProvider(candidate);
-      const available = availableByProvider.get(resolved.provider);
-      if (!available) return false;
-      return available.has(resolved.name) || available.has(resolved.original);
-    });
-    if (!found) {
-      missingSpecs.push(candidates.join(" | "));
-    }
+  logger.log(
+    `Checked ${collected.specs.length} deck(s); ${uniqueModels.size} model(s) resolved.`,
+  );
+  if (!shouldCheckRemote && skippedRemote.size > 0) {
+    logger.log(
+      `Skipped remote availability checks for ${skippedRemote.size} model(s). Use --online to verify remote providers.`,
+    );
   }
-
-  if (missingSpecs.length > 0) {
-    const lines = ["Missing models detected:"];
-    for (const spec of missingSpecs) {
-      lines.push(`- ${spec}`);
-    }
-    throw new Error(lines.join("\n"));
-  }
-
-  logger.log("All referenced models are available.");
 }

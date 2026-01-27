@@ -752,6 +752,11 @@ code:not(pre *) {
   background: var(--color-warning-soft);
   color: var(--color-warning);
 }
+.badge--ghost {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
 .init-field input,
 .init-field select,
 .init-field textarea {

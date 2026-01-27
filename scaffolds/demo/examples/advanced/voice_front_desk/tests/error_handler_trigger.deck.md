@@ -6,6 +6,8 @@ model = "openai/gpt-4o-mini"
 temperature = 0.3
 +++
 
+![generate-test-input](gambit://cards/generate-test-input.card.md)
+
 ![test_bot_hangup](./cards/test_bot_hangup.card.md)
 
 You are a caller asking the clinic to run a failure simulation. Your goal is to

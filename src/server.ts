@@ -60,13 +60,6 @@ const simulatorBundlePath = path.resolve(
   "dist",
   "bundle.js",
 );
-const simulatorUiEntryPath = path.resolve(
-  moduleDir,
-  "..",
-  "simulator-ui",
-  "src",
-  "main.tsx",
-);
 const simulatorBundleSourceMapPath = path.resolve(
   moduleDir,
   "..",
@@ -453,6 +446,193 @@ function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
   }
 }
 
+function getPathValue(value: unknown, path: Array<string>): unknown {
+  let current: unknown = value;
+  for (const segment of path) {
+    if (
+      !current || typeof current !== "object" ||
+      !(segment in (current as Record<string, unknown>))
+    ) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function setPathValue(
+  value: unknown,
+  path: Array<string>,
+  nextValue: unknown,
+): unknown {
+  if (path.length === 0) return nextValue;
+  const root = value && typeof value === "object"
+    ? cloneValue(value as unknown)
+    : {};
+  let cursor = root as Record<string, unknown>;
+  for (let i = 0; i < path.length - 1; i++) {
+    const segment = path[i];
+    const existing = cursor[segment];
+    const next = existing && typeof existing === "object"
+      ? cloneValue(existing as unknown)
+      : {};
+    cursor[segment] = next;
+    cursor = next as Record<string, unknown>;
+  }
+  const last = path[path.length - 1];
+  if (nextValue === undefined) {
+    delete cursor[last];
+  } else {
+    cursor[last] = nextValue;
+  }
+  return root;
+}
+
+function findMissingRequiredFields(
+  schema: NormalizedSchema | undefined,
+  value: unknown,
+  prefix: Array<string> = [],
+): Array<string> {
+  if (!schema) return [];
+  if (schema.optional) return [];
+
+  if (schema.kind === "object" && schema.fields) {
+    if (
+      value !== undefined && value !== null &&
+      (typeof value !== "object" || Array.isArray(value))
+    ) {
+      return [];
+    }
+    const asObj = value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : undefined;
+    const missing: Array<string> = [];
+    for (const [key, child] of Object.entries(schema.fields)) {
+      missing.push(
+        ...findMissingRequiredFields(
+          child,
+          asObj ? asObj[key] : undefined,
+          [...prefix, key],
+        ),
+      );
+    }
+    return missing;
+  }
+
+  const key = prefix.join(".") || "(root)";
+  if (value === undefined || value === null) {
+    return schema.defaultValue !== undefined ? [] : [key];
+  }
+
+  if (schema.kind === "string" || schema.kind === "enum") {
+    return typeof value === "string" && value.trim() === "" ? [key] : [];
+  }
+  if (schema.kind === "array") {
+    return Array.isArray(value) && value.length === 0 ? [key] : [];
+  }
+  if (schema.kind === "number") {
+    return typeof value === "number" && Number.isFinite(value) ? [] : [key];
+  }
+  if (schema.kind === "boolean") {
+    return typeof value === "boolean" ? [] : [key];
+  }
+  return [];
+}
+
+function getSchemaAtPath(
+  schema: NormalizedSchema | undefined,
+  path: Array<string>,
+): NormalizedSchema | undefined {
+  let current = schema;
+  for (const segment of path) {
+    if (!current || current.kind !== "object" || !current.fields) return;
+    current = current.fields[segment];
+  }
+  return current;
+}
+
+function buildInitFillPrompt(args: {
+  missing: Array<string>;
+  current: unknown;
+  schema: NormalizedSchema | undefined;
+}): string {
+  const schemaHints = args.missing.map((path) => {
+    const segments = path === "(root)" ? [] : path.split(".");
+    const leaf = getSchemaAtPath(args.schema, segments);
+    return {
+      path,
+      kind: leaf?.kind,
+      description: leaf?.description,
+      enumValues: leaf?.enumValues,
+    };
+  });
+  const payload = {
+    type: "gambit_test_bot_init_fill",
+    missing: args.missing,
+    current: args.current ?? null,
+    schemaHints,
+  };
+  return [
+    "You are filling missing required init fields for a Gambit Test Bot run.",
+    "Return ONLY valid JSON that includes values for the missing fields.",
+    "Do not include any fields that are not listed as missing.",
+    "If the only missing path is '(root)', return the full init JSON value.",
+    "",
+    JSON.stringify(payload, null, 2),
+  ].join("\n");
+}
+
+function unwrapRespondPayload(output: unknown): unknown {
+  if (!output || typeof output !== "object") return output;
+  const record = output as Record<string, unknown>;
+  if ("payload" in record) {
+    return record.payload;
+  }
+  return output;
+}
+
+function parseInitFillOutput(
+  output: unknown,
+): { data?: unknown; error?: string } {
+  if (output === null || output === undefined) {
+    return { error: "Persona returned empty init fill output." };
+  }
+  if (typeof output === "object") {
+    return { data: unwrapRespondPayload(output) };
+  }
+  if (typeof output === "string") {
+    const text = output.trim();
+    if (!text) return { error: "Persona returned empty init fill output." };
+    try {
+      const parsed = JSON.parse(text);
+      return { data: unwrapRespondPayload(parsed) };
+    } catch (err) {
+      return {
+        error: `Persona returned invalid JSON for init fill: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+  }
+  return { error: "Persona returned unsupported init fill output." };
+}
+
+function validateInitInput(schema: ZodTypeAny | undefined, value: unknown) {
+  if (!schema) return value;
+  if (typeof schema.safeParse !== "function") {
+    throw new Error("Init schema missing safeParse");
+  }
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    const issue = result.error.issues?.[0];
+    const message = issue
+      ? `${issue.path.join(".") || "(root)"}: ${issue.message}`
+      : result.error.message;
+    throw new Error(`Schema validation failed: ${message}`);
+  }
+  return result.data;
+}
+
 /**
  * Start the WebSocket simulator server used by the Gambit debug UI.
  */
@@ -468,6 +648,7 @@ export function startWebSocketSimulator(opts: {
   signal?: AbortSignal;
   sessionDir?: string;
   autoBundle?: boolean;
+  forceBundle?: boolean;
   sourceMap?: boolean;
   bundlePlatform?: "deno" | "browser";
   responsesMode?: boolean;
@@ -510,6 +691,7 @@ export function startWebSocketSimulator(opts: {
     return slug || "session";
   };
   type TestBotRunStatus = {
+    initFill?: TestBotInitFill;
     id: string;
     status: "idle" | "running" | "completed" | "error" | "canceled";
     sessionId?: string;
@@ -535,6 +717,12 @@ export function startWebSocketSimulator(opts: {
       name?: string;
       index: number;
     }>;
+  };
+  type TestBotInitFill = {
+    requested: Array<string>;
+    applied?: unknown;
+    provided?: unknown;
+    error?: string;
   };
   type TestBotRunEntry = {
     run: TestBotRunStatus;
@@ -1008,6 +1196,10 @@ export function startWebSocketSimulator(opts: {
       ? state.meta.sessionId
       : undefined;
     if (sessionId) run.sessionId = sessionId;
+    const initFill =
+      (state.meta as { testBotInitFill?: TestBotInitFill } | undefined)
+        ?.testBotInitFill;
+    if (initFill) run.initFill = initFill;
     run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
   };
 
@@ -1017,6 +1209,11 @@ export function startWebSocketSimulator(opts: {
     botInput?: unknown;
     initialUserMessage?: string;
     botDeckPath?: string;
+    initFill?: TestBotInitFill;
+    initFillTrace?: {
+      args: Record<string, unknown>;
+      result: Record<string, unknown>;
+    };
   } = {}): TestBotRunStatus => {
     const botDeckPath = typeof runOpts.botDeckPath === "string"
       ? runOpts.botDeckPath
@@ -1061,9 +1258,29 @@ export function startWebSocketSimulator(opts: {
     };
     testBotRuns.set(runId, entry);
     const run = entry.run;
+    if (runOpts.initFill) run.initFill = runOpts.initFill;
     let savedState: SavedState | undefined = undefined;
     let lastCount = 0;
     const capturedTraces: Array<TraceEvent> = [];
+    if (runOpts.initFillTrace) {
+      const actionCallId = randomId("initfill");
+      capturedTraces.push(
+        {
+          type: "tool.call",
+          runId,
+          actionCallId,
+          name: "gambit_test_bot_init_fill",
+          args: runOpts.initFillTrace.args as never,
+        },
+        {
+          type: "tool.result",
+          runId,
+          actionCallId,
+          name: "gambit_test_bot_init_fill",
+          result: runOpts.initFillTrace.result as never,
+        },
+      );
+    }
 
     const setSessionId = (state: SavedState | undefined) => {
       const sessionId = typeof state?.meta?.sessionId === "string"
@@ -1162,6 +1379,7 @@ export function startWebSocketSimulator(opts: {
                 testBotRunId: runId,
                 testBotConfigPath: botConfigPath,
                 testBotName,
+                ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
               };
               const enriched = persistSessionState({
                 ...state,
@@ -1220,6 +1438,7 @@ export function startWebSocketSimulator(opts: {
                 testBotRunId: runId,
                 testBotConfigPath: botConfigPath,
                 testBotName,
+                ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
               };
               const enriched = persistSessionState({
                 ...state,
@@ -1277,6 +1496,61 @@ export function startWebSocketSimulator(opts: {
     entry.promise = loop();
     broadcastTestBot({ type: "testBotStatus", run });
     return run;
+  };
+
+  const persistFailedInitFill = (args: {
+    error: string;
+    initFill: TestBotInitFill | undefined;
+    botDeckPath: string;
+  }): { sessionId?: string; sessionPath?: string } => {
+    const failedRunId = randomId("testbot");
+    const testBotName = path.basename(args.botDeckPath).replace(
+      /\.deck\.(md|ts)$/i,
+      "",
+    );
+    const actionCallId = randomId("initfill");
+    const traces: Array<TraceEvent> = [
+      {
+        type: "tool.call",
+        runId: failedRunId,
+        actionCallId,
+        name: "gambit_test_bot_init_fill",
+        args: { missing: args.initFill?.requested ?? [] } as never,
+      },
+      {
+        type: "tool.result",
+        runId: failedRunId,
+        actionCallId,
+        name: "gambit_test_bot_init_fill",
+        result: {
+          error: args.error,
+          provided: args.initFill?.provided,
+        } as never,
+      },
+    ];
+    const failedState = persistSessionState({
+      runId: failedRunId,
+      messages: [],
+      traces,
+      meta: {
+        testBot: true,
+        testBotRunId: failedRunId,
+        testBotConfigPath: args.botDeckPath,
+        testBotName,
+        testBotInitFill: args.initFill,
+        testBotInitFillError: args.error,
+      },
+    });
+    const sessionId = typeof failedState.meta?.sessionId === "string"
+      ? failedState.meta.sessionId
+      : undefined;
+    const sessionPath = typeof failedState.meta?.sessionStatePath === "string"
+      ? failedState.meta.sessionStatePath
+      : undefined;
+    if (sessionPath) {
+      logger.warn(`[sim] init fill failed; session saved to ${sessionPath}`);
+    }
+    return { sessionId, sessionPath };
   };
 
   const deckLoadPromise: Promise<LoadedDeck | null> = loadDeck(
@@ -1355,16 +1629,29 @@ export function startWebSocketSimulator(opts: {
   const wantsSourceMap = Boolean(opts.sourceMap);
   const bundlePlatform = opts.bundlePlatform ?? "deno";
   const autoBundle = opts.autoBundle ?? true;
+  const forceBundle = opts.forceBundle ?? false;
   const needsBundle = !hasReactBundle() ||
     (wantsSourceMap && !hasReactBundleSourceMap()) ||
     isReactBundleStale();
-  const shouldAutoBundle = autoBundle && moduleLocation.isLocal && needsBundle;
+  const shouldAutoBundle = autoBundle && moduleLocation.isLocal &&
+    (forceBundle || needsBundle);
   if (autoBundle && !moduleLocation.isLocal && opts.verbose) {
     logger.log(
       "[sim] auto-bundle disabled for remote package; using packaged bundle.",
     );
   }
+  if (autoBundle && moduleLocation.isLocal && !shouldAutoBundle) {
+    logger.log("[sim] auto-bundle enabled; bundle already up to date.");
+  }
   if (shouldAutoBundle) {
+    logger.log(
+      `[sim] auto-bundle enabled; rebuilding simulator UI (${
+        forceBundle ? "forced" : "stale"
+      })...`,
+    );
+    logger.log(
+      `[sim] bundling simulator UI (${forceBundle ? "forced" : "stale"})...`,
+    );
     try {
       const p = new Deno.Command("deno", {
         args: [
@@ -1971,6 +2258,7 @@ export function startWebSocketSimulator(opts: {
         let botDeckSelection: AvailableTestDeck | undefined;
         let inheritBotInput = false;
         let userProvidedDeckInput = false;
+        let initFillRequestMissing: Array<string> | undefined = undefined;
         try {
           const body = await req.json() as {
             maxTurns?: number;
@@ -1980,6 +2268,7 @@ export function startWebSocketSimulator(opts: {
             initialUserMessage?: unknown;
             botDeckPath?: string;
             inheritBotInput?: unknown;
+            initFill?: { missing?: unknown };
           };
           if (
             typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
@@ -1999,7 +2288,11 @@ export function startWebSocketSimulator(opts: {
           if (typeof body.inheritBotInput === "boolean") {
             inheritBotInput = body.inheritBotInput;
           }
-          await deckLoadPromise.catch(() => null);
+          if (body.initFill && Array.isArray(body.initFill.missing)) {
+            initFillRequestMissing = body.initFill.missing.filter((entry) =>
+              typeof entry === "string" && entry.trim().length > 0
+            ) as Array<string>;
+          }
           if (typeof body.botDeckPath === "string") {
             const resolved = resolveTestDeck(body.botDeckPath);
             if (!resolved) {
@@ -2045,12 +2338,183 @@ export function startWebSocketSimulator(opts: {
             { status: 400, headers: { "content-type": "application/json" } },
           );
         }
+        let initFillInfo: TestBotInitFill | undefined;
+        let initFillTrace: {
+          args: Record<string, unknown>;
+          result: Record<string, unknown>;
+        } | undefined;
+        try {
+          const rootDeck = await deckLoadPromise.catch(() => null);
+          const rootSchema = rootDeck?.contextSchema ?? rootDeck?.inputSchema;
+          const normalizedSchema = rootSchema
+            ? normalizeSchema(rootSchema)
+            : undefined;
+          const missing = normalizedSchema
+            ? findMissingRequiredFields(normalizedSchema, deckInput)
+            : [];
+          const requested = initFillRequestMissing?.length
+            ? missing.filter((entry) => initFillRequestMissing?.includes(entry))
+            : missing;
+          if (requested.length > 0) {
+            const fillPrompt = buildInitFillPrompt({
+              missing: requested,
+              current: deckInput,
+              schema: normalizedSchema,
+            });
+            const fillOutput = await runDeckWithFallback({
+              path: botDeckSelection.path,
+              input: botInput,
+              inputProvided: botInput !== undefined,
+              modelProvider: opts.modelProvider,
+              allowRootStringInput: true,
+              initialUserMessage: fillPrompt,
+              responsesMode: opts.responsesMode,
+            });
+            const parsed = parseInitFillOutput(fillOutput);
+            if (parsed.error) {
+              initFillInfo = {
+                requested,
+                provided: fillOutput,
+                error: parsed.error,
+              };
+              const failure = persistFailedInitFill({
+                error: parsed.error,
+                initFill: initFillInfo,
+                botDeckPath: botDeckSelection.path,
+              });
+              return new Response(
+                JSON.stringify({
+                  error: parsed.error,
+                  initFill: initFillInfo,
+                  sessionId: failure.sessionId,
+                  sessionPath: failure.sessionPath,
+                }),
+                {
+                  status: 400,
+                  headers: { "content-type": "application/json" },
+                },
+              );
+            }
+            let appliedObject: Record<string, unknown> = {};
+            let appliedRoot: unknown = undefined;
+            let nextInput = deckInput;
+            for (const pathKey of requested) {
+              const segments = pathKey === "(root)" ? [] : pathKey.split(".");
+              const leafSchema = getSchemaAtPath(normalizedSchema, segments);
+              const currentValue = getPathValue(nextInput, segments);
+              if (
+                currentValue !== undefined && currentValue !== null &&
+                !(typeof currentValue === "string" &&
+                  (leafSchema?.kind === "string" ||
+                    leafSchema?.kind === "enum") &&
+                  currentValue.trim() === "") &&
+                !(Array.isArray(currentValue) && leafSchema?.kind === "array" &&
+                  currentValue.length === 0)
+              ) {
+                continue;
+              }
+              const fillValue = getPathValue(parsed.data, segments);
+              if (fillValue === undefined) continue;
+              if (segments.length === 0) {
+                nextInput = fillValue;
+                appliedRoot = fillValue;
+                continue;
+              }
+              nextInput = setPathValue(nextInput, segments, fillValue);
+              const appliedValue = setPathValue(
+                appliedObject,
+                segments,
+                fillValue,
+              );
+              if (appliedValue && typeof appliedValue === "object") {
+                appliedObject = appliedValue as Record<string, unknown>;
+              }
+            }
+            const validated = validateInitInput(rootSchema, nextInput);
+            deckInput = validated;
+            const remainingMissing = normalizedSchema
+              ? findMissingRequiredFields(normalizedSchema, deckInput)
+              : [];
+            if (remainingMissing.length > 0) {
+              const message = `Init fill incomplete: missing ${
+                remainingMissing.join(", ")
+              }`;
+              initFillInfo = {
+                requested,
+                applied: appliedRoot !== undefined
+                  ? appliedRoot
+                  : Object.keys(appliedObject).length
+                  ? appliedObject
+                  : undefined,
+                provided: parsed.data,
+                error: message,
+              };
+              const failure = persistFailedInitFill({
+                error: message,
+                initFill: initFillInfo,
+                botDeckPath: botDeckSelection.path,
+              });
+              return new Response(
+                JSON.stringify({
+                  error: message,
+                  initFill: initFillInfo,
+                  sessionId: failure.sessionId,
+                  sessionPath: failure.sessionPath,
+                }),
+                {
+                  status: 400,
+                  headers: { "content-type": "application/json" },
+                },
+              );
+            }
+            initFillInfo = {
+              requested,
+              applied: appliedRoot !== undefined
+                ? appliedRoot
+                : Object.keys(appliedObject).length
+                ? appliedObject
+                : undefined,
+              provided: parsed.data,
+            };
+            initFillTrace = {
+              args: {
+                missing: requested,
+              },
+              result: {
+                applied: initFillInfo.applied,
+                provided: initFillInfo.provided,
+              },
+            };
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          initFillInfo = initFillInfo ?? {
+            requested: [],
+          };
+          initFillInfo.error = message;
+          const failure = persistFailedInitFill({
+            error: message,
+            initFill: initFillInfo,
+            botDeckPath: botDeckSelection.path,
+          });
+          return new Response(
+            JSON.stringify({
+              error: message,
+              initFill: initFillInfo,
+              sessionId: failure.sessionId,
+              sessionPath: failure.sessionPath,
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
         const run = startTestBotRun({
           maxTurnsOverride,
           deckInput,
           botInput,
           initialUserMessage,
           botDeckPath: botDeckSelection.path,
+          initFill: initFillInfo,
+          initFillTrace,
         });
         return new Response(
           JSON.stringify({ run }),
@@ -2854,9 +3318,15 @@ export function startWebSocketSimulator(opts: {
 
       if (url.pathname === "/schema") {
         const desc = await schemaPromise;
+        const deck = await deckLoadPromise.catch(() => null);
+        const startMode = deck &&
+            (deck.startMode === "assistant" || deck.startMode === "user")
+          ? deck.startMode
+          : undefined;
         return new Response(
           JSON.stringify({
             deck: resolvedDeckPath,
+            startMode,
             ...desc,
           }),
           {
@@ -2981,17 +3451,51 @@ function hasReactBundleSourceMap(): boolean {
   }
 }
 
+function newestMtimeInDir(dirPath: string): number | undefined {
+  const stack: Array<string> = [dirPath];
+  let newest: number | undefined = undefined;
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    let entries: Array<Deno.DirEntry>;
+    try {
+      entries = Array.from(Deno.readDirSync(current));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory) {
+        stack.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile) continue;
+      try {
+        const stat = Deno.statSync(entryPath);
+        if (!stat.isFile) continue;
+        const mtime = stat.mtime?.getTime();
+        if (typeof mtime !== "number") continue;
+        newest = newest === undefined ? mtime : Math.max(newest, mtime);
+      } catch {
+        continue;
+      }
+    }
+  }
+  return newest;
+}
+
 function isReactBundleStale(): boolean {
   try {
     const bundleStat = Deno.statSync(simulatorBundlePath);
-    const entryStat = Deno.statSync(simulatorUiEntryPath);
-    if (!bundleStat.isFile || !entryStat.isFile) return false;
+    if (!bundleStat.isFile) return false;
     const bundleTime = bundleStat.mtime?.getTime();
-    const entryTime = entryStat.mtime?.getTime();
-    if (typeof bundleTime !== "number" || typeof entryTime !== "number") {
+    if (typeof bundleTime !== "number") {
       return false;
     }
-    return entryTime > bundleTime;
+    const srcRoot = path.resolve(moduleDir, "..", "simulator-ui", "src");
+    const newestSource = newestMtimeInDir(srcRoot);
+    if (typeof newestSource !== "number") return false;
+    return newestSource > bundleTime;
   } catch {
     return false;
   }

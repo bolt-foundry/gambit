@@ -5,6 +5,9 @@ graders = "graders"
 tests = "tests"
 schemas = "schemas"
 
+[providers]
+fallback = "openrouter"
+
 [models.aliases.default]
 model = "openrouter/openai/gpt-4o-mini"
 description = "Workspace default model alias."

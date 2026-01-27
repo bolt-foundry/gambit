@@ -49,5 +49,7 @@ export type { RenderDeckResult } from "@bolt-foundry/gambit-core";
 export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
 /** Provider factory for Ollama-backed model calls. */
 export { createOllamaProvider } from "./src/providers/ollama.ts";
+/** Provider factory for Google Gemini-backed model calls. */
+export { createGoogleProvider } from "./src/providers/google.ts";
 /** Start the WebSocket simulator server for the Gambit UI. */
 export { startWebSocketSimulator } from "./src/server.ts";

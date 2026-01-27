@@ -1,13 +1,18 @@
 +++
 [release]
-since = "bdc68aae672ce89c7d50b913deb1703a9ce7d5df"
+since = "849762245925cce325c04da1d604088370ec3723"
 +++
 
 # Changelog
 
-## Unreleased (v0.8.3)
+## Unreleased (v0.8.4)
 
 - TBD
+
+## v0.8.3
+
+- fix(gambit): include CLI docs/reference files in binary builds
+- chore(infra): run the Gambit compile check during `bft gambit:release`
 
 ## v0.8.2
 

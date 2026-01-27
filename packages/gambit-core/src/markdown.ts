@@ -505,6 +505,7 @@ export async function loadMarkdownDeck(
     graderDecks: mergeDeckRefs(rootGraderDecks, embeddedGraderDecks),
     cards: allCards,
     label: deckMeta.label,
+    startMode: deckMeta.startMode,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     contextSchema: mergedContextSchema,

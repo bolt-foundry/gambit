@@ -13,7 +13,7 @@ You role-play an existing patient calling the clinic. Use the input fields to
 drive your responses. If `scenarioDescription` is provided, follow it closely;
 otherwise use the default goals below:
 
-![init](gambit://cards/context.card.md)
+![generate-test-input](gambit://cards/generate-test-input.card.md)
 
 - Start with a natural, casual opener about scheduling or getting help as an
   existing patient. Avoid formal "confirm my identity" phrasing.

@@ -15,6 +15,8 @@
   alias is missing.
 - Demo/init scaffolds include a starter alias plus docs describing how to route
   Ollama/OpenRouter targets through the new layer.
+- `gambit.toml` now supports `[providers] fallback = "openrouter" | "none"` to
+  control whether unprefixed models fall back to OpenRouter.
 
 ## Why
 
@@ -38,3 +40,5 @@
   adding new decks.
 - Extend `gambit check` with richer reporting (e.g., list resolved aliases) if
   teams need more visibility.
+- Add opt-in live provider integration tests (set `GAMBIT_RUN_LIVE_TESTS=1` and
+  provider API keys).

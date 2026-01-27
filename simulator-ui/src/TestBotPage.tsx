@@ -76,6 +76,9 @@ export default function TestBotPage(props: {
     traces: [],
     toolInserts: [],
   });
+  const [lastInitFill, setLastInitFill] = useState<
+    TestBotRun["initFill"] | null
+  >(null);
   const runRef = useRef<TestBotRun>({
     status: "idle",
     messages: [],
@@ -120,7 +123,6 @@ export default function TestBotPage(props: {
   const deckSchemaError = deckSchema.schemaResponse?.error ??
     deckSchema.error ??
     undefined;
-  const [inheritPersonaInit, setInheritPersonaInit] = useState(true);
   const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
   const [deckInitDirty, setDeckInitDirty] = useState(false);
   const [deckJsonErrors, setDeckJsonErrors] = useState<
@@ -386,20 +388,10 @@ export default function TestBotPage(props: {
     setDeckInitValue(nextInit);
   }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
 
-  useEffect(() => {
-    if (!inheritPersonaInit) return;
-    if (deckInitDirty) return;
-    if (botInputValue === undefined) return;
-    setDeckInitValue(cloneValue(botInputValue));
-  }, [inheritPersonaInit, botInputValue, deckInitDirty]);
-
   const handleDeckInitChange = useCallback((next: unknown) => {
-    if (inheritPersonaInit) {
-      setInheritPersonaInit(false);
-    }
     setDeckInitValue(next);
     setDeckInitDirty(true);
-  }, [inheritPersonaInit]);
+  }, []);
 
   useEffect(() => {
     if (!botInputSchema) return;
@@ -552,7 +544,6 @@ export default function TestBotPage(props: {
   const hasPersonaSelection = canRunPersona && Boolean(selectedDeckId);
   const canStart = hasPersonaSelection &&
     (!botInputSchema || missingBotInput.length === 0) &&
-    (!deckInputSchema || missingDeckInit.length === 0) &&
     botJsonErrorCount === 0 &&
     deckJsonErrorCount === 0;
 
@@ -600,22 +591,59 @@ export default function TestBotPage(props: {
 
   const startRun = useCallback(async () => {
     try {
+      const initFillRequest = missingDeckInit.length > 0
+        ? { requested: missingDeckInit }
+        : null;
+      if (initFillRequest) {
+        setLastInitFill(initFillRequest);
+        console.info("[test-bot] init fill requested", initFillRequest);
+      }
       const payload: Record<string, unknown> = {
         botInput: botInputValue,
         initialUserMessage,
         botDeckPath: selectedDeckId ?? undefined,
-        inheritBotInput: inheritPersonaInit,
+        context: deckInitValue,
+        initFill: missingDeckInit.length > 0
+          ? { missing: missingDeckInit }
+          : undefined,
       };
-      if (!inheritPersonaInit) {
-        payload.context = deckInitValue;
-      }
       const res = await fetch("/api/test/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { run?: TestBotRun };
+      const data = await res.json().catch(() => ({})) as {
+        run?: TestBotRun;
+        error?: string;
+        initFill?: TestBotRun["initFill"];
+        sessionPath?: string;
+      };
+      if (!res.ok) {
+        if (data.initFill) {
+          setLastInitFill(data.initFill);
+          console.info("[test-bot] init fill error", data.initFill);
+        }
+        if (data.sessionPath) {
+          console.info(
+            "[test-bot] init fill session saved",
+            data.sessionPath,
+          );
+        }
+        setRun({
+          status: "error",
+          error: typeof data.error === "string" ? data.error : res.statusText,
+          initFill: data.initFill,
+          messages: [],
+          traces: [],
+          toolInserts: [],
+        });
+        return;
+      }
       if (data.run) {
+        if (data.run.initFill) {
+          setLastInitFill(data.run.initFill);
+          console.info("[test-bot] init fill applied", data.run.initFill);
+        }
         setRun({
           ...data.run,
           messages: data.run.messages ?? [],
@@ -637,10 +665,10 @@ export default function TestBotPage(props: {
   }, [
     deckInitValue,
     botInputValue,
-    inheritPersonaInit,
     initialUserMessage,
     refreshStatus,
     selectedDeckId,
+    missingDeckInit,
   ]);
 
   const stopRun = useCallback(async () => {
@@ -854,6 +882,29 @@ export default function TestBotPage(props: {
             </div>
           </div>
           {run.error && <div className="error">{run.error}</div>}
+          {(run.initFill ?? lastInitFill) && (
+            <div className="patch-card">
+              <div className="patch-summary">Init fill</div>
+              {(run.initFill ?? lastInitFill)?.error && (
+                <div className="error">
+                  {(run.initFill ?? lastInitFill)?.error}
+                </div>
+              )}
+              <div className="patch-meta">
+                Requested: {(run.initFill ?? lastInitFill)?.requested?.length
+                  ? (run.initFill ?? lastInitFill)!.requested.join(", ")
+                  : "none"}
+              </div>
+              {(run.initFill ?? lastInitFill)?.applied !== undefined && (
+                <pre className="trace-json">
+                  {formatJson((run.initFill ?? lastInitFill)?.applied)}
+                </pre>
+              )}
+              {(run.initFill ?? lastInitFill)?.applied === undefined && (
+                <div className="patch-meta">No fills applied.</div>
+              )}
+            </div>
+          )}
           {!canStart && canRunPersona && (
             <div className="error">
               {!hasPersonaSelection
@@ -869,6 +920,14 @@ export default function TestBotPage(props: {
                   missingDeckInit.slice(0, 6).join(", ")
                 }${missingDeckInit.length > 6 ? "…" : ""}`
                 : ""}
+            </div>
+          )}
+          {canStart && missingDeckInit.length > 0 && (
+            <div className="placeholder">
+              Missing required init fields will be requested from the persona:
+              {" "}
+              {missingDeckInit.slice(0, 6).join(", ")}
+              {missingDeckInit.length > 6 ? "…" : ""}
             </div>
           )}
           <div
@@ -1039,41 +1098,6 @@ export default function TestBotPage(props: {
           {deckSchemaError && <div className="error">{deckSchemaError}</div>}
           {deckInputSchema && (
             <>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 6,
-                  marginBottom: 8,
-                }}
-              >
-                <label
-                  style={{ display: "flex", gap: 8, alignItems: "center" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={inheritPersonaInit}
-                    onChange={(e) => {
-                      const next = e.target.checked;
-                      setInheritPersonaInit(next);
-                      if (next) {
-                        setDeckInitDirty(false);
-                        setDeckJsonErrors({});
-                        if (botInputValue !== undefined) {
-                          setDeckInitValue(cloneValue(botInputValue));
-                        }
-                      }
-                    }}
-                  />
-                  Use test deck input for init
-                </label>
-                {inheritPersonaInit && (
-                  <span style={{ fontSize: 12, color: "#64748b" }}>
-                    Persona fields will auto-populate deck init until you edit
-                    them.
-                  </span>
-                )}
-              </div>
               <InitForm
                 schema={deckInputSchema}
                 value={deckInitValue}

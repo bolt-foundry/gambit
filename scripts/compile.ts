@@ -34,22 +34,37 @@ const coreRel = normalizePath(path.relative(packageRoot, coreDir));
 const coreCards = normalizePath(path.join(coreRel, "cards"));
 const coreSchemas = normalizePath(path.join(coreRel, "schemas"));
 
-const baseArgs = [
-  "compile",
-  "-A",
-  "--include",
-  "deno.jsonc",
-  "--include",
+const docIncludeCandidates = [
   "docs/cli/commands",
-  "--include",
+  "docs/external/reference/cli/commands",
+];
+
+const docIncludes: string[] = [];
+for (const relPath of docIncludeCandidates) {
+  try {
+    await Deno.stat(path.join(packageRoot, relPath));
+    docIncludes.push(relPath);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) continue;
+    throw err;
+  }
+}
+
+const includePaths = [
+  "deno.jsonc",
+  ...docIncludes,
   coreCards,
-  "--include",
   coreSchemas,
-  "--include",
   "scaffolds",
-  "--include",
   "simulator-ui/dist",
 ];
+
+const baseArgs = includePaths.flatMap((includePath) => [
+  "--include",
+  includePath,
+]);
+
+baseArgs.unshift("compile", "-A");
 
 const extraArgs = Deno.args.filter((arg) => arg !== "--");
 const hasOutput = extraArgs.some((arg, idx) =>

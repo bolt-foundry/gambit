@@ -20,3 +20,8 @@ flags = [
 
 Runs a persona deck against a root deck to simulate conversations. Repeat
 `--grade` to apply multiple graders.
+
+If the root deck has required init fields that are missing, the persona deck is
+asked to return JSON for only the missing fields before the run starts. The
+filled init is merged without overwriting explicit values and validated against
+the root init schema.

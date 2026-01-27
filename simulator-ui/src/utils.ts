@@ -18,6 +18,7 @@ export type NormalizedSchema = {
 
 export type SchemaResponse = {
   deck?: string;
+  startMode?: "assistant" | "user";
   schema?: NormalizedSchema;
   defaults?: unknown;
   error?: string;
@@ -152,6 +153,12 @@ export type TestBotRun = {
   status: "idle" | "running" | "completed" | "error" | "canceled";
   sessionId?: string;
   error?: string;
+  initFill?: {
+    requested: string[];
+    applied?: unknown;
+    provided?: unknown;
+    error?: string;
+  };
   startedAt?: string;
   finishedAt?: string;
   maxTurns?: number;

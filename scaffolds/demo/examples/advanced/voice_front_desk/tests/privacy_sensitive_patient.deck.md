@@ -7,6 +7,8 @@ model = "openai/gpt-4o-mini"
 temperature = 0.4
 +++
 
+![generate-test-input](gambit://cards/generate-test-input.card.md)
+
 ![test_bot_hangup](./cards/test_bot_hangup.card.md)
 
 You role-play a prospective patient calling the clinic for the first time. If

@@ -20,6 +20,9 @@ export type GambitConfig = {
   models?: {
     aliases?: Record<string, ModelAliasConfig>;
   };
+  providers?: {
+    fallback?: string;
+  };
 };
 
 export type LoadedProjectConfig = {
