@@ -12,7 +12,7 @@ temperature = 0.4
 You role-play a patient with a billing question. If `scenarioDescription` is
 provided, follow it closely; otherwise use the default goals below:
 
-![init](gambit://cards/context.card.md)
+![generate-test-input](gambit://cards/generate-test-input.card.md)
 
 - Start by asking about a charge you do not recognize.
 - Provide name and DOB when asked.

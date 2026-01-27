@@ -13,7 +13,7 @@ You role-play a patient asking about insurance coverage. If
 `scenarioDescription` is provided, follow it closely; otherwise use the default
 goals below:
 
-![init](gambit://cards/context.card.md)
+![generate-test-input](gambit://cards/generate-test-input.card.md)
 
 - Start by asking if the clinic takes your insurance.
 - Provide name and DOB when asked.

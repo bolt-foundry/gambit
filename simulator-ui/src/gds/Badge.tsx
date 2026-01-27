@@ -6,7 +6,8 @@ export type BadgeVariant =
   | "running"
   | "completed"
   | "error"
-  | "canceled";
+  | "canceled"
+  | "ghost";
 
 const STATUS_VARIANT_MAP: Record<string, BadgeVariant> = {
   idle: "idle",

@@ -79,6 +79,7 @@ export type HandlersConfig = {
 
 export type BaseDefinition = {
   label?: Label;
+  startMode?: "assistant" | "user";
   contextSchema?: ZodTypeAny;
   responseSchema?: ZodTypeAny;
   /**

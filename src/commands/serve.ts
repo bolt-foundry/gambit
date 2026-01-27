@@ -35,6 +35,7 @@ export async function handleServeCommand(opts: {
     );
   })();
   const autoBundle = opts.bundle ?? isDevEnv;
+  const forceBundle = opts.bundle === true;
   const sourceMap = opts.sourcemap ?? autoBundle;
   if (!autoBundle && sourceMap) {
     throw new Error(
@@ -52,6 +53,7 @@ export async function handleServeCommand(opts: {
       port,
       verbose: opts.verbose,
       autoBundle,
+      forceBundle,
       sourceMap,
       bundlePlatform,
       responsesMode: opts.responsesMode,

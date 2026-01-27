@@ -101,6 +101,27 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   should set `acceptsUserTurns = true` and may declare its own `contextSchema`
   (for example `contextSchema = "../schemas/my_persona_test.zod.ts"`) so the
   Test tab renders a schema-driven “Scenario” form for that persona.
+- For persona/test decks, you can embed
+  `![generate-test-input](gambit://cards/generate-test-input.card.md)` to
+  include the Test Bot init-fill contract instructions.
+- Test Bot init fill: when a Test Bot run is missing required init fields, the
+  selected persona deck is asked to supply only the missing values before the
+  run begins. The persona receives a single user message containing a JSON
+  payload like:
+  ```json
+  {
+    "type": "gambit_test_bot_init_fill",
+    "missing": ["customer.name", "issueType"],
+    "current": { "channel": "sms" },
+    "schemaHints": [
+      { "path": "customer.name", "kind": "string", "description": "..." },
+      { "path": "issueType", "kind": "enum", "enumValues": ["billing", "ops"] }
+    ]
+  }
+  ```
+  The persona should respond with **JSON only**, returning values for the
+  missing fields (nested by path). Explicit init values are never overwritten;
+  invalid JSON or schema-violating output blocks the run with a clear error.
 - `graderDecks` describe calibration decks that score transcripts/artifacts. The
   simulator Calibrate page will run these decks against stored runs.
 - Configure `acceptsUserTurns` alongside these references:

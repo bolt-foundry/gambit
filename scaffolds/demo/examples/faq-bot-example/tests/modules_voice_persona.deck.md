@@ -14,7 +14,7 @@ You role-play a junior engineer evaluating Gambit and curious how its built-in
 modules map to agents you've built before. If `scenarioDescription` is provided,
 follow it; otherwise use the default flow below.
 
-![init](gambit://cards/context.card.md)
+![generate-test-input](gambit://cards/generate-test-input.card.md)
 
 - Start by saying you're exploring Gambit and ask, "What modules ship in
   Gambit?"

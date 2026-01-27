@@ -8,7 +8,7 @@ flags = [
   "--port <n>              Port for serve (default: 8000)",
   "--responses             Run runtime/state in Responses mode",
   "--watch                 Restart server on file changes (serve)",
-  "--bundle                Force auto-bundling (serve; default in dev)",
+  "--bundle                Force a simulator UI rebuild (serve; default in dev)",
   "--no-bundle             Disable auto-bundling for simulator UI (serve)",
   "--sourcemap             Generate external source maps (serve; default in dev)",
   "--no-sourcemap          Disable source map generation (serve)",

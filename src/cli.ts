@@ -15,10 +15,10 @@ import {
   fetchOllamaTags,
   OLLAMA_PREFIX,
 } from "./providers/ollama.ts";
-import {
-  createOpenRouterProvider,
-  OPENROUTER_PREFIX,
-} from "./providers/openrouter.ts";
+import { createOpenRouterProvider } from "./providers/openrouter.ts";
+import { createGoogleProvider } from "./providers/google.ts";
+import { createProviderRouter } from "./providers/router.ts";
+import { createProviderMatchers } from "./model_matchers.ts";
 import { handleCheckCommand } from "./commands/check.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
@@ -274,6 +274,43 @@ async function main() {
       return { candidates, allowPull: allowPullForSingle };
     };
 
+    const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
+    const googleApiKey = (Deno.env.get("GOOGLE_API_KEY") ??
+      Deno.env.get("GEMINI_API_KEY"))?.trim();
+    const openRouterBaseURL = Deno.env.get("OPENROUTER_BASE_URL") ??
+      DEFAULT_OPENROUTER_BASE_URL;
+    const ollamaBaseURL = Deno.env.get("OLLAMA_BASE_URL") ?? undefined;
+    const googleBaseURL = Deno.env.get("GOOGLE_BASE_URL") ??
+      Deno.env.get("GEMINI_BASE_URL") ??
+      undefined;
+
+    const fallbackProviderRaw = projectConfig?.config?.providers?.fallback;
+    let fallbackProvider:
+      | "openrouter"
+      | "ollama"
+      | "google"
+      | null
+      | undefined = undefined;
+    if (typeof fallbackProviderRaw === "string") {
+      const normalized = fallbackProviderRaw.trim().toLowerCase();
+      if (normalized === "none") {
+        fallbackProvider = null;
+      } else if (
+        normalized === "openrouter" || normalized === "ollama" ||
+        normalized === "google"
+      ) {
+        fallbackProvider = normalized as "openrouter" | "ollama" | "google";
+      } else if (normalized.length > 0) {
+        logger.warn(
+          `[gambit] Unknown providers.fallback "${fallbackProviderRaw}" in gambit.toml; using default fallback.`,
+        );
+      }
+    }
+
+    const effectiveFallbackProvider = fallbackProvider === undefined
+      ? "openrouter"
+      : fallbackProvider;
+
     if (args.cmd === "grade") {
       const graderPath = args.graderPath ?? deckPath;
       if (!graderPath) {
@@ -320,21 +357,19 @@ async function main() {
       }
       await handleCheckCommand({
         deckPath,
-        openRouterApiKey: Deno.env.get("OPENROUTER_API_KEY") ?? undefined,
-        openRouterBaseURL: Deno.env.get("OPENROUTER_BASE_URL") ?? undefined,
-        ollamaApiKey: Deno.env.get("OLLAMA_API_KEY") ?? undefined,
-        ollamaBaseURL: Deno.env.get("OLLAMA_BASE_URL") ?? undefined,
         modelResolver: modelAliasResolver,
+        fallbackProvider,
+        checkOnline: args.online,
+        openRouterApiKey: openRouterApiKey ?? undefined,
+        googleApiKey: googleApiKey ?? undefined,
+        ollamaBaseURL,
       });
       return;
     }
 
-    const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
     const chatFallback = Deno.env.get("GAMBIT_CHAT_FALLBACK") === "1";
     const responsesMode = args.responses ||
       (!chatFallback && Deno.env.get("GAMBIT_RESPONSES_MODE") !== "0");
-    const openRouterBaseURL = Deno.env.get("OPENROUTER_BASE_URL") ??
-      DEFAULT_OPENROUTER_BASE_URL;
     const openRouterProvider = openRouterApiKey
       ? createOpenRouterProvider({
         apiKey: openRouterApiKey,
@@ -343,12 +378,29 @@ async function main() {
           Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
       })
       : null;
-    const ollamaBaseURL = Deno.env.get("OLLAMA_BASE_URL") ?? undefined;
     const ollamaProvider = createOllamaProvider({
       apiKey: Deno.env.get("OLLAMA_API_KEY")?.trim() || undefined,
       baseURL: ollamaBaseURL,
     });
+    const googleProvider = googleApiKey
+      ? createGoogleProvider({
+        apiKey: googleApiKey,
+        baseURL: googleBaseURL,
+      })
+      : null;
+
+    const providerRouter = createProviderRouter({
+      providers: {
+        openrouter: openRouterProvider,
+        ollama: ollamaProvider,
+        google: googleProvider,
+      },
+      defaultProvider: fallbackProvider,
+      fallbackToDefaultOnMissing: ["google"],
+    });
+
     const ollamaPrefix = OLLAMA_PREFIX;
+    const providerMatchers = createProviderMatchers(effectiveFallbackProvider);
     const ollamaTagsCache: { promise: Promise<Set<string>> | null } = {
       promise: null,
     };
@@ -361,7 +413,7 @@ async function main() {
     const providerCapabilities: Array<ProviderCapability> = [
       {
         name: "ollama",
-        matches: (model) => model.startsWith(ollamaPrefix),
+        matches: providerMatchers.matchesOllama,
         isAvailable: async (model, opts) => {
           const trimmed = model.slice(ollamaPrefix.length);
           if (!trimmed) {
@@ -396,10 +448,23 @@ async function main() {
         },
       },
       {
+        name: "google",
+        matches: providerMatchers.matchesGoogle,
+        isAvailable: (_model, _opts) =>
+          Promise.resolve(
+            googleApiKey
+              ? { available: true }
+              : (effectiveFallbackProvider === "openrouter" && openRouterApiKey)
+              ? { available: true }
+              : {
+                available: false,
+                reason: "GOOGLE_API_KEY or GEMINI_API_KEY is not set",
+              },
+          ),
+      },
+      {
         name: "openrouter",
-        matches: (model) =>
-          model.startsWith(OPENROUTER_PREFIX) ||
-          !model.startsWith(ollamaPrefix),
+        matches: providerMatchers.matchesOpenRouter,
         isAvailable: (_model, _opts) =>
           Promise.resolve(
             openRouterApiKey ? { available: true } : {
@@ -485,28 +550,19 @@ async function main() {
         if (!request.model) {
           throw new Error("Model is required.");
         }
-        if (request.model.startsWith(ollamaPrefix)) {
-          const trimmedModel = request.model.slice(ollamaPrefix.length);
-          const ollamaResponses = ollamaProvider.responses;
-          if (!ollamaResponses) {
-            throw new Error("Ollama responses are not configured.");
-          }
-          return await ollamaResponses({
-            ...input,
-            request: {
-              ...request,
-              model: trimmedModel,
-            },
-          });
-        }
-        if (!openRouterProvider?.responses) {
+        const selection = providerRouter.resolve({ model: request.model });
+        const responses = selection.provider.responses;
+        if (!responses) {
           throw new Error(
-            "OPENROUTER_API_KEY is required for non-ollama models.",
+            `${selection.providerKey} provider does not support responses.`,
           );
         }
-        return await openRouterProvider.responses({
+        return await responses({
           ...input,
-          request,
+          request: {
+            ...request,
+            model: selection.model,
+          },
         });
       },
       chat: async (input: {
@@ -529,16 +585,11 @@ async function main() {
         if (!request.model) {
           throw new Error("Model is required.");
         }
-        if (request.model.startsWith(ollamaPrefix)) {
-          const model = request.model.slice(ollamaPrefix.length);
-          return await ollamaProvider.chat({ ...request, model });
-        }
-        if (!openRouterProvider) {
-          throw new Error(
-            "OPENROUTER_API_KEY is required for non-ollama models.",
-          );
-        }
-        return await openRouterProvider.chat(request);
+        const selection = providerRouter.resolve({ model: request.model });
+        return await selection.provider.chat({
+          ...request,
+          model: selection.model,
+        });
       },
     };
 

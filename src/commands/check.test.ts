@@ -1,317 +1,93 @@
 import { assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { handleCheckCommand } from "./check.ts";
-import { createModelAliasResolver } from "../project_config.ts";
 
-async function writeDeck(dir: string, filename: string, contents: string) {
-  const target = path.join(dir, filename);
-  await Deno.writeTextFile(target, contents);
-  return target;
+async function writeDeck(dir: string, name: string, model: string) {
+  const deckPath = path.join(dir, name);
+  const contents = `+++
+label = "test"
+
+[modelParams]
+model = "${model}"
++++
+
+Test deck.
+`;
+  await Deno.writeTextFile(deckPath, contents);
+  return deckPath;
 }
 
-function resolveUrl(input: Request | URL | string): string {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.href;
-  return input.url;
-}
-
-Deno.test("check validates models across providers", async () => {
+Deno.test({
+  name: "check fails when ollama model is missing",
+  permissions: { read: true, write: true },
+}, async () => {
   const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[modelParams]
-model = "openrouter/anthropic/claude-3.5-sonnet"
-[handlers.onError]
-path = "./handler.deck.md"
-[[testDecks]]
-label = "child"
-path = "./child.deck.md"
-+++
-
-Root deck.`,
-  );
-  await writeDeck(
-    dir,
-    "child.deck.md",
-    `+++
-label = "child"
-[modelParams]
-model = "ollama/llama3"
-+++
-
-Child deck.`,
-  );
-  await writeDeck(
-    dir,
-    "handler.deck.md",
-    `+++
-label = "handler"
-[modelParams]
-model = "openrouter/anthropic/claude-3.5-sonnet"
-+++
-
-Handler deck.`,
-  );
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input: Request | URL | string) => {
-    const url = resolveUrl(input);
-    if (url.includes("openrouter.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [{ id: "anthropic/claude-3.5-sonnet" }] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    if (url.includes("ollama.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [{ id: "llama3" }] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    return Promise.resolve(new Response("not found", { status: 404 }));
-  };
-
-  try {
-    await handleCheckCommand({
-      deckPath: rootDeck,
-      openRouterBaseURL: "https://openrouter.test/v1",
-      ollamaBaseURL: "http://ollama.test/v1",
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("check reports missing models", async () => {
-  const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[modelParams]
-model = "anthropic/claude-3.5-sonnet"
-[[testDecks]]
-label = "child"
-path = "./child.deck.md"
-+++
-
-Root deck.`,
-  );
-  await writeDeck(
-    dir,
-    "child.deck.md",
-    `+++
-label = "child"
-[modelParams]
-model = "ollama/llama3"
-+++
-
-Child deck.`,
-  );
+  const deckPath = await writeDeck(dir, "root.deck.md", "ollama/missing-model");
 
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () =>
     Promise.resolve(
-      new Response(JSON.stringify({ data: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(JSON.stringify({ models: [] }), { status: 200 }),
     );
-
   try {
     await assertRejects(
       () =>
         handleCheckCommand({
-          deckPath: rootDeck,
-          openRouterBaseURL: "https://openrouter.test/v1",
-          ollamaBaseURL: "http://ollama.test/v1",
+          deckPath,
         }),
       Error,
-      "Missing models detected:",
+      "ollama: model not installed",
     );
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-Deno.test("check includes handler models", async () => {
+Deno.test({
+  name: "check skips remote providers when offline",
+  permissions: { read: true, write: true },
+}, async () => {
   const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[handlers.onError]
-path = "./handler.deck.md"
-+++
+  const deckPath = await writeDeck(dir, "root.deck.md", "openrouter/test");
 
-Root deck.`,
-  );
-  await writeDeck(
-    dir,
-    "handler.deck.md",
-    `+++
-label = "handler"
-[modelParams]
-model = "ollama/missing-model"
-+++
-
-Handler deck.`,
-  );
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input: Request | URL | string) => {
-    const url = resolveUrl(input);
-    if (url.includes("ollama.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    return Promise.resolve(
-      new Response(
-        JSON.stringify({ data: [] }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-  };
-
-  try {
-    await assertRejects(
-      () =>
-        handleCheckCommand({
-          deckPath: rootDeck,
-          openRouterBaseURL: "https://openrouter.test/v1",
-          ollamaBaseURL: "http://ollama.test/v1",
-        }),
-      Error,
-      "Missing models detected:",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  await handleCheckCommand({
+    deckPath,
+    checkOnline: false,
+  });
 });
 
-Deno.test("check resolves model aliases", async () => {
+Deno.test({
+  name: "check enforces remote providers when online",
+  permissions: { read: true, write: true },
+}, async () => {
   const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[modelParams]
-model = "randall"
-+++
+  const deckPath = await writeDeck(dir, "root.deck.md", "openrouter/test");
 
-Root deck.`,
-  );
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input: Request | URL | string) => {
-    const url = resolveUrl(input);
-    if (url.includes("ollama.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [{ id: "llama3" }] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    return Promise.resolve(new Response("not found", { status: 404 }));
-  };
-  try {
-    await handleCheckCommand({
-      deckPath: rootDeck,
-      ollamaBaseURL: "http://ollama.test/v1",
-      modelResolver: createModelAliasResolver({
-        models: {
-          aliases: {
-            randall: { model: "ollama/llama3" },
-          },
-        },
-      }),
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-Deno.test("check errors on missing aliases", async () => {
-  const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[modelParams]
-model = "randall"
-+++
-
-Root deck.`,
-  );
   await assertRejects(
     () =>
       handleCheckCommand({
-        deckPath: rootDeck,
-        modelResolver: createModelAliasResolver({
-          models: { aliases: { other: { model: "openrouter/foo" } } },
-        }),
+        deckPath,
+        checkOnline: true,
       }),
     Error,
-    "Unknown model aliases",
+    "OPENROUTER_API_KEY",
   );
 });
 
-Deno.test("check accepts model fallbacks when one candidate exists", async () => {
+Deno.test({
+  name: "check rejects unprefixed models when fallback is none",
+  permissions: { read: true, write: true },
+}, async () => {
   const dir = await Deno.makeTempDir();
-  const rootDeck = await writeDeck(
-    dir,
-    "root.deck.md",
-    `+++
-label = "root"
-[modelParams]
-model = ["ollama/missing", "openrouter/openai/gpt-4o-mini"]
-+++
+  const deckPath = await writeDeck(dir, "root.deck.md", "llama3");
 
-Root deck.`,
+  await assertRejects(
+    () =>
+      handleCheckCommand({
+        deckPath,
+        fallbackProvider: null,
+      }),
+    Error,
+    "no fallback provider configured",
   );
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (input: Request | URL | string) => {
-    const url = resolveUrl(input);
-    if (url.includes("openrouter.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [{ id: "openai/gpt-4o-mini" }] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    if (url.includes("ollama.test")) {
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({ data: [] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      );
-    }
-    return Promise.resolve(new Response("not found", { status: 404 }));
-  };
-  try {
-    await handleCheckCommand({
-      deckPath: rootDeck,
-      openRouterBaseURL: "https://openrouter.test/v1",
-      ollamaBaseURL: "http://ollama.test/v1",
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });

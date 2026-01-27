@@ -61,6 +61,7 @@ type Args = {
   statePath?: string;
   outPath?: string;
   verbose?: boolean;
+  online?: boolean;
   port?: number;
   watch?: boolean;
   bundle?: boolean;
@@ -186,6 +187,7 @@ export function parseCliArgs(argv: Array<string>): Args {
       "stream",
       "responses",
       "verbose",
+      "online",
       "help",
       "version",
       "watch",
@@ -273,6 +275,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     statePath: parsed.state as string | undefined,
     outPath: parsed.out as string | undefined,
     verbose: Boolean(parsed.verbose),
+    online: Boolean(parsed.online),
     port: parsePortValue(parsed.port),
     watch: Boolean(parsed.watch),
     bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
