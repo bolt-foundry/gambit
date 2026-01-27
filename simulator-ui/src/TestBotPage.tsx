@@ -128,6 +128,12 @@ export default function TestBotPage(props: {
   const [deckJsonErrors, setDeckJsonErrors] = useState<
     Record<string, string | null>
   >({});
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [optimisticUser, setOptimisticUser] = useState<
+    { id: string; text: string } | null
+  >(null);
   const pollRef = useRef<number | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const runIdRef = useRef<string | undefined>(undefined);
@@ -571,6 +577,27 @@ export default function TestBotPage(props: {
     if (run.status !== "running" && streamingUser) {
       setStreamingUser(null);
     }
+    if (optimisticUser) {
+      const lastUser = [...run.messages].reverse().find((msg) =>
+        msg.role === "user"
+      );
+      if (lastUser?.content === optimisticUser.text) {
+        setOptimisticUser(null);
+      }
+    }
+    if (run.status !== "running" && optimisticUser) {
+      setOptimisticUser(null);
+    }
+    if (
+      streamingAssistant &&
+      run.messages.some((msg) =>
+        msg.role === "assistant" &&
+        typeof msg.content === "string" &&
+        msg.content.includes(streamingAssistant.text)
+      )
+    ) {
+      setStreamingAssistant(null);
+    }
     const el = transcriptRef.current;
     if (!el) return;
     const shouldScroll = run.messages.length > lastRunMessageCountRef.current ||
@@ -701,11 +728,7 @@ export default function TestBotPage(props: {
 
   useEffect(() => {
     if (!setNavActions) return;
-    setNavActions(
-      <Button variant="secondary" onClick={handleNewChat}>
-        New chat
-      </Button>,
-    );
+    setNavActions(null);
     return () => setNavActions(null);
   }, [handleNewChat, setNavActions]);
 
@@ -765,7 +788,7 @@ export default function TestBotPage(props: {
   }, [handleNewChat, loadTestBot, selectedDeckId]);
 
   const runStatusLabel = run.status === "running"
-    ? "Running test bot…"
+    ? "Running…"
     : run.status === "completed"
     ? "Completed"
     : run.status === "error"
@@ -773,6 +796,158 @@ export default function TestBotPage(props: {
     : run.status === "canceled"
     ? "Stopped"
     : "Idle";
+
+  const startMode = deckSchema.schemaResponse?.startMode ?? "assistant";
+  const isUserStart = startMode === "user";
+  const showStartOverlay = hasPersonaSelection &&
+    startMode === "assistant" &&
+    run.status !== "running" &&
+    run.messages.length === 0 &&
+    !streamingAssistant?.text &&
+    !streamingUser?.text;
+  const canStartAssistant = showStartOverlay &&
+    !chatSending &&
+    run.status !== "running" &&
+    (run.sessionId ||
+      (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
+
+  const canSendChat = hasPersonaSelection &&
+    run.status !== "running" &&
+    !chatSending &&
+    chatDraft.trim().length > 0 &&
+    !showStartOverlay &&
+    (run.sessionId ||
+      (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
+
+  const handleStartAssistant = useCallback(async () => {
+    if (!hasPersonaSelection || chatSending) return;
+    setChatSending(true);
+    setChatError(null);
+    let nextRunId = run.id;
+    if (!nextRunId) {
+      nextRunId = `testbot-ui-${crypto.randomUUID()}`;
+      setRun((prev) => ({
+        ...prev,
+        id: nextRunId,
+        status: "running",
+        error: undefined,
+        messages: prev.messages ?? [],
+        traces: prev.traces ?? [],
+        toolInserts: prev.toolInserts ?? [],
+      }));
+    }
+    try {
+      const payload: Record<string, unknown> = {
+        message: "",
+        runId: nextRunId,
+        sessionId: run.sessionId,
+        botDeckPath: selectedDeckId ?? undefined,
+      };
+      if (!run.sessionId) {
+        payload.context = deckInitValue;
+      }
+      const res = await fetch("/api/test/message", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({})) as {
+        run?: TestBotRun;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : res.statusText,
+        );
+      }
+      if (data.run) {
+        setRun({
+          ...data.run,
+          messages: data.run.messages ?? [],
+          traces: data.run.traces ?? [],
+          toolInserts: data.run.toolInserts ?? [],
+        });
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatSending(false);
+    }
+  }, [
+    chatSending,
+    deckInitValue,
+    hasPersonaSelection,
+    run.id,
+    run.sessionId,
+    selectedDeckId,
+  ]);
+
+  const handleSendChat = useCallback(async () => {
+    const message = chatDraft.trim();
+    if (!message) return;
+    setChatSending(true);
+    setChatError(null);
+    let nextRunId = run.id;
+    const optimisticId = crypto.randomUUID();
+    if (!nextRunId) {
+      nextRunId = `testbot-ui-${crypto.randomUUID()}`;
+      setRun((prev) => ({
+        ...prev,
+        id: nextRunId,
+        status: "running",
+        error: undefined,
+        messages: prev.messages ?? [],
+        traces: prev.traces ?? [],
+        toolInserts: prev.toolInserts ?? [],
+      }));
+    }
+    setOptimisticUser({ id: optimisticId, text: message });
+    setChatDraft("");
+    try {
+      const payload: Record<string, unknown> = {
+        message,
+        runId: nextRunId,
+        sessionId: run.sessionId,
+        botDeckPath: selectedDeckId ?? undefined,
+      };
+      if (!run.sessionId) {
+        payload.context = deckInitValue;
+      }
+      const res = await fetch("/api/test/message", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({})) as {
+        run?: TestBotRun;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : res.statusText,
+        );
+      }
+      if (data.run) {
+        setRun({
+          ...data.run,
+          messages: data.run.messages ?? [],
+          traces: data.run.traces ?? [],
+          toolInserts: data.run.toolInserts ?? [],
+        });
+      }
+    } catch (err) {
+      setChatError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatSending(false);
+    }
+  }, [
+    chatDraft,
+    deckInitValue,
+    run.id,
+    run.sessionId,
+    run.status,
+    selectedDeckId,
+  ]);
 
   return (
     <PageShell>
@@ -793,9 +968,9 @@ export default function TestBotPage(props: {
               overflowY: "auto",
             }}
           >
+            <strong>Test deck</strong>
             {testDecks.length > 0 && (
               <Listbox
-                label="Test deck"
                 value={selectedDeckId ?? ""}
                 onChange={handleDeckSelection}
                 options={testDecks.map((deck) => ({
@@ -805,7 +980,6 @@ export default function TestBotPage(props: {
                 }))}
               />
             )}
-            {testDecks.length === 0 && <strong>Test deck</strong>}
             {testDecks.length === 0 && (
               <div className="placeholder">
                 No deck-defined personas found. Add <code>[[testDecks]]</code>
@@ -816,6 +990,14 @@ export default function TestBotPage(props: {
             {botDescription && (
               <div className="placeholder">{botDescription}</div>
             )}
+            <Button
+              variant="primary"
+              onClick={startRun}
+              disabled={!canStart}
+              data-testid="testbot-run"
+            >
+              Run test bot
+            </Button>
           </Panel>
           <Panel
             className="test-bot-sidebar"
@@ -858,19 +1040,11 @@ export default function TestBotPage(props: {
           <div className="flex-row gap-8 items-center">
             <div className="flex-column flex-1 gap-4">
               <div className="flex-row items-center gap-8">
-                <strong>Latest test run</strong>
+                <strong>Test run</strong>
                 <Badge variant={run.status}>{runStatusLabel}</Badge>
               </div>
             </div>
             <div className="flex-row row-reverse gap-8 wrap">
-              <Button
-                variant="primary"
-                onClick={startRun}
-                disabled={!canStart}
-                data-testid="testbot-run"
-              >
-                Run test bot
-              </Button>
               <Button
                 variant="ghost"
                 onClick={stopRun}
@@ -878,6 +1052,9 @@ export default function TestBotPage(props: {
                 data-testid="testbot-stop"
               >
                 Stop
+              </Button>
+              <Button variant="secondary" onClick={handleNewChat}>
+                New chat
               </Button>
             </div>
           </div>
@@ -930,160 +1107,243 @@ export default function TestBotPage(props: {
               {missingDeckInit.length > 6 ? "…" : ""}
             </div>
           )}
-          <div
-            className="imessage-thread"
-            ref={transcriptRef}
-          >
-            {run.messages.length === 0 && (
-              <div className="placeholder">No messages yet.</div>
-            )}
-            {(() => {
-              const rows: React.ReactNode[] = [];
-              const renderToolBucket = (index: number) => {
-                const bucket = toolBuckets.get(index);
-                if (!bucket || bucket.length === 0) return;
-                const isOpen = Boolean(toolCallsOpen[index]);
-                let latencyLabel: string | null = null;
-                for (let i = index; i < run.messages.length; i += 1) {
-                  if (run.messages[i]?.role === "assistant") {
-                    const latency = assistantLatencyByMessageIndex[i];
-                    if (typeof latency === "number") {
-                      latencyLabel = `${Math.max(0, Math.round(latency))}ms`;
+          <div className="test-bot-thread">
+            <div
+              className="imessage-thread"
+              ref={transcriptRef}
+            >
+              {run.messages.length === 0 && (
+                <div className="placeholder">No messages yet.</div>
+              )}
+              {(() => {
+                const rows: React.ReactNode[] = [];
+                const renderToolBucket = (index: number) => {
+                  const bucket = toolBuckets.get(index);
+                  if (!bucket || bucket.length === 0) return;
+                  const isOpen = Boolean(toolCallsOpen[index]);
+                  let latencyLabel: string | null = null;
+                  for (let i = index; i < run.messages.length; i += 1) {
+                    if (run.messages[i]?.role === "assistant") {
+                      const latency = assistantLatencyByMessageIndex[i];
+                      if (typeof latency === "number") {
+                        latencyLabel = `${Math.max(0, Math.round(latency))}ms`;
+                      }
+                      break;
                     }
-                    break;
                   }
-                }
-                rows.push(
-                  <div
-                    key={`tool-bucket-${index}`}
-                    className="tool-calls-collapsible"
-                  >
-                    <button
-                      type="button"
-                      className="tool-calls-toggle"
-                      onClick={() =>
-                        setToolCallsOpen((prev) => ({
-                          ...prev,
-                          [index]: !prev[index],
-                        }))}
-                    >
-                      <span className="tool-calls-toggle-label">
-                        Tool calls ({bucket.length})
-                        {latencyLabel ? ` · ${latencyLabel}` : ""} ·{" "}
-                        {isOpen ? "Hide" : "Show"}
-                      </span>
-                    </button>
-                    {isOpen && (
-                      <div className="tool-calls-list">
-                        {bucket.map((call, callIdx) => (
-                          <ToolCallBubble
-                            key={`tool-${call.id}-${index}-${callIdx}`}
-                            call={call}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>,
-                );
-              };
-              renderToolBucket(0);
-              run.messages.forEach((m, idx) => {
-                rows.push(
-                  <div
-                    key={`${m.role}-${idx}`}
-                    className={`imessage-row ${
-                      m.role === "user" ? "left" : "right"
-                    }`}
-                  >
+                  rows.push(
                     <div
-                      className={`imessage-bubble ${
-                        m.role === "user" ? "right" : "left"
-                      }`}
-                      title={m.role}
+                      key={`tool-bucket-${index}`}
+                      className="tool-calls-collapsible"
                     >
-                      {(
-                          m.respondPayload !== undefined ||
-                          m.respondMeta !== undefined ||
-                          typeof m.respondStatus === "number" ||
-                          typeof m.respondMessage === "string" ||
-                          typeof m.respondCode === "string"
-                        )
-                        ? (
-                          <div className="respond-summary">
-                            <div className="respond-meta">
-                              <Badge>gambit_respond</Badge>
-                              {typeof m.respondStatus === "number" && (
-                                <Badge variant="ghost">
-                                  status {m.respondStatus}
-                                </Badge>
+                      <button
+                        type="button"
+                        className="tool-calls-toggle"
+                        onClick={() =>
+                          setToolCallsOpen((prev) => ({
+                            ...prev,
+                            [index]: !prev[index],
+                          }))}
+                      >
+                        <span className="tool-calls-toggle-label">
+                          Tool calls ({bucket.length})
+                          {latencyLabel ? ` · ${latencyLabel}` : ""} ·{" "}
+                          {isOpen ? "Hide" : "Show"}
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <div className="tool-calls-list">
+                          {bucket.map((call, callIdx) => (
+                            <ToolCallBubble
+                              key={`tool-${call.id}-${index}-${callIdx}`}
+                              call={call}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>,
+                  );
+                };
+                renderToolBucket(0);
+                run.messages.forEach((m, idx) => {
+                  rows.push(
+                    <div
+                      key={`${m.role}-${idx}`}
+                      className={`imessage-row ${
+                        m.role === "user" ? "left" : "right"
+                      }`}
+                    >
+                      <div
+                        className={`imessage-bubble ${
+                          m.role === "user" ? "right" : "left"
+                        }`}
+                        title={m.role}
+                      >
+                        {(
+                            m.respondPayload !== undefined ||
+                            m.respondMeta !== undefined ||
+                            typeof m.respondStatus === "number" ||
+                            typeof m.respondMessage === "string" ||
+                            typeof m.respondCode === "string"
+                          )
+                          ? (
+                            <div className="respond-summary">
+                              <div className="respond-meta">
+                                <Badge>gambit_respond</Badge>
+                                {typeof m.respondStatus === "number" && (
+                                  <Badge variant="ghost">
+                                    status {m.respondStatus}
+                                  </Badge>
+                                )}
+                                {m.respondCode && (
+                                  <Badge variant="ghost">
+                                    code {m.respondCode}
+                                  </Badge>
+                                )}
+                              </div>
+                              {m.respondMessage && (
+                                <div className="respond-message">
+                                  {m.respondMessage}
+                                </div>
                               )}
-                              {m.respondCode && (
-                                <Badge variant="ghost">
-                                  code {m.respondCode}
-                                </Badge>
+                              {m.respondPayload !== undefined && (
+                                <pre className="bubble-json">
+                                  {formatJson(m.respondPayload)}
+                                </pre>
+                              )}
+                              {m.respondMeta && (
+                                <details className="respond-meta-details">
+                                  <summary>Meta</summary>
+                                  <pre className="bubble-json">
+                                    {formatJson(m.respondMeta)}
+                                  </pre>
+                                </details>
                               )}
                             </div>
-                            {m.respondMessage && (
-                              <div className="respond-message">
-                                {m.respondMessage}
-                              </div>
-                            )}
-                            {m.respondPayload !== undefined && (
-                              <pre className="bubble-json">
-                                {formatJson(m.respondPayload)}
-                              </pre>
-                            )}
-                            {m.respondMeta && (
-                              <details className="respond-meta-details">
-                                <summary>Meta</summary>
-                                <pre className="bubble-json">
-                                  {formatJson(m.respondMeta)}
-                                </pre>
-                              </details>
-                            )}
-                          </div>
-                        )
-                        : m.content}
-                      {m.messageRefId && run.sessionId && (
-                        <FeedbackControls
-                          messageRefId={m.messageRefId}
-                          feedback={m.feedback}
-                          onScore={handleTestBotScore}
-                          onReasonChange={handleTestBotReason}
-                        />
-                      )}
+                          )
+                          : m.content}
+                        {m.messageRefId && run.sessionId && (
+                          <FeedbackControls
+                            messageRefId={m.messageRefId}
+                            feedback={m.feedback}
+                            onScore={handleTestBotScore}
+                            onReasonChange={handleTestBotReason}
+                          />
+                        )}
+                      </div>
+                    </div>,
+                  );
+                  renderToolBucket(idx + 1);
+                });
+                return rows;
+              })()}
+              {streamingUser?.text && streamingUser.runId === run.id &&
+                (streamingUser.expectedUserCount === undefined ||
+                  countUserMessages(run.messages) <
+                    streamingUser.expectedUserCount) &&
+                (
+                  <div className="imessage-row left">
+                    <div
+                      className="imessage-bubble right imessage-bubble-muted"
+                      title="user"
+                    >
+                      {streamingUser.text}
                     </div>
-                  </div>,
-                );
-                renderToolBucket(idx + 1);
-              });
-              return rows;
-            })()}
-            {streamingUser?.text && streamingUser.runId === run.id &&
-              (streamingUser.expectedUserCount === undefined ||
-                countUserMessages(run.messages) <
-                  streamingUser.expectedUserCount) &&
-              (
+                  </div>
+                )}
+              {optimisticUser && (
                 <div className="imessage-row left">
                   <div
-                    className="imessage-bubble right imessage-bubble-muted"
+                    className="imessage-bubble right"
                     title="user"
                   >
-                    {streamingUser.text}
+                    {optimisticUser.text}
                   </div>
                 </div>
               )}
-            {streamingAssistant?.text && streamingAssistant.runId === run.id &&
-              (
-                <div className="imessage-row right">
-                  <div
-                    className="imessage-bubble left imessage-bubble-muted"
-                    title="assistant"
+              {streamingAssistant?.text &&
+                streamingAssistant.runId === run.id &&
+                (
+                  <div className="imessage-row right">
+                    <div
+                      className="imessage-bubble left imessage-bubble-muted"
+                      title="assistant"
+                    >
+                      {streamingAssistant.text}
+                    </div>
+                  </div>
+                )}
+            </div>
+            <div className="composer">
+              <div className="composer-inputs">
+                {isUserStart && run.messages.length === 0 &&
+                  !streamingAssistant?.text && !streamingUser?.text && (
+                  <div className="placeholder emphasis">
+                    This deck expects a user message to kick things off.
+                  </div>
+                )}
+                <div className="flex-row gap-4 mb-2">
+                  <textarea
+                    className="message-input flex-1"
+                    rows={1}
+                    placeholder={showStartOverlay
+                      ? "Start the assistant to begin..."
+                      : isUserStart && run.messages.length === 0
+                      ? "Send the first message to begin..."
+                      : "Message the assistant..."}
+                    value={chatDraft}
+                    onChange={(e) => setChatDraft(e.target.value)}
+                    disabled={showStartOverlay}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (canSendChat) {
+                          handleSendChat();
+                        }
+                      }
+                    }}
+                  />
+                  <div className="composer-actions">
+                    <Button
+                      variant="primary"
+                      onClick={handleSendChat}
+                      disabled={!canSendChat}
+                      data-testid="testbot-chat-send"
+                    >
+                      Send
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              {chatError && <div className="error">{chatError}</div>}
+            </div>
+            {showStartOverlay && (
+              <div className="test-bot-thread-overlay">
+                <div className="test-bot-thread-card">
+                  <strong>Start the assistant</strong>
+                  <div className="placeholder">
+                    Start the assistant to kick off the conversation.
+                  </div>
+                  {chatError && <div className="error">{chatError}</div>}
+                  <Button
+                    variant="primary"
+                    onClick={handleStartAssistant}
+                    disabled={!canStartAssistant}
+                    data-testid="testbot-start-assistant"
                   >
-                    {streamingAssistant.text}
-                  </div>
+                    Start assistant
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={startRun}
+                    disabled={!canStart}
+                    data-testid="testbot-run-overlay"
+                  >
+                    Run test bot
+                  </Button>
                 </div>
-              )}
+              </div>
+            )}
           </div>
         </Panel>
         <Panel

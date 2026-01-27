@@ -735,6 +735,7 @@ export function startWebSocketSimulator(opts: {
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   let deckLabel: string | undefined = undefined;
+  let rootStartMode: "assistant" | "user" | undefined = undefined;
   const enrichStateWithSession = (state: SavedState): {
     state: SavedState;
     dir?: string;
@@ -1328,10 +1329,13 @@ export function startWebSocketSimulator(opts: {
 
     const generateDeckBotUserMessage = async (
       history: Array<ModelMessage | null | undefined>,
-      streamOpts?: { onStreamText?: (chunk: string) => void },
+      streamOpts?: {
+        onStreamText?: (chunk: string) => void;
+        allowEmptyAssistant?: boolean;
+      },
     ): Promise<string> => {
       const assistantMessage = getLastAssistantMessage(history);
-      if (!assistantMessage) return "";
+      if (!assistantMessage && !streamOpts?.allowEmptyAssistant) return "";
       const result = await runDeckWithFallback({
         path: botDeckPath,
         input: botInput,
@@ -1339,7 +1343,7 @@ export function startWebSocketSimulator(opts: {
         modelProvider: opts.modelProvider,
         state: deckBotState,
         allowRootStringInput: true,
-        initialUserMessage: assistantMessage,
+        initialUserMessage: assistantMessage ?? undefined,
         onStateUpdate: (state) => {
           deckBotState = state;
         },
@@ -1357,7 +1361,10 @@ export function startWebSocketSimulator(opts: {
 
     const loop = async () => {
       try {
-        if (!controller.signal.aborted) {
+        const effectiveStartMode = rootStartMode ?? "assistant";
+        const shouldRunInitial = effectiveStartMode !== "user" ||
+          Boolean(initialUserMessage);
+        if (!controller.signal.aborted && shouldRunInitial) {
           const initialResult = await runDeck({
             path: resolvedDeckPath,
             input: deckInput,
@@ -1408,6 +1415,8 @@ export function startWebSocketSimulator(opts: {
                 turn,
                 ts: Date.now(),
               }),
+            allowEmptyAssistant: effectiveStartMode === "user" &&
+              !getLastAssistantMessage(history),
           });
           broadcastTestBot({
             type: "testBotStreamEnd",
@@ -1559,6 +1568,10 @@ export function startWebSocketSimulator(opts: {
     .then((deck) => {
       resolvedDeckPath = deck.path;
       deckSlug = deckSlugFromPath(resolvedDeckPath);
+      rootStartMode = deck.startMode === "assistant" ||
+          deck.startMode === "user"
+        ? deck.startMode
+        : undefined;
       deckLabel = typeof deck.label === "string"
         ? deck.label
         : toDeckLabel(deck.path);
@@ -2522,6 +2535,281 @@ export function startWebSocketSimulator(opts: {
         );
       }
 
+      if (url.pathname === "/api/test/message") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        // 1) Parse request payload and stitch together run/session state.
+        let payload: {
+          runId?: unknown;
+          sessionId?: unknown;
+          message?: unknown;
+          context?: unknown;
+          init?: unknown;
+          botDeckPath?: unknown;
+          model?: unknown;
+          modelForce?: unknown;
+          stream?: unknown;
+        } = {};
+        try {
+          payload = await req.json();
+        } catch {
+          // ignore parse errors
+        }
+        let runId = typeof payload.runId === "string"
+          ? payload.runId
+          : undefined;
+        const sessionId = typeof payload.sessionId === "string"
+          ? payload.sessionId
+          : undefined;
+        let savedState = sessionId ? readSessionState(sessionId) : undefined;
+        if (!savedState && runId) {
+          const entry = testBotRuns.get(runId);
+          if (entry?.run.sessionId) {
+            savedState = readSessionState(entry.run.sessionId);
+          }
+        }
+        if (savedState && !runId) {
+          runId = typeof savedState.meta?.testBotRunId === "string"
+            ? savedState.meta.testBotRunId
+            : savedState.runId;
+        }
+        runId = runId ?? randomId("testbot");
+        const existingEntry = testBotRuns.get(runId);
+        if (existingEntry?.promise) {
+          return new Response(
+            JSON.stringify({ error: "Test bot run already in progress" }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          );
+        }
+        // 2) Resolve which test deck to use and derive initial input.
+        await deckLoadPromise.catch(() => null);
+        const requestedDeck = typeof payload.botDeckPath === "string"
+          ? payload.botDeckPath
+          : undefined;
+        const selection = (() => {
+          if (requestedDeck) return resolveTestDeck(requestedDeck);
+          const metaPath =
+            typeof savedState?.meta?.testBotConfigPath === "string"
+              ? savedState.meta.testBotConfigPath
+              : undefined;
+          if (metaPath) return resolveTestDeck(metaPath);
+          return availableTestDecks[0];
+        })();
+        if (!selection) {
+          return new Response(
+            JSON.stringify({ error: "No test decks configured" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        const botConfigPath = selection.path;
+        const testBotName = path.basename(botConfigPath).replace(
+          /\.deck\.(md|ts)$/i,
+          "",
+        );
+        const message = typeof payload.message === "string"
+          ? payload.message.trim()
+          : "";
+        let deckInput = payload.context ?? payload.init;
+        if (!savedState && deckInput === undefined) {
+          try {
+            const desc = await schemaPromise;
+            deckInput = desc.defaults !== undefined
+              ? desc.defaults
+              : deriveInitialFromSchema(desc.schema);
+          } catch {
+            // ignore; keep undefined
+          }
+        }
+        const stream = typeof payload.stream === "boolean"
+          ? payload.stream
+          : true;
+        const deckForStart = await deckLoadPromise.catch(() => null);
+        const startMode = deckForStart &&
+            (deckForStart.startMode === "assistant" ||
+              deckForStart.startMode === "user")
+          ? deckForStart.startMode
+          : "assistant";
+        const hasSavedMessages = (savedState?.messages?.length ?? 0) > 0;
+        const startOnly = !message && startMode === "assistant" &&
+          !hasSavedMessages;
+        if (!message && !startOnly) {
+          return new Response(
+            JSON.stringify({ error: "Missing message" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        // 3) Initialize the run, sync from prior session state, and prep tracing.
+        const entry = existingEntry ?? {
+          run: {
+            id: runId,
+            status: "idle",
+            messages: [],
+            traces: [],
+            toolInserts: [],
+          },
+          promise: null,
+          abort: null,
+        };
+        testBotRuns.set(runId, entry);
+        const run = entry.run;
+        run.status = "running";
+        run.error = undefined;
+        run.startedAt = run.startedAt ?? new Date().toISOString();
+        if (savedState) {
+          syncTestBotRunFromState(run, savedState);
+        }
+        broadcastTestBot({ type: "testBotStatus", run });
+        const controller = new AbortController();
+        entry.abort = controller;
+        const isAborted = () => controller.signal.aborted;
+        const capturedTraces = Array.isArray(savedState?.traces)
+          ? cloneTraces(savedState.traces)
+          : [];
+        const tracer = (event: TraceEvent) => {
+          const stamped = event.ts ? event : { ...event, ts: Date.now() };
+          capturedTraces.push(stamped);
+          consoleTracer?.(stamped);
+        };
+        const appendFromState = (state: SavedState) => {
+          const snapshot = buildTestBotSnapshot(state);
+          run.messages = snapshot.messages;
+          run.toolInserts = snapshot.toolInserts;
+          run.traces = Array.isArray(state.traces)
+            ? [...state.traces]
+            : undefined;
+          const nextSessionId = typeof state.meta?.sessionId === "string"
+            ? state.meta.sessionId
+            : undefined;
+          if (nextSessionId) run.sessionId = nextSessionId;
+          broadcastTestBot({ type: "testBotStatus", run });
+        };
+        // 4) Execute the deck run(s): optional assistant start, then user message.
+        entry.promise = (async () => {
+          try {
+            const countAssistantMessages = (state?: SavedState): number => {
+              if (!state?.messages?.length) return 0;
+              let count = 0;
+              for (const msg of state.messages) {
+                if (msg?.role === "assistant") count += 1;
+              }
+              return count;
+            };
+            const runOnce = async (
+              initialUserMessage: string | undefined,
+              turn: number,
+              shouldStream = stream,
+            ) => {
+              if (isAborted()) return undefined;
+              const hasSavedMessages = (savedState?.messages?.length ?? 0) > 0;
+              const inputProvided = !hasSavedMessages &&
+                deckInput !== undefined;
+              const input = inputProvided ? deckInput : undefined;
+              const result = await runDeck({
+                path: resolvedDeckPath,
+                input,
+                inputProvided,
+                modelProvider: opts.modelProvider,
+                isRoot: true,
+                allowRootStringInput: true,
+                defaultModel: typeof payload.model === "string"
+                  ? payload.model
+                  : opts.model,
+                modelOverride: typeof payload.modelForce === "string"
+                  ? payload.modelForce
+                  : opts.modelForce,
+                trace: tracer,
+                stream: shouldStream,
+                state: savedState,
+                responsesMode: opts.responsesMode,
+                initialUserMessage,
+                onStateUpdate: (state) => {
+                  if (isAborted()) return;
+                  const nextMeta = {
+                    ...(savedState?.meta ?? {}),
+                    ...(state.meta ?? {}),
+                    testBot: true,
+                    testBotRunId: runId,
+                    testBotConfigPath: botConfigPath,
+                    testBotName,
+                  };
+                  const enriched = persistSessionState({
+                    ...state,
+                    meta: nextMeta,
+                    traces: capturedTraces,
+                  });
+                  savedState = enriched;
+                  appendFromState(enriched);
+                },
+                onStreamText: (chunk) =>
+                  broadcastTestBot({
+                    type: "testBotStream",
+                    runId,
+                    role: "assistant",
+                    chunk,
+                    turn,
+                    ts: Date.now(),
+                  }),
+              });
+              if (isAborted()) return result;
+              if (shouldStream) {
+                broadcastTestBot({
+                  type: "testBotStreamEnd",
+                  runId,
+                  role: "assistant",
+                  turn,
+                  ts: Date.now(),
+                });
+              }
+              return result;
+            };
+            let assistantTurn = countAssistantMessages(savedState);
+            if (
+              startMode === "assistant" &&
+              !hasSavedMessages
+            ) {
+              if (isAborted()) {
+                run.status = "canceled";
+                return;
+              }
+              await runOnce(undefined, assistantTurn, stream);
+              assistantTurn += 1;
+            }
+            let result: unknown = undefined;
+            if (message) {
+              if (isAborted()) {
+                run.status = "canceled";
+                return;
+              }
+              result = await runOnce(message, assistantTurn, stream);
+            }
+            if (isAborted()) {
+              run.status = "canceled";
+            } else if (result !== undefined && isGambitEndSignal(result)) {
+              run.status = "completed";
+            } else {
+              run.status = "completed";
+            }
+          } catch (err) {
+            run.status = "error";
+            run.error = err instanceof Error ? err.message : String(err);
+          } finally {
+            if (savedState) {
+              syncTestBotRunFromState(run, savedState);
+            }
+            run.finishedAt = new Date().toISOString();
+            entry.abort = null;
+            entry.promise = null;
+            broadcastTestBot({ type: "testBotStatus", run });
+          }
+        })();
+        // 5) Return the current run snapshot to the caller.
+        return new Response(
+          JSON.stringify({ run }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
+
       if (url.pathname === "/api/test/status") {
         const runId = url.searchParams.get("runId") ?? undefined;
         const sessionId = url.searchParams.get("sessionId") ?? undefined;
@@ -3322,7 +3610,7 @@ export function startWebSocketSimulator(opts: {
         const startMode = deck &&
             (deck.startMode === "assistant" || deck.startMode === "user")
           ? deck.startMode
-          : undefined;
+          : "assistant";
         return new Response(
           JSON.stringify({
             deck: resolvedDeckPath,

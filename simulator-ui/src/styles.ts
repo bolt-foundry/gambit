@@ -1241,12 +1241,11 @@ code:not(pre *) {
 }
 .composer-inputs {
   display: flex;
+  flex-direction: column;
   gap: 12px;
-  flex-wrap: wrap;
 }
 .message-input {
   width: 100%;
-  min-height: 80px;
   border-radius: 10px;
   border: 1px solid var(--color-border-strong);
   padding: 10px;
@@ -1763,6 +1762,36 @@ code:not(pre *) {
   gap: 10px;
   padding: 6px;
 }
+.test-bot-thread {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+}
+.test-bot-thread-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(248, 250, 252, 0.86);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.test-bot-thread-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 16px;
+  max-width: 360px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: center;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
 .imessage-row {
   display: flex;
 }
@@ -1886,5 +1915,9 @@ code:not(pre *) {
   background: var(--color-surface-subtle);
   border-radius: 8px;
   padding: 6px 10px;
+}
+.placeholder.emphasis {
+  background: var(--color-primary-alpha-15);
+  color: var(--color-primary);
 }
 `;
