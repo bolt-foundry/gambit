@@ -11,4 +11,4 @@ Start here:
 - Guides: `./guides/`
 - Reference: `./reference/`
 - Examples: `./examples/`
-- Posts: `./posts/`
+- Posts: `../posts/`
