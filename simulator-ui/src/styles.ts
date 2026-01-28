@@ -53,6 +53,12 @@ body,
   --color-overlay: rgba(15, 23, 42, 0.4);
   --color-text-on-primary-subtle: rgba(255, 255, 255, 0.9);
   --color-text-on-primary-muted: rgba(255, 255, 255, 0.7);
+  --corner-radius-scale: 1;
+}
+@supports (corner-shape: squircle) {
+  :root {
+    --corner-radius-scale: 2;
+  }
 }
 *,
 *::before,
@@ -95,7 +101,8 @@ body {
 .editor-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--panel-radius, 14px);
+  border-radius: calc(var(--panel-radius, 14px) * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: var(--panel-padding, 12px);
   min-height: 0;
   overflow: hidden;
@@ -133,7 +140,8 @@ body {
 }
 .docs-callout {
   background: var(--color-surface);
-  border-radius: 18px;
+  border-radius: calc(18px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border);
   padding: 20px;
   box-shadow: 0 10px 30px var(--color-shadow-soft);
@@ -202,7 +210,8 @@ body {
   gap: 14px;
 }
 .docs-loop-step {
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border);
   background: var(--color-surface-muted);
   padding: 16px;
@@ -232,7 +241,8 @@ body {
 }
 .docs-tabs .docs-tab-card {
   background: var(--color-surface);
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border);
   padding: 16px;
   display: flex;
@@ -254,7 +264,8 @@ body {
   align-items: center;
   justify-content: center;
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   background: var(--color-primary-soft);
   color: var(--color-primary-dark);
   font-weight: 700;
@@ -292,13 +303,15 @@ body {
 pre.deck-preview,
 pre.docs-command {
   background: var(--color-ink-weak);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 12px 16px;
 }
 code:not(pre *) {
   background: var(--color-ink-soft);
   padding: 4px;
-  border-radius: 4px;
+  border-radius: calc(4px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
 }
 .app-header {
   display: flex;
@@ -323,7 +336,8 @@ code:not(pre *) {
 }
 .header-actions button {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px 14px;
   background: var(--color-surface);
   cursor: pointer;
@@ -411,7 +425,8 @@ code:not(pre *) {
 }
 .calibrate-run-card {
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: calc(14px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   background: var(--color-surface);
   display: flex;
   flex-direction: column;
@@ -452,7 +467,8 @@ code:not(pre *) {
 .calibrate-run-turn {
   width: 16px;
   height: 16px;
-  border-radius: 5px;
+  border-radius: calc(5px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -557,7 +573,8 @@ code:not(pre *) {
 }
 .calibrate-summary-card {
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
   background: var(--color-surface-muted);
   display: flex;
@@ -597,7 +614,8 @@ code:not(pre *) {
 }
 .bubble {
   background: var(--color-surface-subtle);
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 12px;
   width: 100%;
   box-shadow: inset 0 0 0 1px var(--color-border);
@@ -623,7 +641,8 @@ code:not(pre *) {
 .bubble-json {
   background: var(--color-ink-weak);
   padding: 8px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   font-size: 12px;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -653,7 +672,8 @@ code:not(pre *) {
 .score-button {
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 4px 10px;
   cursor: pointer;
   font-size: 12px;
@@ -666,7 +686,8 @@ code:not(pre *) {
 .feedback-reason {
   width: 100%;
   min-height: 48px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border-strong);
   padding: 8px;
   resize: vertical;
@@ -689,7 +710,8 @@ code:not(pre *) {
 }
 .init-panel {
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: calc(14px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   background: var(--color-surface-muted);
   padding: 12px;
   margin-bottom: 12px;
@@ -713,7 +735,8 @@ code:not(pre *) {
 .init-field {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -766,7 +789,8 @@ code:not(pre *) {
 .init-field textarea {
   width: 100%;
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
   box-sizing: border-box;
   font-family: inherit;
@@ -779,7 +803,8 @@ code:not(pre *) {
 .init-summary-json {
   margin-top: 10px;
   background: var(--color-shadow-soft);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   overflow-x: auto;
   font-size: 12px;
@@ -802,7 +827,8 @@ code:not(pre *) {
 }
 .trace-panel {
   background: var(--color-surface);
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 16px;
   border: 1px solid var(--color-border);
   min-height: 0;
@@ -816,7 +842,8 @@ code:not(pre *) {
 }
 .trace-row {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
   background: var(--color-surface-muted);
   word-break: break-word;
@@ -835,7 +862,8 @@ code:not(pre *) {
 .calibrate-score-badge {
   min-width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   background: var(--color-border);
   color: var(--color-text);
   display: flex;
@@ -847,7 +875,8 @@ code:not(pre *) {
 .calibrate-score-badge--small {
   min-width: 22px;
   height: 20px;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   font-size: 12px;
 }
 .calibrate-score-badge--pending {
@@ -950,7 +979,8 @@ code:not(pre *) {
 .calibrate-reference-form select,
 .calibrate-reference-form textarea {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 6px 8px;
   font-family: inherit;
   font-size: 12px;
@@ -978,7 +1008,8 @@ code:not(pre *) {
 }
 .calibrate-context-row {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
   background: var(--color-surface-muted);
 }
@@ -994,7 +1025,8 @@ code:not(pre *) {
   font-size: 13px;
   color: var(--color-text);
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
 }
@@ -1014,7 +1046,8 @@ code:not(pre *) {
 }
 .score-btn {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 6px 10px;
   background: var(--color-surface);
   cursor: pointer;
@@ -1050,7 +1083,8 @@ code:not(pre *) {
 }
 .calibrate-review-panel {
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   background: var(--color-surface-muted);
   display: flex;
@@ -1085,7 +1119,8 @@ code:not(pre *) {
 }
 .calibrate-flag-reason textarea {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 6px 8px;
   font-family: inherit;
   font-size: 12px;
@@ -1237,7 +1272,8 @@ code:not(pre *) {
 .composer {
   background: var(--color-surface);
   padding: 12px;
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -1250,7 +1286,8 @@ code:not(pre *) {
 }
 .message-input {
   width: 100%;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border-strong);
   padding: 10px;
   resize: vertical;
@@ -1278,7 +1315,8 @@ code:not(pre *) {
 .notes-inline textarea {
   width: 100%;
   min-height: 80px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border-strong);
   padding: 10px;
   resize: vertical;
@@ -1321,7 +1359,8 @@ code:not(pre *) {
 }
 .rating-button {
   border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 4px 10px;
   font-size: 12px;
   background: var(--color-surface);
@@ -1338,7 +1377,8 @@ code:not(pre *) {
 }
 .composer-actions button {
   padding: 10px 18px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: none;
   background: var(--color-primary);
   color: var(--color-surface);
@@ -1426,7 +1466,8 @@ code:not(pre *) {
   width: 100%;
   text-align: left;
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   background: var(--color-surface-muted);
   cursor: pointer;
@@ -1444,7 +1485,8 @@ code:not(pre *) {
 .session-delete-button {
   width: 36px;
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   background: var(--color-surface-muted);
   color: var(--color-danger);
   cursor: pointer;
@@ -1472,7 +1514,8 @@ code:not(pre *) {
 }
 .recent-session-button {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   background: var(--color-surface-muted);
   text-align: left;
@@ -1555,7 +1598,8 @@ code:not(pre *) {
   height: 2px;
   width: 100%;
   background: var(--color-text);
-  border-radius: 2px;
+  border-radius: calc(2px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
 }
 .sessions-toggle-label {
   font-size: 13px;
@@ -1592,7 +1636,8 @@ code:not(pre *) {
 .panel-tab {
   border: 1px solid var(--color-border-strong);
   background: var(--color-surface-muted);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 600;
@@ -1674,7 +1719,8 @@ code:not(pre *) {
 }
 .gds-listbox-trigger {
   width: 100%;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-border-strong);
   padding: 8px 30px 8px 10px;
   font-family: inherit;
@@ -1714,7 +1760,8 @@ code:not(pre *) {
 .gds-listbox-popover {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   box-shadow: 0 12px 32px var(--color-shadow-strong);
   z-index: 20;
   max-height: 260px;
@@ -1732,7 +1779,8 @@ code:not(pre *) {
   flex-direction: column;
   gap: 2px;
   font-family: inherit;
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   box-sizing: border-box;
   margin-bottom: 2px;
 }
@@ -1753,7 +1801,8 @@ code:not(pre *) {
 }
 .gds-button {
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px 14px;
   background: var(--color-surface);
   cursor: pointer;
@@ -1843,7 +1892,8 @@ code:not(pre *) {
 .test-bot-thread-card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 16px;
+  border-radius: calc(16px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 16px;
   max-width: 360px;
   width: 100%;
@@ -1865,7 +1915,8 @@ code:not(pre *) {
 .imessage-bubble {
   max-width: min(520px, 85%);
   padding: 10px 12px;
-  border-radius: 18px;
+  border-radius: calc(18px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   font-size: 13px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -1915,7 +1966,8 @@ code:not(pre *) {
 .assistant-thread {
   background: var(--color-surface-muted);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
 }
 .assistant-actions {
@@ -1927,7 +1979,8 @@ code:not(pre *) {
 }
 .assistant-actions button {
   padding: 8px 14px;
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   border: 1px solid var(--color-primary);
   background: var(--color-primary);
   color: var(--color-surface);
@@ -1940,7 +1993,8 @@ code:not(pre *) {
 }
 .patch-card {
   border: 1px solid var(--color-border-strong);
-  border-radius: 12px;
+  border-radius: calc(12px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 10px;
   background: var(--color-surface-muted);
   display: flex;
@@ -1964,7 +2018,8 @@ code:not(pre *) {
 .patch-reason-input {
   width: 100%;
   border: 1px solid var(--color-border-strong);
-  border-radius: 10px;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 8px;
   font-family: inherit;
   box-sizing: border-box;
@@ -1974,7 +2029,8 @@ code:not(pre *) {
   font-size: 14px;
   line-height: 1.5;
   background: var(--color-surface-subtle);
-  border-radius: 8px;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   padding: 6px 10px;
 }
 .placeholder.emphasis {
