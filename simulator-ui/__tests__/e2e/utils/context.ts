@@ -431,7 +431,17 @@ class E2eTestContext {
 
   async currentPath(): Promise<string> {
     if (!this.page) throw new Error("context page not initialized");
-    return await this.page.evaluate(() => globalThis.location.pathname);
+    const attempt = async () =>
+      await this.page!.evaluate(() => globalThis.location.pathname);
+    for (let tries = 0; tries < 3; tries += 1) {
+      try {
+        return await attempt();
+      } catch (err) {
+        if (!isTransientActionError(err) || tries === 2) throw err;
+        await wait(400);
+      }
+    }
+    return "";
   }
 
   async click(selector: string): Promise<void> {

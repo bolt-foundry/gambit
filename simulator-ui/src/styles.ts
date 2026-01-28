@@ -70,6 +70,10 @@ body {
   background: var(--color-bg);
   overflow: hidden;
 }
+:where(input, textarea, select, button):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent) inset;
+}
 .app-root {
   height: 100%;
   min-height: 0;
@@ -1465,37 +1469,44 @@ code:not(pre *) {
 .session-select-button {
   width: 100%;
   text-align: left;
-  border: 1px solid var(--color-border-strong);
-  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  border: 0;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
   corner-shape: squircle;
-  padding: 10px;
-  background: var(--color-surface-muted);
+  padding: 8px 10px;
+  background: transparent;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  font-family: inherit;
+  box-sizing: border-box;
 }
 .session-select-button.active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-soft);
+  background: var(--color-border);
 }
 .session-select-button:hover {
-  background: var(--color-border);
+  background: var(--color-surface-subtle);
+}
+.session-select-button strong {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text);
+}
+.session-select-button span {
+  font-size: 12px;
+  color: var(--color-text-subtle);
+}
+.session-select-button code {
+  font-size: 12px;
+  color: var(--color-text-subtle);
 }
 .session-delete-button {
   width: 36px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: calc(10px * var(--corner-radius-scale, 1));
-  corner-shape: squircle;
-  background: var(--color-surface-muted);
-  color: var(--color-danger);
-  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-.session-delete-button:hover {
-  background: var(--color-danger-soft);
+  padding: 0;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
 }
 .session-delete-button svg {
   display: block;
@@ -1852,6 +1863,16 @@ code:not(pre *) {
 .gds-button--ghost:hover {
   border-color: var(--color-border-strong);
   background: var(--color-surface-muted);
+}
+.gds-button--ghost-danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-danger);
+}
+.gds-button--ghost-danger:hover {
+  background: var(--color-danger);
+  color: var(--color-surface);
+  border-color: var(--color-danger);
 }
 .gds-button--danger {
   background: var(--color-danger-soft);

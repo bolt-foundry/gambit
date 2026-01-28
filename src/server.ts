@@ -2596,17 +2596,16 @@ export function startWebSocketSimulator(opts: {
           if (metaPath) return resolveTestDeck(metaPath);
           return availableTestDecks[0];
         })();
-        if (!selection) {
+        if (requestedDeck && !selection) {
           return new Response(
-            JSON.stringify({ error: "No test decks configured" }),
+            JSON.stringify({ error: "Unknown test deck selection" }),
             { status: 400, headers: { "content-type": "application/json" } },
           );
         }
-        const botConfigPath = selection.path;
-        const testBotName = path.basename(botConfigPath).replace(
-          /\.deck\.(md|ts)$/i,
-          "",
-        );
+        const botConfigPath = selection?.path ?? resolvedDeckPath;
+        const testBotName = selection
+          ? path.basename(botConfigPath).replace(/\.deck\.(md|ts)$/i, "")
+          : toDeckLabel(resolvedDeckPath);
         const message = typeof payload.message === "string"
           ? payload.message.trim()
           : "";

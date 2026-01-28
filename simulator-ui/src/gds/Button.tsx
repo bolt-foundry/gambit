@@ -6,7 +6,8 @@ export type ButtonVariant =
   | "primary-deemph"
   | "secondary"
   | "ghost"
-  | "danger";
+  | "danger"
+  | "ghost-danger";
 
 export default function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & {
