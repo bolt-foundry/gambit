@@ -7,6 +7,7 @@ const logger = console;
 let initFlagWarningShown = false;
 
 const COMMANDS = [
+  "bot",
   "check",
   "demo",
   "init",
@@ -25,6 +26,7 @@ function isKnownCommand(cmd?: string): cmd is Command {
 }
 
 const HELP_COMMANDS = [
+  "bot",
   "check",
   "demo",
   "init",
@@ -49,6 +51,7 @@ type Args = {
   graderPath?: string;
   gradePaths?: Array<string>;
   botInput?: string;
+  botRoot?: string;
   maxTurns?: number;
   context?: string;
   message?: string;
@@ -204,6 +207,7 @@ export function parseCliArgs(argv: Array<string>): Args {
       "grade",
       "grader",
       "bot-input",
+      "bot-root",
       "max-turns",
       "model",
       "model-force",
@@ -266,6 +270,7 @@ export function parseCliArgs(argv: Array<string>): Args {
       parsed.grade as string | Array<string> | undefined,
     ),
     botInput: parsed["bot-input"] as string | undefined,
+    botRoot: parsed["bot-root"] as string | undefined,
     maxTurns: parsePortValue(parsed["max-turns"], "max-turns"),
     model: parsed.model as string | undefined,
     modelForce: parsed["model-force"] as string | undefined,
