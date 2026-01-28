@@ -43,6 +43,7 @@ import {
 
 const logger = console;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const BOT_ROOT_ENV = "GAMBIT_BOT_ROOT";
 
 type ModelCandidate = {
   model: string;
@@ -103,6 +104,38 @@ async function resolveCliVersion(): Promise<string> {
     if (version) return version;
   }
   return "unknown";
+}
+
+function resolveBotDeckPath(): string {
+  const url = new URL("./decks/gambit-bot.deck.md", import.meta.url);
+  if (url.protocol !== "file:") {
+    throw new Error("Unable to resolve bot deck path.");
+  }
+  return path.fromFileUrl(url);
+}
+
+async function resolveBotRoot(opts: {
+  botRoot?: string;
+  projectConfig: Awaited<ReturnType<typeof loadProjectConfig>>;
+}): Promise<string> {
+  const direct = opts.botRoot?.trim();
+  const workspaceDecks = opts.projectConfig?.config?.workspace?.decks;
+  const projectRoot = opts.projectConfig?.root;
+  const inferred = workspaceDecks && projectRoot
+    ? path.resolve(projectRoot, workspaceDecks)
+    : undefined;
+  const raw = direct || inferred;
+  if (!raw) {
+    throw new Error(
+      "bot requires --bot-root or workspace.decks in gambit.toml",
+    );
+  }
+  const resolved = await Deno.realPath(raw);
+  const info = await Deno.stat(resolved);
+  if (!info.isDirectory) {
+    throw new Error(`bot root is not a directory: ${resolved}`);
+  }
+  return resolved;
 }
 
 async function loadGambitEnv() {
@@ -200,7 +233,10 @@ async function main() {
       return;
     }
 
-    if (!deckPath && args.cmd !== "grade" && args.cmd !== "export") {
+    if (
+      !deckPath && args.cmd !== "grade" && args.cmd !== "export" &&
+      args.cmd !== "bot"
+    ) {
       printUsage();
       Deno.exit(1);
     }
@@ -605,6 +641,43 @@ async function main() {
         event: import("@bolt-foundry/gambit-core").TraceEvent,
       ) => tracerFns.forEach((fn) => fn(event))
       : undefined;
+
+    if (args.cmd === "bot") {
+      const botDeckPath = resolveBotDeckPath();
+      let botRoot: string;
+      try {
+        botRoot = await resolveBotRoot({
+          botRoot: args.botRoot ?? args.deckPath,
+          projectConfig,
+        });
+      } catch (err) {
+        logger.error(err instanceof Error ? err.message : String(err));
+        Deno.exit(1);
+      }
+      Deno.env.set(BOT_ROOT_ENV, botRoot);
+      await startTui({
+        deckPath: botDeckPath,
+        model: args.model,
+        modelForce: args.modelForce,
+        modelProvider: provider,
+        trace: tracer,
+        verbose: args.verbose,
+        responsesMode,
+        toolResultMessage: (event) => {
+          if (event.type !== "tool.result") return null;
+          if (event.name !== "bot_write") return null;
+          const result = event.result as
+            | { payload?: { path?: string; action?: string } }
+            | undefined;
+          const pathValue = result?.payload?.path;
+          if (!pathValue) return null;
+          const action = result?.payload?.action;
+          const suffix = action ? ` (${action})` : "";
+          return `file: ${pathValue}${suffix}`;
+        },
+      });
+      return;
+    }
 
     if (args.cmd === "repl") {
       await startTui({

@@ -39,6 +39,9 @@ export async function startTui(opts: {
   trace?: (
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
+  toolResultMessage?: (
+    event: import("@bolt-foundry/gambit-core").TraceEvent,
+  ) => string | null;
   verbose?: boolean;
   initialSystemMessage?: string;
   initialContext?: unknown;
@@ -177,6 +180,10 @@ export async function startTui(opts: {
         });
       }
       toolMessageIndex.delete(key);
+      const toolMessage = opts.toolResultMessage?.(event);
+      if (toolMessage) {
+        messages.push({ role: "system", text: toolMessage });
+      }
       scheduleRender();
     }
     opts.trace?.(event);
