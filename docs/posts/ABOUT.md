@@ -5,7 +5,7 @@ lifecycle = "beta"
 scope = "Area"
 +++
 
-# External Posts Structure
+# Posts Structure
 
 Posts are public updates for launches, milestones, or notable changes.
 
