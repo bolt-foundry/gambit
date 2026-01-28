@@ -303,6 +303,15 @@ function useSessions() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const byNewest = useCallback((items: SessionMeta[]) => {
+    return [...items].sort((a, b) => {
+      const aTime = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const bTime = b.createdAt ? Date.parse(b.createdAt) : 0;
+      const safeATime = Number.isFinite(aTime) ? aTime : 0;
+      const safeBTime = Number.isFinite(bTime) ? bTime : 0;
+      return safeBTime - safeATime;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -311,7 +320,7 @@ function useSessions() {
       const res = await fetch("/sessions");
       if (!res.ok) throw new Error(res.statusText);
       const body = await res.json() as { sessions?: SessionMeta[] };
-      setSessions(body.sessions ?? []);
+      setSessions(byNewest(body.sessions ?? []));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load sessions",
@@ -319,7 +328,7 @@ function useSessions() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [byNewest]);
 
   const deleteSession = useCallback(async (sessionId: string) => {
     setLoading(true);
@@ -454,7 +463,7 @@ function SessionsDrawer(props: {
                     <code>{session.id}</code>
                   </button>
                   <Button
-                    variant="danger"
+                    variant="ghost-danger"
                     className="session-delete-button"
                     onClick={() => {
                       onDelete(session.id);

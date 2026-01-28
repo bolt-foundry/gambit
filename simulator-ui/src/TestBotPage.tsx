@@ -158,7 +158,9 @@ export default function TestBotPage(props: {
   const runIdRef = useRef<string | undefined>(undefined);
   const resetSkipRef = useRef(false);
   const handleNewChatRef = useRef<() => void>(() => {});
+  const allowRunSessionNavRef = useRef(false);
   const missingSessionRef = useRef<string | null>(null);
+  const missingSessionRetryRef = useRef<Record<string, number>>({});
   const sessionDetailRequestRef = useRef(0);
   const sessionIdForDrawerRef = useRef<string | null>(null);
   const sessionIdForDrawer = activeSessionId ?? run.sessionId ?? null;
@@ -176,8 +178,28 @@ export default function TestBotPage(props: {
       if (!res.ok) {
         if (!shouldApply()) return;
         if (res.status === 404 || res.status === 502) {
+          const activeRun = runRef.current;
+          const isActiveRunSession = activeRun.sessionId === sessionId;
+          const shouldRetryMissing = isActiveRunSession &&
+            (activeRun.status === "running" ||
+              activeRun.status === "completed");
+          if (shouldRetryMissing) {
+            const attempts = missingSessionRetryRef.current[sessionId] ?? 0;
+            if (attempts < 5) {
+              missingSessionRetryRef.current[sessionId] = attempts + 1;
+              setSessionDetailLoading(false);
+              setSessionDetailError(null);
+              window.setTimeout(() => {
+                if (sessionIdForDrawerRef.current === sessionId) {
+                  loadSessionDetail(sessionId).catch(() => {});
+                }
+              }, 500);
+              return;
+            }
+          }
           if (missingSessionRef.current === sessionId) return;
           missingSessionRef.current = sessionId;
+          delete missingSessionRetryRef.current[sessionId];
           setSessionDetail(null);
           setSessionDetailError(null);
           setRun((prev) =>
@@ -234,6 +256,7 @@ export default function TestBotPage(props: {
       setSessionDetail(data);
       setSessionDetailError(null);
       missingSessionRef.current = null;
+      delete missingSessionRetryRef.current[sessionId];
     } catch (err) {
       if (!shouldApply()) return;
       setSessionDetailError(
@@ -313,8 +336,14 @@ export default function TestBotPage(props: {
 
   useEffect(() => {
     if (!run.sessionId) return;
-    if (activeSessionId && run.sessionId !== activeSessionId) return;
+    if (
+      activeSessionId && run.sessionId !== activeSessionId &&
+      !allowRunSessionNavRef.current
+    ) {
+      return;
+    }
     onReplaceTestBotSession(run.sessionId);
+    allowRunSessionNavRef.current = false;
   }, [activeSessionId, onReplaceTestBotSession, run.sessionId]);
 
   useEffect(() => {
@@ -521,7 +550,8 @@ export default function TestBotPage(props: {
     opts?: { runId?: string; sessionId?: string },
   ) => {
     try {
-      const runId = opts?.runId ?? run.id;
+      const runId = opts?.runId ??
+        (opts?.sessionId ? undefined : run.id);
       const sessionId = opts?.sessionId;
       const params = new URLSearchParams();
       if (runId) params.set("runId", runId);
@@ -555,6 +585,7 @@ export default function TestBotPage(props: {
 
   useEffect(() => {
     if (!activeSessionId) return;
+    if (allowRunSessionNavRef.current) return;
     refreshStatus({ sessionId: activeSessionId });
   }, [activeSessionId, refreshStatus]);
 
@@ -720,8 +751,9 @@ export default function TestBotPage(props: {
     return map;
   }, [run.messages, latencyByTurn]);
   const canRunPersona = testDecks.length > 0;
-  const hasPersonaSelection = canRunPersona && Boolean(selectedDeckId);
-  const canStart = hasPersonaSelection &&
+  const hasPersonaSelection = Boolean(selectedDeckId);
+  const hasDeckSelection = !canRunPersona || hasPersonaSelection;
+  const canStart = canRunPersona && hasPersonaSelection &&
     (!botInputSchema || missingBotInput.length === 0) &&
     botJsonErrorCount === 0 &&
     deckJsonErrorCount === 0;
@@ -791,6 +823,7 @@ export default function TestBotPage(props: {
 
   const startRun = useCallback(async () => {
     try {
+      allowRunSessionNavRef.current = true;
       const initFillRequest = missingDeckInit.length > 0
         ? { requested: missingDeckInit }
         : null;
@@ -819,6 +852,7 @@ export default function TestBotPage(props: {
         sessionPath?: string;
       };
       if (!res.ok) {
+        allowRunSessionNavRef.current = false;
         if (data.initFill) {
           setLastInitFill(data.initFill);
           console.info("[test-bot] init fill error", data.initFill);
@@ -860,6 +894,7 @@ export default function TestBotPage(props: {
       }
       refreshStatus({ runId: data.run?.id });
     } catch (err) {
+      allowRunSessionNavRef.current = false;
       console.error(err);
     }
   }, [
@@ -1031,7 +1066,7 @@ export default function TestBotPage(props: {
 
   const startMode = deckSchema.schemaResponse?.startMode ?? "assistant";
   const isUserStart = startMode === "user";
-  const showStartOverlay = hasPersonaSelection &&
+  const showStartOverlay = hasDeckSelection &&
     startMode === "assistant" &&
     run.status !== "running" &&
     run.messages.length === 0 &&
@@ -1043,7 +1078,7 @@ export default function TestBotPage(props: {
     (run.sessionId ||
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
 
-  const canSendChat = hasPersonaSelection &&
+  const canSendChat = hasDeckSelection &&
     run.status !== "running" &&
     !chatSending &&
     chatDraft.trim().length > 0 &&
@@ -1052,7 +1087,7 @@ export default function TestBotPage(props: {
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
 
   const handleStartAssistant = useCallback(async () => {
-    if (!hasPersonaSelection || chatSending) return;
+    if (!hasDeckSelection || chatSending) return;
     setChatSending(true);
     setChatError(null);
     let nextRunId = run.id;
@@ -1108,7 +1143,7 @@ export default function TestBotPage(props: {
   }, [
     chatSending,
     deckInitValue,
-    hasPersonaSelection,
+    hasDeckSelection,
     run.id,
     run.sessionId,
     selectedDeckId,
@@ -1439,9 +1474,10 @@ export default function TestBotPage(props: {
                 };
                 renderToolBucket(0);
                 run.messages.forEach((m, idx) => {
+                  const messageKey = m.messageRefId ?? `${m.role}-${idx}`;
                   rows.push(
                     <div
-                      key={`${m.role}-${idx}`}
+                      key={messageKey}
                       className={`imessage-row ${
                         m.role === "user" ? "right" : "left"
                       }`}
