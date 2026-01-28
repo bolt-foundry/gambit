@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import CalibrateDrawer from "./CalibrateDrawer.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -19,8 +20,6 @@ import {
   extractTotalTurns,
   extractTotalTurnsFromResult,
   extractTurnContext,
-  formatSnippet,
-  formatTimestamp,
   formatTimestampShort,
   getDurableStreamOffset,
   getGradeRefFromLocation,
@@ -39,7 +38,6 @@ import type {
   CalibrationRun,
   GraderDeckMeta,
   GradingFlag,
-  ModelMessage,
   SessionDetailResponse,
 } from "./utils.ts";
 import PageGrid from "./gds/PageGrid.tsx";
@@ -47,9 +45,10 @@ import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 
 function GradePage(
-  { setNavActions, onAppPathChange }: {
+  { setNavActions, onAppPathChange, activeSessionId }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
+    activeSessionId?: string | null;
   },
 ) {
   const [loading, setLoading] = useState(true);
@@ -68,7 +67,6 @@ function GradePage(
     null,
   );
   const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
-  const [copiedStatePath, setCopiedStatePath] = useState(false);
   const initialCalibrateSessionRef = useRef<string | null>(
     getGradeSessionIdFromLocation(),
   );
@@ -145,6 +143,12 @@ function GradePage(
   }, [loadCalibrateData]);
 
   useEffect(() => {
+    if (!activeSessionId) return;
+    if (activeSessionId === selectedSessionId) return;
+    setSelectedSessionId(activeSessionId);
+  }, [activeSessionId, selectedSessionId]);
+
+  useEffect(() => {
     const streamId = GRADE_STREAM_ID;
     const streamUrl = buildDurableStreamUrl(
       streamId,
@@ -206,6 +210,8 @@ function GradePage(
     const loadSessionDetail = async () => {
       try {
         setSessionDetailLoading(true);
+        setSessionDetail(null);
+        setSessionDetailError(null);
         const res = await fetch(
           `/api/session?sessionId=${encodeURIComponent(selectedSessionId)}`,
         );
@@ -382,43 +388,6 @@ function GradePage(
   const flaggedRefSet = useMemo(() => {
     return new Set(gradingFlags.map((flag) => flag.refId));
   }, [gradingFlags]);
-  const messageByRefId = useMemo(() => {
-    const map = new Map<string, ModelMessage>();
-    const refs = sessionDetail?.messageRefs ?? [];
-    const messages = sessionDetail?.messages ?? [];
-    refs.forEach((ref, idx) => {
-      if (!ref?.id) return;
-      const message = messages[idx];
-      if (message) map.set(ref.id, message);
-    });
-    return map;
-  }, [sessionDetail?.messageRefs, sessionDetail?.messages]);
-  const messageRoleByRefId = useMemo(() => {
-    const map = new Map<string, string>();
-    const refs = sessionDetail?.messageRefs ?? [];
-    refs.forEach((ref) => {
-      if (!ref?.id || !ref.role) return;
-      map.set(ref.id, ref.role);
-    });
-    return map;
-  }, [sessionDetail?.messageRefs]);
-  const feedbackItems = useMemo(() => {
-    const feedback = sessionDetail?.feedback ?? [];
-    const items = feedback.map((entry) => {
-      const message = messageByRefId.get(entry.messageRefId);
-      const role = message?.role ?? messageRoleByRefId.get(entry.messageRefId);
-      return {
-        entry,
-        message,
-        role,
-      };
-    });
-    return items.sort((a, b) => {
-      const aKey = a.entry.createdAt ?? "";
-      const bKey = b.entry.createdAt ?? "";
-      return bKey.localeCompare(aKey);
-    });
-  }, [sessionDetail?.feedback, messageByRefId, messageRoleByRefId]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const prevRunIdsRef = useRef<string[]>([]);
   const [expandedResults, setExpandedResults] = useState<
@@ -584,14 +553,6 @@ function GradePage(
     }, 650);
   }, [updateFlagReason]);
 
-  const handleCopyStatePath = useCallback(() => {
-    const target = selectedSession?.statePath ?? null;
-    if (!target) return;
-    navigator.clipboard?.writeText(target);
-    setCopiedStatePath(true);
-    window.setTimeout(() => setCopiedStatePath(false), 1200);
-  }, [selectedSession?.statePath]);
-
   const runGrader = useCallback(async () => {
     if (!selectedSessionId || !selectedGraderId) return;
     try {
@@ -634,17 +595,9 @@ function GradePage(
 
   useEffect(() => {
     if (!setNavActions) return;
-    setNavActions(
-      <Button
-        variant="ghost"
-        onClick={loadCalibrateData}
-        disabled={loading}
-      >
-        Refresh data
-      </Button>,
-    );
+    setNavActions(null);
     return () => setNavActions(null);
-  }, [loadCalibrateData, loading, setNavActions]);
+  }, [setNavActions]);
 
   return (
     <PageShell className="calibrate-shell">
@@ -657,7 +610,18 @@ function GradePage(
             gap: 10,
           }}
         >
-          <strong>Run a grader</strong>
+          <div className="flex-row gap-8 items-center">
+            <div className="flex-1">
+              <strong>Run a grader</strong>
+            </div>
+            <Button
+              variant="primary"
+              onClick={runGrader}
+              disabled={!canRun}
+            >
+              {running ? "Running…" : "Run grader"}
+            </Button>
+          </div>
           {sessions.length === 0 && (
             <div className="placeholder">
               No sessions found. Run the Test view to capture a session before
@@ -672,23 +636,6 @@ function GradePage(
           )}
           {sessions.length > 0 && graders.length > 0 && (
             <>
-              <Listbox
-                label="Session"
-                value={selectedSessionId ?? ""}
-                onChange={(value) =>
-                  setSelectedSessionId(value.length ? value : null)}
-                options={sessions.map((session) => ({
-                  value: session.id,
-                  label: session.testBotName ??
-                    session.deckSlug ??
-                    session.deck ??
-                    session.id,
-                  meta: session.createdAt
-                    ? formatTimestamp(session.createdAt)
-                    : undefined,
-                }))}
-                placeholder="Select session"
-              />
               <Listbox
                 label="Grader"
                 value={selectedGraderId ?? ""}
@@ -706,16 +653,6 @@ function GradePage(
                   {selectedGrader.description}
                 </div>
               )}
-              <div>
-                <Button
-                  variant="primary"
-                  onClick={runGrader}
-                  disabled={!canRun}
-                  style={{ width: "100%" }}
-                >
-                  {running ? "Running…" : "Run grader"}
-                </Button>
-              </div>
             </>
           )}
         </Panel>
@@ -1125,138 +1062,15 @@ function GradePage(
             </>
           )}
         </Panel>
-        <Panel as="aside" className="calibrate-drawer">
-          <div className="drawer-section">
-            <strong>Calibrate</strong>
-            {selectedSession?.statePath && (
-              <>
-                <Button variant="secondary" onClick={handleCopyStatePath}>
-                  <Icon
-                    name={copiedStatePath ? "copied" : "copy"}
-                    size={14}
-                  />
-                  {copiedStatePath ? "Copied" : "Copy state path"}
-                </Button>
-                <p className="calibrate-button-meta">
-                  Paste this in your coding assistant to debug the agent.
-                </p>
-              </>
-            )}
-            <h3>Ratings & flags</h3>
-            {sessionDetailLoading && (
-              <div className="placeholder">Loading ratings and flags…</div>
-            )}
-            {sessionDetailError && (
-              <div className="error">{sessionDetailError}</div>
-            )}
-            {!sessionDetailLoading &&
-              !sessionDetailError &&
-              feedbackItems.length === 0 &&
-              gradingFlags.length === 0 && (
-              <div className="placeholder">
-                No ratings or flags yet.
-              </div>
-            )}
-            {feedbackItems.length > 0 && (
-              <div className="calibrate-summary-list">
-                {feedbackItems.map(({ entry, message, role }) => {
-                  const roleLabel = role === "assistant"
-                    ? "Assistant message"
-                    : "Test bot message";
-                  const displayScore = entry.score;
-                  const scoreLabel = displayScore > 0
-                    ? `+${displayScore}`
-                    : displayScore;
-                  const scoreClass = getScoreClass(displayScore);
-                  return (
-                    <div
-                      key={`${entry.id}-${entry.messageRefId}`}
-                      className="calibrate-summary-card"
-                    >
-                      <div
-                        className="calibrate-summary-title"
-                        title={entry.createdAt &&
-                          formatTimestampShort(entry.createdAt)}
-                      >
-                        {roleLabel}
-                      </div>
-                      <div className="calibrate-summary-score-row">
-                        <div
-                          className={`calibrate-score-badge calibrate-score-badge--small ${scoreClass}`}
-                        >
-                          {scoreLabel}
-                        </div>
-                        {entry.reason && (
-                          <div className="calibrate-summary-reason ellipsis">
-                            {entry.reason}
-                          </div>
-                        )}
-                      </div>
-                      {message?.content && (
-                        <div className="calibrate-summary-meta ellipsis">
-                          {formatSnippet(message.content)}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {gradingFlags.length > 0 && (
-              <div className="calibrate-summary-list">
-                {gradingFlags.map((flag) => {
-                  const runLabel = flag.runId
-                    ? runLabelById.get(flag.runId)
-                    : undefined;
-                  const flaggedItem = runItemByRefId.get(flag.refId);
-                  const turnLabel = flaggedItem?.turnNumber
-                    ? `Assistant turn ${flaggedItem.turnNumber}`
-                    : undefined;
-                  const gradedAssistant = extractTurnContext(
-                    flaggedItem?.input,
-                  ).gradedAssistant;
-                  return (
-                    <div
-                      key={flag.id}
-                      className="calibrate-summary-card calibrate-flag-card"
-                    >
-                      {(runLabel || turnLabel)
-                        ? (
-                          <div
-                            className="calibrate-summary-title"
-                            title={flag.createdAt &&
-                              formatTimestampShort(flag.createdAt)}
-                          >
-                            {runLabel}
-                            {runLabel && turnLabel && " • "}
-                            {turnLabel}
-                          </div>
-                        )
-                        : "Flagged grader"}
-                      <div className="calibrate-summary-score-row">
-                        <div
-                          className={`calibrate-score-badge calibrate-score-badge--small`}
-                        >
-                          <Icon name="flag" size={10} />
-                        </div>
-                        {flag.reason && (
-                          <div className="calibrate-summary-reason ellipsis">
-                            {flag.reason}
-                          </div>
-                        )}
-                      </div>
-                      {gradedAssistant && (
-                        <div className="calibrate-summary-meta ellipsis">
-                          {formatSnippet(gradedAssistant)}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </Panel>
+        <CalibrateDrawer
+          statePath={selectedSession?.statePath}
+          loading={sessionDetailLoading}
+          error={sessionDetailError}
+          sessionId={selectedSessionId}
+          sessionDetail={sessionDetail}
+          runLabelById={runLabelById}
+          runItemByRefId={runItemByRefId}
+        />
       </PageGrid>
     </PageShell>
   );

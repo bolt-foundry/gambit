@@ -4,6 +4,7 @@ import { CircleSolidChevronDownIcon } from "./icons/CircleSolidChevronDown.tsx";
 import { CopiedIcon } from "./icons/Copied.tsx";
 import { CopyIcon } from "./icons/Copy.tsx";
 import { FlagIcon } from "./icons/Flag.tsx";
+import { TrashIcon } from "./icons/Trash.tsx";
 import { ReviewIcon } from "./icons/Review.tsx";
 
 const ICONS = {
@@ -14,6 +15,7 @@ const ICONS = {
   copied: CopiedIcon,
   circleInfo: CircleInfoIcon,
   review: ReviewIcon,
+  trash: TrashIcon,
 };
 
 export type IconName = keyof typeof ICONS;

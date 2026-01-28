@@ -574,6 +574,10 @@ code:not(pre *) {
   font-weight: 700;
   color: var(--color-text);
 }
+.calibrate-summary-subtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
 .ellipsis {
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1364,37 +1368,48 @@ code:not(pre *) {
   display: inline-block;
   word-break: break-all;
 }
-.sessions-overlay {
+.sessions-drawer {
   position: fixed;
   inset: 0;
-  background: var(--color-overlay);
   display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: 1000;
 }
-.sessions-dialog {
+.sessions-drawer-panel {
+  width: min(360px, 90vw);
   background: var(--color-surface);
-  border-radius: 16px;
-  padding: 20px;
-  width: min(520px, 90%);
-  max-height: 80vh;
+  border-right: 1px solid var(--color-border);
+  box-shadow: 12px 0 30px var(--color-shadow-strong);
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.sessions-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
-}
-.sessions-dialog header {
+.sessions-drawer-panel header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.sessions-dialog ul {
+.sessions-drawer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sessions-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sessions-drawer-backdrop {
+  flex: 1;
+  border: 0;
+  padding: 0;
+  background: var(--color-overlay);
+  cursor: pointer;
+}
+.sessions-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -1402,10 +1417,10 @@ code:not(pre *) {
   flex-direction: column;
   gap: 8px;
 }
-.sessions-dialog li {
+.sessions-list li {
   display: flex;
   gap: 8px;
-  align-items: stretch;
+  align-items: center;
 }
 .session-select-button {
   width: 100%;
@@ -1419,6 +1434,10 @@ code:not(pre *) {
   flex-direction: column;
   gap: 4px;
 }
+.session-select-button.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
 .session-select-button:hover {
   background: var(--color-border);
 }
@@ -1429,10 +1448,16 @@ code:not(pre *) {
   background: var(--color-surface-muted);
   color: var(--color-danger);
   cursor: pointer;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .session-delete-button:hover {
   background: var(--color-danger-soft);
+}
+.session-delete-button svg {
+  display: block;
+  min-width: 14px;
 }
 .trace-empty, .empty-state {
   padding: 12px;
@@ -1479,6 +1504,11 @@ code:not(pre *) {
   z-index: 10;
   flex-wrap: wrap;
 }
+.top-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .top-nav-buttons {
   display: flex;
   gap: 8px;
@@ -1509,6 +1539,27 @@ code:not(pre *) {
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+.sessions-toggle {
+  gap: 8px;
+}
+.hamburger-icon {
+  width: 18px;
+  height: 12px;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.hamburger-icon span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: var(--color-text);
+  border-radius: 2px;
+}
+.sessions-toggle-label {
+  font-size: 13px;
+  font-weight: 600;
 }
 .top-nav-info {
   display: flex;
@@ -1752,6 +1803,16 @@ code:not(pre *) {
 .gds-button--ghost:hover {
   border-color: var(--color-border-strong);
   background: var(--color-surface-muted);
+}
+.gds-button--danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+.gds-button--danger:hover {
+  background: var(--color-danger);
+  color: var(--color-surface);
+  border-color: var(--color-danger);
 }
 .imessage-thread {
   flex: 1;
