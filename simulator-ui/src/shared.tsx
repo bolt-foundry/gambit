@@ -121,7 +121,7 @@ export function CopyBadge(props: {
 export function ConversationView(props: {
   messages: ConversationMessage[];
   header?: React.ReactNode;
-  onScore: (messageRefId: string, score: number) => void;
+  onScore: (messageRefId: string, score: number | null) => void;
   onReasonChange: (messageRefId: string, score: number, reason: string) => void;
   emptyState?: React.ReactNode;
 }) {
@@ -161,7 +161,7 @@ export function ConversationView(props: {
 
 export function MessageBubble(props: {
   entry: ConversationMessage;
-  onScore: (messageRefId: string, score: number) => void;
+  onScore: (messageRefId: string, score: number | null) => void;
   onReasonChange: (messageRefId: string, score: number, reason: string) => void;
 }) {
   const { entry, onScore, onReasonChange } = props;
@@ -245,7 +245,7 @@ export function MessageBubble(props: {
 export function FeedbackControls(props: {
   messageRefId: string;
   feedback?: FeedbackEntry;
-  onScore: (messageRefId: string, score: number) => void;
+  onScore: (messageRefId: string, score: number | null) => void;
   onReasonChange: (messageRefId: string, score: number, reason: string) => void;
 }) {
   const { messageRefId, feedback, onScore, onReasonChange } = props;
@@ -311,6 +311,14 @@ export function FeedbackControls(props: {
               effectiveScore === value && "score-button-active",
             )}
             onClick={() => {
+              if (effectiveScore === value) {
+                setLocalScore(null);
+                setOpened(false);
+                setReason("");
+                setStatus("idle");
+                onScore(messageRefId, null);
+                return;
+              }
               setOpened(true);
               setLocalScore(value);
               onScore(messageRefId, value);

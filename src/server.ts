@@ -3080,7 +3080,7 @@ export function startWebSocketSimulator(opts: {
           const body = await req.json() as {
             sessionId?: string;
             messageRefId?: string;
-            score?: number;
+            score?: number | null;
             reason?: string;
           };
           if (!body.sessionId) {
@@ -3089,7 +3089,10 @@ export function startWebSocketSimulator(opts: {
           if (!body.messageRefId) {
             throw new Error("Missing messageRefId");
           }
-          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
+          if (
+            body.score !== null &&
+            (typeof body.score !== "number" || Number.isNaN(body.score))
+          ) {
             throw new Error("Invalid score");
           }
           const state = readSessionState(body.sessionId);
@@ -3098,34 +3101,44 @@ export function startWebSocketSimulator(opts: {
           simulatorCapturedTraces = Array.isArray(state.traces)
             ? cloneTraces(state.traces)
             : [];
-          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
-          const reason = typeof body.reason === "string"
-            ? body.reason
-            : undefined;
-          const runId = typeof state.runId === "string" ? state.runId : "run";
           const existing = state.feedback ?? [];
           const idx = existing.findIndex((f) =>
             f.messageRefId === body.messageRefId
           );
-          const now = new Date().toISOString();
-          const entry = idx >= 0
-            ? {
-              ...existing[idx],
-              score: clamped,
-              reason,
-              runId: existing[idx].runId ?? runId,
+          let entry: FeedbackEntry | undefined;
+          let feedback: Array<FeedbackEntry> = existing;
+          let deleted = false;
+          if (body.score === null) {
+            if (idx >= 0) {
+              feedback = existing.filter((_, i) => i !== idx);
+              deleted = true;
             }
-            : {
-              id: randomId("fb"),
-              runId,
-              messageRefId: body.messageRefId,
-              score: clamped,
-              reason,
-              createdAt: now,
-            };
-          const feedback = idx >= 0
-            ? existing.map((f, i) => i === idx ? entry : f)
-            : [...existing, entry];
+          } else {
+            const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+            const reason = typeof body.reason === "string"
+              ? body.reason
+              : undefined;
+            const runId = typeof state.runId === "string" ? state.runId : "run";
+            const now = new Date().toISOString();
+            entry = idx >= 0
+              ? {
+                ...existing[idx],
+                score: clamped,
+                reason,
+                runId: existing[idx].runId ?? runId,
+              }
+              : {
+                id: randomId("fb"),
+                runId,
+                messageRefId: body.messageRefId,
+                score: clamped,
+                reason,
+                createdAt: now,
+              };
+            feedback = idx >= 0
+              ? existing.map((f, i) => i === idx ? entry! : f)
+              : [...existing, entry];
+          }
           const enriched = persistSessionState({
             ...state,
             feedback,
@@ -3134,7 +3147,7 @@ export function startWebSocketSimulator(opts: {
           simulatorSavedState = enriched;
           emitSimulator({ type: "state", state: enriched });
           return new Response(
-            JSON.stringify({ feedback: entry }),
+            JSON.stringify({ feedback: entry, deleted }),
             { headers: { "content-type": "application/json" } },
           );
         } catch (err) {
@@ -3345,7 +3358,7 @@ export function startWebSocketSimulator(opts: {
           const body = await req.json() as {
             sessionId?: string;
             messageRefId?: string;
-            score?: number;
+            score?: number | null;
             reason?: string;
           };
           if (!body.sessionId) {
@@ -3354,43 +3367,56 @@ export function startWebSocketSimulator(opts: {
           if (!body.messageRefId) {
             throw new Error("Missing messageRefId");
           }
-          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
+          if (
+            body.score !== null &&
+            (typeof body.score !== "number" || Number.isNaN(body.score))
+          ) {
             throw new Error("Invalid score");
           }
           const state = readSessionState(body.sessionId);
           if (!state) {
             throw new Error("Session not found");
           }
-          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
-          const reason = typeof body.reason === "string"
-            ? body.reason
-            : undefined;
-          const runId = typeof state.runId === "string"
-            ? state.runId
-            : "session";
           const existing = state.feedback ?? [];
           const idx = existing.findIndex((entry) =>
             entry.messageRefId === body.messageRefId
           );
-          const now = new Date().toISOString();
-          const entry = idx >= 0
-            ? {
-              ...existing[idx],
-              score: clamped,
-              reason,
-              runId: existing[idx].runId ?? runId,
+          let entry: FeedbackEntry | undefined;
+          let feedback: Array<FeedbackEntry> = existing;
+          let deleted = false;
+          if (body.score === null) {
+            if (idx >= 0) {
+              feedback = existing.filter((_, i) => i !== idx);
+              deleted = true;
             }
-            : {
-              id: randomId("fb"),
-              runId,
-              messageRefId: body.messageRefId,
-              score: clamped,
-              reason,
-              createdAt: now,
-            };
-          const feedback = idx >= 0
-            ? existing.map((item, i) => i === idx ? entry : item)
-            : [...existing, entry];
+          } else {
+            const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+            const reason = typeof body.reason === "string"
+              ? body.reason
+              : undefined;
+            const runId = typeof state.runId === "string"
+              ? state.runId
+              : "session";
+            const now = new Date().toISOString();
+            entry = idx >= 0
+              ? {
+                ...existing[idx],
+                score: clamped,
+                reason,
+                runId: existing[idx].runId ?? runId,
+              }
+              : {
+                id: randomId("fb"),
+                runId,
+                messageRefId: body.messageRefId,
+                score: clamped,
+                reason,
+                createdAt: now,
+              };
+            feedback = idx >= 0
+              ? existing.map((item, i) => i === idx ? entry! : item)
+              : [...existing, entry];
+          }
           const nextState = persistSessionState({
             ...state,
             feedback,
@@ -3409,7 +3435,8 @@ export function startWebSocketSimulator(opts: {
             JSON.stringify({
               sessionId: body.sessionId,
               feedback: entry,
-              saved: true,
+              saved: !deleted,
+              deleted,
             }),
             { headers: { "content-type": "application/json" } },
           );

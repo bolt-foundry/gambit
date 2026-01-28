@@ -9,12 +9,14 @@ import { createRoot } from "react-dom/client";
 import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
+import Icon from "./gds/Icon.tsx";
 import {
   buildConversationEntries,
   buildDurableStreamUrl,
   buildGradePath,
   classNames,
   cloneValue,
+  deckDisplayPath,
   deckLabel,
   deckPath,
   DEFAULT_SESSION_PATH,
@@ -28,11 +30,14 @@ import {
   getSessionIdFromPath,
   normalizeAppPath,
   normalizeBasePath,
+  normalizedDeckPath,
+  normalizeFsPath,
+  repoRootPath,
   SCORE_VALUES,
   SESSIONS_BASE_PATH,
   setDurableStreamOffset,
   SIMULATOR_STREAM_ID,
-  toDeckSlug,
+  toRelativePath,
 } from "./utils.ts";
 import type {
   SavedState,
@@ -185,7 +190,7 @@ function useSimulator() {
   );
 
   const sendFeedback = useCallback(
-    async (messageRefId: string, score: number, reason?: string) => {
+    async (messageRefId: string, score: number | null, reason?: string) => {
       const sessionId = savedState?.meta?.sessionId;
       if (!sessionId) return;
       try {
@@ -336,10 +341,42 @@ function useSessions() {
     }
   }, [refresh]);
 
-  return { sessions, loading, error, refresh, deleteSession };
+  const deleteAll = useCallback(async (scope?: SessionMeta[]) => {
+    setLoading(true);
+    setError(null);
+    try {
+      let targetSessions = scope;
+      if (!targetSessions) {
+        const res = await fetch("/sessions");
+        if (!res.ok) throw new Error(res.statusText);
+        const body = await res.json() as { sessions?: SessionMeta[] };
+        targetSessions = body.sessions ?? [];
+      }
+      await Promise.allSettled(
+        (targetSessions ?? []).map((session) =>
+          fetch("/api/session/delete", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sessionId: session.id }),
+          })
+        ),
+      );
+      await refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to delete sessions",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [refresh]);
+
+  return { sessions, loading, error, refresh, deleteSession, deleteAll };
 }
 
-function SessionModal(props: {
+type SessionsApi = ReturnType<typeof useSessions>;
+
+function SessionsDrawer(props: {
   open: boolean;
   sessions: SessionMeta[];
   loading: boolean;
@@ -347,7 +384,9 @@ function SessionModal(props: {
   onRefresh: () => void;
   onSelect: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
+  onDeleteAll: () => void;
   onClose: () => void;
+  activeSessionId?: string | null;
 }) {
   const {
     open,
@@ -357,55 +396,87 @@ function SessionModal(props: {
     onRefresh,
     onSelect,
     onDelete,
+    onDeleteAll,
     onClose,
+    activeSessionId,
   } = props;
+  useEffect(() => {
+    if (!open) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose, open]);
   if (!open) return null;
   return (
-    <div className="sessions-overlay">
-      <div className="sessions-dialog">
+    <div className="sessions-drawer">
+      <div className="sessions-drawer-panel" role="dialog">
         <header>
           <h2>Sessions</h2>
           <Button variant="ghost" onClick={onClose}>Close</Button>
         </header>
-        <div className="sessions-body">
+        <div className="sessions-drawer-actions">
           <Button variant="secondary" onClick={onRefresh}>Refresh</Button>
+          <Button
+            variant="danger"
+            onClick={onDeleteAll}
+            disabled={loading || sessions.length === 0}
+          >
+            Delete all
+          </Button>
+        </div>
+        <div className="sessions-drawer-body">
           {loading && <p>Loading sessions…</p>}
           {error && <p className="error">{error}</p>}
-          <ul>
-            {sessions.map((session) => (
-              <li key={session.id}>
-                <button
-                  type="button"
-                  className="session-select-button"
-                  onClick={() => onSelect(session.id)}
-                >
-                  <strong>
-                    {session.testBotName ??
-                      session.deckSlug ??
-                      session.deck ??
-                      "session"}
-                  </strong>
-                  <span>{formatTimestamp(session.createdAt)}</span>
-                  <code>{session.id}</code>
-                </button>
-                <button
-                  type="button"
-                  className="session-delete-button"
-                  onClick={() => {
-                    if (!window.confirm("Delete this session?")) return;
-                    onDelete(session.id);
-                  }}
-                  aria-label="Delete session"
-                  title="Delete session"
-                >
-                  X
-                </button>
-              </li>
-            ))}
+          <ul className="sessions-list">
+            {sessions.map((session) => {
+              const isActive = activeSessionId === session.id;
+              return (
+                <li key={session.id}>
+                  <button
+                    type="button"
+                    className={classNames(
+                      "session-select-button",
+                      isActive && "active",
+                    )}
+                    onClick={() => onSelect(session.id)}
+                  >
+                    <strong>
+                      {session.testBotName ??
+                        session.deckSlug ??
+                        session.deck ??
+                        "session"}
+                    </strong>
+                    <span>{formatTimestamp(session.createdAt)}</span>
+                    <code>{session.id}</code>
+                  </button>
+                  <Button
+                    variant="danger"
+                    className="session-delete-button"
+                    onClick={() => {
+                      onDelete(session.id);
+                    }}
+                    aria-label="Delete session"
+                    title="Delete session"
+                  >
+                    <Icon name="trash" size={14} />
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
           {sessions.length === 0 && !loading && <p>No saved sessions yet.</p>}
         </div>
       </div>
+      <button
+        type="button"
+        className="sessions-drawer-backdrop"
+        onClick={onClose}
+        aria-label="Close sessions drawer"
+      />
     </div>
   );
 }
@@ -458,9 +529,18 @@ function RecentSessionsEmptyState(props: {
 }
 
 function SimulatorApp(
-  { basePath, setNavActions }: {
+  {
+    basePath,
+    setNavActions,
+    sessionsApi,
+    onOpenSessionsDrawer,
+    activeSessionId,
+  }: {
     basePath: string;
     setNavActions?: (actions: React.ReactNode | null) => void;
+    sessionsApi: SessionsApi;
+    onOpenSessionsDrawer: () => void;
+    activeSessionId?: string | null;
   },
 ) {
   const simulator = useSimulator();
@@ -470,8 +550,7 @@ function SimulatorApp(
     loading: sessionsLoading,
     error: sessionsError,
     refresh,
-    deleteSession,
-  } = useSessions();
+  } = sessionsApi;
   const { resetLocal } = simulator;
   const normalizedBase = normalizeBasePath(basePath || SESSIONS_BASE_PATH);
   const rootPath = normalizedBase === "" ? "/" : normalizedBase;
@@ -487,7 +566,6 @@ function SimulatorApp(
       }/debug`.replace(/\/{2,}/g, "/"),
     [normalizedSessionBase],
   );
-  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pendingReset, setPendingReset] = useState(false);
   const [initValue, setInitValue] = useState<unknown>(undefined);
@@ -501,8 +579,8 @@ function SimulatorApp(
   );
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const appliedSessionIdRef = useRef<string | null>(null);
+  const externalSessionIdRef = useRef<string | null>(null);
   const initializedRef = useRef(false);
-  const currentDeckSlug = useMemo(() => toDeckSlug(deckPath), []);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteStatus, setNoteStatus] = useState<
     "idle" | "dirty" | "saving" | "saved"
@@ -522,9 +600,6 @@ function SimulatorApp(
   useEffect(() => {
     refresh();
   }, [refresh]);
-  useEffect(() => {
-    if (sessionsOpen) refresh();
-  }, [sessionsOpen, refresh]);
 
   const schema = httpSchema.schemaResponse?.schema;
   const schemaDefaults = httpSchema.schemaResponse?.defaults;
@@ -666,6 +741,16 @@ function SimulatorApp(
   }, [navigateToSession, startNewChat, sessionBasePath]);
 
   useEffect(() => {
+    if (!activeSessionId) {
+      externalSessionIdRef.current = null;
+      return;
+    }
+    if (externalSessionIdRef.current === activeSessionId) return;
+    externalSessionIdRef.current = activeSessionId;
+    adoptSessionFromPath(activeSessionId);
+  }, [activeSessionId, adoptSessionFromPath]);
+
+  useEffect(() => {
     const handler = () => {
       const sessionFromPath =
         getSessionIdFromPath(undefined, sessionBasePath) ??
@@ -771,7 +856,7 @@ function SimulatorApp(
   ]);
 
   const handleScore = useCallback(
-    (refId: string, score: number) => {
+    (refId: string, score: number | null) => {
       simulator.sendFeedback(refId, score);
     },
     [simulator],
@@ -803,9 +888,6 @@ function SimulatorApp(
     if (!setNavActions) return;
     setNavActions(
       <>
-        <Button variant="secondary" onClick={() => setSessionsOpen(true)}>
-          Sessions
-        </Button>
         <Button
           variant="secondary"
           onClick={() => startNewChat()}
@@ -829,13 +911,20 @@ function SimulatorApp(
   const deckSessions = useMemo(() => {
     return sessions.filter((session) => {
       if (!session) return false;
-      if (session.deckSlug) return session.deckSlug === currentDeckSlug;
       if (typeof session.deck === "string") {
-        return toDeckSlug(session.deck) === currentDeckSlug;
+        const normalizedSessionDeck = normalizeFsPath(session.deck);
+        if (normalizedSessionDeck === normalizedDeckPath) return true;
+        const relative = toRelativePath(normalizedSessionDeck, repoRootPath);
+        if (
+          relative &&
+          normalizeFsPath(relative) === normalizeFsPath(deckDisplayPath)
+        ) {
+          return true;
+        }
       }
       return false;
     });
-  }, [sessions, currentDeckSlug]);
+  }, [sessions, deckDisplayPath, normalizedDeckPath, repoRootPath]);
 
   const recentSessionsEmpty = (
     <RecentSessionsEmptyState
@@ -843,7 +932,7 @@ function SimulatorApp(
       loading={sessionsLoading}
       error={sessionsError}
       onSelect={(id) => navigateToSession(id)}
-      onOpenAll={() => setSessionsOpen(true)}
+      onOpenAll={onOpenSessionsDrawer}
     />
   );
 
@@ -1040,19 +1129,6 @@ function SimulatorApp(
           </div>
         )}
       </footer>
-      <SessionModal
-        open={sessionsOpen}
-        sessions={deckSessions}
-        loading={sessionsLoading}
-        error={sessionsError}
-        onRefresh={refresh}
-        onSelect={(id) => {
-          navigateToSession(id);
-          setSessionsOpen(false);
-        }}
-        onDelete={deleteSession}
-        onClose={() => setSessionsOpen(false)}
-      />
     </PageShell>
   );
 }
@@ -1064,6 +1140,9 @@ function App() {
   );
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
+  const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
+  const sessionsApi = useSessions();
+  const [testBotResetToken, setTestBotResetToken] = useState(0);
   const activeSessionId = getSessionIdFromPath(path);
 
   useEffect(() => {
@@ -1137,11 +1216,84 @@ function App() {
   const gradePath = activeSessionId
     ? buildGradePath(activeSessionId)
     : "/grade";
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      const nextPath = currentPage === "test"
+        ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/test`
+        : currentPage === "grade"
+        ? buildGradePath(sessionId)
+        : `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/debug`;
+      navigate(nextPath);
+      setSessionsDrawerOpen(false);
+    },
+    [currentPage, navigate],
+  );
+
+  useEffect(() => {
+    if (sessionsDrawerOpen) {
+      sessionsApi.refresh();
+    }
+  }, [sessionsApi.refresh, sessionsDrawerOpen]);
+
+  const deckSessions = useMemo(() => {
+    return sessionsApi.sessions.filter((session) => {
+      if (!session) return false;
+      if (typeof session.deck === "string") {
+        const normalizedSessionDeck = normalizeFsPath(session.deck);
+        if (normalizedSessionDeck === normalizedDeckPath) return true;
+        const relative = toRelativePath(normalizedSessionDeck, repoRootPath);
+        if (
+          relative &&
+          normalizeFsPath(relative) === normalizeFsPath(deckDisplayPath)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }, [
+    sessionsApi.sessions,
+    deckDisplayPath,
+    normalizedDeckPath,
+    repoRootPath,
+  ]);
+
+  const handleDeleteAll = useCallback(async () => {
+    await sessionsApi.deleteAll(deckSessions);
+    setTestBotResetToken((prev) => prev + 1);
+    setSessionsDrawerOpen(false);
+    window.location.assign(DEFAULT_TEST_PATH);
+  }, [deckSessions, sessionsApi.deleteAll]);
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      await sessionsApi.deleteSession(sessionId);
+      if (sessionId === activeSessionId) {
+        window.location.assign(DEFAULT_TEST_PATH);
+      }
+    },
+    [activeSessionId, sessionsApi.deleteSession],
+  );
 
   return (
     <>
       <div className="app-root">
         <div className="top-nav">
+          <div className="top-nav-left">
+            <Button
+              variant="ghost"
+              className="sessions-toggle"
+              onClick={() => setSessionsDrawerOpen(true)}
+              data-testid="nav-sessions"
+            >
+              <span className="hamburger-icon" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+              <span className="sessions-toggle-label">Sessions</span>
+            </Button>
+          </div>
           <div className="top-nav-buttons">
             <Button
               variant={currentPage === "docs" ? "primary-deemph" : "secondary"}
@@ -1194,6 +1346,9 @@ function App() {
               <SimulatorApp
                 basePath={simulatorBasePath}
                 setNavActions={setNavActions}
+                sessionsApi={sessionsApi}
+                onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
+                activeSessionId={activeSessionId}
               />
             )
             : currentPage === "test"
@@ -1202,6 +1357,7 @@ function App() {
                 onReplaceTestBotSession={handleReplaceTestBotSession}
                 onResetTestBotSession={handleResetTestBotSession}
                 activeSessionId={activeSessionId}
+                resetToken={testBotResetToken}
                 setNavActions={setNavActions}
               />
             )
@@ -1209,10 +1365,23 @@ function App() {
               <GradePage
                 setNavActions={setNavActions}
                 onAppPathChange={handleAppPathChange}
+                activeSessionId={activeSessionId}
               />
             )}
         </div>
       </div>
+      <SessionsDrawer
+        open={sessionsDrawerOpen}
+        sessions={deckSessions}
+        loading={sessionsApi.loading}
+        error={sessionsApi.error}
+        onRefresh={sessionsApi.refresh}
+        onSelect={handleSelectSession}
+        onDelete={handleDeleteSession}
+        onDeleteAll={handleDeleteAll}
+        onClose={() => setSessionsDrawerOpen(false)}
+        activeSessionId={activeSessionId}
+      />
     </>
   );
 }

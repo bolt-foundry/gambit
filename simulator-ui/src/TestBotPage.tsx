@@ -10,18 +10,27 @@ import {
   buildDurableStreamUrl,
   cloneValue,
   countUserMessages,
+  deckDisplayPath,
   deckPath,
+  DEFAULT_TEST_PATH,
   deriveInitialFromSchema,
   findMissingRequiredFields,
   formatJson,
   getDurableStreamOffset,
+  GRADE_STREAM_ID,
+  normalizedDeckPath,
+  normalizeFsPath,
+  repoRootPath,
   setDurableStreamOffset,
   summarizeToolCalls,
   TEST_STREAM_ID,
+  toRelativePath,
 } from "./utils.ts";
 import type {
+  CalibrateStreamMessage,
   FeedbackEntry,
   NormalizedSchema,
+  SessionDetailResponse,
   TestBotConfigResponse,
   TestBotRun,
   TestBotSocketMessage,
@@ -40,17 +49,20 @@ import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Listbox from "./gds/Listbox.tsx";
+import CalibrateDrawer from "./CalibrateDrawer.tsx";
 
 export default function TestBotPage(props: {
   onReplaceTestBotSession: (sessionId: string) => void;
   onResetTestBotSession: () => void;
   activeSessionId: string | null;
+  resetToken?: number;
   setNavActions?: (actions: React.ReactNode | null) => void;
 }) {
   const {
     onReplaceTestBotSession,
     onResetTestBotSession,
     activeSessionId,
+    resetToken,
     setNavActions,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
@@ -134,9 +146,104 @@ export default function TestBotPage(props: {
   const [optimisticUser, setOptimisticUser] = useState<
     { id: string; text: string } | null
   >(null);
+  const [sessionDetail, setSessionDetail] = useState<
+    SessionDetailResponse | null
+  >(null);
+  const [sessionDetailError, setSessionDetailError] = useState<string | null>(
+    null,
+  );
+  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const runIdRef = useRef<string | undefined>(undefined);
+  const resetSkipRef = useRef(false);
+  const handleNewChatRef = useRef<() => void>(() => {});
+  const missingSessionRef = useRef<string | null>(null);
+  const sessionDetailRequestRef = useRef(0);
+  const sessionIdForDrawerRef = useRef<string | null>(null);
+  const sessionIdForDrawer = activeSessionId ?? run.sessionId ?? null;
+
+  const loadSessionDetail = useCallback(async (sessionId: string) => {
+    const requestId = ++sessionDetailRequestRef.current;
+    const shouldApply = () =>
+      requestId === sessionDetailRequestRef.current &&
+      sessionIdForDrawerRef.current === sessionId;
+    try {
+      setSessionDetailLoading(true);
+      const res = await fetch(
+        `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
+      );
+      if (!res.ok) {
+        if (!shouldApply()) return;
+        if (res.status === 404 || res.status === 502) {
+          if (missingSessionRef.current === sessionId) return;
+          missingSessionRef.current = sessionId;
+          setSessionDetail(null);
+          setSessionDetailError(null);
+          setRun((prev) =>
+            prev.sessionId === sessionId
+              ? {
+                id: "",
+                status: "idle",
+                messages: [],
+                traces: [],
+                toolInserts: [],
+                sessionId: undefined,
+              }
+              : prev
+          );
+          onResetTestBotSession();
+          window.location.assign(DEFAULT_TEST_PATH);
+          return;
+        }
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = await res.json() as SessionDetailResponse;
+      if (!shouldApply()) return;
+      const sessionDeck = typeof data?.meta?.deck === "string"
+        ? data.meta.deck
+        : null;
+      if (sessionDeck) {
+        const normalizedSessionDeck = normalizeFsPath(sessionDeck);
+        const relative = toRelativePath(normalizedSessionDeck, repoRootPath);
+        const matchesCurrentDeck =
+          normalizedSessionDeck === normalizedDeckPath ||
+          (relative &&
+            normalizeFsPath(relative) === normalizeFsPath(deckDisplayPath));
+        if (!matchesCurrentDeck) {
+          setSessionDetail(null);
+          setSessionDetailError(null);
+          setRun((prev) =>
+            prev.sessionId === sessionId
+              ? {
+                id: "",
+                status: "idle",
+                messages: [],
+                traces: [],
+                toolInserts: [],
+                sessionId: undefined,
+              }
+              : prev
+          );
+          onResetTestBotSession();
+          window.location.assign(DEFAULT_TEST_PATH);
+          return;
+        }
+      }
+      setSessionDetail(data);
+      setSessionDetailError(null);
+      missingSessionRef.current = null;
+    } catch (err) {
+      if (!shouldApply()) return;
+      setSessionDetailError(
+        err instanceof Error ? err.message : "Failed to load session details",
+      );
+      setSessionDetail(null);
+    } finally {
+      if (shouldApply()) setSessionDetailLoading(false);
+    }
+  }, [onResetTestBotSession]);
 
   const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
     let storedDeckId: string | null = null;
@@ -206,8 +313,9 @@ export default function TestBotPage(props: {
 
   useEffect(() => {
     if (!run.sessionId) return;
+    if (activeSessionId && run.sessionId !== activeSessionId) return;
     onReplaceTestBotSession(run.sessionId);
-  }, [onReplaceTestBotSession, run.sessionId]);
+  }, [activeSessionId, onReplaceTestBotSession, run.sessionId]);
 
   useEffect(() => {
     if (!selectedDeckId) return;
@@ -221,6 +329,33 @@ export default function TestBotPage(props: {
   useEffect(() => {
     runRef.current = run;
   }, [run]);
+
+  useEffect(() => {
+    sessionIdForDrawerRef.current = sessionIdForDrawer;
+    if (!sessionIdForDrawer) {
+      setSessionDetail(null);
+      setSessionDetailError(null);
+      setSessionDetailLoading(false);
+      return;
+    }
+    loadSessionDetail(sessionIdForDrawer).catch(() => {});
+  }, [loadSessionDetail, sessionIdForDrawer]);
+
+  useEffect(() => {
+    if (!sessionIdForDrawer) return;
+    sessionIdForDrawerRef.current = sessionIdForDrawer;
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        loadSessionDetail(sessionIdForDrawer).catch(() => {});
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, [loadSessionDetail, sessionIdForDrawer]);
 
   useEffect(() => {
     const streamId = TEST_STREAM_ID;
@@ -345,6 +480,43 @@ export default function TestBotPage(props: {
     };
   }, [deckPath]);
 
+  useEffect(() => {
+    if (!sessionIdForDrawer) return;
+    const streamId = GRADE_STREAM_ID;
+    const streamUrl = buildDurableStreamUrl(
+      streamId,
+      getDurableStreamOffset(streamId),
+    );
+    const source = new EventSource(streamUrl);
+
+    source.onmessage = (event) => {
+      let envelope: { offset?: unknown; data?: unknown } | null = null;
+      try {
+        envelope = JSON.parse(event.data) as {
+          offset?: unknown;
+          data?: unknown;
+        };
+      } catch {
+        return;
+      }
+      if (
+        envelope &&
+        typeof envelope.offset === "number" &&
+        Number.isFinite(envelope.offset)
+      ) {
+        setDurableStreamOffset(streamId, envelope.offset + 1);
+      }
+      const msg = envelope?.data as CalibrateStreamMessage | undefined;
+      if (!msg || msg.type !== "calibrateSession") return;
+      if (msg.sessionId !== sessionIdForDrawer) return;
+      loadSessionDetail(sessionIdForDrawer).catch(() => {});
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [loadSessionDetail, sessionIdForDrawer]);
+
   const refreshStatus = useCallback(async (
     opts?: { runId?: string; sessionId?: string },
   ) => {
@@ -377,8 +549,9 @@ export default function TestBotPage(props: {
   }, [run.id, selectedDeckId, testDecks]);
 
   useEffect(() => {
+    if (activeSessionId) return;
     refreshStatus();
-  }, [refreshStatus]);
+  }, [activeSessionId, refreshStatus]);
 
   useEffect(() => {
     if (!activeSessionId) return;
@@ -718,13 +891,29 @@ export default function TestBotPage(props: {
       await stopRun();
     }
     setRun({
+      id: "",
       status: "idle",
       messages: [],
       traces: [],
       toolInserts: [],
+      sessionId: undefined,
     });
+    missingSessionRef.current = null;
     onResetTestBotSession();
   }, [onResetTestBotSession, run.status, stopRun]);
+
+  useEffect(() => {
+    handleNewChatRef.current = handleNewChat;
+  }, [handleNewChat]);
+
+  useEffect(() => {
+    if (!resetSkipRef.current) {
+      resetSkipRef.current = true;
+      return;
+    }
+    if (resetToken === undefined) return;
+    handleNewChatRef.current();
+  }, [resetToken]);
 
   useEffect(() => {
     if (!setNavActions) return;
@@ -733,7 +922,7 @@ export default function TestBotPage(props: {
   }, [handleNewChat, setNavActions]);
 
   const saveTestBotFeedback = useCallback(
-    async (messageRefId: string, score: number, reason?: string) => {
+    async (messageRefId: string, score: number | null, reason?: string) => {
       if (!run.sessionId) return;
       try {
         const res = await fetch("/api/session/feedback", {
@@ -747,7 +936,31 @@ export default function TestBotPage(props: {
           }),
         });
         if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json() as { feedback?: FeedbackEntry };
+        const data = await res.json() as {
+          feedback?: FeedbackEntry;
+          deleted?: boolean;
+        };
+        if (data.deleted) {
+          setRun((prev) => ({
+            ...prev,
+            messages: prev.messages.map((msg) =>
+              msg.messageRefId === messageRefId
+                ? { ...msg, feedback: undefined }
+                : msg
+            ),
+          }));
+          setSessionDetail((prev) => {
+            if (!prev) return prev;
+            const existing = prev.feedback ?? [];
+            return {
+              ...prev,
+              feedback: existing.filter((entry) =>
+                entry.messageRefId !== messageRefId
+              ),
+            };
+          });
+          return;
+        }
         if (data.feedback) {
           setRun((prev) => ({
             ...prev,
@@ -757,6 +970,25 @@ export default function TestBotPage(props: {
                 : msg
             ),
           }));
+          setSessionDetail((prev) => {
+            if (!prev) return prev;
+            const existing = prev.feedback ?? [];
+            const nextFeedback = (() => {
+              const index = existing.findIndex((entry) =>
+                entry.messageRefId === messageRefId
+              );
+              if (index >= 0) {
+                const next = [...existing];
+                next[index] = data.feedback!;
+                return next;
+              }
+              return [data.feedback!, ...existing];
+            })();
+            return {
+              ...prev,
+              feedback: nextFeedback,
+            };
+          });
         }
       } catch (err) {
         console.error(err);
@@ -766,7 +998,7 @@ export default function TestBotPage(props: {
   );
 
   const handleTestBotScore = useCallback(
-    (messageRefId: string, score: number) => {
+    (messageRefId: string, score: number | null) => {
       saveTestBotFeedback(messageRefId, score);
     },
     [saveTestBotFeedback],
@@ -960,6 +1192,53 @@ export default function TestBotPage(props: {
           }}
         >
           <Panel
+            style={{ display: "flex", flexDirection: "column", gap: 10 }}
+          >
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <strong>Assistant inputs</strong>
+            </div>
+            {deckSchema.loading && (
+              <div className="editor-status">Loading schema…</div>
+            )}
+            {deckSchemaError && <div className="error">{deckSchemaError}</div>}
+            {deckInputSchema && (
+              <>
+                <InitForm
+                  schema={deckInputSchema}
+                  value={deckInitValue}
+                  onChange={handleDeckInitChange}
+                  onJsonErrorChange={(pathKey, err) =>
+                    setDeckJsonErrors((prev) =>
+                      prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
+                    )}
+                />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setDeckInitDirty(false);
+                      setDeckJsonErrors({});
+                      const nextInit = deckSchemaDefaults !== undefined
+                        ? cloneValue(deckSchemaDefaults)
+                        : deriveInitialFromSchema(deckInputSchema);
+                      setDeckInitValue(nextInit);
+                    }}
+                  >
+                    Reset init
+                  </Button>
+                  <Button variant="ghost" onClick={() => deckSchema.refresh()}>
+                    Refresh schema
+                  </Button>
+                </div>
+              </>
+            )}
+            {!deckInputSchema && !deckSchema.loading && (
+              <div className="placeholder">
+                No input schema found for this deck.
+              </div>
+            )}
+          </Panel>
+          <Panel
             className="test-bot-sidebar"
             style={{
               display: "flex",
@@ -968,7 +1247,19 @@ export default function TestBotPage(props: {
               overflowY: "auto",
             }}
           >
-            <strong>Test deck</strong>
+            <div className="flex-row gap-8 items-center">
+              <div className="flex-1">
+                <strong>Test deck</strong>
+              </div>
+              <Button
+                variant="primary"
+                onClick={startRun}
+                disabled={!canStart}
+                data-testid="testbot-run"
+              >
+                Run test bot
+              </Button>
+            </div>
             {testDecks.length > 0 && (
               <Listbox
                 value={selectedDeckId ?? ""}
@@ -990,24 +1281,6 @@ export default function TestBotPage(props: {
             {botDescription && (
               <div className="placeholder">{botDescription}</div>
             )}
-            <Button
-              variant="primary"
-              onClick={startRun}
-              disabled={!canStart}
-              data-testid="testbot-run"
-            >
-              Run test bot
-            </Button>
-          </Panel>
-          <Panel
-            className="test-bot-sidebar"
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-            }}
-          >
             <strong>Test deck input</strong>
             <div style={{ flex: 1 }}>
               {botInputSchemaError && (
@@ -1170,7 +1443,7 @@ export default function TestBotPage(props: {
                     <div
                       key={`${m.role}-${idx}`}
                       className={`imessage-row ${
-                        m.role === "user" ? "left" : "right"
+                        m.role === "user" ? "right" : "left"
                       }`}
                     >
                       <div
@@ -1242,7 +1515,7 @@ export default function TestBotPage(props: {
                   countUserMessages(run.messages) <
                     streamingUser.expectedUserCount) &&
                 (
-                  <div className="imessage-row left">
+                  <div className="imessage-row right">
                     <div
                       className="imessage-bubble right imessage-bubble-muted"
                       title="user"
@@ -1252,7 +1525,7 @@ export default function TestBotPage(props: {
                   </div>
                 )}
               {optimisticUser && (
-                <div className="imessage-row left">
+                <div className="imessage-row right">
                   <div
                     className="imessage-bubble right"
                     title="user"
@@ -1264,7 +1537,7 @@ export default function TestBotPage(props: {
               {streamingAssistant?.text &&
                 streamingAssistant.runId === run.id &&
                 (
-                  <div className="imessage-row right">
+                  <div className="imessage-row left">
                     <div
                       className="imessage-bubble left imessage-bubble-muted"
                       title="assistant"
@@ -1346,53 +1619,13 @@ export default function TestBotPage(props: {
             )}
           </div>
         </Panel>
-        <Panel
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <strong>Assistant inputs</strong>
-          </div>
-          {deckSchema.loading && (
-            <div className="editor-status">Loading schema…</div>
-          )}
-          {deckSchemaError && <div className="error">{deckSchemaError}</div>}
-          {deckInputSchema && (
-            <>
-              <InitForm
-                schema={deckInputSchema}
-                value={deckInitValue}
-                onChange={handleDeckInitChange}
-                onJsonErrorChange={(pathKey, err) =>
-                  setDeckJsonErrors((prev) =>
-                    prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
-                  )}
-              />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setDeckInitDirty(false);
-                    setDeckJsonErrors({});
-                    const nextInit = deckSchemaDefaults !== undefined
-                      ? cloneValue(deckSchemaDefaults)
-                      : deriveInitialFromSchema(deckInputSchema);
-                    setDeckInitValue(nextInit);
-                  }}
-                >
-                  Reset init
-                </Button>
-                <Button variant="ghost" onClick={() => deckSchema.refresh()}>
-                  Refresh schema
-                </Button>
-              </div>
-            </>
-          )}
-          {!deckInputSchema && !deckSchema.loading && (
-            <div className="placeholder">
-              No input schema found for this deck.
-            </div>
-          )}
-        </Panel>
+        <CalibrateDrawer
+          loading={sessionDetailLoading}
+          error={sessionDetailError}
+          sessionId={sessionIdForDrawer}
+          sessionDetail={sessionDetail}
+          messages={run.messages}
+        />
       </PageGrid>
     </PageShell>
   );
