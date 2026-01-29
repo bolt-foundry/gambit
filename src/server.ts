@@ -122,10 +122,18 @@ type NormalizedSchema = {
   items?: NormalizedSchema;
 };
 
+type DeckToolDescription = {
+  name: string;
+  label?: string;
+  description?: string;
+  path?: string;
+};
+
 type SchemaDescription = {
   schema?: NormalizedSchema;
   defaults?: unknown;
   error?: string;
+  tools?: Array<DeckToolDescription>;
 };
 
 type SessionMeta = {
@@ -210,12 +218,43 @@ async function describeDeckInputSchemaFromPath(
 ): Promise<SchemaDescription> {
   try {
     const deck = await loadDeck(deckPath);
-    return describeZodSchema(deck.inputSchema);
+    const tools = mapDeckTools(deck.actionDecks);
+    const desc = describeZodSchema(deck.inputSchema);
+    return tools ? { ...desc, tools } : desc;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(`[sim] failed to load deck schema: ${message}`);
     return { error: message };
   }
+}
+
+function mapDeckTools(
+  actionDecks?: Array<{
+    name?: string;
+    label?: string;
+    description?: string;
+    path?: string;
+  }>,
+): Array<DeckToolDescription> | undefined {
+  if (!Array.isArray(actionDecks) || actionDecks.length === 0) {
+    return undefined;
+  }
+  const described = actionDecks
+    .filter((action): action is {
+      name: string;
+      label?: string;
+      description?: string;
+      path?: string;
+    } => Boolean(action?.name && typeof action.name === "string"))
+    .map((action) => ({
+      name: action.name,
+      label: typeof action.label === "string" ? action.label : undefined,
+      description: typeof action.description === "string"
+        ? action.description
+        : undefined,
+      path: action.path,
+    }));
+  return described.length > 0 ? described : undefined;
 }
 
 function describeZodSchema(schema?: ZodTypeAny): SchemaDescription {
@@ -1625,13 +1664,16 @@ export function startWebSocketSimulator(opts: {
 
   const schemaPromise: Promise<SchemaDescription> = deckLoadPromise
     .then((deck) => {
-      const desc = deck ? describeZodSchema(deck.inputSchema) : {
-        error: "Deck failed to load",
-      };
-      if (hasInitialContext) {
-        return { ...desc, defaults: initialContext };
+      if (!deck) {
+        return { error: "Deck failed to load" };
       }
-      return desc;
+      const desc = describeZodSchema(deck.inputSchema);
+      const tools = mapDeckTools(deck.actionDecks);
+      const next = tools ? { ...desc, tools } : desc;
+      if (hasInitialContext) {
+        return { ...next, defaults: initialContext };
+      }
+      return next;
     })
     .catch((err) => {
       const message = err instanceof Error ? err.message : String(err);

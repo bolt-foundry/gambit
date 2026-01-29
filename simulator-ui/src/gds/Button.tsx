@@ -8,18 +8,31 @@ export type ButtonVariant =
   | "ghost"
   | "danger"
   | "ghost-danger";
+export type ButtonSize = "medium" | "small";
 
 export default function Button(
   props: React.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: ButtonVariant;
+    size?: ButtonSize;
   },
 ) {
-  const { variant = "secondary", className, type, ...rest } = props;
+  const {
+    variant = "secondary",
+    size = "medium",
+    className,
+    type,
+    ...rest
+  } = props;
 
   return (
     <button
       type={type ?? "button"}
-      className={classNames("gds-button", `gds-button--${variant}`, className)}
+      className={classNames(
+        "gds-button",
+        `gds-button--${variant}`,
+        `gds-button--size-${size}`,
+        className,
+      )}
       {...rest}
     />
   );

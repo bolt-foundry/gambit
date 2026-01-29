@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import Button from "./gds/Button.tsx";
 import Icon from "./gds/Icon.tsx";
 import Panel from "./gds/Panel.tsx";
+import ScrollingText from "./gds/ScrollingText.tsx";
 import {
   extractGradingFlags,
   extractTurnContext,
@@ -266,15 +267,19 @@ export default function CalibrateDrawer(props: CalibrateDrawerProps) {
                       {scoreLabel}
                     </div>
                     {entry.reason && (
-                      <div className="calibrate-summary-reason ellipsis">
-                        {entry.reason}
-                      </div>
+                      <ScrollingText
+                        as="div"
+                        text={entry.reason}
+                        className="calibrate-summary-reason"
+                      />
                     )}
                   </div>
                   {message?.content && (
-                    <div className="calibrate-summary-meta ellipsis">
-                      {formatSnippet(message.content)}
-                    </div>
+                    <ScrollingText
+                      as="div"
+                      text={formatSnippet(message.content)}
+                      className="calibrate-summary-meta"
+                    />
                   )}
                 </div>
               );
@@ -318,15 +323,19 @@ export default function CalibrateDrawer(props: CalibrateDrawerProps) {
                       <Icon name="flag" size={10} />
                     </div>
                     {flag.reason && (
-                      <div className="calibrate-summary-reason ellipsis">
-                        {flag.reason}
-                      </div>
+                      <ScrollingText
+                        as="div"
+                        text={flag.reason}
+                        className="calibrate-summary-reason"
+                      />
                     )}
                   </div>
                   {gradedAssistant && (
-                    <div className="calibrate-summary-meta ellipsis">
-                      {formatSnippet(gradedAssistant)}
-                    </div>
+                    <ScrollingText
+                      as="div"
+                      text={formatSnippet(gradedAssistant)}
+                      className="calibrate-summary-meta"
+                    />
                   )}
                 </div>
               );
