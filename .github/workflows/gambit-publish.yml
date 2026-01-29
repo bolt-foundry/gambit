@@ -144,48 +144,53 @@ jobs:
         run: |
           version="${{ steps.meta.outputs.version }}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "is_release=false" >> "$GITHUB_OUTPUT"
+          echo "is_rc_prerelease=false" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=false" >> "$GITHUB_OUTPUT"
+          echo "gambit_jsr_published=false" >> "$GITHUB_OUTPUT"
+          echo "core_jsr_published=false" >> "$GITHUB_OUTPUT"
+          check_jsr() {
+            local label="$1"
+            local package="$2"
+            local version="$3"
+            local meta_url="https://jsr.io/${package}/meta.json"
+            if deno eval -q '
+              const [url, version] = Deno.args;
+              const res = await fetch(url);
+              if (!res.ok) {
+                console.error(`Failed to fetch ${url}: ${res.status}`);
+                Deno.exit(2);
+              }
+              const data = await res.json();
+              const versions = data?.versions ?? {};
+              if (Object.prototype.hasOwnProperty.call(versions, version)) {
+                Deno.exit(0);
+              }
+              Deno.exit(1);
+            ' "$meta_url" "$version"; then
+              echo "${label}_jsr_published=true" >> "$GITHUB_OUTPUT"
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then
+                echo "::warning::Could not verify JSR metadata for ${package} (exit $status); assuming not published"
+              fi
+              echo "${label}_jsr_published=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
           if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             if git rev-parse "v${version}" >/dev/null 2>&1; then
               echo "tag_exists=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "tag_exists=false" >> "$GITHUB_OUTPUT"
             fi
-            check_jsr() {
-              local label="$1"
-              local package="$2"
-              local version="$3"
-              local meta_url="https://jsr.io/${package}/meta.json"
-              if deno eval -q '
-                const [url, version] = Deno.args;
-                const res = await fetch(url);
-                if (!res.ok) {
-                  console.error(`Failed to fetch ${url}: ${res.status}`);
-                  Deno.exit(2);
-                }
-                const data = await res.json();
-                const versions = data?.versions ?? {};
-                if (Object.prototype.hasOwnProperty.call(versions, version)) {
-                  Deno.exit(0);
-                }
-                Deno.exit(1);
-              ' "$meta_url" "$version"; then
-                echo "${label}_jsr_published=true" >> "$GITHUB_OUTPUT"
-              else
-                status=$?
-                if [ "$status" -ne 1 ]; then
-                  echo "::warning::Could not verify JSR metadata for ${package} (exit $status); assuming not published"
-                fi
-                echo "${label}_jsr_published=false" >> "$GITHUB_OUTPUT"
-              fi
-            }
             check_jsr gambit "${{ steps.meta.outputs.gambit_package }}" "$version"
             check_jsr core "${{ steps.meta.outputs.core_package }}" "$version"
-          else
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
-            echo "tag_exists=false" >> "$GITHUB_OUTPUT"
-            echo "gambit_jsr_published=false" >> "$GITHUB_OUTPUT"
-            echo "core_jsr_published=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "is_rc_prerelease=true" >> "$GITHUB_OUTPUT"
+            if git rev-parse "v${version}" >/dev/null 2>&1; then
+              echo "tag_exists=true" >> "$GITHUB_OUTPUT"
+            fi
+            check_jsr gambit "${{ steps.meta.outputs.gambit_package }}" "$version"
+            check_jsr core "${{ steps.meta.outputs.core_package }}" "$version"
           fi
 
       - name: Lint (gambit)
@@ -373,7 +378,7 @@ jobs:
           CANARY_VERSION: ${{ steps.canary.outputs.version }}
 
       - name: Tag release
-        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.tag_exists != 'true'
+        if: (steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true') && steps.release.outputs.tag_exists != 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           git config user.name "github-actions[bot]"
@@ -382,7 +387,7 @@ jobs:
           git push origin "v${version}"
 
       - name: Dispatch release-binaries
-        if: steps.release.outputs.is_release == 'true'
+        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           curl -sSf -X POST \
@@ -394,7 +399,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Wait for release binaries
-        if: steps.release.outputs.is_release == 'true'
+        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           tag="v${version}"
@@ -451,7 +456,7 @@ jobs:
           REQUIRED_ASSETS: "gambit-darwin-arm64.gz,gambit-darwin-x64.gz,gambit-linux-arm64.gz,gambit-linux-x64.gz,SHA256SUMS"
 
       - name: Prepare release publish config
-        if: steps.release.outputs.is_release == 'true'
+        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
         run: |
           gambit_config="deno.json"
           if [ -f "deno.jsonc" ]; then
@@ -564,12 +569,12 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
 
       - name: Publish release (gambit-core)
-        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.core_jsr_published != 'true'
+        if: (steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true') && steps.release.outputs.core_jsr_published != 'true'
         run: deno publish --allow-dirty
         working-directory: packages/gambit-core
 
       - name: Publish release (gambit)
-        if: steps.release.outputs.is_release == 'true' && steps.release.outputs.gambit_jsr_published != 'true'
+        if: (steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true') && steps.release.outputs.gambit_jsr_published != 'true'
         run: deno publish --allow-dirty
 
       - name: Publish release (gambit-core npm)
@@ -583,6 +588,21 @@ jobs:
           fi
           deno task build_npm
           npm publish ./dist/npm --access public
+        working-directory: packages/gambit-core
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Publish rc (gambit-core npm)
+        if: steps.release.outputs.is_rc_prerelease == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          package="${{ steps.meta.outputs.core_package }}"
+          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+            echo "npm already has ${package}@${version}; skipping"
+            exit 0
+          fi
+          deno task build_npm
+          npm publish ./dist/npm --access public --tag rc
         working-directory: packages/gambit-core
         env:
           NPM_CONFIG_PROVENANCE: "true"
@@ -616,8 +636,37 @@ jobs:
         env:
           NPM_CONFIG_PROVENANCE: "true"
 
+      - name: Publish rc (gambit npm)
+        if: steps.release.outputs.is_rc_prerelease == 'true'
+        run: |
+          version="${{ steps.release.outputs.version }}"
+          package="${{ steps.meta.outputs.gambit_package }}"
+          core_package="${{ steps.meta.outputs.core_package }}"
+          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+            echo "npm already has ${package}@${version}; skipping"
+            exit 0
+          fi
+          max_attempts=6
+          delay_seconds=10
+          for attempt in $(seq 1 "$max_attempts"); do
+            if npm view "${core_package}@${version}" version >/dev/null 2>&1; then
+              echo "npm has ${core_package}@${version}"
+              break
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Timed out waiting for ${core_package}@${version} to appear on npm"
+              exit 1
+            fi
+            echo "Waiting for ${core_package}@${version} to appear on npm (attempt ${attempt}/${max_attempts})"
+            sleep "$delay_seconds"
+          done
+          deno task build_npm
+          npm publish ./dist/npm --access public --tag rc
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+
       - name: Restore release publish config
-        if: steps.release.outputs.is_release == 'true'
+        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
         run: |
           gambit_config="deno.json"
           if [ -f "deno.jsonc" ]; then
