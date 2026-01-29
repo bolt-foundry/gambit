@@ -219,6 +219,7 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(steps.tag.outputs.name, '-') }}
           files: |
             dist/gambit-*.gz
             dist/SHA256SUMS
