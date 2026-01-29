@@ -15,6 +15,7 @@ type ButtonProps =
     variant?: ButtonVariant;
     size?: ButtonSize;
     href?: string;
+    tab?: boolean;
   }
   & React.ButtonHTMLAttributes<HTMLButtonElement>
   & React.AnchorHTMLAttributes<HTMLAnchorElement>;
@@ -26,6 +27,7 @@ export default function Button(props: ButtonProps) {
     className,
     type,
     href,
+    tab = false,
     ...rest
   } = props;
 
@@ -33,6 +35,7 @@ export default function Button(props: ButtonProps) {
     "gds-button",
     `gds-button--${variant}`,
     `gds-button--size-${size}`,
+    tab && "gds-button--tab",
     className,
   );
 

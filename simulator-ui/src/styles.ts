@@ -1559,6 +1559,26 @@ code:not(pre *) {
   justify-content: center;
   gap: 8px
 }
+.gds-button--tab {
+  border-color: transparent;
+}
+.gds-button--tab:hover {
+  border-color: transparent;
+}
+.gds-button--tab.gds-button--primary,
+.gds-button--tab.gds-button--primary:hover,
+.gds-button--tab.gds-button--primary-deemph,
+.gds-button--tab.gds-button--primary-deemph:hover,
+.gds-button--tab.gds-button--secondary,
+.gds-button--tab.gds-button--secondary:hover,
+.gds-button--tab.gds-button--ghost,
+.gds-button--tab.gds-button--ghost:hover,
+.gds-button--tab.gds-button--ghost-danger,
+.gds-button--tab.gds-button--ghost-danger:hover,
+.gds-button--tab.gds-button--danger,
+.gds-button--tab.gds-button--danger:hover {
+  border-color: transparent;
+}
 .gds-button--size-medium {
   padding: 8px 14px;
 }
