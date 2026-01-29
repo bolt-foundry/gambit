@@ -1123,7 +1123,7 @@ function App() {
     : "/grade";
   const handleSelectSession = useCallback(
     (sessionId: string) => {
-      const nextPath = currentPage === "test"
+      const nextPath = currentPage === "test" || currentPage === "docs"
         ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/test`
         : currentPage === "grade"
         ? buildGradePath(sessionId)
@@ -1203,27 +1203,31 @@ function App() {
           </div>
           <div className="top-nav-buttons">
             <Button
-              variant={currentPage === "docs" ? "primary-deemph" : "secondary"}
+              tab
+              variant={currentPage === "docs" ? "primary-deemph" : "ghost"}
               onClick={() => navigate(DOCS_PATH)}
               data-testid="nav-docs"
             >
               Docs
             </Button>
             <Button
-              variant={currentPage === "test" ? "primary-deemph" : "secondary"}
+              tab
+              variant={currentPage === "test" ? "primary-deemph" : "ghost"}
               onClick={() => navigate(testBotPath)}
               data-testid="nav-test"
             >
               Test
             </Button>
             <Button
-              variant={currentPage === "grade" ? "primary-deemph" : "secondary"}
+              tab
+              variant={currentPage === "grade" ? "primary-deemph" : "ghost"}
               onClick={() => navigate(gradePath)}
               data-testid="nav-grade"
             >
               Grade
             </Button>
             <Button
+              tab
               variant={currentPage === "debug" ? "primary-deemph" : "ghost"}
               onClick={() => navigate(debugPath)}
               data-testid="nav-debug"

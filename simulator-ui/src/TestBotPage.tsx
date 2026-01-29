@@ -1332,6 +1332,7 @@ export default function TestBotPage(props: {
             <div className="panel-tabs" style={{ marginTop: 6 }}>
               <Button
                 className="flex-1"
+                tab
                 variant={assistantDeckTab === "input"
                   ? "primary-deemph"
                   : "ghost"}
@@ -1342,6 +1343,7 @@ export default function TestBotPage(props: {
               </Button>
               <Button
                 className="flex-1"
+                tab
                 variant={assistantDeckTab === "tools"
                   ? "primary-deemph"
                   : "ghost"}
@@ -1352,6 +1354,7 @@ export default function TestBotPage(props: {
               </Button>
               <Button
                 className="flex-1"
+                tab
                 variant={assistantDeckTab === "schema"
                   ? "primary-deemph"
                   : "ghost"}
