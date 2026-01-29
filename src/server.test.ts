@@ -40,6 +40,13 @@ async function readStreamEvents(port: number, offset = 0) {
   return body.events ?? [];
 }
 
+async function readJsonLines(filePath: string): Promise<Array<unknown>> {
+  const text = await Deno.readTextFile(filePath);
+  return text.split("\n").filter((line) => line.trim().length > 0).map((line) =>
+    JSON.parse(line)
+  );
+}
+
 Deno.test("simulator streams responses", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -99,6 +106,158 @@ Deno.test("simulator streams responses", async () => {
     .join("");
   assertEquals(streams, "hi");
   assertEquals(messages.some((m) => m.type === "result"), true);
+});
+
+Deno.test("simulator persists snapshot + events and hydrates traces", async () => {
+  const dir = await Deno.makeTempDir();
+  const sessionsDir = path.join(dir, "sessions");
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "persist.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+    sessionDir: sessionsDir,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+  const result = await runSimulator(port, { input: "hello", stream: false });
+  assert(result.sessionId, "missing sessionId");
+
+  const sessionDir = path.join(sessionsDir, result.sessionId!);
+  const statePath = path.join(sessionDir, "state.json");
+  const eventsPath = path.join(sessionDir, "events.jsonl");
+
+  const state = JSON.parse(await Deno.readTextFile(statePath)) as Record<
+    string,
+    unknown
+  >;
+  assert(!("traces" in state), "state.json should exclude traces");
+  const meta = state.meta as Record<string, unknown>;
+  assertEquals(meta.sessionEventsPath, eventsPath);
+  assertEquals(
+    meta.sessionFeedbackPath,
+    path.join(sessionDir, "feedback.jsonl"),
+  );
+  assertEquals(meta.sessionGradingPath, path.join(sessionDir, "grading.jsonl"));
+
+  const events = await readJsonLines(eventsPath);
+  assert(events.length > 0, "events.jsonl should have entries");
+  assert(
+    events.some((event) =>
+      (event as { type?: string }).type === "session.start"
+    ),
+  );
+  assert(
+    events.some((event) => (event as { kind?: string }).kind === "trace"),
+  );
+
+  const sessionRes = await fetch(
+    `http://127.0.0.1:${port}/api/session?sessionId=${result.sessionId}`,
+  );
+  const sessionPayload = await sessionRes.json() as {
+    traces?: Array<unknown>;
+  };
+  assert(Array.isArray(sessionPayload.traces));
+  assert(sessionPayload.traces.length > 0, "traces should hydrate from events");
+
+  await server.shutdown();
+  await server.finished;
+});
+
+Deno.test("simulator appends feedback log entries", async () => {
+  const dir = await Deno.makeTempDir();
+  const sessionsDir = path.join(dir, "sessions");
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "feedback.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+    sessionDir: sessionsDir,
+  });
+
+  const port = (server.addr as Deno.NetAddr).port;
+  const result = await runSimulator(port, { input: "hello", stream: false });
+  assert(result.sessionId, "missing sessionId");
+
+  const sessionDir = path.join(sessionsDir, result.sessionId!);
+  const state = JSON.parse(
+    await Deno.readTextFile(path.join(sessionDir, "state.json")),
+  ) as { messageRefs?: Array<{ id?: string }> };
+  const messageRefId = state.messageRefs?.[0]?.id;
+  assert(messageRefId, "missing messageRefId");
+
+  const res = await fetch(`http://127.0.0.1:${port}/api/simulator/feedback`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sessionId: result.sessionId,
+      messageRefId,
+      score: 1,
+      reason: "ok",
+    }),
+  });
+  assert(res.ok);
+  await res.json();
+
+  const feedbackPath = path.join(sessionDir, "feedback.jsonl");
+  const entries = await readJsonLines(feedbackPath);
+  assert(entries.length > 0, "feedback.jsonl should have entries");
+  assert(
+    entries.some((entry) =>
+      (entry as { type?: string }).type === "feedback.update"
+    ),
+  );
+
+  await server.shutdown();
+  await server.finished;
 });
 
 Deno.test("simulator exposes schema and defaults", async () => {

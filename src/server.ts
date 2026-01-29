@@ -1,4 +1,5 @@
 import * as path from "@std/path";
+import { existsSync } from "@std/fs";
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
@@ -801,36 +802,329 @@ export function startWebSocketSimulator(opts: {
     ) {
       meta.sessionStatePath = path.join(meta.sessionDir, "state.json");
     }
+    if (
+      typeof meta.sessionEventsPath !== "string" &&
+      typeof meta.sessionDir === "string"
+    ) {
+      meta.sessionEventsPath = path.join(meta.sessionDir, "events.jsonl");
+    }
+    if (
+      typeof meta.sessionFeedbackPath !== "string" &&
+      typeof meta.sessionDir === "string"
+    ) {
+      meta.sessionFeedbackPath = path.join(meta.sessionDir, "feedback.jsonl");
+    }
+    if (
+      typeof meta.sessionGradingPath !== "string" &&
+      typeof meta.sessionDir === "string"
+    ) {
+      meta.sessionGradingPath = path.join(meta.sessionDir, "grading.jsonl");
+    }
     const dir = typeof meta.sessionDir === "string"
       ? meta.sessionDir
       : undefined;
     return { state: { ...state, meta }, dir };
   };
-  const persistSessionState = (state: SavedState): SavedState => {
-    const { state: enriched, dir } = enrichStateWithSession(state);
-    if (dir) {
+  const sessionStateCache = new Map<string, SavedState>();
+  const sessionWriteQueues = new Map<string, Array<() => void>>();
+  const sessionWriteActive = new Set<string>();
+
+  const enqueueSessionWrite = (sessionId: string, task: () => void) => {
+    const queue = sessionWriteQueues.get(sessionId) ?? [];
+    queue.push(task);
+    sessionWriteQueues.set(sessionId, queue);
+    if (sessionWriteActive.has(sessionId)) return;
+    sessionWriteActive.add(sessionId);
+    while (queue.length) {
+      const next = queue.shift();
+      if (!next) continue;
       try {
-        ensureDir(dir);
-        const filePath = path.join(dir, "state.json");
-        Deno.writeTextFileSync(filePath, JSON.stringify(enriched, null, 2));
+        next();
       } catch (err) {
         logger.warn(
-          `[sim] failed to persist session state: ${
+          `[sim] session write failed: ${
             err instanceof Error ? err.message : err
           }`,
         );
       }
     }
-    return enriched;
+    sessionWriteActive.delete(sessionId);
   };
-  const readSessionState = (sessionId: string): SavedState | undefined => {
+
+  const mergeSessionState = (
+    current: SavedState | undefined,
+    next: SavedState,
+  ): SavedState => {
+    if (!current) return next;
+    const merged: SavedState = {
+      ...current,
+      ...next,
+      meta: {
+        ...(current.meta ?? {}),
+        ...(next.meta ?? {}),
+      },
+      messages: next.messages ?? current.messages,
+      items: next.items ?? current.items,
+      format: next.format ?? current.format,
+      messageRefs: next.messageRefs ?? current.messageRefs,
+      feedback: next.feedback ?? current.feedback,
+      notes: next.notes ?? current.notes,
+      conversationScore: next.conversationScore ?? current.conversationScore,
+      traces: next.traces ?? current.traces,
+    };
+    return merged;
+  };
+
+  const materializeSnapshot = (state: SavedState): SavedState => {
+    const snapshot = { ...state };
+    delete (snapshot as Record<string, unknown>).traces;
+    return snapshot;
+  };
+
+  const writeJsonAtomic = (filePath: string, payload: unknown) => {
+    const dir = path.dirname(filePath);
+    ensureDir(dir);
+    const tmpPath = path.join(
+      dir,
+      `.tmp-${path.basename(filePath)}-${randomId("tmp")}`,
+    );
+    Deno.writeTextFileSync(tmpPath, JSON.stringify(payload, null, 2));
+    Deno.renameSync(tmpPath, filePath);
+  };
+
+  const appendJsonl = (filePath: string, payload: unknown) => {
+    const dir = path.dirname(filePath);
+    ensureDir(dir);
+    const line = JSON.stringify(payload);
+    Deno.writeTextFileSync(filePath, `${line}\n`, { append: true });
+  };
+
+  const appendSessionEvent = (
+    state: SavedState,
+    payload: Record<string, unknown>,
+  ) => {
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : undefined;
+    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : undefined;
+    if (!sessionId || !eventsPath) return;
+    const stamped = {
+      createdAt: new Date().toISOString(),
+      sessionId,
+      ts: typeof payload.ts === "number" ? payload.ts : Date.now(),
+      ...payload,
+    };
+    enqueueSessionWrite(sessionId, () => {
+      appendJsonl(eventsPath, stamped);
+    });
+  };
+
+  const appendFeedbackLog = (
+    state: SavedState,
+    payload: Record<string, unknown>,
+  ) => {
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : undefined;
+    const feedbackPath = typeof state.meta?.sessionFeedbackPath === "string"
+      ? state.meta.sessionFeedbackPath
+      : undefined;
+    if (!sessionId || !feedbackPath) return;
+    const stamped = {
+      createdAt: new Date().toISOString(),
+      sessionId,
+      ...payload,
+    };
+    enqueueSessionWrite(sessionId, () => {
+      appendJsonl(feedbackPath, stamped);
+    });
+  };
+
+  const appendGradingLog = (
+    state: SavedState,
+    payload: Record<string, unknown>,
+  ) => {
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : undefined;
+    const gradingPath = typeof state.meta?.sessionGradingPath === "string"
+      ? state.meta.sessionGradingPath
+      : undefined;
+    if (!sessionId || !gradingPath) return;
+    const stamped = {
+      createdAt: new Date().toISOString(),
+      sessionId,
+      ...payload,
+    };
+    enqueueSessionWrite(sessionId, () => {
+      appendJsonl(gradingPath, stamped);
+    });
+  };
+
+  const TRACE_EVENT_TYPES = new Set<string>([
+    "run.start",
+    "message.user",
+    "run.end",
+    "deck.start",
+    "deck.end",
+    "action.start",
+    "action.end",
+    "tool.call",
+    "tool.result",
+    "model.call",
+    "model.result",
+    "log",
+    "monolog",
+  ]);
+
+  const traceCategory = (type: string): string => {
+    switch (type) {
+      case "message.user":
+      case "model.result":
+        return "turn";
+      case "tool.call":
+      case "tool.result":
+        return "tool";
+      case "log":
+      case "monolog":
+        return "status";
+      case "run.start":
+      case "run.end":
+      case "deck.start":
+      case "deck.end":
+      case "action.start":
+      case "action.end":
+      case "model.call":
+        return "lifecycle";
+      default:
+        return "trace";
+    }
+  };
+
+  const loadSessionTraces = (state: SavedState): Array<TraceEvent> => {
+    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : undefined;
+    if (!eventsPath) return [];
+    try {
+      const text = Deno.readTextFileSync(eventsPath);
+      const traces: Array<TraceEvent> = [];
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const record = JSON.parse(line) as Record<string, unknown>;
+          const kind = typeof record.kind === "string" ? record.kind : "";
+          const type = typeof record.type === "string" ? record.type : "";
+          if (kind === "trace" || TRACE_EVENT_TYPES.has(type)) {
+            traces.push(record as TraceEvent);
+          }
+        } catch {
+          // ignore invalid lines
+        }
+      }
+      return traces;
+    } catch {
+      return [];
+    }
+  };
+
+  const persistSessionState = (state: SavedState): SavedState => {
+    const { state: enriched, dir } = enrichStateWithSession(state);
+    const sessionId = typeof enriched.meta?.sessionId === "string"
+      ? enriched.meta.sessionId
+      : undefined;
+    const merged = sessionId
+      ? mergeSessionState(sessionStateCache.get(sessionId), enriched)
+      : enriched;
+    if (sessionId) {
+      sessionStateCache.set(sessionId, merged);
+    }
+    if (dir && sessionId) {
+      const snapshot = materializeSnapshot(merged);
+      const eventsPath = typeof snapshot.meta?.sessionEventsPath === "string"
+        ? snapshot.meta.sessionEventsPath
+        : path.join(dir, "events.jsonl");
+      const statePath = typeof snapshot.meta?.sessionStatePath === "string"
+        ? snapshot.meta.sessionStatePath
+        : path.join(dir, "state.json");
+      enqueueSessionWrite(sessionId, () => {
+        try {
+          ensureDir(dir);
+          const firstWrite = !existsSync(eventsPath);
+          writeJsonAtomic(statePath, snapshot);
+          if (firstWrite) {
+            appendJsonl(eventsPath, {
+              type: "session.start",
+              category: "lifecycle",
+              createdAt: new Date().toISOString(),
+              sessionId,
+              runId: snapshot.runId,
+              deck: snapshot.meta?.deck,
+            });
+          }
+          appendJsonl(eventsPath, {
+            type: "session.snapshot",
+            category: "snapshot",
+            createdAt: new Date().toISOString(),
+            sessionId,
+            runId: snapshot.runId,
+            state: snapshot,
+          });
+        } catch (err) {
+          logger.warn(
+            `[sim] failed to persist session state: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      });
+    }
+    return merged;
+  };
+  const readSessionState = (
+    sessionId: string,
+    opts?: { withTraces?: boolean },
+  ): SavedState | undefined => {
     const dir = path.join(sessionsRoot, sessionId);
     const filePath = path.join(dir, "state.json");
     try {
       const text = Deno.readTextFileSync(filePath);
       const parsed = JSON.parse(text) as SavedState;
       if (parsed && typeof parsed === "object") {
-        return parsed;
+        const meta = {
+          ...(parsed.meta ?? {}),
+          sessionId,
+          sessionDir: dir,
+        } as Record<string, unknown>;
+        if (typeof meta.sessionStatePath !== "string") {
+          meta.sessionStatePath = filePath;
+        }
+        if (typeof meta.sessionEventsPath !== "string") {
+          meta.sessionEventsPath = path.join(dir, "events.jsonl");
+        }
+        if (typeof meta.sessionFeedbackPath !== "string") {
+          meta.sessionFeedbackPath = path.join(dir, "feedback.jsonl");
+        }
+        if (typeof meta.sessionGradingPath !== "string") {
+          meta.sessionGradingPath = path.join(dir, "grading.jsonl");
+        }
+        const enriched = { ...parsed, meta } as SavedState;
+        if (opts?.withTraces) {
+          const loadedTraces = loadSessionTraces(enriched);
+          const fallbackTraces = Array.isArray(enriched.traces)
+            ? enriched.traces
+            : [];
+          const traces = loadedTraces.length > 0
+            ? loadedTraces
+            : fallbackTraces;
+          const withTraces = { ...enriched, traces };
+          sessionStateCache.set(sessionId, withTraces);
+          return withTraces;
+        }
+        sessionStateCache.set(sessionId, enriched);
+        return enriched;
       }
     } catch {
       // ignore
@@ -1345,10 +1639,31 @@ export function startWebSocketSimulator(opts: {
       }
     };
 
+    const pendingTraceEvents: Array<TraceEvent> = [];
+    const flushPendingTraceEvents = (state: SavedState) => {
+      if (!pendingTraceEvents.length) return;
+      for (const pending of pendingTraceEvents) {
+        appendSessionEvent(state, {
+          ...pending,
+          kind: "trace",
+          category: traceCategory(pending.type),
+        } as Record<string, unknown>);
+      }
+      pendingTraceEvents.length = 0;
+    };
     const tracer = (event: TraceEvent) => {
       const stamped = event.ts ? event : { ...event, ts: Date.now() };
       capturedTraces.push(stamped);
       consoleTracer?.(stamped);
+      if (savedState?.meta?.sessionId) {
+        appendSessionEvent(savedState, {
+          ...stamped,
+          kind: "trace",
+          category: traceCategory(stamped.type),
+        } as Record<string, unknown>);
+      } else {
+        pendingTraceEvents.push(stamped);
+      }
     };
 
     let deckBotState: SavedState | undefined = undefined;
@@ -1433,6 +1748,7 @@ export function startWebSocketSimulator(opts: {
                 traces: capturedTraces,
               });
               savedState = enriched;
+              flushPendingTraceEvents(enriched);
               appendFromState(enriched);
             },
           });
@@ -1494,6 +1810,7 @@ export function startWebSocketSimulator(opts: {
                 traces: capturedTraces,
               });
               savedState = enriched;
+              flushPendingTraceEvents(enriched);
               appendFromState(enriched);
             },
             onStreamText: (chunk) =>
@@ -1852,6 +2169,10 @@ export function startWebSocketSimulator(opts: {
                 gradingRuns: nextRuns,
               },
             });
+            appendGradingLog(nextState, {
+              type: "grading.run",
+              run: nextEntry,
+            });
             const sessionMeta = buildSessionMeta(sessionId, nextState);
             appendDurableStreamEvent(GRADE_STREAM_ID, {
               type: "calibrateSession",
@@ -2021,21 +2342,24 @@ export function startWebSocketSimulator(opts: {
           );
           let nextFlags: Array<GradingFlag>;
           let flagged = false;
+          let flagEntry: GradingFlag | undefined;
           if (flagIndex >= 0) {
+            flagEntry = existingFlags[flagIndex];
             nextFlags = existingFlags.filter((_, idx) => idx !== flagIndex);
             flagged = false;
           } else {
             const now = new Date().toISOString();
+            flagEntry = {
+              id: randomId("flag"),
+              refId: body.refId,
+              runId: body.runId,
+              turnIndex: body.turnIndex,
+              reason: body.reason?.trim() || undefined,
+              createdAt: now,
+            };
             nextFlags = [
               ...existingFlags,
-              {
-                id: randomId("flag"),
-                refId: body.refId,
-                runId: body.runId,
-                turnIndex: body.turnIndex,
-                reason: body.reason?.trim() || undefined,
-                createdAt: now,
-              },
+              flagEntry,
             ];
             flagged = true;
           }
@@ -2045,6 +2369,12 @@ export function startWebSocketSimulator(opts: {
               ...meta,
               gradingFlags: nextFlags,
             },
+          });
+          appendGradingLog(updated, {
+            type: "grading.flag",
+            flagged,
+            flag: flagEntry,
+            refId: body.refId,
           });
           const sessionMeta = buildSessionMeta(body.sessionId, updated);
           appendDurableStreamEvent(GRADE_STREAM_ID, {
@@ -2114,6 +2444,11 @@ export function startWebSocketSimulator(opts: {
               ...meta,
               gradingFlags: nextFlags,
             },
+          });
+          appendGradingLog(updated, {
+            type: "grading.flag.reason",
+            flag: updatedFlag,
+            refId: body.refId,
           });
           const sessionMeta = buildSessionMeta(body.sessionId, updated);
           appendDurableStreamEvent(GRADE_STREAM_ID, {
@@ -2223,6 +2558,12 @@ export function startWebSocketSimulator(opts: {
               ...(state.meta ?? {}),
               gradingRuns: nextRuns,
             },
+          });
+          appendGradingLog(nextState, {
+            type: "grading.reference",
+            run: nextRun,
+            runId: body.runId,
+            turnIndex: body.turnIndex,
           });
           const sessionMeta = buildSessionMeta(body.sessionId, nextState);
           appendDurableStreamEvent(GRADE_STREAM_ID, {
@@ -2604,11 +2945,15 @@ export function startWebSocketSimulator(opts: {
         const sessionId = typeof payload.sessionId === "string"
           ? payload.sessionId
           : undefined;
-        let savedState = sessionId ? readSessionState(sessionId) : undefined;
+        let savedState = sessionId
+          ? readSessionState(sessionId, { withTraces: true })
+          : undefined;
         if (!savedState && runId) {
           const entry = testBotRuns.get(runId);
           if (entry?.run.sessionId) {
-            savedState = readSessionState(entry.run.sessionId);
+            savedState = readSessionState(entry.run.sessionId, {
+              withTraces: true,
+            });
           }
         }
         if (savedState && !runId) {
@@ -2707,10 +3052,31 @@ export function startWebSocketSimulator(opts: {
         const capturedTraces = Array.isArray(savedState?.traces)
           ? cloneTraces(savedState.traces)
           : [];
+        const pendingTraceEvents: Array<TraceEvent> = [];
+        const flushPendingTraceEvents = (state: SavedState) => {
+          if (!pendingTraceEvents.length) return;
+          for (const pending of pendingTraceEvents) {
+            appendSessionEvent(state, {
+              ...pending,
+              kind: "trace",
+              category: traceCategory(pending.type),
+            } as Record<string, unknown>);
+          }
+          pendingTraceEvents.length = 0;
+        };
         const tracer = (event: TraceEvent) => {
           const stamped = event.ts ? event : { ...event, ts: Date.now() };
           capturedTraces.push(stamped);
           consoleTracer?.(stamped);
+          if (savedState?.meta?.sessionId) {
+            appendSessionEvent(savedState, {
+              ...stamped,
+              kind: "trace",
+              category: traceCategory(stamped.type),
+            } as Record<string, unknown>);
+          } else {
+            pendingTraceEvents.push(stamped);
+          }
         };
         const appendFromState = (state: SavedState) => {
           const snapshot = buildTestBotSnapshot(state);
@@ -2780,6 +3146,7 @@ export function startWebSocketSimulator(opts: {
                     traces: capturedTraces,
                   });
                   savedState = enriched;
+                  flushPendingTraceEvents(enriched);
                   appendFromState(enriched);
                 },
                 onStreamText: (chunk) =>
@@ -2872,7 +3239,7 @@ export function startWebSocketSimulator(opts: {
           sessionId,
         };
         if (!entry && sessionId) {
-          const state = readSessionState(sessionId);
+          const state = readSessionState(sessionId, { withTraces: true });
           if (state) {
             run.id = typeof state.runId === "string" ? state.runId : run.id;
             run.status = "completed";
@@ -2880,7 +3247,7 @@ export function startWebSocketSimulator(opts: {
           }
         }
         if (run.sessionId) {
-          const state = readSessionState(run.sessionId);
+          const state = readSessionState(run.sessionId, { withTraces: true });
           if (state) {
             syncTestBotRunFromState(run, state);
           }
@@ -3000,7 +3367,9 @@ export function startWebSocketSimulator(opts: {
           simulatorCurrentRunId = undefined;
         }
         if (payload.sessionId) {
-          const loaded = readSessionState(payload.sessionId);
+          const loaded = readSessionState(payload.sessionId, {
+            withTraces: true,
+          });
           if (loaded) {
             simulatorSavedState = loaded;
             simulatorCapturedTraces = Array.isArray(loaded.traces)
@@ -3011,6 +3380,18 @@ export function startWebSocketSimulator(opts: {
         simulatorCurrentRunId = undefined;
         const stream = payload.stream ?? true;
         const forwardTrace = payload.trace ?? true;
+        const pendingTraceEvents: Array<TraceEvent> = [];
+        const flushPendingTraceEvents = (state: SavedState) => {
+          if (!pendingTraceEvents.length) return;
+          for (const pending of pendingTraceEvents) {
+            appendSessionEvent(state, {
+              ...pending,
+              kind: "trace",
+              category: traceCategory(pending.type),
+            } as Record<string, unknown>);
+          }
+          pendingTraceEvents.length = 0;
+        };
         const tracer = (event: TraceEvent) => {
           const stamped = event.ts ? event : { ...event, ts: Date.now() };
           if (stamped.type === "run.start") {
@@ -3019,6 +3400,15 @@ export function startWebSocketSimulator(opts: {
           simulatorCapturedTraces.push(stamped);
           consoleTracer?.(stamped);
           if (forwardTrace) emitSimulator({ type: "trace", event: stamped });
+          if (simulatorSavedState?.meta?.sessionId) {
+            appendSessionEvent(simulatorSavedState, {
+              ...stamped,
+              kind: "trace",
+              category: traceCategory(stamped.type),
+            } as Record<string, unknown>);
+          } else {
+            pendingTraceEvents.push(stamped);
+          }
         };
         let initialUserMessage: unknown = typeof payload.message === "string"
           ? payload.message
@@ -3074,6 +3464,7 @@ export function startWebSocketSimulator(opts: {
                 traces: simulatorCapturedTraces,
               });
               simulatorSavedState = enrichedState;
+              flushPendingTraceEvents(enrichedState);
               emitSimulator({ type: "state", state: enrichedState });
             },
             initialUserMessage,
@@ -3136,7 +3527,7 @@ export function startWebSocketSimulator(opts: {
           ) {
             throw new Error("Invalid score");
           }
-          const state = readSessionState(body.sessionId);
+          const state = readSessionState(body.sessionId, { withTraces: true });
           if (!state) throw new Error("Session not found");
           simulatorSavedState = state;
           simulatorCapturedTraces = Array.isArray(state.traces)
@@ -3185,6 +3576,12 @@ export function startWebSocketSimulator(opts: {
             feedback,
             traces: simulatorCapturedTraces,
           });
+          appendFeedbackLog(enriched, {
+            type: "feedback.update",
+            messageRefId: body.messageRefId,
+            feedback: entry,
+            deleted,
+          });
           simulatorSavedState = enriched;
           emitSimulator({ type: "state", state: enriched });
           return new Response(
@@ -3213,7 +3610,7 @@ export function startWebSocketSimulator(opts: {
           if (!body.sessionId) {
             throw new Error("Missing sessionId");
           }
-          const state = readSessionState(body.sessionId);
+          const state = readSessionState(body.sessionId, { withTraces: true });
           if (!state) throw new Error("Session not found");
           simulatorSavedState = state;
           simulatorCapturedTraces = Array.isArray(state.traces)
@@ -3256,7 +3653,7 @@ export function startWebSocketSimulator(opts: {
           if (typeof body.score !== "number" || Number.isNaN(body.score)) {
             throw new Error("Invalid score");
           }
-          const state = readSessionState(body.sessionId);
+          const state = readSessionState(body.sessionId, { withTraces: true });
           if (!state) throw new Error("Session not found");
           simulatorSavedState = state;
           simulatorCapturedTraces = Array.isArray(state.traces)
@@ -3297,7 +3694,7 @@ export function startWebSocketSimulator(opts: {
           if (!body.sessionId) {
             throw new Error("Missing sessionId");
           }
-          const state = readSessionState(body.sessionId);
+          const state = readSessionState(body.sessionId, { withTraces: true });
           if (!state) {
             throw new Error("Session not found");
           }
@@ -3331,7 +3728,7 @@ export function startWebSocketSimulator(opts: {
             { status: 400, headers: { "content-type": "application/json" } },
           );
         }
-        const state = readSessionState(sessionId);
+        const state = readSessionState(sessionId, { withTraces: true });
         if (!state) {
           return new Response(
             JSON.stringify({ error: "Session not found" }),
@@ -3461,6 +3858,12 @@ export function startWebSocketSimulator(opts: {
           const nextState = persistSessionState({
             ...state,
             feedback,
+          });
+          appendFeedbackLog(nextState, {
+            type: "feedback.update",
+            messageRefId: body.messageRefId,
+            feedback: entry,
+            deleted,
           });
           const testBotRunId = typeof nextState.meta?.testBotRunId === "string"
             ? nextState.meta.testBotRunId
@@ -3625,6 +4028,12 @@ export function startWebSocketSimulator(opts: {
           const updated = persistSessionState({
             ...state,
             feedback: nextFeedback,
+          });
+          appendFeedbackLog(updated, {
+            type: "feedback.archive",
+            messageRefId: body.messageRefId,
+            archivedAt: (next as { archivedAt?: string }).archivedAt,
+            archived: body.archived !== false,
           });
           return new Response(
             JSON.stringify({
