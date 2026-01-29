@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import Icon from "./Icon.tsx";
+import ScrollingText from "./ScrollingText.tsx";
 
 export type ListboxOption = {
   value: string;
@@ -124,11 +125,15 @@ export default function Listbox(props: ListboxProps) {
         disabled={disabled}
         ref={triggerRef}
       >
-        <span className="gds-listbox-label ellipsis">
-          {selected?.label ?? placeholder}
-        </span>
+        <ScrollingText
+          text={selected?.label ?? placeholder}
+          className="gds-listbox-label"
+        />
         {selected?.meta && (
-          <span className="gds-listbox-meta ellipsis">{selected.meta}</span>
+          <ScrollingText
+            text={selected.meta}
+            className="gds-listbox-meta"
+          />
         )}
         <span className="gds-listbox-caret" aria-hidden="true">
           <Icon name="chevronDown" size={8} />
@@ -156,13 +161,15 @@ export default function Listbox(props: ListboxProps) {
                     onChange(option.value);
                   }}
                 >
-                  <span className="gds-listbox-option-label ellipsis">
-                    {option.label}
-                  </span>
+                  <ScrollingText
+                    text={option.label}
+                    className="gds-listbox-option-label"
+                  />
                   {option.meta && (
-                    <span className="gds-listbox-option-meta ellipsis">
-                      {option.meta}
-                    </span>
+                    <ScrollingText
+                      text={option.meta}
+                      className="gds-listbox-option-meta"
+                    />
                   )}
                 </button>
               );

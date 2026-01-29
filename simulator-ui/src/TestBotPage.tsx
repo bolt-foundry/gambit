@@ -14,6 +14,7 @@ import {
   deckPath,
   DEFAULT_TEST_PATH,
   deriveInitialFromSchema,
+  fileNameFromPath,
   findMissingRequiredFields,
   formatJson,
   getDurableStreamOffset,
@@ -48,7 +49,10 @@ import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
+import List from "./gds/List.tsx";
+import ListItem from "./gds/ListItem.tsx";
 import Listbox from "./gds/Listbox.tsx";
+import ScrollingText from "./gds/ScrollingText.tsx";
 import CalibrateDrawer from "./CalibrateDrawer.tsx";
 
 export default function TestBotPage(props: {
@@ -106,6 +110,9 @@ export default function TestBotPage(props: {
   >({});
   const lastUserEndByTurnRef = useRef<Record<number, number>>({});
   const firstAssistantTokenByTurnRef = useRef<Record<number, boolean>>({});
+  const [assistantDeckTab, setAssistantDeckTab] = useState<
+    "input" | "tools" | "schema"
+  >("input");
 
   useEffect(() => {
     lastRunMessageCountRef.current = 0;
@@ -135,6 +142,7 @@ export default function TestBotPage(props: {
   const deckSchemaError = deckSchema.schemaResponse?.error ??
     deckSchema.error ??
     undefined;
+
   const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
   const [deckInitDirty, setDeckInitDirty] = useState(false);
   const [deckJsonErrors, setDeckJsonErrors] = useState<
@@ -635,6 +643,35 @@ export default function TestBotPage(props: {
     )
       .length;
   }, [deckJsonErrors]);
+  const deckTools = useMemo(() => {
+    const tools = deckSchema.schemaResponse?.tools;
+    if (!Array.isArray(tools)) return [];
+    return tools
+      .filter(
+        (tool): tool is {
+          name: string;
+          label?: string;
+          description?: string;
+          path?: string;
+        } => Boolean(tool && typeof tool.name === "string"),
+      )
+      .map((tool) => {
+        const pathValue = typeof tool.path === "string" ? tool.path : undefined;
+        const fileName = fileNameFromPath(pathValue);
+        return {
+          name: tool.name,
+          label: tool.label && tool.label.trim().length > 0
+            ? tool.label
+            : tool.name,
+          description: tool.description,
+          path: pathValue,
+          fileName,
+        };
+      })
+      .sort((a, b) =>
+        a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+      );
+  }, [deckSchema.schemaResponse?.tools]);
 
   const toolCallSummaries = useMemo(
     () => summarizeToolCalls(run.traces ?? []),
@@ -1226,62 +1263,7 @@ export default function TestBotPage(props: {
             overflow: "hidden",
           }}
         >
-          <Panel
-            style={{ display: "flex", flexDirection: "column", gap: 10 }}
-          >
-            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-              <strong>Assistant inputs</strong>
-            </div>
-            {deckSchema.loading && (
-              <div className="editor-status">Loading schema…</div>
-            )}
-            {deckSchemaError && <div className="error">{deckSchemaError}</div>}
-            {deckInputSchema && (
-              <>
-                <InitForm
-                  schema={deckInputSchema}
-                  value={deckInitValue}
-                  onChange={handleDeckInitChange}
-                  onJsonErrorChange={(pathKey, err) =>
-                    setDeckJsonErrors((prev) =>
-                      prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
-                    )}
-                />
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setDeckInitDirty(false);
-                      setDeckJsonErrors({});
-                      const nextInit = deckSchemaDefaults !== undefined
-                        ? cloneValue(deckSchemaDefaults)
-                        : deriveInitialFromSchema(deckInputSchema);
-                      setDeckInitValue(nextInit);
-                    }}
-                  >
-                    Reset init
-                  </Button>
-                  <Button variant="ghost" onClick={() => deckSchema.refresh()}>
-                    Refresh schema
-                  </Button>
-                </div>
-              </>
-            )}
-            {!deckInputSchema && !deckSchema.loading && (
-              <div className="placeholder">
-                No input schema found for this deck.
-              </div>
-            )}
-          </Panel>
-          <Panel
-            className="test-bot-sidebar"
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              overflowY: "auto",
-            }}
-          >
+          <Panel className="test-bot-sidebar flex-column gap-8 flex-1">
             <div className="flex-row gap-8 items-center">
               <div className="flex-1">
                 <strong>Test deck</strong>
@@ -1341,6 +1323,169 @@ export default function TestBotPage(props: {
                 </div>
               )}
             </div>
+          </Panel>
+
+          <Panel className="flex-column gap-10 flex-1">
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <strong>Assistant deck</strong>
+            </div>
+            <div className="panel-tabs" style={{ marginTop: 6 }}>
+              <Button
+                className="flex-1"
+                variant={assistantDeckTab === "input"
+                  ? "primary-deemph"
+                  : "ghost"}
+                size="small"
+                onClick={() => setAssistantDeckTab("input")}
+              >
+                Input
+              </Button>
+              <Button
+                className="flex-1"
+                variant={assistantDeckTab === "tools"
+                  ? "primary-deemph"
+                  : "ghost"}
+                size="small"
+                onClick={() => setAssistantDeckTab("tools")}
+              >
+                Tools
+              </Button>
+              <Button
+                className="flex-1"
+                variant={assistantDeckTab === "schema"
+                  ? "primary-deemph"
+                  : "ghost"}
+                size="small"
+                onClick={() => setAssistantDeckTab("schema")}
+              >
+                Schema
+              </Button>
+            </div>
+            {assistantDeckTab === "input" && (
+              <>
+                {deckSchema.loading && (
+                  <div className="editor-status">Loading schema…</div>
+                )}
+                {deckSchemaError && (
+                  <div className="error">{deckSchemaError}</div>
+                )}
+                {deckInputSchema && (
+                  <>
+                    <InitForm
+                      schema={deckInputSchema}
+                      value={deckInitValue}
+                      onChange={handleDeckInitChange}
+                      onJsonErrorChange={(pathKey, err) =>
+                        setDeckJsonErrors((prev) =>
+                          prev[pathKey] === err
+                            ? prev
+                            : { ...prev, [pathKey]: err }
+                        )}
+                    />
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setDeckInitDirty(false);
+                          setDeckJsonErrors({});
+                          const nextInit = deckSchemaDefaults !== undefined
+                            ? cloneValue(deckSchemaDefaults)
+                            : deriveInitialFromSchema(deckInputSchema);
+                          setDeckInitValue(nextInit);
+                        }}
+                      >
+                        Reset init
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => deckSchema.refresh()}
+                      >
+                        Refresh schema
+                      </Button>
+                    </div>
+                  </>
+                )}
+                {!deckInputSchema && !deckSchema.loading && (
+                  <div className="placeholder">
+                    No input schema found for this deck.
+                  </div>
+                )}
+              </>
+            )}
+            {assistantDeckTab === "tools" && (
+              <>
+                {deckSchema.loading && (
+                  <div className="editor-status">Loading tools…</div>
+                )}
+                {deckSchemaError && (
+                  <div className="error">{deckSchemaError}</div>
+                )}
+                {!deckSchema.loading && !deckSchemaError &&
+                  deckTools.length === 0 && (
+                  <div className="placeholder">
+                    No tools declared for this deck.
+                  </div>
+                )}
+                {deckTools.length > 0 && (
+                  <List>
+                    {deckTools.map((tool) => (
+                      <ListItem
+                        key={tool.name}
+                        title={tool.label}
+                        meta={tool.fileName
+                          ? <code>{tool.fileName}</code>
+                          : null}
+                        description={tool.description}
+                      />
+                    ))}
+                  </List>
+                )}
+              </>
+            )}
+            {assistantDeckTab === "schema" && (
+              <div className="flex-column gap-6 flex-1">
+                {deckSchema.loading && (
+                  <div className="editor-status">Loading schema…</div>
+                )}
+                {deckSchemaError && (
+                  <div className="error">{deckSchemaError}</div>
+                )}
+                {!deckSchema.loading && !deckSchemaError && (
+                  deckSchema.schemaResponse
+                    ? (
+                      <List className="flex-1">
+                        <ListItem
+                          title="Deck metadata"
+                          description={
+                            <>
+                              <div className="flex-row gap-4">
+                                <span>
+                                  <strong>Path</strong>:
+                                </span>
+                                <ScrollingText
+                                  as="div"
+                                  text={deckSchema.schemaResponse?.deck ??
+                                    "unknown"}
+                                />
+                              </div>
+                              <div>
+                                <strong>Start mode</strong>:{" "}
+                                {deckSchema.schemaResponse?.startMode ??
+                                  "assistant"}
+                              </div>
+                            </>
+                          }
+                        />
+                      </List>
+                    )
+                    : (
+                      <div className="placeholder">
+                        No schema available for this deck.
+                      </div>
+                    )
+                )}
+              </div>
+            )}
           </Panel>
         </div>
 
@@ -1447,11 +1592,10 @@ export default function TestBotPage(props: {
                       <button
                         type="button"
                         className="tool-calls-toggle"
-                        onClick={() =>
-                          setToolCallsOpen((prev) => ({
-                            ...prev,
-                            [index]: !prev[index],
-                          }))}
+                        onClick={() => setToolCallsOpen((prev) => ({
+                          ...prev,
+                          [index]: !prev[index],
+                        }))}
                       >
                         <span className="tool-calls-toggle-label">
                           Tool calls ({bucket.length})
@@ -1629,27 +1773,49 @@ export default function TestBotPage(props: {
             {showStartOverlay && (
               <div className="test-bot-thread-overlay">
                 <div className="test-bot-thread-card">
-                  <strong>Start the assistant</strong>
-                  <div className="placeholder">
-                    Start the assistant to kick off the conversation.
+                  <strong className="test-bot-thread-title">
+                    Choose how to start
+                  </strong>
+                  <div className="placeholder test-bot-thread-subtitle">
+                    Pick the flow you want: manual conversation or a full test
+                    bot run.
+                  </div>
+                  <div className="test-bot-thread-sections">
+                    <div className="test-bot-thread-section">
+                      <div className="test-bot-thread-section-title">
+                        Start the assistant
+                      </div>
+                      <div className="test-bot-thread-section-body">
+                        Use this when you want to explore the chat manually.
+                      </div>
+                      <Button
+                        variant="secondary"
+                        onClick={handleStartAssistant}
+                        disabled={!canStartAssistant}
+                        data-testid="testbot-start-assistant"
+                      >
+                        Start assistant
+                      </Button>
+                    </div>
+                    <div className="test-bot-thread-section">
+                      <div className="test-bot-thread-section-title">
+                        Run test bot
+                      </div>
+                      <div className="test-bot-thread-section-body">
+                        Run the configured test bot to execute the scenario
+                        end-to-end.
+                      </div>
+                      <Button
+                        variant="primary"
+                        onClick={startRun}
+                        disabled={!canStart}
+                        data-testid="testbot-run-overlay"
+                      >
+                        Run test bot
+                      </Button>
+                    </div>
                   </div>
                   {chatError && <div className="error">{chatError}</div>}
-                  <Button
-                    variant="primary"
-                    onClick={handleStartAssistant}
-                    disabled={!canStartAssistant}
-                    data-testid="testbot-start-assistant"
-                  >
-                    Start assistant
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={startRun}
-                    disabled={!canStart}
-                    data-testid="testbot-run-overlay"
-                  >
-                    Run test bot
-                  </Button>
                 </div>
               </div>
             )}

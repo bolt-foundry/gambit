@@ -22,6 +22,12 @@ export type SchemaResponse = {
   schema?: NormalizedSchema;
   defaults?: unknown;
   error?: string;
+  tools?: Array<{
+    name: string;
+    label?: string;
+    description?: string;
+    path?: string;
+  }>;
 };
 
 export type ModelMessage = {
@@ -288,11 +294,16 @@ export const deckDisplayPath =
   toRelativePath(normalizedDeckPath, repoRootPath) ??
     normalizedDeckPath;
 
-export const botFilename = (pathValue?: string | null): string | null => {
+export const fileNameFromPath = (
+  pathValue?: string | null,
+): string | null => {
   if (!pathValue) return null;
   const base = pathValue.split(/[\\/]/).pop() ?? pathValue;
   return base || pathValue;
 };
+
+export const botFilename = (pathValue?: string | null): string | null =>
+  fileNameFromPath(pathValue);
 
 export function classNames(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
