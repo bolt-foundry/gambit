@@ -1,3 +1,6 @@
+import Button from "./gds/Button.tsx";
+import { GambitLogo } from "./GambitLogo.tsx";
+
 const GAMBIT_PACKAGE_README =
   "https://github.com/bolt-foundry/gambit/blob/main/README.md";
 const GAMBIT_CLI_DOC =
@@ -10,7 +13,12 @@ export default function DocsPage() {
   return (
     <div className="docs-shell">
       <section className="docs-hero">
-        <p className="docs-eyebrow">Gambit Simulator</p>
+        <p className="docs-eyebrow">
+          <span className="docs-eyebrow-logo" aria-label="Gambit">
+            <GambitLogo height={11} />
+          </span>{" "}
+          Simulator
+        </p>
         <h1>Test an agent. See where it fails. Fix it fast.</h1>
         <p className="docs-subtitle">
           Gambit is an open-source agent harness framework. It's designed to
@@ -19,29 +27,19 @@ export default function DocsPage() {
         </p>
       </section>
 
-      <section className="docs-callout">
-        <header className="docs-callout-header">
-          <div>
-            <h2
-              style={{
-                display: "flex",
-                flexDirection: "row",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
-              <span className="docs-icon">🤖</span>
-              Start here:
-              <a
-                className="gds-button gds-button--primary"
-                href={DEFAULT_TEST_PATH}
-              >
-                Open Test
-              </a>
-            </h2>
-          </div>
+      <section className="docs-section docs-get-started">
+        <header className="docs-section-header">
+          <span className="docs-icon">🤖</span>
+          <h2>Start here:</h2>
+          <Button
+            variant="primary"
+            size="large"
+            href={DEFAULT_TEST_PATH}
+          >
+            Open Test
+          </Button>
         </header>
-        <div className="docs-callout-body">
+        <div className="docs-section-card">
           <p>
             The Test view lets you interact with your agent like a real user
             would.
@@ -76,16 +74,20 @@ export default function DocsPage() {
         </div>
       </section>
 
-      <section className="docs-section docs-tabs">
+      <section className="docs-section">
         <header className="docs-section-header">
           <span className="docs-icon">🧭</span>
           <h2>When should I use each tab?</h2>
         </header>
-        <div className="docs-tab-card">
+        <div className="docs-section-card">
           <div className="docs-tab-row">
-            <a className="docs-tab-pill" href={DEFAULT_TEST_PATH}>
+            <Button
+              variant="primary-deemph"
+              href={DEFAULT_TEST_PATH}
+              size="small"
+            >
               Test
-            </a>
+            </Button>
             <p>
               Use this whenever you want to{" "}
               <strong>understand behavior</strong>. This is where almost
@@ -93,24 +95,26 @@ export default function DocsPage() {
             </p>
           </div>
           <div className="docs-tab-row">
-            <a
-              className="docs-tab-pill docs-tab-pill--gold"
+            <Button
+              variant="primary-deemph"
               href={DEFAULT_GRADE_PATH}
+              size="small"
             >
               Grade
-            </a>
+            </Button>
             <p>
               Use this once you care about{" "}
               <strong>measuring quality</strong>, not just eyeballing it.
             </p>
           </div>
           <div className="docs-tab-row">
-            <a
-              className="docs-tab-pill docs-tab-pill--indigo"
+            <Button
+              variant="primary-deemph"
               href={DEFAULT_DEBUG_PATH}
+              size="small"
             >
               Debug
-            </a>
+            </Button>
             <p>
               Use this when you need to understand{" "}
               <strong>why something failed</strong> at a deeper level.
