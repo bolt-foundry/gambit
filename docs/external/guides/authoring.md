@@ -166,7 +166,9 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 - Tracing: add `--verbose` for console traces or `--trace out.jsonl` to persist
   events; use `--state state.json` with `run` to persist conversation state
   between turns. When `--state` is omitted, test-bot/serve sessions default to
-  `<project-root>/.gambit/sessions/...` where the project root is the nearest
+  `<project-root>/.gambit/sessions/...` where each session includes `state.json`
+  (materialized snapshot) plus append-only `events.jsonl`, `feedback.jsonl`, and
+  `grading.jsonl` for downstream ingestion. The project root is the nearest
   parent with `deno.json`, `deno.jsonc`, or `package.json` (falling back to the
   deck directory).
 

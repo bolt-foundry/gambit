@@ -2,7 +2,7 @@ import * as path from "@std/path";
 import type { ZodTypeAny } from "zod";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import { loadState, saveState } from "@bolt-foundry/gambit-core";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider, TraceEvent } from "@bolt-foundry/gambit-core";
 import { runDeckWithFallback } from "./test_bot.ts";
 
 const logger = console;
@@ -23,6 +23,52 @@ type GradingRunRecord = {
   result?: unknown;
   error?: string;
 };
+
+const TRACE_EVENT_TYPES = new Set<string>([
+  "run.start",
+  "message.user",
+  "run.end",
+  "deck.start",
+  "deck.end",
+  "action.start",
+  "action.end",
+  "tool.call",
+  "tool.result",
+  "model.call",
+  "model.result",
+  "log",
+  "monolog",
+]);
+
+function loadTraceEventsFromSession(
+  statePath: string,
+  state: { meta?: Record<string, unknown> },
+): Array<TraceEvent> {
+  const meta = state.meta ?? {};
+  const eventsPath = typeof meta.sessionEventsPath === "string"
+    ? meta.sessionEventsPath
+    : path.join(path.dirname(statePath), "events.jsonl");
+  try {
+    const text = Deno.readTextFileSync(eventsPath);
+    const traces: Array<TraceEvent> = [];
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line) as Record<string, unknown>;
+        const kind = typeof record.kind === "string" ? record.kind : "";
+        const type = typeof record.type === "string" ? record.type : "";
+        if (kind === "trace" || TRACE_EVENT_TYPES.has(type)) {
+          traces.push(record as TraceEvent);
+        }
+      } catch {
+        // ignore invalid lines
+      }
+    }
+    return traces;
+  } catch {
+    return [];
+  }
+}
 
 function randomId(prefix: string): string {
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
@@ -137,7 +183,9 @@ export async function runGraderAgainstState(opts: {
     feedback: state.feedback,
     notes: state.notes,
     conversationScore: state.conversationScore,
-    traces: state.traces,
+    traces: Array.isArray(state.traces) && state.traces.length > 0
+      ? state.traces
+      : loadTraceEventsFromSession(opts.statePath, state),
     meta: metaForGrading,
   };
 

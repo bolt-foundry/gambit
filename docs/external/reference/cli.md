@@ -111,7 +111,20 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 The debug UI/editor is local-first and persists lightweight state under
 `.gambit/`:
 
-- `<project-root>/.gambit/sessions/<sessionId>/state.json`: per-session
-  transcript, message refs, feedback, traces, and session notes. The project
-  root is the nearest parent of the deck with `deno.json`, `deno.jsonc`, or
-  `package.json` (falls back to the deck directory).
+- `<project-root>/.gambit/sessions/<sessionId>/state.json`: materialized
+  snapshot for the session (messages, refs, feedback, notes, meta). Traces are
+  stored separately in `events.jsonl` so the snapshot stays lightweight; the
+  snapshot includes log paths in `meta` for downstream ingestion.
+- `<project-root>/.gambit/sessions/<sessionId>/events.jsonl`: append-only event
+  protocol (includes runtime traces and state snapshots).
+- `<project-root>/.gambit/sessions/<sessionId>/feedback.jsonl`: append-only user
+  feedback entries.
+- `<project-root>/.gambit/sessions/<sessionId>/grading.jsonl`: append-only
+  grading runs, flags, and reference samples. The project root is the nearest
+  parent of the deck with `deno.json`, `deno.jsonc`, or `package.json` (falls
+  back to the deck directory).
+
+Each `*.jsonl` file is line-delimited JSON. Read it by streaming lines and
+parsing each line as a standalone event. `events.jsonl` is the canonical stream
+for runtime activity (including traces) and includes periodic `session.snapshot`
+events for rebuilding `state.json` without polling.

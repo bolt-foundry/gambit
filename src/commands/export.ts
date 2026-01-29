@@ -30,6 +30,52 @@ type GradingRunRecord = {
   error?: string;
 };
 
+const TRACE_EVENT_TYPES = new Set<string>([
+  "run.start",
+  "message.user",
+  "run.end",
+  "deck.start",
+  "deck.end",
+  "action.start",
+  "action.end",
+  "tool.call",
+  "tool.result",
+  "model.call",
+  "model.result",
+  "log",
+  "monolog",
+]);
+
+function loadTraceEventsFromSession(
+  statePath: string,
+  state: { meta?: Record<string, unknown> },
+): Array<TraceEvent> {
+  const meta = state.meta ?? {};
+  const eventsPath = typeof meta.sessionEventsPath === "string"
+    ? meta.sessionEventsPath
+    : path.join(path.dirname(statePath), "events.jsonl");
+  try {
+    const text = Deno.readTextFileSync(eventsPath);
+    const traces: Array<TraceEvent> = [];
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line) as Record<string, unknown>;
+        const kind = typeof record.kind === "string" ? record.kind : "";
+        const type = typeof record.type === "string" ? record.type : "";
+        if (kind === "trace" || TRACE_EVENT_TYPES.has(type)) {
+          traces.push(record as TraceEvent);
+        }
+      } catch {
+        // ignore invalid lines
+      }
+    }
+    return traces;
+  } catch {
+    return [];
+  }
+}
+
 function normalizeId(prefix: string, raw?: string): string {
   const cleaned = (raw ?? "")
     .toLowerCase()
@@ -282,7 +328,9 @@ export async function exportBundle(
 
   const tempDir = await Deno.makeTempDir({ prefix: "gambit-export-" });
   try {
-    const traceEvents = Array.isArray(state.traces) ? state.traces : [];
+    const traceEvents = Array.isArray(state.traces) && state.traces.length > 0
+      ? state.traces
+      : loadTraceEventsFromSession(args.statePath, state);
     const rawMeta = state.meta && typeof state.meta === "object"
       ? state.meta as Record<string, unknown>
       : undefined;
