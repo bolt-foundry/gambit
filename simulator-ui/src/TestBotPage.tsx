@@ -1473,6 +1473,17 @@ export default function TestBotPage(props: {
                                 {deckSchema.schemaResponse?.startMode ??
                                   "assistant"}
                               </div>
+                              {deckSchema.schemaResponse?.modelParams &&
+                                (
+                                  <div className="flex-column gap-4">
+                                    <strong>Model params</strong>
+                                    <pre className="trace-json">
+                                      {formatJson(
+                                        deckSchema.schemaResponse?.modelParams,
+                                      )}
+                                    </pre>
+                                  </div>
+                                )}
                             </>
                           }
                         />

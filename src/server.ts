@@ -1,5 +1,6 @@
 import * as path from "@std/path";
 import { existsSync } from "@std/fs";
+import { parse } from "@std/jsonc";
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
@@ -82,6 +83,32 @@ const simulatorFaviconSrcPath = path.resolve(
   "src",
   "favicon.ico",
 );
+const gambitVersion = (() => {
+  const envVersion = Deno.env.get("GAMBIT_VERSION")?.trim();
+  if (envVersion) return envVersion;
+  const readVersion = (configPath: string): string | null => {
+    try {
+      const text = Deno.readTextFileSync(configPath);
+      const data = parse(text) as { version?: string };
+      const version = typeof data.version === "string"
+        ? data.version.trim()
+        : "";
+      return version || null;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) return null;
+      throw err;
+    }
+  };
+  const candidates = [
+    path.resolve(moduleDir, "..", "deno.jsonc"),
+    path.resolve(moduleDir, "..", "deno.json"),
+  ];
+  for (const candidate of candidates) {
+    const version = readVersion(candidate);
+    if (version) return version;
+  }
+  return "unknown";
+})();
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const GRADE_STREAM_ID = "gambit-grade";
 const TEST_STREAM_ID = "gambit-test";
@@ -4084,6 +4111,9 @@ export function startWebSocketSimulator(opts: {
       if (url.pathname === "/schema") {
         const desc = await schemaPromise;
         const deck = await deckLoadPromise.catch(() => null);
+        const modelParams = deck && typeof deck === "object"
+          ? (deck as { modelParams?: Record<string, unknown> }).modelParams
+          : undefined;
         const startMode = deck &&
             (deck.startMode === "assistant" || deck.startMode === "user")
           ? deck.startMode
@@ -4092,6 +4122,7 @@ export function startWebSocketSimulator(opts: {
           JSON.stringify({
             deck: resolvedDeckPath,
             startMode,
+            modelParams,
             ...desc,
           }),
           {
@@ -4349,6 +4380,7 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
   <script>
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(safeDeckPath)};
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
+    window.__GAMBIT_VERSION__ = ${JSON.stringify(gambitVersion)};
   </script>
   <script type="module" src="${bundleUrl}"></script>
 </body>

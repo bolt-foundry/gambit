@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
-import Icon from "./gds/Icon.tsx";
+import SessionsDrawer from "./SessionsDrawer.tsx";
 import {
   buildConversationEntries,
   buildDurableStreamUrl,
@@ -55,6 +55,7 @@ import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
+import Icon from "./gds/Icon.tsx";
 
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
@@ -384,111 +385,6 @@ function useSessions() {
 }
 
 type SessionsApi = ReturnType<typeof useSessions>;
-
-function SessionsDrawer(props: {
-  open: boolean;
-  sessions: SessionMeta[];
-  loading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-  onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => void;
-  onDeleteAll: () => void;
-  onClose: () => void;
-  activeSessionId?: string | null;
-}) {
-  const {
-    open,
-    sessions,
-    loading,
-    error,
-    onRefresh,
-    onSelect,
-    onDelete,
-    onDeleteAll,
-    onClose,
-    activeSessionId,
-  } = props;
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose, open]);
-  if (!open) return null;
-  return (
-    <div className="sessions-drawer">
-      <div className="sessions-drawer-panel" role="dialog">
-        <header>
-          <h2>Sessions</h2>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </header>
-        <div className="sessions-drawer-actions">
-          <Button variant="secondary" onClick={onRefresh}>Refresh</Button>
-          <Button
-            variant="danger"
-            onClick={onDeleteAll}
-            disabled={loading || sessions.length === 0}
-          >
-            Delete all
-          </Button>
-        </div>
-        <div className="sessions-drawer-body">
-          {loading && <p>Loading sessions…</p>}
-          {error && <p className="error">{error}</p>}
-          <ul className="sessions-list">
-            {sessions.map((session) => {
-              const isActive = activeSessionId === session.id;
-              return (
-                <li key={session.id}>
-                  <button
-                    type="button"
-                    className={classNames(
-                      "session-select-button",
-                      isActive && "active",
-                    )}
-                    onClick={() => onSelect(session.id)}
-                  >
-                    <strong>
-                      {session.testBotName ??
-                        session.deckSlug ??
-                        session.deck ??
-                        "session"}
-                    </strong>
-                    <span>{formatTimestamp(session.createdAt)}</span>
-                    <code>{session.id}</code>
-                  </button>
-                  <Button
-                    variant="ghost-danger"
-                    className="session-delete-button"
-                    onClick={() => {
-                      onDelete(session.id);
-                    }}
-                    aria-label="Delete session"
-                    title="Delete session"
-                  >
-                    <Icon name="trash" size={14} />
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-          {sessions.length === 0 && !loading && <p>No saved sessions yet.</p>}
-        </div>
-      </div>
-      <button
-        type="button"
-        className="sessions-drawer-backdrop"
-        onClick={onClose}
-        aria-label="Close sessions drawer"
-      />
-    </div>
-  );
-}
 
 function RecentSessionsEmptyState(props: {
   sessions: SessionMeta[];
@@ -1290,17 +1186,19 @@ function App() {
         <div className="top-nav">
           <div className="top-nav-left">
             <Button
-              variant="ghost"
-              className="sessions-toggle"
+              variant={sessionsDrawerOpen ? "primary-deemph" : "ghost"}
+              className={classNames(
+                "sessions-toggle",
+                sessionsDrawerOpen && "active",
+              )}
               onClick={() => setSessionsDrawerOpen(true)}
               data-testid="nav-sessions"
             >
-              <span className="hamburger-icon" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-              <span className="sessions-toggle-label">Sessions</span>
+              <Icon
+                name="hamburgerMenu"
+                size={17}
+                style={{ color: "var(--color-text)" }}
+              />
             </Button>
           </div>
           <div className="top-nav-buttons">
@@ -1340,11 +1238,6 @@ function App() {
           </div>
           <div className="top-nav-right">
             {navActions && <div className="top-nav-actions">{navActions}</div>}
-            {bundleStamp && (
-              <div className="top-nav-info">
-                <span className="bundle-stamp">Bundle: {bundleStamp}</span>
-              </div>
-            )}
           </div>
         </div>
         <div className="page-shell">
@@ -1390,6 +1283,7 @@ function App() {
         onDeleteAll={handleDeleteAll}
         onClose={() => setSessionsDrawerOpen(false)}
         activeSessionId={activeSessionId}
+        bundleStamp={bundleStamp}
       />
     </>
   );

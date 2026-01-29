@@ -19,6 +19,7 @@ export type NormalizedSchema = {
 export type SchemaResponse = {
   deck?: string;
   startMode?: "assistant" | "user";
+  modelParams?: Record<string, unknown>;
   schema?: NormalizedSchema;
   defaults?: unknown;
   error?: string;
@@ -280,6 +281,9 @@ export const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
 const deckLabelFromWindow = (
   window as unknown as { __GAMBIT_DECK_LABEL__?: string | null }
 ).__GAMBIT_DECK_LABEL__ ?? null;
+export const gambitVersion = (
+  window as unknown as { __GAMBIT_VERSION__?: string | null }
+).__GAMBIT_VERSION__ ?? null;
 const fallbackDeckLabel = (() => {
   const base = deckPath.split(/[\\/]/).pop() ?? deckPath;
   const cleaned = base.replace(/\.deck\.(md|ts)$/i, "")

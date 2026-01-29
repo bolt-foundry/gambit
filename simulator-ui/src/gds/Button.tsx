@@ -8,32 +8,37 @@ export type ButtonVariant =
   | "ghost"
   | "danger"
   | "ghost-danger";
-export type ButtonSize = "medium" | "small";
+export type ButtonSize = "large" | "medium" | "small";
 
-export default function Button(
-  props: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+type ButtonProps =
+  & {
     variant?: ButtonVariant;
     size?: ButtonSize;
-  },
-) {
+    href?: string;
+  }
+  & React.ButtonHTMLAttributes<HTMLButtonElement>
+  & React.AnchorHTMLAttributes<HTMLAnchorElement>;
+
+export default function Button(props: ButtonProps) {
   const {
     variant = "secondary",
     size = "medium",
     className,
     type,
+    href,
     ...rest
   } = props;
 
-  return (
-    <button
-      type={type ?? "button"}
-      className={classNames(
-        "gds-button",
-        `gds-button--${variant}`,
-        `gds-button--size-${size}`,
-        className,
-      )}
-      {...rest}
-    />
+  const classes = classNames(
+    "gds-button",
+    `gds-button--${variant}`,
+    `gds-button--size-${size}`,
+    className,
   );
+
+  if (href) {
+    return <a className={classes} href={href} {...rest} />;
+  }
+
+  return <button type={type ?? "button"} className={classes} {...rest} />;
 }
