@@ -56,6 +56,7 @@ import TestBotPage from "./TestBotPage.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Icon from "./gds/Icon.tsx";
+import Tabs from "./gds/Tabs.tsx";
 
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
@@ -1201,40 +1202,26 @@ function App() {
               />
             </Button>
           </div>
-          <div className="top-nav-buttons">
-            <Button
-              tab
-              variant={currentPage === "docs" ? "primary-deemph" : "ghost"}
-              onClick={() => navigate(DOCS_PATH)}
-              data-testid="nav-docs"
-            >
-              Docs
-            </Button>
-            <Button
-              tab
-              variant={currentPage === "test" ? "primary-deemph" : "ghost"}
-              onClick={() => navigate(testBotPath)}
-              data-testid="nav-test"
-            >
-              Test
-            </Button>
-            <Button
-              tab
-              variant={currentPage === "grade" ? "primary-deemph" : "ghost"}
-              onClick={() => navigate(gradePath)}
-              data-testid="nav-grade"
-            >
-              Grade
-            </Button>
-            <Button
-              tab
-              variant={currentPage === "debug" ? "primary-deemph" : "ghost"}
-              onClick={() => navigate(debugPath)}
-              data-testid="nav-debug"
-            >
-              Debug
-            </Button>
-          </div>
+          <Tabs
+            className="top-nav-buttons"
+            activeId={currentPage}
+            onChange={(next) =>
+              navigate(
+                next === "docs"
+                  ? DOCS_PATH
+                  : next === "test"
+                  ? testBotPath
+                  : next === "grade"
+                  ? gradePath
+                  : debugPath,
+              )}
+            tabs={[
+              { id: "docs", label: "Docs", testId: "nav-docs" },
+              { id: "test", label: "Test", testId: "nav-test" },
+              { id: "grade", label: "Grade", testId: "nav-grade" },
+              { id: "debug", label: "Debug", testId: "nav-debug" },
+            ]}
+          />
           <div className="top-nav-center">
             <span className="top-nav-deck" title={deckPath}>
               {deckLabel}
