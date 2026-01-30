@@ -16,6 +16,7 @@ import {
 } from "./utils.ts";
 import Badge from "./gds/Badge.tsx";
 import Panel from "./gds/Panel.tsx";
+import Tabs from "./gds/Tabs.tsx";
 import type {
   FeedbackEntry,
   ModelMessage,
@@ -786,22 +787,16 @@ export function InitPanel(props: {
       </div>
       {editable && (
         <>
-          <div className="panel-tabs" style={{ marginTop: 6 }}>
-            <button
-              type="button"
-              className={classNames("panel-tab", mode === "form" && "active")}
-              onClick={() => onModeChange("form")}
-            >
-              Form
-            </button>
-            <button
-              type="button"
-              className={classNames("panel-tab", mode === "json" && "active")}
-              onClick={() => onModeChange("json")}
-            >
-              JSON
-            </button>
-          </div>
+          <Tabs
+            className="panel-tabs"
+            size="small"
+            activeId={mode}
+            onChange={(next) => onModeChange(next as typeof mode)}
+            tabs={[
+              { id: "form", label: "Form" },
+              { id: "json", label: "JSON" },
+            ]}
+          />
           {mode === "form"
             ? (
               <InitForm

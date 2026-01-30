@@ -48,6 +48,7 @@ import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
+import Tabs from "./gds/Tabs.tsx";
 import Badge from "./gds/Badge.tsx";
 import List from "./gds/List.tsx";
 import ListItem from "./gds/ListItem.tsx";
@@ -1329,41 +1330,20 @@ export default function TestBotPage(props: {
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
               <strong>Assistant deck</strong>
             </div>
-            <div className="panel-tabs" style={{ marginTop: 6 }}>
-              <Button
-                className="flex-1"
-                tab
-                variant={assistantDeckTab === "input"
-                  ? "primary-deemph"
-                  : "ghost"}
-                size="small"
-                onClick={() => setAssistantDeckTab("input")}
-              >
-                Input
-              </Button>
-              <Button
-                className="flex-1"
-                tab
-                variant={assistantDeckTab === "tools"
-                  ? "primary-deemph"
-                  : "ghost"}
-                size="small"
-                onClick={() => setAssistantDeckTab("tools")}
-              >
-                Tools
-              </Button>
-              <Button
-                className="flex-1"
-                tab
-                variant={assistantDeckTab === "schema"
-                  ? "primary-deemph"
-                  : "ghost"}
-                size="small"
-                onClick={() => setAssistantDeckTab("schema")}
-              >
-                Schema
-              </Button>
-            </div>
+            <Tabs
+              className="panel-tabs"
+              style={{ marginTop: 6 }}
+              size="small"
+              tabClassName="flex-1"
+              activeId={assistantDeckTab}
+              onChange={(next) =>
+                setAssistantDeckTab(next as typeof assistantDeckTab)}
+              tabs={[
+                { id: "input", label: "Input" },
+                { id: "tools", label: "Tools" },
+                { id: "schema", label: "Schema" },
+              ]}
+            />
             {assistantDeckTab === "input" && (
               <>
                 {deckSchema.loading && (

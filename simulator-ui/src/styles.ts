@@ -1352,6 +1352,58 @@ code:not(pre *) {
   flex-wrap: wrap;
   flex: 1;
 }
+.tab-anchor-group {
+  position: relative;
+}
+.tab-anchor {
+  position: relative;
+  z-index: 1;
+}
+.tab-anchor-indicator {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: var(--color-primary-alpha-15);
+  border: 0;
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
+  transition:
+    top 180ms ease,
+    left 180ms ease,
+    width 180ms ease,
+    height 180ms ease,
+    opacity 120ms ease;
+}
+@supports (anchor-name: --active-tab-anchor) {
+  .tab-anchor--active {
+    anchor-name: --active-tab-anchor;
+  }
+  .tab-anchor-indicator {
+    position-anchor: --active-tab-anchor;
+    top: anchor(top);
+    left: anchor(left);
+    width: anchor-size(width);
+    height: anchor-size(height);
+    opacity: 1;
+  }
+  .tab-anchor-group .gds-button--tab {
+    background: transparent;
+    border-color: transparent;
+    color: var(--color-text);
+  }
+  .tab-anchor-group .gds-button--tab:hover {
+    border-color: var(--color-border-strong);
+    background: var(--color-surface-muted);
+  }
+  .tab-anchor-group .tab-anchor--active.gds-button--tab {
+    color: var(--color-primary);
+  }
+  .tab-anchor-group .tab-anchor--active.gds-button--tab:hover {
+    border-color: transparent;
+    background: transparent;
+  }
+}
 .top-nav-center {
   flex: 0 1 auto;
   display: flex;
