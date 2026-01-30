@@ -1,8 +1,8 @@
 # Gambit Simulator UI E2E Tests
 
 These tests exercise the Gambit simulator UI in a full browser environment. They
-use a local context wrapper around Puppeteer, record artifacts, and
-automatically start a Gambit server pointing at:
+use the Playwright-based iframe harness, record artifacts, and automatically
+start a Gambit server pointing at:
 `init/examples/advanced/voice_front_desk/decks/root.deck.md`.
 
 ## Quick Start
@@ -15,7 +15,8 @@ deno task e2e
 
 ## Demo Video Runner (Playwright)
 
-Debug) as a video artifact. It uses Playwright Core with a nix-managed browser.
+Use the demo runner to capture a video artifact. It uses Playwright Core with a
+Nix-managed browser.
 
 From `packages/gambit`:
 
@@ -101,7 +102,8 @@ deno task e2e-logs
 - `GAMBIT_E2E_URL`: Override base URL (defaults to auto-started server).
 - `GAMBIT_E2E_RECORD_VIDEO`: `false` to disable recording.
 - `GAMBIT_E2E_SHOW_BROWSER`: `true` to run headed.
-- `PUPPETEER_EXECUTABLE_PATH`: Use a specific Chrome/Chromium binary.
+- `GAMBIT_PLAYWRIGHT_EXECUTABLE_PATH`: Use a specific Chrome/Chromium binary.
+- `PLAYWRIGHT_EXECUTABLE_PATH`: Fallback executable path for Playwright.
 
 ## Adding a Test
 
@@ -111,7 +113,7 @@ deno task e2e-logs
   await using ctx = await createE2eTestContext(t.name);
   ```
 - Prefer `ctx.navigate`, `ctx.click`, `ctx.type`, `ctx.exists`, `ctx.text`, and
-  `ctx.screenshot` instead of raw Puppeteer APIs.
+  `ctx.screenshot` instead of raw Playwright APIs.
 - For iframe-shell demos, use `ctx.viewportControl.zoomTo()` or
   `ctx.viewportControl.resetZoom()` to drive smooth zooming via the shell API.
 
@@ -129,6 +131,7 @@ deno task e2e
 ## Troubleshooting
 
 - Server not starting: check `logs/dev-server.log` under `__latest__/logs`.
-- Browser not found: install Chrome/Chromium or set `PUPPETEER_EXECUTABLE_PATH`.
+- Browser not found: install Chrome/Chromium or set
+  `GAMBIT_PLAYWRIGHT_EXECUTABLE_PATH` (or `PLAYWRIGHT_EXECUTABLE_PATH`).
 - No video output: install `ffmpeg` or re-run with
   `GAMBIT_E2E_RECORD_VIDEO=false`.

@@ -3,10 +3,12 @@ import { ensureDir } from "@std/fs";
 import * as path from "@std/path";
 import {
   type Browser,
+  type BrowserContext,
   type CDPSession,
-  launch,
+  chromium,
+  type ConsoleMessage,
   type Page,
-} from "puppeteer-core";
+} from "playwright-core";
 
 function getErrorMessage(err: unknown): string {
   const message = (err as { message?: unknown })?.message;
@@ -238,6 +240,7 @@ function toSlug(name: string): string {
 
 class E2eTestContext {
   browser: Browser | null = null;
+  context: BrowserContext | null = null;
   page: Page | null = null;
   runBaseDir?: string;
   slug: string;
@@ -273,7 +276,8 @@ class E2eTestContext {
     options?: CreateE2eTestContextOptions,
   ): Promise<E2eTestContext> {
     const headless = (Deno.env.get("GAMBIT_E2E_SHOW_BROWSER") || "") !== "true";
-    const executablePath = Deno.env.get("PUPPETEER_EXECUTABLE_PATH") ||
+    const executablePath = Deno.env.get("GAMBIT_PLAYWRIGHT_EXECUTABLE_PATH") ||
+      Deno.env.get("PLAYWRIGHT_EXECUTABLE_PATH") ||
       undefined;
 
     await killDanglingChromiumProcesses();
@@ -308,7 +312,7 @@ class E2eTestContext {
     ].join("\n");
     await Deno.writeTextFile(path.join(latestDir, "index.txt"), index + "\n");
 
-    ctx.browser = await launch({
+    ctx.browser = await chromium.launch({
       headless,
       executablePath,
       args: [
@@ -318,12 +322,12 @@ class E2eTestContext {
         "--disable-gpu",
         "--window-size=1280,720",
       ],
-      defaultViewport: { width: 1280, height: 720 },
-      dumpio: false,
     });
 
-    ctx.page = await ctx.browser.newPage();
-    await ctx.page.setViewport({ width: 1280, height: 720 });
+    ctx.context = await ctx.browser.newContext({
+      viewport: { width: 1280, height: 720 },
+    });
+    ctx.page = await ctx.context.newPage();
 
     // Browser console and pageerror → log files for debugging
     const clientLogPath = path.join(logsDir, "client.log");
@@ -341,10 +345,10 @@ class E2eTestContext {
         // ignore file write errors in CI
       }
     };
-    ctx.page.on("console", (msg) => {
+    ctx.page.on("console", (msg: ConsoleMessage) => {
       writeLog(msg.type(), "console", msg.text()).catch(() => {});
     });
-    ctx.page.on("pageerror", (err) => {
+    ctx.page.on("pageerror", (err: Error) => {
       writeLog("error", "pageerror", String(err)).catch(() => {});
     });
 
@@ -407,14 +411,13 @@ class E2eTestContext {
     const timeoutMs = opts?.timeoutMs ?? 8_000;
     const attempt = async () => {
       await this.page!.waitForFunction(
-        (pattern: string, flags: string) => {
+        ({ pattern, flags }: { pattern: string; flags: string }) => {
           const matcher = new RegExp(pattern, flags);
           const href = new URL(location.href);
           return matcher.test(href.pathname);
         },
+        { pattern: re.source, flags: re.flags },
         { timeout: timeoutMs },
-        re.source,
-        re.flags,
       );
     };
     for (let tries = 0; tries < 3; tries += 1) {
@@ -449,9 +452,9 @@ class E2eTestContext {
     const attempt = async () => {
       await this.page!.waitForSelector(selector, {
         timeout: 15_000,
-        visible: true,
+        state: "visible",
       });
-      const ok = await this.page!.evaluate((sel) => {
+      const ok = await this.page!.evaluate((sel: string) => {
         const el = document.querySelector<HTMLElement>(sel);
         if (!el) return false;
         el.scrollIntoView({ block: "center", inline: "center" });
@@ -481,10 +484,10 @@ class E2eTestContext {
     const attempt = async () => {
       await this.page!.waitForSelector(selector, {
         timeout,
-        visible: true,
+        state: "visible",
       });
       if (opts?.clear) {
-        await this.page!.evaluate((sel) => {
+        await this.page!.evaluate((sel: string) => {
           const el = document.querySelector<
             HTMLInputElement | HTMLTextAreaElement
           >(sel);
@@ -522,7 +525,7 @@ class E2eTestContext {
       const handle = await this.page.$(selector);
       if (!handle) return "";
       const txt = await this.page.evaluate(
-        (el) => (el.textContent || "").trim(),
+        (el: Element) => (el.textContent || "").trim(),
         handle,
       );
       await handle.dispose();
@@ -538,7 +541,7 @@ class E2eTestContext {
   ): Promise<void> {
     if (!this.page) throw new Error("context page not initialized");
     await this.page.evaluate(
-      (fnName, fnArgs) => {
+      ({ fnName, fnArgs }: { fnName: string; fnArgs: Array<unknown> }) => {
         const api = (window as { gambitDemo?: Record<string, unknown> })
           .gambitDemo;
         const target = api?.[fnName as keyof typeof api];
@@ -549,8 +552,7 @@ class E2eTestContext {
         }
         return (target as (...args: Array<unknown>) => unknown)(...fnArgs);
       },
-      method,
-      args,
+      { fnName: method, fnArgs: args },
     );
   }
 
@@ -768,8 +770,7 @@ class E2eTestContext {
   // Internal helpers for video recording.
   private async startVideoRecording(): Promise<void> {
     if (!this.page || !this.frameDir || !this.videoPath) return;
-    const target = this.page.target();
-    const session = await target.createCDPSession();
+    const session = await this.page.context().newCDPSession(this.page);
     this.videoSession = session;
     this.pendingFrameWrites.clear();
     this.frameSeq = 0;
@@ -946,6 +947,17 @@ class E2eTestContext {
         await this.flushVideoFrames();
         await this.exportVideo();
       }
+
+      if (this.context) {
+        try {
+          await this.context.close();
+        } catch (error) {
+          if (!isIgnorableCloseError(error)) {
+            console.warn("[gambit-e2e] context close failed:", error);
+          }
+        }
+      }
+      this.context = null;
 
       if (this.browser) {
         try {
