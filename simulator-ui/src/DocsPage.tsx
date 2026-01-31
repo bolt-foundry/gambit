@@ -2,9 +2,9 @@ import Button from "./gds/Button.tsx";
 import { GambitLogo } from "./GambitLogo.tsx";
 
 const GAMBIT_PACKAGE_README =
-  "https://github.com/bolt-foundry/gambit/blob/main/README.md";
+  "https://github.com/molt-foundry/gambit/blob/main/README.md";
 const GAMBIT_CLI_DOC =
-  "https://github.com/bolt-foundry/gambit/blob/main/docs/cli.md";
+  "https://github.com/molt-foundry/gambit/blob/main/docs/cli.md";
 const DEFAULT_TEST_PATH = "/sessions/new/test";
 const DEFAULT_DEBUG_PATH = "/sessions/new/debug";
 const DEFAULT_GRADE_PATH = "/grade";

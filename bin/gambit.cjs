@@ -56,7 +56,7 @@ const getPlatformAsset = () => {
 const getCacheDir = (version) => {
   const cacheRoot = process.env.XDG_CACHE_HOME ||
     (process.env.HOME ? path.join(process.env.HOME, ".cache") : os.tmpdir());
-  return path.join(cacheRoot, "bolt-foundry", "gambit", version);
+  return path.join(cacheRoot, "molt-foundry", "gambit", version);
 };
 
 const request = (url, redirectCount = 0) =>
@@ -173,7 +173,7 @@ const main = async () => {
   }
 
   const baseUrl = process.env.GAMBIT_BINARY_BASE_URL ||
-    `https://github.com/bolt-foundry/gambit/releases/download/v${version}`;
+    `https://github.com/molt-foundry/gambit/releases/download/v${version}`;
   const binaryUrl = process.env.GAMBIT_BINARY_URL ||
     `${baseUrl}/${assetName}.gz`;
   const checksumUrl = process.env.GAMBIT_BINARY_CHECKSUM_URL ||

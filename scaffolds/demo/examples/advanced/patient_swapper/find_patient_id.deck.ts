@@ -1,4 +1,4 @@
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import { z } from "npm:zod";
 import { lookupSchema } from "./schemas/patient_swapper_input.zod.ts";
 

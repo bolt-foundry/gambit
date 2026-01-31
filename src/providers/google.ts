@@ -7,7 +7,7 @@ import type {
   ResponseItem,
   ResponseMessageItem,
   ResponseToolChoice,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 
 export const GOOGLE_PREFIX = "google/";
 const DEFAULT_GOOGLE_BASE_URL =

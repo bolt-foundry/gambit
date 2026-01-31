@@ -16,13 +16,13 @@ workspace with opinionated folders, ready for your own decks/actions/graders.
 3. Run it in the terminal (or use `npm run repl -- decks/my_first.deck.md`):
 
    ```
-   npx @bolt-foundry/gambit repl decks/my_first.deck.md
+   npx @molt-foundry/gambit repl decks/my_first.deck.md
    ```
 
 4. Explore the debug UI (`npm run serve -- decks/my_first.deck.md` works too):
 
    ```
-   npx @bolt-foundry/gambit serve decks/my_first.deck.md
+   npx @molt-foundry/gambit serve decks/my_first.deck.md
    open http://localhost:8000/debug
    ```
 

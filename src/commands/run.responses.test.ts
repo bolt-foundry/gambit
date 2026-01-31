@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import * as path from "@std/path";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider } from "@molt-foundry/gambit-core";
 import { handleRunCommand } from "./run.ts";
 
 function deckPath(): string {

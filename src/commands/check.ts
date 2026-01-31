@@ -1,5 +1,5 @@
 import * as path from "@std/path";
-import { loadDeck } from "@bolt-foundry/gambit-core";
+import { loadDeck } from "@molt-foundry/gambit-core";
 import type { ModelAliasResolver } from "../project_config.ts";
 import { GOOGLE_PREFIX } from "../providers/google.ts";
 import { fetchOllamaTags, OLLAMA_PREFIX } from "../providers/ollama.ts";

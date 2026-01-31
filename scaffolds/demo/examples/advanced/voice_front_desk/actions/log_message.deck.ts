@@ -1,4 +1,4 @@
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import logMessageInput from "../schemas/log_message_input.zod.ts";
 import logMessageOutput from "../schemas/log_message_output.zod.ts";
 

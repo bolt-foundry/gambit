@@ -1,6 +1,6 @@
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
-import { loadState, saveState } from "@bolt-foundry/gambit-core";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import { isGambitEndSignal, runDeck } from "@molt-foundry/gambit-core";
+import { loadState, saveState } from "@molt-foundry/gambit-core";
+import type { ModelProvider } from "@molt-foundry/gambit-core";
 import { enrichStateMeta } from "../cli_utils.ts";
 
 const logger = console;
@@ -14,7 +14,7 @@ export async function handleRunCommand(opts: {
   model?: string;
   modelForce?: string;
   trace?: (
-    event: import("@bolt-foundry/gambit-core").TraceEvent,
+    event: import("@molt-foundry/gambit-core").TraceEvent,
   ) => void;
   stream?: boolean;
   statePath?: string;
@@ -22,7 +22,7 @@ export async function handleRunCommand(opts: {
 }) {
   const state = opts.statePath ? loadState(opts.statePath) : undefined;
   const onStateUpdate = opts.statePath
-    ? (s: import("@bolt-foundry/gambit-core").SavedState) => {
+    ? (s: import("@molt-foundry/gambit-core").SavedState) => {
       saveState(opts.statePath!, enrichStateMeta(s, opts.deckPath));
     }
     : undefined;

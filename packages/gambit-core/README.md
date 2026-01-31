@@ -1,21 +1,21 @@
-# @bolt-foundry/gambit-core
+# @molt-foundry/gambit-core
 
 Core runtime, definitions, and utilities for building Gambit decks outside of
 the CLI. It includes the loader for Markdown/TypeScript decks, guardrail-aware
 execution, and helpers for persisting local run state. The
-[`@bolt-foundry/gambit`](../gambit/README.md) package re-exports these APIs plus
+[`@molt-foundry/gambit`](../gambit/README.md) package re-exports these APIs plus
 the CLI, but `gambit-core` stays focused on the authoring/runtime pieces that
 can live in any host.
 
 > **Gambit vs. Gambit Core**
 >
-> `@bolt-foundry/gambit-core` is the lightweight runtime + authoring toolkit
+> `@molt-foundry/gambit-core` is the lightweight runtime + authoring toolkit
 > (deck definitions, loaders, runtime, provider helpers).
-> [`@bolt-foundry/gambit`](../gambit/README.md) bundles those same exports
+> [`@molt-foundry/gambit`](../gambit/README.md) bundles those same exports
 > **plus** the CLI, simulator server, and higher-level developer experience. If
 > you need just the runtime inside another application or service, depend on
 > `gambit-core`. If you also want the CLI commands (`run`, `serve`, `repl`,
-> etc.) stick with [`@bolt-foundry/gambit`](../gambit/README.md), which already
+> etc.) stick with [`@molt-foundry/gambit`](../gambit/README.md), which already
 > depends on this package.
 
 ## Highlights
@@ -37,22 +37,22 @@ can live in any host.
 ### Deno
 
 ```
-deno add jsr:@bolt-foundry/gambit-core
+deno add jsr:@molt-foundry/gambit-core
 ```
 
 Import directly from JSR:
 
 ```
-import { defineDeck, runDeck } from "jsr:@bolt-foundry/gambit-core";
+import { defineDeck, runDeck } from "jsr:@molt-foundry/gambit-core";
 ```
 
 ### Node.js / bundlers
 
 ```
-npm install @bolt-foundry/gambit-core
+npm install @molt-foundry/gambit-core
 ```
 
-All exports are ESM and align with what the CLI package (`@bolt-foundry/gambit`)
+All exports are ESM and align with what the CLI package (`@molt-foundry/gambit`)
 surfaces. Use any runtime that supports modern ES modules (Node 18+, Bun, Deno,
 etc.).
 
@@ -81,7 +81,7 @@ when scripting tooling or writing custom providers.
 
 ```
 // hello.deck.ts
-import { defineDeck } from "jsr:@bolt-foundry/gambit-core";
+import { defineDeck } from "jsr:@molt-foundry/gambit-core";
 import { z } from "zod";
 
 export default defineDeck({
@@ -102,7 +102,7 @@ You are a helpful assistant that greets the user by name.
 Cards look similar:
 
 ```
-import { defineCard } from "jsr:@bolt-foundry/gambit-core";
+import { defineCard } from "jsr:@molt-foundry/gambit-core";
 import { z } from "zod";
 
 export default defineCard({
@@ -116,11 +116,11 @@ export default defineCard({
 
 The runtime loads the deck (Markdown or TS) and steps through each pass. Provide
 any `ModelProvider` implementation; the OpenRouter adapter lives in
-`@bolt-foundry/gambit`.
+`@molt-foundry/gambit`.
 
 ```
-import { runDeck } from "jsr:@bolt-foundry/gambit-core";
-import { createOpenRouterProvider } from "jsr:@bolt-foundry/gambit";
+import { runDeck } from "jsr:@molt-foundry/gambit-core";
+import { createOpenRouterProvider } from "jsr:@molt-foundry/gambit";
 
 const provider = createOpenRouterProvider({
   apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
@@ -189,7 +189,7 @@ text for built-in tools like `gambit_context`, `gambit_respond`, and
 - **Request rendering**: [`renderDeck`](src/render.ts) merges an existing Chat
   Completions request with the deck’s system prompt and tool schema, so you can
   debug what will actually reach the model or feed it into another orchestrator.
-- **Model providers**: adapters live in `@bolt-foundry/gambit` (see
+- **Model providers**: adapters live in `@molt-foundry/gambit` (see
   `packages/gambit/src/providers/openrouter.ts`). Implement your own provider by
   conforming to the `responses()` signature in `ModelProvider`.
 - **Constants**:

@@ -11,11 +11,11 @@ import type {
   ResponseTextContent,
   ResponseToolDefinition,
   ResponseUsage,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 import {
   GAMBIT_TOOL_CONTEXT,
   GAMBIT_TOOL_INIT,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 
 const logger = console;
 export const OLLAMA_PREFIX = "ollama/";

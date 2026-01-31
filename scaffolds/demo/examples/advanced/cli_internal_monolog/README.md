@@ -2,7 +2,7 @@
 
 This folder is self-contained and can run outside the bfmono repo as long as
 Deno is installed and the machine has internet access (to fetch
-`jsr:@bolt-foundry/gambit`).
+`jsr:@molt-foundry/gambit`).
 
 ## Prereqs
 
@@ -18,7 +18,7 @@ export OPENROUTER_API_KEY="your-key-here"
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./internal_monolog_parent.deck.md \
+deno run -A jsr:@molt-foundry/gambit/cli run ./internal_monolog_parent.deck.md \
   --message '"What is the capital of France?"' --stream
 ```
 

@@ -5,14 +5,14 @@ import {
   RESERVED_TOOL_PREFIX,
   runDeck,
   toJsonSchema,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 import type {
   Guardrails,
   LoadedDeck,
   ModelMessage,
   ModelProvider,
   ToolDefinition,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 
 export const logger = console;
 

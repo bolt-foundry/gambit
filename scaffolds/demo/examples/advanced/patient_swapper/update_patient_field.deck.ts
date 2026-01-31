@@ -1,4 +1,4 @@
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import { z } from "npm:zod";
 
 function escapeSql(value: string): string {

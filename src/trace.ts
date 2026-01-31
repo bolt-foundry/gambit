@@ -1,5 +1,5 @@
 import * as path from "@std/path";
-import type { TraceEvent } from "@bolt-foundry/gambit-core";
+import type { TraceEvent } from "@molt-foundry/gambit-core";
 
 const logger = console;
 

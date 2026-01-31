@@ -1,4 +1,4 @@
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider } from "@molt-foundry/gambit-core";
 
 export type ProviderKey = "openrouter" | "ollama" | "google";
 

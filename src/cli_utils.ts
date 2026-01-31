@@ -2,9 +2,9 @@ import * as path from "@std/path";
 import {
   GAMBIT_TOOL_CONTEXT,
   GAMBIT_TOOL_INIT,
-} from "@bolt-foundry/gambit-core";
-import type { ModelMessage } from "@bolt-foundry/gambit-core";
-import type { SavedState } from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
+import type { ModelMessage } from "@molt-foundry/gambit-core";
+import type { SavedState } from "@molt-foundry/gambit-core";
 
 export function parsePortValue(
   value: unknown,

@@ -62,10 +62,10 @@ await build({
     license: pkg.license ?? "Apache-2.0",
     repository: {
       type: "git",
-      url: "git+https://github.com/bolt-foundry/gambit.git",
+      url: "git+https://github.com/molt-foundry/gambit.git",
     },
-    bugs: { url: "https://github.com/bolt-foundry/gambit/issues" },
-    homepage: "https://github.com/bolt-foundry/gambit",
+    bugs: { url: "https://github.com/molt-foundry/gambit/issues" },
+    homepage: "https://github.com/molt-foundry/gambit",
   },
   compilerOptions: {
     lib: ["ESNext"],
