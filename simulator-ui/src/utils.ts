@@ -275,6 +275,39 @@ export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 export const SIMULATOR_STREAM_ID = "gambit-simulator";
 export const GRADE_STREAM_ID = "gambit-grade";
 export const TEST_STREAM_ID = "gambit-test";
+export const BUILD_STREAM_ID = "gambit-build";
+
+export const buildTabEnabled = Boolean(
+  (window as unknown as { __GAMBIT_BUILD_TAB_ENABLED__?: boolean })
+    .__GAMBIT_BUILD_TAB_ENABLED__,
+);
+
+export type BuildBotStreamEvent = {
+  type: "buildBotStream";
+  runId?: string;
+  role: "user" | "assistant";
+  chunk: string;
+  turn?: number;
+  ts?: number;
+};
+
+export type BuildBotStreamEndEvent = {
+  type: "buildBotStreamEnd";
+  runId?: string;
+  role: "user" | "assistant";
+  turn?: number;
+  ts?: number;
+};
+
+export type BuildBotStatusEvent = {
+  type: "buildBotStatus";
+  run?: TestBotRun;
+};
+
+export type BuildBotSocketMessage =
+  | BuildBotStreamEvent
+  | BuildBotStreamEndEvent
+  | BuildBotStatusEvent;
 
 export const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
   .__GAMBIT_DECK_PATH__ ?? "Unknown deck";

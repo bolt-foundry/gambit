@@ -112,6 +112,7 @@ const gambitVersion = (() => {
 const SIMULATOR_STREAM_ID = "gambit-simulator";
 const GRADE_STREAM_ID = "gambit-grade";
 const TEST_STREAM_ID = "gambit-test";
+const BUILD_STREAM_ID = "gambit-build";
 type AvailableTestDeck = {
   id: string;
   label: string;
@@ -799,6 +800,26 @@ export function startWebSocketSimulator(opts: {
   const testBotRuns = new Map<string, TestBotRunEntry>();
   const broadcastTestBot = (payload: unknown) => {
     appendDurableStreamEvent(TEST_STREAM_ID, payload);
+  };
+  type BuildBotRunStatus = {
+    id: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    messages: TestBotRunStatus["messages"];
+    traces?: Array<TraceEvent>;
+    toolInserts?: TestBotRunStatus["toolInserts"];
+  };
+  type BuildBotRunEntry = {
+    run: BuildBotRunStatus;
+    state: SavedState | null;
+    promise: Promise<void> | null;
+    abort: AbortController | null;
+  };
+  const buildBotRuns = new Map<string, BuildBotRunEntry>();
+  const broadcastBuildBot = (payload: unknown) => {
+    appendDurableStreamEvent(BUILD_STREAM_ID, payload);
   };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   let deckLabel: string | undefined = undefined;
@@ -1564,6 +1585,16 @@ export function startWebSocketSimulator(opts: {
     run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
   };
 
+  const syncBuildBotRunFromState = (
+    run: BuildBotRunStatus,
+    state: SavedState,
+  ) => {
+    const snapshot = buildTestBotSnapshot(state);
+    run.messages = snapshot.messages;
+    run.toolInserts = snapshot.toolInserts;
+    run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
+  };
+
   const startTestBotRun = (runOpts: {
     maxTurnsOverride?: number;
     deckInput?: unknown;
@@ -1945,85 +1976,98 @@ export function startWebSocketSimulator(opts: {
     return { sessionId, sessionPath };
   };
 
-  const deckLoadPromise: Promise<LoadedDeck | null> = loadDeck(
-    resolvedDeckPath,
-  )
-    .then((deck) => {
-      resolvedDeckPath = deck.path;
-      deckSlug = deckSlugFromPath(resolvedDeckPath);
-      rootStartMode = deck.startMode === "assistant" ||
-          deck.startMode === "user"
-        ? deck.startMode
-        : undefined;
-      deckLabel = typeof deck.label === "string"
-        ? deck.label
-        : toDeckLabel(deck.path);
-      availableTestDecks = (deck.testDecks ?? []).map((testDeck, index) => {
-        const label = testDeck.label && typeof testDeck.label === "string"
-          ? testDeck.label
-          : toDeckLabel(testDeck.path);
-        const id = testDeck.id && typeof testDeck.id === "string"
-          ? testDeck.id
-          : slugify(`${label || "test-deck"}-${index}`);
-        return {
-          id,
-          label: label || id,
-          description: typeof testDeck.description === "string"
-            ? testDeck.description
-            : undefined,
-          path: testDeck.path,
-        };
-      });
-      updateTestDeckRegistry(availableTestDecks);
-      availableGraderDecks = (deck.graderDecks ?? []).map(
-        (graderDeck, index) => {
-          const label = graderDeck.label && typeof graderDeck.label === "string"
-            ? graderDeck.label
-            : toDeckLabel(graderDeck.path);
-          const id = graderDeck.id && typeof graderDeck.id === "string"
-            ? graderDeck.id
-            : slugify(`${label || "grader-deck"}-${index}`);
+  const createDeckLoadPromise = (): Promise<LoadedDeck | null> =>
+    loadDeck(resolvedDeckPath)
+      .then((deck) => {
+        resolvedDeckPath = deck.path;
+        deckSlug = deckSlugFromPath(resolvedDeckPath);
+        rootStartMode = deck.startMode === "assistant" ||
+            deck.startMode === "user"
+          ? deck.startMode
+          : undefined;
+        deckLabel = typeof deck.label === "string"
+          ? deck.label
+          : toDeckLabel(deck.path);
+        availableTestDecks = (deck.testDecks ?? []).map((testDeck, index) => {
+          const label = testDeck.label && typeof testDeck.label === "string"
+            ? testDeck.label
+            : toDeckLabel(testDeck.path);
+          const id = testDeck.id && typeof testDeck.id === "string"
+            ? testDeck.id
+            : slugify(`${label || "test-deck"}-${index}`);
           return {
             id,
             label: label || id,
-            description: typeof graderDeck.description === "string"
-              ? graderDeck.description
+            description: typeof testDeck.description === "string"
+              ? testDeck.description
               : undefined,
-            path: graderDeck.path,
+            path: testDeck.path,
           };
-        },
-      );
-      updateGraderDeckRegistry(availableGraderDecks);
-      return deck;
-    })
-    .catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`[sim] failed to load deck: ${message}`);
-      availableTestDecks = [];
-      updateTestDeckRegistry(availableTestDecks);
-      availableGraderDecks = [];
-      updateGraderDeckRegistry(availableGraderDecks);
-      return null;
-    });
+        });
+        updateTestDeckRegistry(availableTestDecks);
+        availableGraderDecks = (deck.graderDecks ?? []).map(
+          (graderDeck, index) => {
+            const label = graderDeck.label &&
+                typeof graderDeck.label === "string"
+              ? graderDeck.label
+              : toDeckLabel(graderDeck.path);
+            const id = graderDeck.id && typeof graderDeck.id === "string"
+              ? graderDeck.id
+              : slugify(`${label || "grader-deck"}-${index}`);
+            return {
+              id,
+              label: label || id,
+              description: typeof graderDeck.description === "string"
+                ? graderDeck.description
+                : undefined,
+              path: graderDeck.path,
+            };
+          },
+        );
+        updateGraderDeckRegistry(availableGraderDecks);
+        return deck;
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(`[sim] failed to load deck: ${message}`);
+        availableTestDecks = [];
+        updateTestDeckRegistry(availableTestDecks);
+        availableGraderDecks = [];
+        updateGraderDeckRegistry(availableGraderDecks);
+        return null;
+      });
 
-  const schemaPromise: Promise<SchemaDescription> = deckLoadPromise
-    .then((deck) => {
-      if (!deck) {
-        return { error: "Deck failed to load" };
-      }
-      const desc = describeZodSchema(deck.inputSchema);
-      const tools = mapDeckTools(deck.actionDecks);
-      const next = tools ? { ...desc, tools } : desc;
-      if (hasInitialContext) {
-        return { ...next, defaults: initialContext };
-      }
-      return next;
-    })
-    .catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.warn(`[sim] failed to load deck schema: ${message}`);
-      return { error: message };
-    });
+  const createSchemaPromise = (
+    loadPromise: Promise<LoadedDeck | null>,
+  ): Promise<SchemaDescription> =>
+    loadPromise
+      .then((deck) => {
+        if (!deck) {
+          return { error: "Deck failed to load" };
+        }
+        const desc = describeZodSchema(deck.inputSchema);
+        const tools = mapDeckTools(deck.actionDecks);
+        const next = tools ? { ...desc, tools } : desc;
+        if (hasInitialContext) {
+          return { ...next, defaults: initialContext };
+        }
+        return next;
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn(`[sim] failed to load deck schema: ${message}`);
+        return { error: message };
+      });
+
+  let deckLoadPromise: Promise<LoadedDeck | null> = createDeckLoadPromise();
+  let schemaPromise: Promise<SchemaDescription> = createSchemaPromise(
+    deckLoadPromise,
+  );
+
+  const reloadPrimaryDeck = () => {
+    deckLoadPromise = createDeckLoadPromise();
+    schemaPromise = createSchemaPromise(deckLoadPromise);
+  };
 
   const wantsSourceMap = Boolean(opts.sourceMap);
   const bundlePlatform = opts.bundlePlatform ?? "deno";
@@ -3362,6 +3406,284 @@ export function startWebSocketSimulator(opts: {
         );
       }
 
+      if (url.pathname === "/api/build/status") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const runId = url.searchParams.get("runId") ?? undefined;
+        const entry = runId ? buildBotRuns.get(runId) : undefined;
+        const run = entry?.run ?? {
+          id: runId ?? "",
+          status: "idle",
+          messages: [],
+          traces: [],
+          toolInserts: [],
+        };
+        return new Response(JSON.stringify({ run }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (url.pathname === "/api/build/reset") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let runId: string | undefined = undefined;
+        try {
+          const body = await req.json() as { runId?: string };
+          if (typeof body.runId === "string") runId = body.runId;
+        } catch {
+          // ignore
+        }
+        if (!runId) {
+          return new Response(
+            JSON.stringify({ error: "Missing runId" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        const entry = buildBotRuns.get(runId);
+        if (entry?.abort) {
+          entry.abort.abort();
+        }
+        buildBotRuns.delete(runId);
+        broadcastBuildBot({
+          type: "buildBotStatus",
+          run: {
+            id: runId,
+            status: "idle",
+            messages: [],
+            traces: [],
+            toolInserts: [],
+          },
+        });
+        return new Response(JSON.stringify({ reset: true }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (url.pathname === "/api/build/message") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let payload: {
+          runId?: unknown;
+          message?: unknown;
+          model?: unknown;
+          modelForce?: unknown;
+        } = {};
+        try {
+          payload = await req.json();
+        } catch {
+          // ignore
+        }
+        const runId = typeof payload.runId === "string" ? payload.runId : "";
+        if (!runId) {
+          return new Response(
+            JSON.stringify({ error: "Missing runId" }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+        const message = typeof payload.message === "string"
+          ? payload.message
+          : "";
+
+        const existingEntry = buildBotRuns.get(runId);
+        if (existingEntry?.promise) {
+          return new Response(
+            JSON.stringify({ error: "Run already in progress" }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        const entry = existingEntry ?? {
+          run: {
+            id: runId,
+            status: "idle",
+            messages: [],
+            traces: [],
+            toolInserts: [],
+          },
+          state: null,
+          promise: null,
+          abort: null,
+        };
+        buildBotRuns.set(runId, entry);
+
+        const run = entry.run;
+        run.status = "running";
+        run.error = undefined;
+        run.startedAt = run.startedAt ?? new Date().toISOString();
+        if (entry.state) {
+          syncBuildBotRunFromState(run, entry.state);
+        }
+        broadcastBuildBot({ type: "buildBotStatus", run });
+
+        const controller = new AbortController();
+        entry.abort = controller;
+        const isAborted = () => controller.signal.aborted;
+
+        const botDeckUrl = new URL(
+          "./decks/gambit-bot.deck.md",
+          import.meta.url,
+        );
+        if (botDeckUrl.protocol !== "file:") {
+          run.status = "error";
+          run.error = "Unable to resolve Gambit Bot deck path";
+          broadcastBuildBot({ type: "buildBotStatus", run });
+          return new Response(
+            JSON.stringify({ error: run.error }),
+            { status: 500, headers: { "content-type": "application/json" } },
+          );
+        }
+        const botDeckPath = path.fromFileUrl(botDeckUrl);
+
+        const botRootOverride = Deno.env.get("GAMBIT_SIMULATOR_BUILD_BOT_ROOT");
+        const botRootCandidate = botRootOverride?.trim() ||
+          path.dirname(resolvedDeckPath);
+        let botRoot: string;
+        try {
+          botRoot = await Deno.realPath(botRootCandidate);
+          const info = await Deno.stat(botRoot);
+          if (!info.isDirectory) {
+            throw new Error(`Build bot root is not a directory: ${botRoot}`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          run.status = "error";
+          run.error = msg;
+          broadcastBuildBot({ type: "buildBotStatus", run });
+          return new Response(
+            JSON.stringify({ error: msg }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+
+        const prevBotRoot = Deno.env.get("GAMBIT_BOT_ROOT");
+        Deno.env.set("GAMBIT_BOT_ROOT", botRoot);
+
+        const capturedTraces = Array.isArray(entry.state?.traces)
+          ? cloneTraces(entry.state!.traces!)
+          : [];
+        const tracer = (event: TraceEvent) => {
+          const stamped = event.ts ? event : { ...event, ts: Date.now() };
+          capturedTraces.push(stamped);
+          consoleTracer?.(stamped);
+        };
+
+        const appendFromState = (state: SavedState) => {
+          syncBuildBotRunFromState(run, state);
+          run.traces = Array.isArray(state.traces) ? [...state.traces] : [];
+          broadcastBuildBot({ type: "buildBotStatus", run });
+        };
+
+        entry.promise = (async () => {
+          try {
+            const runOnce = async (
+              initialUserMessage: string | undefined,
+              turn: number,
+              shouldStream = true,
+            ) => {
+              if (isAborted()) return undefined;
+              const result = await runDeck({
+                path: botDeckPath,
+                input: undefined,
+                inputProvided: false,
+                modelProvider: opts.modelProvider,
+                allowRootStringInput: true,
+                defaultModel: typeof payload.model === "string"
+                  ? payload.model
+                  : opts.model,
+                modelOverride: typeof payload.modelForce === "string"
+                  ? payload.modelForce
+                  : opts.modelForce,
+                trace: tracer,
+                stream: shouldStream,
+                state: entry.state ?? undefined,
+                responsesMode: opts.responsesMode,
+                initialUserMessage,
+                onStateUpdate: (state) => {
+                  if (isAborted()) return;
+                  const nextState: SavedState = {
+                    ...state,
+                    traces: capturedTraces,
+                  };
+                  entry.state = nextState;
+                  appendFromState(nextState);
+                },
+                onStreamText: (chunk) =>
+                  broadcastBuildBot({
+                    type: "buildBotStream",
+                    runId,
+                    role: "assistant",
+                    chunk,
+                    turn,
+                    ts: Date.now(),
+                  }),
+              });
+              if (shouldStream) {
+                broadcastBuildBot({
+                  type: "buildBotStreamEnd",
+                  runId,
+                  role: "assistant",
+                  turn,
+                  ts: Date.now(),
+                });
+              }
+              return result;
+            };
+
+            const hasSavedMessages = (entry.state?.messages?.length ?? 0) > 0;
+            let assistantTurn = 0;
+            if (Array.isArray(entry.state?.messages)) {
+              for (const msg of entry.state!.messages) {
+                if (msg?.role === "assistant") assistantTurn += 1;
+              }
+            }
+            if (!hasSavedMessages && message.trim().length === 0) {
+              await runOnce(undefined, assistantTurn, true);
+            } else {
+              await runOnce(message, assistantTurn, true);
+            }
+
+            if (isAborted()) {
+              run.status = "canceled";
+            } else {
+              run.status = "completed";
+            }
+          } catch (err) {
+            run.status = "error";
+            run.error = err instanceof Error ? err.message : String(err);
+          } finally {
+            run.finishedAt = new Date().toISOString();
+            entry.abort = null;
+            entry.promise = null;
+            try {
+              reloadPrimaryDeck();
+            } catch (err) {
+              logger.warn(
+                `[sim] failed to reload primary deck after build: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
+            }
+            broadcastBuildBot({ type: "buildBotStatus", run });
+            if (prevBotRoot === undefined) {
+              try {
+                Deno.env.delete("GAMBIT_BOT_ROOT");
+              } catch {
+                // ignore
+              }
+            } else {
+              Deno.env.set("GAMBIT_BOT_ROOT", prevBotRoot);
+            }
+          }
+        })();
+
+        return new Response(JSON.stringify({ run }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       if (url.pathname === "/api/simulator/run") {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
@@ -4086,6 +4408,7 @@ export function startWebSocketSimulator(opts: {
         url.pathname === "/" || url.pathname.startsWith("/sessions/") ||
         url.pathname.startsWith("/simulate") ||
         url.pathname.startsWith("/debug") ||
+        url.pathname.startsWith("/build") ||
         url.pathname.startsWith("/editor") ||
         url.pathname.startsWith("/docs") ||
         url.pathname.startsWith("/test") ||
@@ -4352,6 +4675,13 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
   const safeDeckPath = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const safeDeckLabel =
     deckLabel?.replaceAll("<", "&lt;").replaceAll(">", "&gt;") ?? null;
+  const buildTabEnabled = (() => {
+    const raw = Deno.env.get("GAMBIT_SIMULATOR_BUILD_TAB") ?? "";
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" ||
+      normalized === "yes" ||
+      normalized === "on";
+  })();
   const bundleStamp = (() => {
     try {
       const stat = Deno.statSync(simulatorBundlePath);
@@ -4381,6 +4711,7 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(safeDeckPath)};
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
     window.__GAMBIT_VERSION__ = ${JSON.stringify(gambitVersion)};
+    window.__GAMBIT_BUILD_TAB_ENABLED__ = ${JSON.stringify(buildTabEnabled)};
   </script>
   <script type="module" src="${bundleUrl}"></script>
 </body>
