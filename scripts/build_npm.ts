@@ -92,7 +92,7 @@ const coreConfig = parse(await Deno.readTextFile(coreConfigPath)) as {
   version?: string;
   exports?: Record<string, string>;
 };
-const corePackageName = coreConfig.name ?? "@bolt-foundry/gambit-core";
+const corePackageName = coreConfig.name ?? "@molt-foundry/gambit-core";
 const coreVersion = coreConfig.version ?? "";
 const coreLocalOverride = Deno.env.get("GAMBIT_CORE_NPM_PATH");
 let coreVersionRange = coreVersion ? `^${coreVersion}` : undefined;
@@ -148,7 +148,7 @@ await Deno.writeTextFile(
   JSON.stringify({ ...denoConfig, imports: mergedImports }, null, 2),
 );
 
-const specPattern = /["'`](@bolt-foundry\/gambit-core[^"'`]*)["'`]/g;
+const specPattern = /["'`](@molt-foundry\/gambit-core[^"'`]*)["'`]/g;
 const sourceExtensions = [".ts", ".tsx", ".mts", ".cts"];
 const testSuffixes = [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"];
 
@@ -255,10 +255,10 @@ try {
       },
       repository: {
         type: "git",
-        url: "git+https://github.com/bolt-foundry/gambit.git",
+        url: "git+https://github.com/molt-foundry/gambit.git",
       },
-      bugs: { url: "https://github.com/bolt-foundry/gambit/issues" },
-      homepage: "https://github.com/bolt-foundry/gambit",
+      bugs: { url: "https://github.com/molt-foundry/gambit/issues" },
+      homepage: "https://github.com/molt-foundry/gambit",
     },
   });
 } finally {

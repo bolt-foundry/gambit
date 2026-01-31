@@ -19,7 +19,7 @@ Use `chatCompletionsWithDeck`:
 import {
   chatCompletionsWithDeck,
   createOpenRouterProvider,
-} from "jsr:@bolt-foundry/gambit";
+} from "jsr:@molt-foundry/gambit";
 
 const provider = createOpenRouterProvider({
   apiKey: Deno.env.get("OPENROUTER_API_KEY")!,

@@ -16,7 +16,7 @@ Run the CLI directly with npx (no install):
 
 ```
 export OPENROUTER_API_KEY=...
-npx @bolt-foundry/gambit demo
+npx @molt-foundry/gambit demo
 ```
 
 Downloads example files (hello decks plus the `examples/` gallery) and sets
@@ -25,7 +25,7 @@ environment variables.
 To scaffold a starter project that you can customize, run:
 
 ```
-npx @bolt-foundry/gambit init my-project
+npx @molt-foundry/gambit init my-project
 ```
 
 This creates a structured skeleton (`decks/`, `actions/`, `graders/`, `tests/`,
@@ -35,7 +35,7 @@ workflows immediately.
 Run an example in the terminal (`repl`):
 
 ```
-npx @bolt-foundry/gambit repl gambit/hello.deck.md
+npx @molt-foundry/gambit repl gambit/hello.deck.md
 ```
 
 This example just says "hello" and repeats your message back to you.
@@ -43,7 +43,7 @@ This example just says "hello" and repeats your message back to you.
 Run an example in the browser (`serve`):
 
 ```
-npx @bolt-foundry/gambit serve gambit/hello.deck.md
+npx @molt-foundry/gambit serve gambit/hello.deck.md
 open http://localhost:8000/debug
 ```
 
@@ -82,13 +82,13 @@ Use the CLI to run decks locally, stream output, and capture traces/state.
 Run with npx (no install):
 
 ```
-npx @bolt-foundry/gambit <command>
+npx @molt-foundry/gambit <command>
 ```
 
 Run a deck once:
 
 ```
-npx @bolt-foundry/gambit run <deck> --context <json|string> --message <json|string>
+npx @molt-foundry/gambit run <deck> --context <json|string> --message <json|string>
 ```
 
 > `--context` replaces the old `--init` flag. The CLI still accepts `--init` as
@@ -97,25 +97,25 @@ npx @bolt-foundry/gambit run <deck> --context <json|string> --message <json|stri
 Drop into a REPL (streams by default):
 
 ```
-npx @bolt-foundry/gambit repl <deck>
+npx @molt-foundry/gambit repl <deck>
 ```
 
 Run a persona against a root deck (test bot):
 
 ```
-npx @bolt-foundry/gambit test-bot <root-deck> --test-deck <persona-deck>
+npx @molt-foundry/gambit test-bot <root-deck> --test-deck <persona-deck>
 ```
 
 Grade a saved session:
 
 ```
-npx @bolt-foundry/gambit grade <grader-deck> --state <file>
+npx @molt-foundry/gambit grade <grader-deck> --state <file>
 ```
 
 Start the Debug UI server:
 
 ```
-npx @bolt-foundry/gambit serve <deck> --port 8000
+npx @molt-foundry/gambit serve <deck> --port 8000
 ```
 
 Tracing and state: 
@@ -131,13 +131,13 @@ The simulator is the local Debug UI that streams runs and renders traces.
 Run with npx (no install):
 
 ```
-npx @bolt-foundry/gambit <command>
+npx @molt-foundry/gambit <command>
 ```
 
 Start it:
 
 ```
-npx @bolt-foundry/gambit serve <deck> --port 8000
+npx @molt-foundry/gambit serve <deck> --port 8000
 ```
 
 Then open:
@@ -165,7 +165,7 @@ Use the library when you want TypeScript decks/cards or custom compute steps.
 Import the helpers from JSR:
 
 ```
-import { defineDeck, defineCard } from "jsr:@bolt-foundry/gambit";
+import { defineDeck, defineCard } from "jsr:@molt-foundry/gambit";
 ```
 
 Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
@@ -194,14 +194,14 @@ You are a concise assistant. Greet the user and echo the input.
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./hello_world.deck.md --context '"Gambit"' --stream
+npx @molt-foundry/gambit run ./hello_world.deck.md --context '"Gambit"' --stream
 ```
 
 ### Compute deck in TypeScript (no model call): `echo.deck.ts`
 
 ```typescript
 // echo.deck.ts
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import { z } from "zod";
 
 export default defineDeck({
@@ -217,7 +217,7 @@ export default defineDeck({
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./echo.deck.ts --context '{"text":"ping"}'
+npx @molt-foundry/gambit run ./echo.deck.ts --context '{"text":"ping"}'
 ```
 
 ### Deck with a child action (calls a TypeScript tool): `agent_with_time.deck.md`
@@ -239,7 +239,7 @@ And the child action: `get_time.deck.ts`
 
 ```typescript
 // get_time.deck.ts
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import { z } from "zod";
 
 export default defineDeck({
@@ -255,7 +255,7 @@ export default defineDeck({
 Run it:
 
 ```
-npx @bolt-foundry/gambit run ./agent_with_time.deck.md --context '"hello"' --stream
+npx @molt-foundry/gambit run ./agent_with_time.deck.md --context '"hello"' --stream
 ```
 
 ### Respond flow demo (non-root decks + grading)
@@ -265,7 +265,7 @@ payloads → graders? Use the example in `packages/gambit/examples/respond_flow/
 
 ```
 cd packages/gambit
-npx @bolt-foundry/gambit serve ./examples/respond_flow/decks/root.deck.ts --port 8000
+npx @molt-foundry/gambit serve ./examples/respond_flow/decks/root.deck.ts --port 8000
 ```
 
 Then:
@@ -286,23 +286,23 @@ Quickstart:
 
 ```
 export OPENROUTER_API_KEY=...
-deno run -A jsr:@bolt-foundry/gambit/cli demo
+deno run -A jsr:@molt-foundry/gambit/cli demo
 ```
 
 Starter project:
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli init my-project
+deno run -A jsr:@molt-foundry/gambit/cli init my-project
 ```
 
 Run a deck:
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli run <deck> --context <json|string> --message <json|string>
+deno run -A jsr:@molt-foundry/gambit/cli run <deck> --context <json|string> --message <json|string>
 ```
 
 Start the Debug UI:
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli serve <deck> --port 8000
+deno run -A jsr:@molt-foundry/gambit/cli serve <deck> --port 8000
 ```

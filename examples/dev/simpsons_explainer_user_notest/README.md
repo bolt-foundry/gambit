@@ -19,7 +19,7 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit@^0.8.3/cli serve root.deck.md
+deno run -A jsr:@molt-foundry/gambit@^0.8.3/cli serve root.deck.md
 ```
 
 ## Start the assistant (UI)

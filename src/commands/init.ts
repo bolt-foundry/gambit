@@ -1,7 +1,7 @@
 import { load as loadDotenv } from "@std/dotenv";
 import * as path from "@std/path";
 import { startTui } from "../tui.ts";
-import { loadDeck } from "@bolt-foundry/gambit-core";
+import { loadDeck } from "@molt-foundry/gambit-core";
 import {
   createOllamaProvider,
   fetchOllamaTags,
@@ -174,7 +174,7 @@ function buildInitProvider(opts: {
   openRouterProvider: ReturnType<typeof createOpenRouterProvider> | null;
   ollamaProvider: ReturnType<typeof createOllamaProvider>;
   ollamaBaseURL?: string;
-}): import("@bolt-foundry/gambit-core").ModelProvider {
+}): import("@molt-foundry/gambit-core").ModelProvider {
   const openRouterProvider = opts.openRouterProvider;
   const openRouterResponses = openRouterProvider?.responses;
   const resolveModelChoice = async (

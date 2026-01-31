@@ -68,7 +68,7 @@ jobs:
               const suffix = key === "." ? "" : key.startsWith("./")
                 ? key.slice(1)
                 : key;
-              const spec = `@bolt-foundry/gambit-core${suffix}`;
+              const spec = `@molt-foundry/gambit-core${suffix}`;
               const rel = value.startsWith("./") ? value.slice(2) : value;
               localImports[spec] = `./packages/gambit-core/${rel}`;
             }

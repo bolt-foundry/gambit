@@ -1,5 +1,5 @@
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
-import type { SavedState } from "@bolt-foundry/gambit-core";
+import { isGambitEndSignal, runDeck } from "@molt-foundry/gambit-core";
+import type { SavedState } from "@molt-foundry/gambit-core";
 import * as path from "@std/path";
 
 const encoder = new TextEncoder();
@@ -35,12 +35,12 @@ export async function startTui(opts: {
   deckPath: string;
   model: string | undefined;
   modelForce: string | undefined;
-  modelProvider: import("@bolt-foundry/gambit-core").ModelProvider;
+  modelProvider: import("@molt-foundry/gambit-core").ModelProvider;
   trace?: (
-    event: import("@bolt-foundry/gambit-core").TraceEvent,
+    event: import("@molt-foundry/gambit-core").TraceEvent,
   ) => void;
   toolResultMessage?: (
-    event: import("@bolt-foundry/gambit-core").TraceEvent,
+    event: import("@molt-foundry/gambit-core").TraceEvent,
   ) => string | null;
   verbose?: boolean;
   initialSystemMessage?: string;
@@ -142,7 +142,7 @@ export async function startTui(opts: {
   };
 
   const traceEvent = (
-    event: import("@bolt-foundry/gambit-core").TraceEvent,
+    event: import("@molt-foundry/gambit-core").TraceEvent,
   ) => {
     if (event.type === "tool.call") {
       const key = `${event.actionCallId}:${event.name}`;

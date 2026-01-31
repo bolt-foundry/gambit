@@ -1,11 +1,11 @@
 {
-  "name": "@bolt-foundry/gambit-core",
+  "name": "@molt-foundry/gambit-core",
   "version": "0.8.3",
   "description": "Core runtime for Gambit decks.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bolt-foundry/gambit.git"
+    "url": "git+https://github.com/molt-foundry/gambit.git"
   },
   "exports": {
     ".": "./mod.ts"
@@ -22,7 +22,7 @@
         "recommended"
       ],
       "exclude": [
-        "bolt-foundry/no-parent-directory-traversal"
+        "molt-foundry/no-parent-directory-traversal"
       ]
     }
   },

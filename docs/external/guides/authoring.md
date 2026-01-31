@@ -47,7 +47,7 @@ Rules:
 TypeScript compute deck (`.deck.ts`):
 
 ```ts
-import { defineDeck } from "jsr:@bolt-foundry/gambit";
+import { defineDeck } from "jsr:@molt-foundry/gambit";
 import { z } from "zod";
 
 export default defineDeck({

@@ -157,7 +157,7 @@ export function formatEnvLine(key: string, value: string): string {
 export function resolveInvokePrefix(): string {
   const npmCommand = Deno.env.get("npm_command")?.toLowerCase();
   if (npmCommand === "exec" || npmCommand === "npx") {
-    return "npx @bolt-foundry/gambit";
+    return "npx @molt-foundry/gambit";
   }
 
   const execBase = path.basename(Deno.execPath()).toLowerCase();

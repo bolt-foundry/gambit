@@ -11,4 +11,4 @@ Suggested next steps:
 1. Tweak `root.deck.md` or duplicate it into a new file (e.g.
    `decks/my_first.deck.md`) to experiment.
 2. Reference supporting actions in `../actions/` and schemas in `../schemas/`.
-3. Run it via `npx @bolt-foundry/gambit repl decks/my_first.deck.md`.
+3. Run it via `npx @molt-foundry/gambit repl decks/my_first.deck.md`.

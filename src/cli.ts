@@ -558,7 +558,7 @@ async function main() {
       const resolution = modelAliasResolver(model);
       return Boolean(resolution.applied || resolution.missingAlias);
     };
-    const provider: import("@bolt-foundry/gambit-core").ModelProvider = {
+    const provider: import("@molt-foundry/gambit-core").ModelProvider = {
       resolveModel: async (input) =>
         await resolveModelSelection(
           input.model,
@@ -566,10 +566,10 @@ async function main() {
           input.deckPath,
         ),
       responses: async (input: {
-        request: import("@bolt-foundry/gambit-core").CreateResponseRequest;
-        state?: import("@bolt-foundry/gambit-core").SavedState;
+        request: import("@molt-foundry/gambit-core").CreateResponseRequest;
+        state?: import("@molt-foundry/gambit-core").SavedState;
         onStreamEvent?: (
-          event: import("@bolt-foundry/gambit-core").ResponseEvent,
+          event: import("@molt-foundry/gambit-core").ResponseEvent,
         ) => void;
       }) => {
         const applied = shouldResolveModel(input.request.model)
@@ -603,10 +603,10 @@ async function main() {
       },
       chat: async (input: {
         model: string;
-        messages: Array<import("@bolt-foundry/gambit-core").ModelMessage>;
-        tools?: Array<import("@bolt-foundry/gambit-core").ToolDefinition>;
+        messages: Array<import("@molt-foundry/gambit-core").ModelMessage>;
+        tools?: Array<import("@molt-foundry/gambit-core").ToolDefinition>;
         stream?: boolean;
-        state?: import("@bolt-foundry/gambit-core").SavedState;
+        state?: import("@molt-foundry/gambit-core").SavedState;
         onStreamText?: (chunk: string) => void;
         params?: Record<string, unknown>;
       }) => {
@@ -631,14 +631,14 @@ async function main() {
 
     const tracerFns: Array<
       (
-        event: import("@bolt-foundry/gambit-core").TraceEvent,
+        event: import("@molt-foundry/gambit-core").TraceEvent,
       ) => void
     > = [];
     if (args.trace) tracerFns.push(makeJsonlTracer(args.trace));
     if (args.verbose) tracerFns.push(makeConsoleTracer());
     const tracer = tracerFns.length
       ? (
-        event: import("@bolt-foundry/gambit-core").TraceEvent,
+        event: import("@molt-foundry/gambit-core").TraceEvent,
       ) => tracerFns.forEach((fn) => fn(event))
       : undefined;
 

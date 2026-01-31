@@ -198,7 +198,7 @@ const beatClose: DemoTimelineStep[] = [
   },
   {
     type: "voiceover",
-    text: "For more on Gambit, check out our GitHub, or visit boltfoundry.com.",
+    text: "For more on Gambit, check out our GitHub, or visit moltfoundry.com.",
     showSubtitles: true,
   },
 ];

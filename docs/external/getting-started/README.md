@@ -5,11 +5,11 @@ Use this page to get a fast, developer-first path from install to first run.
 ## Quickstart path
 
 1. Run the demo to generate example decks and configs:
-   - `npx @bolt-foundry/gambit demo`
+   - `npx @molt-foundry/gambit demo`
 2. Run a deck in the terminal:
-   - `npx @bolt-foundry/gambit run gambit/hello.deck.md --context '"Gambit"'`
+   - `npx @molt-foundry/gambit run gambit/hello.deck.md --context '"Gambit"'`
 3. Open the debug UI to inspect traces:
-   - `npx @bolt-foundry/gambit serve gambit/hello.deck.md --port 8000`
+   - `npx @molt-foundry/gambit serve gambit/hello.deck.md --port 8000`
    - Visit `http://localhost:8000/debug`
 
 ## Learn by doing

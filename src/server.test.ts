@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider } from "@molt-foundry/gambit-core";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -469,9 +469,9 @@ Deno.test("simulator preserves state and user input", async () => {
 
   const calls: Array<{
     messages: Array<
-      import("@bolt-foundry/gambit-core").ModelMessage
+      import("@molt-foundry/gambit-core").ModelMessage
     >;
-    state?: import("@bolt-foundry/gambit-core").SavedState;
+    state?: import("@molt-foundry/gambit-core").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -560,9 +560,9 @@ Deno.test("simulator treats follow-up input as a user message when state exists"
 
   const calls: Array<{
     messages: Array<
-      import("@bolt-foundry/gambit-core").ModelMessage
+      import("@molt-foundry/gambit-core").ModelMessage
     >;
-    state?: import("@bolt-foundry/gambit-core").SavedState;
+    state?: import("@molt-foundry/gambit-core").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -680,9 +680,9 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
 
   const calls: Array<{
     messages: Array<
-      import("@bolt-foundry/gambit-core").ModelMessage
+      import("@molt-foundry/gambit-core").ModelMessage
     >;
-    state?: import("@bolt-foundry/gambit-core").SavedState;
+    state?: import("@molt-foundry/gambit-core").SavedState;
   }> = [];
 
   const provider: ModelProvider = {
@@ -697,7 +697,7 @@ Deno.test("simulator falls back when provider state lacks messages", async () =>
         // Simulate a provider that returns a minimal state without messages.
         updatedState: {
           runId: input.state?.runId ?? "missing-messages",
-        } as unknown as import("@bolt-foundry/gambit-core").SavedState,
+        } as unknown as import("@molt-foundry/gambit-core").SavedState,
       });
     },
   };

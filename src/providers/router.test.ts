@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider } from "@molt-foundry/gambit-core";
 import { createProviderRouter } from "./router.ts";
 
 const stubProvider = (label: string): ModelProvider => ({

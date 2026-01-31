@@ -2,13 +2,13 @@ import * as path from "@std/path";
 import { walk } from "@std/fs";
 import { extract } from "@std/front-matter/any";
 import { TarStream } from "@std/tar/tar-stream";
-import { loadDeck } from "@bolt-foundry/gambit-core";
-import { loadState } from "@bolt-foundry/gambit-core";
+import { loadDeck } from "@molt-foundry/gambit-core";
+import { loadState } from "@molt-foundry/gambit-core";
 import type {
   HandlersConfig,
   ModelMessage,
   TraceEvent,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 import {
   extractContextInput,
   findLastAssistantMessage,

@@ -2,9 +2,9 @@
   "name": "gambit-starter",
   "private": true,
   "scripts": {
-    "repl": "npx @bolt-foundry/gambit repl",
-    "serve": "npx @bolt-foundry/gambit serve",
-    "test": "npx @bolt-foundry/gambit test-bot"
+    "repl": "npx @molt-foundry/gambit repl",
+    "serve": "npx @molt-foundry/gambit serve",
+    "test": "npx @molt-foundry/gambit test-bot"
   },
   "dependencies": {}
 }

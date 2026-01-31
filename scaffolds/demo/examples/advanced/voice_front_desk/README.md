@@ -2,7 +2,7 @@
 
 This folder is self-contained and can run outside the bfmono repo as long as
 Deno is installed and the machine has internet access (to fetch
-`jsr:@bolt-foundry/gambit`).
+`jsr:@molt-foundry/gambit`).
 
 ## Prereqs
 
@@ -20,13 +20,13 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli serve ./decks/root.deck.md
+deno run -A jsr:@molt-foundry/gambit/cli serve ./decks/root.deck.md
 ```
 
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./decks/root.deck.md \
+deno run -A jsr:@molt-foundry/gambit/cli run ./decks/root.deck.md \
   --context "$(cat ./sample_input.json)" \
   --message '"Hi, this is Nina. I need to move my physical."' --stream
 ```

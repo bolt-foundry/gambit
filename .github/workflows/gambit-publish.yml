@@ -73,7 +73,7 @@ jobs:
               const suffix = key === "." ? "" : key.startsWith("./")
                 ? key.slice(1)
                 : key;
-              const spec = `@bolt-foundry/gambit-core${suffix}`;
+              const spec = `@molt-foundry/gambit-core${suffix}`;
               const rel = value.startsWith("./") ? value.slice(2) : value;
               localImports[spec] = `./packages/gambit-core/${rel}`;
             }
@@ -122,7 +122,7 @@ jobs:
             if (!gambitName) throw new Error(`${gambitPath} missing name`);
             if (!coreName) throw new Error("packages/gambit-core/deno.json missing name");
             const imports = gambit.imports ?? {};
-            const prefix = "jsr:@bolt-foundry/gambit-core@";
+            const prefix = "jsr:@molt-foundry/gambit-core@";
             for (const value of Object.values(imports)) {
               if (typeof value !== "string") continue;
               if (!value.startsWith(prefix)) continue;
@@ -296,8 +296,8 @@ jobs:
             const gambit = parse(await Deno.readTextFile(gambitPath));
             gambit.version = version;
             const imports = gambit.imports ?? {};
-            const prefix = "jsr:@bolt-foundry/gambit-core@";
-            const coreKey = "@bolt-foundry/gambit-core";
+            const prefix = "jsr:@molt-foundry/gambit-core@";
+            const coreKey = "@molt-foundry/gambit-core";
             const updated = {};
             for (const [key, value] of Object.entries(imports)) {
               if (
@@ -339,8 +339,8 @@ jobs:
             })();
             const init = JSON.parse(await Deno.readTextFile(initPath));
             init.dependencies ??= {};
-            init.dependencies["@bolt-foundry/gambit-core"] =
-              `npm:@bolt-foundry/gambit-core@${version}`;
+            init.dependencies["@molt-foundry/gambit-core"] =
+              `npm:@molt-foundry/gambit-core@${version}`;
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
 
             const initDenoPathCandidates = [
@@ -362,8 +362,8 @@ jobs:
               if (!initDenoPath) throw new Deno.errors.NotFound();
               const initDeno = JSON.parse(await Deno.readTextFile(initDenoPath));
               initDeno.imports ??= {};
-              initDeno.imports["@bolt-foundry/gambit-core"] =
-                `jsr:@bolt-foundry/gambit-core@${version}`;
+              initDeno.imports["@molt-foundry/gambit-core"] =
+                `jsr:@molt-foundry/gambit-core@${version}`;
               await Deno.writeTextFile(
                 initDenoPath,
                 JSON.stringify(initDeno, null, 2) + "\n",
@@ -489,8 +489,8 @@ jobs:
             const gambit = parse(await Deno.readTextFile(gambitPath));
             gambit.version = version;
             const imports = gambit.imports ?? {};
-            const prefix = "jsr:@bolt-foundry/gambit-core@";
-            const coreKey = "@bolt-foundry/gambit-core";
+            const prefix = "jsr:@molt-foundry/gambit-core@";
+            const coreKey = "@molt-foundry/gambit-core";
             const updated = {};
             for (const [key, value] of Object.entries(imports)) {
               if (
@@ -532,8 +532,8 @@ jobs:
             })();
             const init = JSON.parse(await Deno.readTextFile(initPath));
             init.dependencies ??= {};
-            init.dependencies["@bolt-foundry/gambit-core"] =
-              `npm:@bolt-foundry/gambit-core@${version}`;
+            init.dependencies["@molt-foundry/gambit-core"] =
+              `npm:@molt-foundry/gambit-core@${version}`;
             await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
 
             const initDenoPathCandidates = [
@@ -555,8 +555,8 @@ jobs:
               if (!initDenoPath) throw new Deno.errors.NotFound();
               const initDeno = JSON.parse(await Deno.readTextFile(initDenoPath));
               initDeno.imports ??= {};
-              initDeno.imports["@bolt-foundry/gambit-core"] =
-                `jsr:@bolt-foundry/gambit-core@${version}`;
+              initDeno.imports["@molt-foundry/gambit-core"] =
+                `jsr:@molt-foundry/gambit-core@${version}`;
               await Deno.writeTextFile(
                 initDenoPath,
                 JSON.stringify(initDeno, null, 2) + "\n",

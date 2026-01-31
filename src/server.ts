@@ -1,22 +1,22 @@
 import * as path from "@std/path";
 import { existsSync } from "@std/fs";
 import { parse } from "@std/jsonc";
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
+import { isGambitEndSignal, runDeck } from "@molt-foundry/gambit-core";
 import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { defaultSessionRoot } from "./cli_utils.ts";
-import { loadDeck } from "@bolt-foundry/gambit-core";
+import { loadDeck } from "@molt-foundry/gambit-core";
 import {
   appendDurableStreamEvent,
   handleDurableStreamRequest,
 } from "./durable_streams.ts";
-import type { FeedbackEntry, SavedState } from "@bolt-foundry/gambit-core";
+import type { FeedbackEntry, SavedState } from "@molt-foundry/gambit-core";
 import type {
   LoadedDeck,
   ModelMessage,
   ModelProvider,
   TraceEvent,
-} from "@bolt-foundry/gambit-core";
+} from "@molt-foundry/gambit-core";
 import type { ZodTypeAny } from "zod";
 
 const GAMBIT_TOOL_RESPOND = "gambit_respond";

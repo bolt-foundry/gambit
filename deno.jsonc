@@ -1,12 +1,12 @@
 {
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
-  "name": "@bolt-foundry/gambit",
+  "name": "@molt-foundry/gambit",
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
   "version": "0.8.3",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bolt-foundry/gambit.git"
+    "url": "git+https://github.com/molt-foundry/gambit.git"
   },
   "exports": {
     ".": "./mod.ts",
@@ -39,7 +39,7 @@
         "recommended"
       ],
       "exclude": [
-        "bolt-foundry/no-parent-directory-traversal",
+        "molt-foundry/no-parent-directory-traversal",
         "no-external-import",
         "no-unversioned-import"
       ],
@@ -67,7 +67,7 @@
     "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
     "@std/tar": "jsr:@std/tar@^0.1.9",
     "@std/toml": "jsr:@std/toml@^1.0.9",
-    "@bolt-foundry/gambit-core": "./packages/gambit-core/mod.ts",
+    "@molt-foundry/gambit-core": "./packages/gambit-core/mod.ts",
     "playwright-core": "npm:playwright-core@^1.57.0", // dev
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
@@ -89,7 +89,7 @@
     ]
   },
   "deploy": {
-    "org": "boltfoundry",
+    "org": "moltfoundry",
     "app": "gambit-demo"
   }
 }
