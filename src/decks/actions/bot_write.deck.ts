@@ -14,6 +14,7 @@ export default defineDeck({
     payload: z.object({
       path: z.string(),
       action: z.enum(["created", "updated"]),
+      before: z.string().nullable().optional(),
     }).optional(),
   }),
   async run(ctx) {
@@ -28,12 +29,18 @@ export default defineDeck({
     }
 
     let action: "created" | "updated" = "created";
+    let before: string | null = null;
     try {
       const stat = await Deno.stat(resolved.fullPath);
       if (stat.isDirectory) {
         return { status: 409, message: "path is a directory" };
       }
       action = "updated";
+      try {
+        before = await Deno.readTextFile(resolved.fullPath);
+      } catch {
+        before = null;
+      }
     } catch (err) {
       if (!(err instanceof Deno.errors.NotFound)) {
         return {
@@ -49,7 +56,7 @@ export default defineDeck({
       });
       return {
         status: 200,
-        payload: { path: resolved.relativePath, action },
+        payload: { path: resolved.relativePath, action, before },
       };
     } catch (err) {
       if (err instanceof Deno.errors.NotFound) {

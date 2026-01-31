@@ -14,6 +14,7 @@ import {
   buildConversationEntries,
   buildDurableStreamUrl,
   buildGradePath,
+  buildTabEnabled,
   classNames,
   cloneValue,
   deckDisplayPath,
@@ -53,6 +54,7 @@ import {
 } from "./shared.tsx";
 import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
+import BuildPage from "./BuildPage.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -1101,13 +1103,22 @@ function App() {
     [replacePath],
   );
 
+  useEffect(() => {
+    if (!buildTabEnabled && path === "/build") {
+      replacePath(DOCS_PATH);
+    }
+  }, [path, replacePath]);
+
   const isDocs = path === DOCS_PATH;
+  const isBuild = buildTabEnabled && path === "/build";
   const isTestBot = !isDocs && /\/test$/.test(path);
   const isGrade = !isDocs &&
     (path.startsWith("/grade") ||
       /^\/sessions\/[^/]+\/grade/.test(path));
   const currentPage = isDocs
     ? "docs"
+    : isBuild
+    ? "build"
     : isTestBot
     ? "test"
     : isGrade
@@ -1209,6 +1220,8 @@ function App() {
               navigate(
                 next === "docs"
                   ? DOCS_PATH
+                  : next === "build"
+                  ? "/build"
                   : next === "test"
                   ? testBotPath
                   : next === "grade"
@@ -1217,6 +1230,9 @@ function App() {
               )}
             tabs={[
               { id: "docs", label: "Docs", testId: "nav-docs" },
+              ...(buildTabEnabled
+                ? [{ id: "build", label: "Build", testId: "nav-build" }]
+                : []),
               { id: "test", label: "Test", testId: "nav-test" },
               { id: "grade", label: "Grade", testId: "nav-grade" },
               { id: "debug", label: "Debug", testId: "nav-debug" },
@@ -1234,6 +1250,8 @@ function App() {
         <div className="page-shell">
           {currentPage === "docs"
             ? <DocsPage />
+            : currentPage === "build"
+            ? <BuildPage setNavActions={setNavActions} />
             : currentPage === "debug"
             ? (
               <SimulatorApp
