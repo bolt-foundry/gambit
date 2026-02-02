@@ -630,8 +630,10 @@ function GradePage(
           )}
           {graders.length === 0 && (
             <div className="placeholder">
-              No grader decks found. Add <code>[[graderDecks]]</code>{" "}
-              to your deck front matter to surface graders here.
+              No grader decks found. Add <code>[[graders]]</code> (or legacy
+              {" "}
+              <code>[[graderDecks]]</code>) to your deck front matter to surface
+              graders here.
             </div>
           )}
           {sessions.length > 0 && graders.length > 0 && (

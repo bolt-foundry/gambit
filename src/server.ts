@@ -113,6 +113,8 @@ const SIMULATOR_STREAM_ID = "gambit-simulator";
 const GRADE_STREAM_ID = "gambit-grade";
 const TEST_STREAM_ID = "gambit-test";
 const BUILD_STREAM_ID = "gambit-build";
+const DEFAULT_TEST_BOT_SEED_PROMPT =
+  "Start the conversation as the user. Do not wait for the assistant to speak first.";
 type AvailableTestDeck = {
   id: string;
   label: string;
@@ -727,6 +729,7 @@ export function startWebSocketSimulator(opts: {
     (initialContext !== undefined);
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = resolveDeckPath(opts.deckPath);
+  let buildBotRootCache: string | null = null;
   const sessionsRoot = (() => {
     const base = opts.sessionDir
       ? path.resolve(opts.sessionDir)
@@ -818,6 +821,98 @@ export function startWebSocketSimulator(opts: {
     abort: AbortController | null;
   };
   const buildBotRuns = new Map<string, BuildBotRunEntry>();
+
+  const resolveBuildBotRoot = async (): Promise<string> => {
+    if (buildBotRootCache) return buildBotRootCache;
+    const override = Deno.env.get("GAMBIT_SIMULATOR_BUILD_BOT_ROOT")?.trim();
+    const candidate = override || path.dirname(resolvedDeckPath);
+    const root = await Deno.realPath(candidate);
+    const info = await Deno.stat(root);
+    if (!info.isDirectory) {
+      throw new Error(`Build bot root is not a directory: ${root}`);
+    }
+    buildBotRootCache = root;
+    return root;
+  };
+
+  const MAX_FILE_PREVIEW_BYTES = 250_000;
+
+  type BuildBotFileEntry = {
+    path: string;
+    type: "file" | "dir";
+    size?: number;
+    modifiedAt?: string;
+  };
+
+  const listBuildBotFiles = async (
+    root: string,
+  ): Promise<Array<BuildBotFileEntry>> => {
+    const entries: Array<BuildBotFileEntry> = [];
+    const walk = async (dir: string, relativePrefix: string) => {
+      for await (const entry of Deno.readDir(dir)) {
+        if (entry.isSymlink) continue;
+        const fullPath = path.join(dir, entry.name);
+        const relPath = relativePrefix
+          ? path.join(relativePrefix, entry.name)
+          : entry.name;
+        if (entry.isDirectory) {
+          entries.push({ path: relPath, type: "dir" });
+          await walk(fullPath, relPath);
+        } else if (entry.isFile) {
+          const info = await Deno.stat(fullPath);
+          entries.push({
+            path: relPath,
+            type: "file",
+            size: info.size,
+            modifiedAt: info.mtime ? info.mtime.toISOString() : undefined,
+          });
+        }
+      }
+    };
+    await walk(root, "");
+    return entries;
+  };
+
+  const resolveBuildBotPath = async (root: string, inputPath: string) => {
+    if (!inputPath || typeof inputPath !== "string") {
+      throw new Error("path is required");
+    }
+    const normalizedInput = path.normalize(inputPath);
+    const segments = normalizedInput.split(/\\|\//g);
+    if (segments.includes("..")) {
+      throw new Error("path traversal is not allowed");
+    }
+    const candidate = path.isAbsolute(normalizedInput)
+      ? normalizedInput
+      : path.resolve(root, normalizedInput);
+    const relativePath = path.relative(root, candidate);
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      throw new Error("path escapes bot root");
+    }
+    const stat = await Deno.lstat(candidate);
+    if (stat.isSymlink) {
+      throw new Error("symlinks are not allowed");
+    }
+    const realCandidate = await Deno.realPath(candidate);
+    const realRelative = path.relative(root, realCandidate);
+    if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+      throw new Error("path escapes bot root");
+    }
+    return { fullPath: candidate, relativePath, stat };
+  };
+
+  const readPreviewText = (bytes: Uint8Array): string | null => {
+    const limit = Math.min(bytes.length, 8192);
+    for (let i = 0; i < limit; i += 1) {
+      if (bytes[i] === 0) return null;
+    }
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    try {
+      return decoder.decode(bytes);
+    } catch {
+      return null;
+    }
+  };
   const broadcastBuildBot = (payload: unknown) => {
     appendDurableStreamEvent(BUILD_STREAM_ID, payload);
   };
@@ -1746,8 +1841,11 @@ export function startWebSocketSimulator(opts: {
         allowEmptyAssistant?: boolean;
       },
     ): Promise<string> => {
-      const assistantMessage = getLastAssistantMessage(history);
-      if (!assistantMessage && !streamOpts?.allowEmptyAssistant) return "";
+      const assistantMessage = getLastAssistantMessage(history)?.trim() || "";
+      const seedPrompt = !assistantMessage && streamOpts?.allowEmptyAssistant
+        ? DEFAULT_TEST_BOT_SEED_PROMPT
+        : undefined;
+      if (!assistantMessage && !seedPrompt) return "";
       const result = await runDeckWithFallback({
         path: botDeckPath,
         input: botInput,
@@ -1755,7 +1853,7 @@ export function startWebSocketSimulator(opts: {
         modelProvider: opts.modelProvider,
         state: deckBotState,
         allowRootStringInput: true,
-        initialUserMessage: assistantMessage ?? undefined,
+        initialUserMessage: assistantMessage || seedPrompt,
         onStateUpdate: (state) => {
           deckBotState = state;
         },
@@ -1976,10 +2074,29 @@ export function startWebSocketSimulator(opts: {
     return { sessionId, sessionPath };
   };
 
+  const resolvePreferredDeckPath = async (
+    candidate: string,
+  ): Promise<string> => {
+    if (path.basename(candidate) === "PROMPT.md") return candidate;
+    const promptPath = path.join(path.dirname(candidate), "PROMPT.md");
+    try {
+      const stat = await Deno.stat(promptPath);
+      if (stat.isFile) return promptPath;
+    } catch {
+      // ignore missing PROMPT.md
+    }
+    return candidate;
+  };
+
   const createDeckLoadPromise = (): Promise<LoadedDeck | null> =>
-    loadDeck(resolvedDeckPath)
+    resolvePreferredDeckPath(resolvedDeckPath)
+      .then((preferredPath) => {
+        resolvedDeckPath = preferredPath;
+        return loadDeck(preferredPath);
+      })
       .then((deck) => {
         resolvedDeckPath = deck.path;
+        buildBotRootCache = null;
         deckSlug = deckSlugFromPath(resolvedDeckPath);
         rootStartMode = deck.startMode === "assistant" ||
             deck.startMode === "user"
@@ -3537,16 +3654,9 @@ export function startWebSocketSimulator(opts: {
         }
         const botDeckPath = path.fromFileUrl(botDeckUrl);
 
-        const botRootOverride = Deno.env.get("GAMBIT_SIMULATOR_BUILD_BOT_ROOT");
-        const botRootCandidate = botRootOverride?.trim() ||
-          path.dirname(resolvedDeckPath);
         let botRoot: string;
         try {
-          botRoot = await Deno.realPath(botRootCandidate);
-          const info = await Deno.stat(botRoot);
-          if (!info.isDirectory) {
-            throw new Error(`Build bot root is not a directory: ${botRoot}`);
-          }
+          botRoot = await resolveBuildBotRoot();
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           run.status = "error";
@@ -3682,6 +3792,87 @@ export function startWebSocketSimulator(opts: {
         return new Response(JSON.stringify({ run }), {
           headers: { "content-type": "application/json" },
         });
+      }
+
+      if (url.pathname === "/api/build/files") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const root = await resolveBuildBotRoot();
+          const entries = await listBuildBotFiles(root);
+          return new Response(JSON.stringify({ root, entries }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+
+      if (url.pathname === "/api/build/file") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const inputPath = url.searchParams.get("path") ?? "";
+        if (!inputPath) {
+          return new Response(JSON.stringify({ error: "Missing path" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        try {
+          const root = await resolveBuildBotRoot();
+          const resolved = await resolveBuildBotPath(root, inputPath);
+          if (!resolved.stat.isFile) {
+            return new Response(
+              JSON.stringify({ error: "Path is not a file" }),
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          if (resolved.stat.size > MAX_FILE_PREVIEW_BYTES) {
+            return new Response(
+              JSON.stringify({
+                path: resolved.relativePath,
+                tooLarge: true,
+                size: resolved.stat.size,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          const bytes = await Deno.readFile(resolved.fullPath);
+          const text = readPreviewText(bytes);
+          if (text === null) {
+            return new Response(
+              JSON.stringify({
+                path: resolved.relativePath,
+                binary: true,
+                size: resolved.stat.size,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              path: resolved.relativePath,
+              contents: text,
+              size: resolved.stat.size,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
       }
 
       if (url.pathname === "/api/simulator/run") {

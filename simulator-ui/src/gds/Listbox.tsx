@@ -12,9 +12,16 @@ import Icon from "./Icon.tsx";
 import ScrollingText from "./ScrollingText.tsx";
 
 export type ListboxOption = {
+  kind?: "option";
   value: string;
   label: string;
   meta?: string | null;
+  disabled?: boolean;
+} | {
+  kind: "header";
+  label: string;
+} | {
+  kind: "separator";
 };
 
 export type ListboxProps = {
@@ -52,10 +59,13 @@ export default function Listbox(props: ListboxProps) {
   const labelClasses = labelClassName
     ? `gds-listbox-field-label ${labelClassName}`
     : "gds-listbox-field-label";
-  const selected = useMemo(
-    () => options.find((option) => option.value === value) ?? null,
-    [options, value],
-  );
+  const selected = useMemo(() => {
+    for (const option of options) {
+      if (option.kind === "header" || option.kind === "separator") continue;
+      if (option.value === value) return option;
+    }
+    return null;
+  }, [options, value]);
 
   const updatePopover = useCallback(() => {
     const trigger = triggerRef.current;
@@ -147,7 +157,26 @@ export default function Listbox(props: ListboxProps) {
             style={popoverStyle}
             ref={popoverRef}
           >
-            {options.map((option) => {
+            {options.map((option, index) => {
+              if (option.kind === "separator") {
+                return (
+                  <div
+                    key={`separator-${index}`}
+                    className="gds-listbox-separator"
+                    role="separator"
+                  />
+                );
+              }
+              if (option.kind === "header") {
+                return (
+                  <div
+                    key={`header-${index}`}
+                    className="gds-listbox-header"
+                  >
+                    {option.label}
+                  </div>
+                );
+              }
               const isSelected = option.value === value;
               return (
                 <button
@@ -156,7 +185,9 @@ export default function Listbox(props: ListboxProps) {
                   role="option"
                   aria-selected={isSelected}
                   className="gds-listbox-option"
+                  disabled={option.disabled}
                   onClick={() => {
+                    if (option.disabled) return;
                     setOpen(false);
                     onChange(option.value);
                   }}

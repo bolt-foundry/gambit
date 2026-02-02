@@ -12,7 +12,11 @@ import {
   loadMarkdownCard,
   loadMarkdownDeck,
 } from "./markdown.ts";
-import { resolveBuiltinCardPath } from "./builtins.ts";
+import {
+  resolveBuiltinCardPath,
+  resolveBuiltinDeckPath,
+  resolveBuiltinSnippetPath,
+} from "./builtins.ts";
 import type {
   ActionDeckDefinition,
   CardDefinition,
@@ -113,7 +117,9 @@ function normalizeActionDecks(
   if (!actions) return [];
   return actions.map((a) => ({
     ...a,
-    path: basePath ? path.resolve(path.dirname(basePath), a.path) : a.path,
+    path: a.path.startsWith("gambit://") || !basePath
+      ? a.path
+      : path.resolve(path.dirname(basePath), a.path),
   }));
 }
 
@@ -129,9 +135,9 @@ function normalizeCompanionDecks<T extends { path: string }>(
   if (!decks) return [];
   return decks.map((deck) => ({
     ...deck,
-    path: basePath
-      ? path.resolve(path.dirname(basePath), deck.path)
-      : deck.path,
+    path: deck.path.startsWith("gambit://") || !basePath
+      ? deck.path
+      : path.resolve(path.dirname(basePath), deck.path),
   })) as Array<T>;
 }
 
@@ -219,7 +225,8 @@ export async function loadCard(
   stack: Array<string> = [],
 ): Promise<LoadedCard> {
   const builtinPath = resolveBuiltinCardPath(cardPath);
-  const normalizedPath = builtinPath ?? cardPath;
+  const snippetPath = resolveBuiltinSnippetPath(cardPath);
+  const normalizedPath = snippetPath ?? builtinPath ?? cardPath;
   if (isMarkdownFile(normalizedPath)) {
     return await loadMarkdownCard(normalizedPath, parentPath, stack);
   }
@@ -230,13 +237,16 @@ export async function loadDeck(
   deckPath: string,
   parentPath?: string,
 ): Promise<LoadedDeck> {
-  if (isMarkdownFile(deckPath)) {
-    return await loadMarkdownDeck(deckPath, parentPath);
+  const builtinDeck = resolveBuiltinDeckPath(deckPath);
+  const normalizedDeckPath = builtinDeck ?? deckPath;
+  const markdownParent = builtinDeck ? undefined : parentPath;
+  if (isMarkdownFile(normalizedDeckPath)) {
+    return await loadMarkdownDeck(normalizedDeckPath, markdownParent);
   }
 
-  const resolved = parentPath
-    ? path.resolve(path.dirname(parentPath), deckPath)
-    : path.resolve(deckPath);
+  const resolved = markdownParent
+    ? path.resolve(path.dirname(markdownParent), normalizedDeckPath)
+    : path.resolve(normalizedDeckPath);
   const mod = await import(toFileUrl(resolved));
   const deck = mod.default;
   if (!isDeckDefinition(deck)) {

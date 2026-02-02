@@ -291,18 +291,40 @@ export default function TestBotPage(props: {
       const query = params.toString() ? `?${params.toString()}` : "";
       return fetch(`/api/test${query}`);
     };
-    try {
-      let res = await fetchTestBotConfig(requestedDeckId);
-      if (!res.ok && res.status === 400 && requestedDeckId) {
-        try {
-          localStorage.removeItem(deckStorageKey);
-        } catch {
-          // ignore storage failures
-        }
-        res = await fetchTestBotConfig();
-      }
+    const loadResponse = async (
+      res: Response,
+    ): Promise<TestBotConfigResponse> => {
       if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as TestBotConfigResponse;
+      return await res.json() as TestBotConfigResponse;
+    };
+    try {
+      let data: TestBotConfigResponse;
+      if (!opts?.deckId && storedDeckId) {
+        const initial = await fetchTestBotConfig();
+        data = await loadResponse(initial);
+        const decks = Array.isArray(data.testDecks) ? data.testDecks : [];
+        if (decks.some((deck) => deck.id === storedDeckId)) {
+          const res = await fetchTestBotConfig(storedDeckId);
+          data = await loadResponse(res);
+        } else {
+          try {
+            localStorage.removeItem(deckStorageKey);
+          } catch {
+            // ignore storage failures
+          }
+        }
+      } else {
+        let res = await fetchTestBotConfig(requestedDeckId);
+        if (!res.ok && res.status === 400 && requestedDeckId) {
+          try {
+            localStorage.removeItem(deckStorageKey);
+          } catch {
+            // ignore storage failures
+          }
+          res = await fetchTestBotConfig();
+        }
+        data = await loadResponse(res);
+      }
       const decks = Array.isArray(data.testDecks) ? data.testDecks : [];
       setTestDecks(decks);
       setBotDescription(
@@ -1291,9 +1313,11 @@ export default function TestBotPage(props: {
             )}
             {testDecks.length === 0 && (
               <div className="placeholder">
-                No deck-defined personas found. Add <code>[[testDecks]]</code>
+                No deck-defined personas found. Add <code>[[scenarios]]</code>
                 {" "}
-                to your deck front matter to drive the Test Bot.
+                (or legacy{" "}
+                <code>[[testDecks]]</code>) to your deck front matter to drive
+                the Test Bot.
               </div>
             )}
             {botDescription && (
@@ -1488,7 +1512,9 @@ export default function TestBotPage(props: {
             <div className="flex-column flex-1 gap-4">
               <div className="flex-row items-center gap-8">
                 <strong>Test run</strong>
-                <Badge variant={run.status}>{runStatusLabel}</Badge>
+                <Badge variant={run.status} data-testid="testbot-status">
+                  {runStatusLabel}
+                </Badge>
               </div>
             </div>
             <div className="flex-row row-reverse gap-8 wrap">
