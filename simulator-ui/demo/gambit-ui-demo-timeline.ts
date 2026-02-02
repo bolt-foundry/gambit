@@ -38,6 +38,14 @@ export type DemoTimelineStep =
     ms: number;
   }
   | {
+    type: "wait-for";
+    selector?: string;
+    text?: string | RegExp;
+    timeoutMs?: number;
+    state?: "attached" | "visible" | "hidden" | "detached";
+    exact?: boolean;
+  }
+  | {
     type: "click";
     selector?: string;
     text?: string;
@@ -65,6 +73,10 @@ export type DemoTimelineStep =
   | {
     type: "zoom-reset";
     durationMs?: number;
+  }
+  | {
+    type: "screenshot";
+    label: string;
   };
 
 /** Beat 1: Welcome + definition (Gambit is a framework for building LLM workflows in Markdown and code). */

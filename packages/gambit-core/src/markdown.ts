@@ -9,7 +9,7 @@ import {
   RESERVED_TOOL_PREFIX,
   TOOL_NAME_PATTERN,
 } from "./constants.ts";
-import { isCardDefinition } from "./definitions.ts";
+import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
 import { mergeZodObjects } from "./schema.ts";
 import { resolveBuiltinSchemaPath } from "./builtins.ts";
@@ -113,6 +113,7 @@ type DeckRef = {
 function normalizeDeckRefs<T extends DeckRef>(
   refs: unknown,
   basePath: string,
+  opts?: { requirePrompt?: boolean; requireDescription?: boolean },
 ): Array<T> {
   if (!Array.isArray(refs)) return [];
   return refs
@@ -123,11 +124,28 @@ function normalizeDeckRefs<T extends DeckRef>(
       if (!p) {
         throw new Error("Deck reference must include a path");
       }
+      if (opts?.requirePrompt && !p.endsWith("PROMPT.md")) {
+        throw new Error(
+          `Deck reference must point to PROMPT.md (${basePath})`,
+        );
+      }
       const normalized: Record<string, unknown> = { ...rec };
-      normalized.path = path.resolve(path.dirname(basePath), p);
+      normalized.path = p.startsWith("gambit://")
+        ? p
+        : path.resolve(path.dirname(basePath), p);
       if (typeof rec.description !== "string") delete normalized.description;
       if (typeof rec.label !== "string") delete normalized.label;
       if (typeof rec.id !== "string") delete normalized.id;
+      if (opts?.requireDescription) {
+        const desc = typeof rec.description === "string"
+          ? rec.description.trim()
+          : "";
+        if (!desc) {
+          throw new Error(
+            `Action deck must include a description (${basePath})`,
+          );
+        }
+      }
       return normalized as T;
     });
 }
@@ -150,8 +168,9 @@ function mergeDeckRefs<T extends DeckRef>(
 function normalizeActionDecks(
   entries: unknown,
   basePath: string,
+  opts?: { requirePrompt?: boolean; requireDescription?: boolean },
 ): Array<ActionDeckDefinition> {
-  return normalizeDeckRefs<ActionDeckDefinition>(entries, basePath).map(
+  return normalizeDeckRefs<ActionDeckDefinition>(entries, basePath, opts).map(
     (entry) => {
       const name = "name" in entry ? String(entry.name ?? "").trim() : "";
       if (!name) {
@@ -187,15 +206,15 @@ async function expandEmbedsInBody(args: {
     const target = match[1];
     out += body.slice(lastIndex, matchIndex);
     if (target === RESPOND_MARKER) {
-      warnLegacyMarker("respond", "gambit://cards/respond.card.md");
+      warnLegacyMarker("respond", "gambit://snippets/respond.md");
       respond = true;
       out += RESPOND_TEXT;
     } else if (target === INIT_MARKER) {
-      warnLegacyMarker("init", "gambit://cards/context.card.md");
+      warnLegacyMarker("init", "gambit://snippets/context.md");
       initHint = true;
       out += INIT_TEXT;
     } else if (target === END_MARKER) {
-      warnLegacyMarker("end", "gambit://cards/end.card.md");
+      warnLegacyMarker("end", "gambit://snippets/end.md");
       endHint = true;
       out += END_TEXT;
     } else {
@@ -348,17 +367,39 @@ export async function loadMarkdownDeck(
   const hasNewActionDecks = (deckMeta as {
     actionDecks?: unknown;
   }).actionDecks;
-  const legacyDeckActions = (deckMeta as { actions?: unknown }).actions;
-  const actionDecks = normalizeActionDecks(
-    hasNewActionDecks ?? legacyDeckActions,
-    resolved,
-  );
-  if (!hasNewActionDecks && legacyDeckActions) {
+  const canonicalActions = (deckMeta as { actions?: unknown }).actions;
+  const actionDecks = normalizeActionDecks(canonicalActions, resolved, {
+    requirePrompt: true,
+    requireDescription: true,
+  });
+  const legacyActionDecks = normalizeActionDecks(hasNewActionDecks, resolved);
+  if (hasNewActionDecks) {
     logger.warn(
-      `[gambit] deck at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
+      `[gambit] deck at ${resolved} uses deprecated "actionDecks"; use "[[actions]]" instead.`,
     );
   }
-  actionDecks.forEach((a) => {
+  if ((deckMeta as { testDecks?: unknown }).testDecks) {
+    logger.warn(
+      `[gambit] deck at ${resolved} uses deprecated "testDecks"; use "[[scenarios]]" instead.`,
+    );
+  }
+  if ((deckMeta as { graderDecks?: unknown }).graderDecks) {
+    logger.warn(
+      `[gambit] deck at ${resolved} uses deprecated "graderDecks"; use "[[graders]]" instead.`,
+    );
+  }
+  const scenarioDecks = normalizeDeckRefs<TestDeckDefinition>(
+    (deckMeta as { scenarios?: unknown }).scenarios,
+    resolved,
+    { requirePrompt: true },
+  );
+  const graderDecks = normalizeDeckRefs<GraderDeckDefinition>(
+    (deckMeta as { graders?: unknown }).graders,
+    resolved,
+    { requirePrompt: true },
+  );
+  const allActionDecks = [...actionDecks, ...legacyActionDecks];
+  allActionDecks.forEach((a) => {
     if (
       a.name.startsWith(RESERVED_TOOL_PREFIX) &&
       !BUILTIN_TOOL_NAME_SET.has(a.name)
@@ -401,6 +442,39 @@ export async function loadMarkdownDeck(
     warnLegacySchema(resolved, "outputSchema", "responseSchema");
   }
 
+  const executePath = (deckMeta as { execute?: unknown }).execute;
+  let executor: DeckDefinition["run"] | DeckDefinition["execute"] | undefined;
+  let executeContextSchema: ZodTypeAny | undefined;
+  let executeResponseSchema: ZodTypeAny | undefined;
+  if (typeof executePath === "string" && executePath.trim()) {
+    const execResolved = path.resolve(path.dirname(resolved), executePath);
+    const mod = await import(toFileUrl(execResolved));
+    const executeDeck = mod.default;
+    if (!isDeckDefinition(executeDeck)) {
+      throw new Error(
+        `Execute module at ${execResolved} did not export a valid deck definition`,
+      );
+    }
+    executor = typeof executeDeck.run === "function"
+      ? executeDeck.run
+      : typeof executeDeck.execute === "function"
+      ? executeDeck.execute
+      : undefined;
+    if (!executor) {
+      throw new Error(
+        `Execute module at ${execResolved} must export a deck with run(ctx)`,
+      );
+    }
+    executeContextSchema = executeDeck.contextSchema ?? executeDeck.inputSchema;
+    executeResponseSchema = executeDeck.responseSchema ??
+      executeDeck.outputSchema;
+  }
+  if (executor && deckMeta.modelParams) {
+    logger.warn(
+      `[gambit] deck at ${resolved} sets execute + modelParams; modelParams will be ignored.`,
+    );
+  }
+
   const allCards = flattenCards(cards);
   const cleanedBody = replaced.body;
   const allowEnd = Boolean(deckMeta.allowEnd) ||
@@ -413,12 +487,12 @@ export async function loadMarkdownDeck(
       mergedActions[action.name] = action;
     }
   }
-  for (const action of actionDecks) {
+  for (const action of allActionDecks) {
     mergedActions[action.name] = action;
   }
 
-  let mergedContextSchema = contextSchema;
-  let mergedResponseSchema = responseSchema;
+  let mergedContextSchema = contextSchema ?? executeContextSchema;
+  let mergedResponseSchema = responseSchema ?? executeResponseSchema;
   for (const card of allCards) {
     mergedContextSchema = mergeZodObjects(
       mergedContextSchema,
@@ -501,17 +575,26 @@ export async function loadMarkdownDeck(
     allowEnd,
     actionDecks: mergedActionDecks,
     actions: mergedActionDecks,
-    testDecks: mergeDeckRefs(rootTestDecks, embeddedTestDecks),
-    graderDecks: mergeDeckRefs(rootGraderDecks, embeddedGraderDecks),
+    testDecks: mergeDeckRefs(
+      scenarioDecks,
+      rootTestDecks,
+      embeddedTestDecks,
+    ),
+    graderDecks: mergeDeckRefs(
+      graderDecks,
+      rootGraderDecks,
+      embeddedGraderDecks,
+    ),
     cards: allCards,
     label: deckMeta.label,
     startMode: deckMeta.startMode,
-    modelParams: deckMeta.modelParams,
+    modelParams: executor ? undefined : deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     contextSchema: mergedContextSchema,
     responseSchema: mergedResponseSchema,
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
+    executor,
     handlers,
     respond: Boolean(deckMeta.respond) ||
       replaced.respond ||
