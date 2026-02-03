@@ -745,6 +745,19 @@ export function startWebSocketSimulator(opts: {
     }
     return base;
   })();
+  const buildRunsRoot = (() => {
+    const dir = path.join(sessionsRoot, "build-runs");
+    try {
+      Deno.mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      logger.warn(
+        `[sim] unable to ensure build runs directory ${dir}: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+    }
+    return dir;
+  })();
   const ensureDir = (dir: string) => {
     try {
       Deno.mkdirSync(dir, { recursive: true });
@@ -1331,6 +1344,101 @@ export function startWebSocketSimulator(opts: {
       entries.sort((a, b) => {
         const aKey = a.createdAt ?? a.id;
         const bKey = b.createdAt ?? b.id;
+        return bKey.localeCompare(aKey);
+      });
+      return entries;
+    } catch {
+      return [];
+    }
+  };
+
+  type BuildRunMeta = {
+    id: string;
+    status: BuildBotRunStatus["status"];
+    startedAt?: string;
+    finishedAt?: string;
+    updatedAt?: string;
+    messageCount?: number;
+  };
+
+  const isSafeRunId = (runId: string): boolean => {
+    if (!runId) return false;
+    if (runId === "." || runId === "..") return false;
+    if (runId !== path.basename(runId)) return false;
+    if (runId.includes("/") || runId.includes("\\")) return false;
+    return true;
+  };
+
+  const buildRunPath = (runId: string): string =>
+    path.join(buildRunsRoot, runId, "run.json");
+  const buildRunStatePath = (runId: string): string =>
+    path.join(buildRunsRoot, runId, "state.json");
+
+  const persistBuildRun = (run: BuildBotRunStatus) => {
+    if (!isSafeRunId(run.id)) return;
+    const filePath = buildRunPath(run.id);
+    writeJsonAtomic(filePath, {
+      ...run,
+      updatedAt: new Date().toISOString(),
+    });
+  };
+
+  const persistBuildRunState = (runId: string, state: SavedState) => {
+    if (!isSafeRunId(runId)) return;
+    const filePath = buildRunStatePath(runId);
+    const snapshot = materializeSnapshot(state);
+    writeJsonAtomic(filePath, snapshot);
+  };
+
+  const readBuildRun = (runId: string): BuildBotRunStatus | undefined => {
+    if (!isSafeRunId(runId)) return undefined;
+    const filePath = buildRunPath(runId);
+    try {
+      const text = Deno.readTextFileSync(filePath);
+      const parsed = JSON.parse(text) as BuildBotRunStatus;
+      if (parsed && typeof parsed === "object" && parsed.id === runId) {
+        return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  };
+
+  const readBuildRunState = (runId: string): SavedState | undefined => {
+    if (!isSafeRunId(runId)) return undefined;
+    const filePath = buildRunStatePath(runId);
+    try {
+      const text = Deno.readTextFileSync(filePath);
+      const parsed = JSON.parse(text) as SavedState;
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return undefined;
+  };
+
+  const listBuildRuns = (): Array<BuildRunMeta> => {
+    try {
+      const entries: Array<BuildRunMeta> = [];
+      for (const entry of Deno.readDirSync(buildRunsRoot)) {
+        if (!entry.isDirectory) continue;
+        const run = readBuildRun(entry.name);
+        if (!run) continue;
+        entries.push({
+          id: run.id,
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          updatedAt: (run as { updatedAt?: string }).updatedAt,
+          messageCount: run.messages?.length ?? 0,
+        });
+      }
+      entries.sort((a, b) => {
+        const aKey = a.updatedAt ?? a.startedAt ?? a.id;
+        const bKey = b.updatedAt ?? b.startedAt ?? b.id;
         return bKey.localeCompare(aKey);
       });
       return entries;
@@ -3529,7 +3637,8 @@ export function startWebSocketSimulator(opts: {
         }
         const runId = url.searchParams.get("runId") ?? undefined;
         const entry = runId ? buildBotRuns.get(runId) : undefined;
-        const run = entry?.run ?? {
+        const storedRun = runId && !entry ? readBuildRun(runId) : undefined;
+        const run = entry?.run ?? storedRun ?? {
           id: runId ?? "",
           status: "idle",
           messages: [],
@@ -3561,6 +3670,14 @@ export function startWebSocketSimulator(opts: {
         const entry = buildBotRuns.get(runId);
         if (entry?.abort) {
           entry.abort.abort();
+        }
+        if (entry?.run) {
+          if (entry.run.status === "running") {
+            entry.run.status = "canceled";
+          }
+          entry.run.finishedAt = entry.run.finishedAt ??
+            new Date().toISOString();
+          persistBuildRun(entry.run);
         }
         buildBotRuns.delete(runId);
         broadcastBuildBot({
@@ -3626,6 +3743,15 @@ export function startWebSocketSimulator(opts: {
         };
         buildBotRuns.set(runId, entry);
 
+        if (!entry.state && (entry.run.messages?.length ?? 0) > 0) {
+          return new Response(
+            JSON.stringify({
+              error: "Run history loaded without resumable state",
+            }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          );
+        }
+
         const run = entry.run;
         run.status = "running";
         run.error = undefined;
@@ -3634,6 +3760,7 @@ export function startWebSocketSimulator(opts: {
           syncBuildBotRunFromState(run, entry.state);
         }
         broadcastBuildBot({ type: "buildBotStatus", run });
+        persistBuildRun(run);
 
         const controller = new AbortController();
         entry.abort = controller;
@@ -3647,6 +3774,7 @@ export function startWebSocketSimulator(opts: {
           run.status = "error";
           run.error = "Unable to resolve Gambit Bot deck path";
           broadcastBuildBot({ type: "buildBotStatus", run });
+          persistBuildRun(run);
           return new Response(
             JSON.stringify({ error: run.error }),
             { status: 500, headers: { "content-type": "application/json" } },
@@ -3662,6 +3790,7 @@ export function startWebSocketSimulator(opts: {
           run.status = "error";
           run.error = msg;
           broadcastBuildBot({ type: "buildBotStatus", run });
+          persistBuildRun(run);
           return new Response(
             JSON.stringify({ error: msg }),
             { status: 400, headers: { "content-type": "application/json" } },
@@ -3684,6 +3813,8 @@ export function startWebSocketSimulator(opts: {
           syncBuildBotRunFromState(run, state);
           run.traces = Array.isArray(state.traces) ? [...state.traces] : [];
           broadcastBuildBot({ type: "buildBotStatus", run });
+          persistBuildRun(run);
+          persistBuildRunState(runId, state);
         };
 
         entry.promise = (async () => {
@@ -3777,6 +3908,7 @@ export function startWebSocketSimulator(opts: {
               );
             }
             broadcastBuildBot({ type: "buildBotStatus", run });
+            persistBuildRun(run);
             if (prevBotRoot === undefined) {
               try {
                 Deno.env.delete("GAMBIT_BOT_ROOT");
@@ -4731,6 +4863,57 @@ export function startWebSocketSimulator(opts: {
           headers: { "content-type": "application/json; charset=utf-8" },
         });
       }
+      if (url.pathname === "/api/build/runs") {
+        const runs = listBuildRuns();
+        return new Response(JSON.stringify({ runs }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      }
+      if (url.pathname === "/api/build/load") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json() as { runId?: string };
+          if (!body.runId || !isSafeRunId(body.runId)) {
+            throw new Error("Missing runId");
+          }
+          const saved = readBuildRun(body.runId);
+          if (!saved) {
+            return new Response(
+              JSON.stringify({ error: "Run not found" }),
+              { status: 404, headers: { "content-type": "application/json" } },
+            );
+          }
+          const savedState = readBuildRunState(body.runId);
+          const hydratedState = savedState
+            ? {
+              ...savedState,
+              traces: Array.isArray(saved.traces)
+                ? [...saved.traces]
+                : savedState.traces,
+            }
+            : null;
+          const entry: BuildBotRunEntry = {
+            run: saved,
+            state: hydratedState,
+            promise: null,
+            abort: null,
+          };
+          buildBotRuns.set(body.runId, entry);
+          broadcastBuildBot({ type: "buildBotStatus", run: saved });
+          return new Response(JSON.stringify({ run: saved }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
 
       return new Response("Not found", { status: 404 });
     },
@@ -4873,6 +5056,14 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
       normalized === "yes" ||
       normalized === "on";
   })();
+  const chatAccordionEnabled = (() => {
+    const raw = Deno.env.get("GAMBIT_SIMULATOR_CHAT_ACCORDION");
+    if (raw === undefined) return true;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" ||
+      normalized === "yes" ||
+      normalized === "on";
+  })();
   const bundleStamp = (() => {
     try {
       const stat = Deno.statSync(simulatorBundlePath);
@@ -4903,6 +5094,11 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
     window.__GAMBIT_VERSION__ = ${JSON.stringify(gambitVersion)};
     window.__GAMBIT_BUILD_TAB_ENABLED__ = ${JSON.stringify(buildTabEnabled)};
+    window.__GAMBIT_CHAT_ACCORDION_ENABLED__ = ${
+    JSON.stringify(
+      chatAccordionEnabled,
+    )
+  };
   </script>
   <script type="module" src="${bundleUrl}"></script>
 </body>

@@ -18,7 +18,6 @@ import {
   findMissingRequiredFields,
   formatJson,
   getDurableStreamOffset,
-  GRADE_STREAM_ID,
   normalizedDeckPath,
   normalizeFsPath,
   repoRootPath,
@@ -28,10 +27,8 @@ import {
   toRelativePath,
 } from "./utils.ts";
 import type {
-  CalibrateStreamMessage,
   FeedbackEntry,
   NormalizedSchema,
-  SessionDetailResponse,
   TestBotConfigResponse,
   TestBotRun,
   TestBotSocketMessage,
@@ -54,7 +51,6 @@ import List from "./gds/List.tsx";
 import ListItem from "./gds/ListItem.tsx";
 import Listbox from "./gds/Listbox.tsx";
 import ScrollingText from "./gds/ScrollingText.tsx";
-import CalibrateDrawer from "./CalibrateDrawer.tsx";
 
 export default function TestBotPage(props: {
   onReplaceTestBotSession: (sessionId: string) => void;
@@ -62,6 +58,10 @@ export default function TestBotPage(props: {
   activeSessionId: string | null;
   resetToken?: number;
   setNavActions?: (actions: React.ReactNode | null) => void;
+  onFeedbackUpdate?: (
+    messageRefId: string,
+    feedback: FeedbackEntry | null,
+  ) => void;
 }) {
   const {
     onReplaceTestBotSession,
@@ -69,6 +69,7 @@ export default function TestBotPage(props: {
     activeSessionId,
     resetToken,
     setNavActions,
+    onFeedbackUpdate,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
@@ -155,127 +156,12 @@ export default function TestBotPage(props: {
   const [optimisticUser, setOptimisticUser] = useState<
     { id: string; text: string } | null
   >(null);
-  const [sessionDetail, setSessionDetail] = useState<
-    SessionDetailResponse | null
-  >(null);
-  const [sessionDetailError, setSessionDetailError] = useState<string | null>(
-    null,
-  );
-  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const pollRef = useRef<number | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const runIdRef = useRef<string | undefined>(undefined);
   const resetSkipRef = useRef(false);
   const handleNewChatRef = useRef<() => void>(() => {});
   const allowRunSessionNavRef = useRef(false);
-  const missingSessionRef = useRef<string | null>(null);
-  const missingSessionRetryRef = useRef<Record<string, number>>({});
-  const sessionDetailRequestRef = useRef(0);
-  const sessionIdForDrawerRef = useRef<string | null>(null);
-  const sessionIdForDrawer = activeSessionId ?? run.sessionId ?? null;
-
-  const loadSessionDetail = useCallback(async (sessionId: string) => {
-    const requestId = ++sessionDetailRequestRef.current;
-    const shouldApply = () =>
-      requestId === sessionDetailRequestRef.current &&
-      sessionIdForDrawerRef.current === sessionId;
-    try {
-      setSessionDetailLoading(true);
-      const res = await fetch(
-        `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
-      );
-      if (!res.ok) {
-        if (!shouldApply()) return;
-        if (res.status === 404 || res.status === 502) {
-          const activeRun = runRef.current;
-          const isActiveRunSession = activeRun.sessionId === sessionId;
-          const shouldRetryMissing = isActiveRunSession &&
-            (activeRun.status === "running" ||
-              activeRun.status === "completed");
-          if (shouldRetryMissing) {
-            const attempts = missingSessionRetryRef.current[sessionId] ?? 0;
-            if (attempts < 5) {
-              missingSessionRetryRef.current[sessionId] = attempts + 1;
-              setSessionDetailLoading(false);
-              setSessionDetailError(null);
-              window.setTimeout(() => {
-                if (sessionIdForDrawerRef.current === sessionId) {
-                  loadSessionDetail(sessionId).catch(() => {});
-                }
-              }, 500);
-              return;
-            }
-          }
-          if (missingSessionRef.current === sessionId) return;
-          missingSessionRef.current = sessionId;
-          delete missingSessionRetryRef.current[sessionId];
-          setSessionDetail(null);
-          setSessionDetailError(null);
-          setRun((prev) =>
-            prev.sessionId === sessionId
-              ? {
-                id: "",
-                status: "idle",
-                messages: [],
-                traces: [],
-                toolInserts: [],
-                sessionId: undefined,
-              }
-              : prev
-          );
-          onResetTestBotSession();
-          window.location.assign(DEFAULT_TEST_PATH);
-          return;
-        }
-        const text = await res.text();
-        throw new Error(text || res.statusText);
-      }
-      const data = await res.json() as SessionDetailResponse;
-      if (!shouldApply()) return;
-      const sessionDeck = typeof data?.meta?.deck === "string"
-        ? data.meta.deck
-        : null;
-      if (sessionDeck) {
-        const normalizedSessionDeck = normalizeFsPath(sessionDeck);
-        const relative = toRelativePath(normalizedSessionDeck, repoRootPath);
-        const matchesCurrentDeck =
-          normalizedSessionDeck === normalizedDeckPath ||
-          (relative &&
-            normalizeFsPath(relative) === normalizeFsPath(deckDisplayPath));
-        if (!matchesCurrentDeck) {
-          setSessionDetail(null);
-          setSessionDetailError(null);
-          setRun((prev) =>
-            prev.sessionId === sessionId
-              ? {
-                id: "",
-                status: "idle",
-                messages: [],
-                traces: [],
-                toolInserts: [],
-                sessionId: undefined,
-              }
-              : prev
-          );
-          onResetTestBotSession();
-          window.location.assign(DEFAULT_TEST_PATH);
-          return;
-        }
-      }
-      setSessionDetail(data);
-      setSessionDetailError(null);
-      missingSessionRef.current = null;
-      delete missingSessionRetryRef.current[sessionId];
-    } catch (err) {
-      if (!shouldApply()) return;
-      setSessionDetailError(
-        err instanceof Error ? err.message : "Failed to load session details",
-      );
-      setSessionDetail(null);
-    } finally {
-      if (shouldApply()) setSessionDetailLoading(false);
-    }
-  }, [onResetTestBotSession]);
 
   const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
     let storedDeckId: string | null = null;
@@ -389,33 +275,6 @@ export default function TestBotPage(props: {
   useEffect(() => {
     runRef.current = run;
   }, [run]);
-
-  useEffect(() => {
-    sessionIdForDrawerRef.current = sessionIdForDrawer;
-    if (!sessionIdForDrawer) {
-      setSessionDetail(null);
-      setSessionDetailError(null);
-      setSessionDetailLoading(false);
-      return;
-    }
-    loadSessionDetail(sessionIdForDrawer).catch(() => {});
-  }, [loadSessionDetail, sessionIdForDrawer]);
-
-  useEffect(() => {
-    if (!sessionIdForDrawer) return;
-    sessionIdForDrawerRef.current = sessionIdForDrawer;
-    const handleFocus = () => {
-      if (document.visibilityState === "visible") {
-        loadSessionDetail(sessionIdForDrawer).catch(() => {});
-      }
-    };
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleFocus);
-    return () => {
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleFocus);
-    };
-  }, [loadSessionDetail, sessionIdForDrawer]);
 
   useEffect(() => {
     const streamId = TEST_STREAM_ID;
@@ -539,43 +398,6 @@ export default function TestBotPage(props: {
       source.close();
     };
   }, [deckPath]);
-
-  useEffect(() => {
-    if (!sessionIdForDrawer) return;
-    const streamId = GRADE_STREAM_ID;
-    const streamUrl = buildDurableStreamUrl(
-      streamId,
-      getDurableStreamOffset(streamId),
-    );
-    const source = new EventSource(streamUrl);
-
-    source.onmessage = (event) => {
-      let envelope: { offset?: unknown; data?: unknown } | null = null;
-      try {
-        envelope = JSON.parse(event.data) as {
-          offset?: unknown;
-          data?: unknown;
-        };
-      } catch {
-        return;
-      }
-      if (
-        envelope &&
-        typeof envelope.offset === "number" &&
-        Number.isFinite(envelope.offset)
-      ) {
-        setDurableStreamOffset(streamId, envelope.offset + 1);
-      }
-      const msg = envelope?.data as CalibrateStreamMessage | undefined;
-      if (!msg || msg.type !== "calibrateSession") return;
-      if (msg.sessionId !== sessionIdForDrawer) return;
-      loadSessionDetail(sessionIdForDrawer).catch(() => {});
-    };
-
-    return () => {
-      source.close();
-    };
-  }, [loadSessionDetail, sessionIdForDrawer]);
 
   const refreshStatus = useCallback(async (
     opts?: { runId?: string; sessionId?: string },
@@ -993,7 +815,6 @@ export default function TestBotPage(props: {
       toolInserts: [],
       sessionId: undefined,
     });
-    missingSessionRef.current = null;
     onResetTestBotSession();
   }, [onResetTestBotSession, run.status, stopRun]);
 
@@ -1019,6 +840,20 @@ export default function TestBotPage(props: {
   const saveTestBotFeedback = useCallback(
     async (messageRefId: string, score: number | null, reason?: string) => {
       if (!run.sessionId) return;
+      if (onFeedbackUpdate) {
+        if (score === null) {
+          onFeedbackUpdate(messageRefId, null);
+        } else {
+          onFeedbackUpdate(messageRefId, {
+            id: `optimistic:${messageRefId}:${Date.now()}`,
+            runId: run.id || "optimistic",
+            messageRefId,
+            score,
+            reason,
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
       try {
         const res = await fetch("/api/session/feedback", {
           method: "POST",
@@ -1044,16 +879,7 @@ export default function TestBotPage(props: {
                 : msg
             ),
           }));
-          setSessionDetail((prev) => {
-            if (!prev) return prev;
-            const existing = prev.feedback ?? [];
-            return {
-              ...prev,
-              feedback: existing.filter((entry) =>
-                entry.messageRefId !== messageRefId
-              ),
-            };
-          });
+          onFeedbackUpdate?.(messageRefId, null);
           return;
         }
         if (data.feedback) {
@@ -1065,31 +891,13 @@ export default function TestBotPage(props: {
                 : msg
             ),
           }));
-          setSessionDetail((prev) => {
-            if (!prev) return prev;
-            const existing = prev.feedback ?? [];
-            const nextFeedback = (() => {
-              const index = existing.findIndex((entry) =>
-                entry.messageRefId === messageRefId
-              );
-              if (index >= 0) {
-                const next = [...existing];
-                next[index] = data.feedback!;
-                return next;
-              }
-              return [data.feedback!, ...existing];
-            })();
-            return {
-              ...prev,
-              feedback: nextFeedback,
-            };
-          });
+          onFeedbackUpdate?.(messageRefId, data.feedback);
         }
       } catch (err) {
         console.error(err);
       }
     },
-    [run.sessionId],
+    [onFeedbackUpdate, run.id, run.sessionId],
   );
 
   const handleTestBotScore = useCallback(
@@ -1841,13 +1649,6 @@ export default function TestBotPage(props: {
             )}
           </div>
         </Panel>
-        <CalibrateDrawer
-          loading={sessionDetailLoading}
-          error={sessionDetailError}
-          sessionId={sessionIdForDrawer}
-          sessionDetail={sessionDetail}
-          messages={run.messages}
-        />
       </PageGrid>
     </PageShell>
   );
