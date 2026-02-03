@@ -9,7 +9,9 @@ import { createRoot } from "react-dom/client";
 import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
+import WorkbenchDrawer from "./WorkbenchDrawer.tsx";
 import SessionsDrawer from "./SessionsDrawer.tsx";
+import { BuildChatProvider } from "./BuildChatContext.tsx";
 import {
   buildConversationEntries,
   buildDurableStreamUrl,
@@ -41,7 +43,10 @@ import {
   toRelativePath,
 } from "./utils.ts";
 import type {
+  FeedbackEntry,
+  GradingFlag,
   SavedState,
+  SessionDetailResponse,
   SessionMeta,
   SimulatorMessage,
   TraceEvent,
@@ -1049,15 +1054,224 @@ function App() {
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
+  const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(false);
   const sessionsApi = useSessions();
   const [testBotResetToken, setTestBotResetToken] = useState(0);
   const activeSessionId = getSessionIdFromPath(path);
+  const [workbenchSessionDetail, setWorkbenchSessionDetail] = useState<
+    SessionDetailResponse | null
+  >(null);
+  const [workbenchSessionDetailError, setWorkbenchSessionDetailError] =
+    useState<string | null>(null);
+  const [workbenchSessionDetailLoading, setWorkbenchSessionDetailLoading] =
+    useState(false);
+  const workbenchSessionDetailRequestRef = useRef(0);
+  const workbenchSessionRetryRef = useRef<Record<string, number>>({});
+  const workbenchRefreshTimeoutRef = useRef<number | null>(null);
+  const activeSessionIdRef = useRef<string | null>(activeSessionId);
 
   useEffect(() => {
     const handler = () => setPath(normalizeAppPath(window.location.pathname));
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, []);
+
+  const loadWorkbenchSessionDetail = useCallback(async (sessionId: string) => {
+    const requestId = ++workbenchSessionDetailRequestRef.current;
+    const shouldApply = () =>
+      requestId === workbenchSessionDetailRequestRef.current &&
+      activeSessionIdRef.current === sessionId;
+    try {
+      setWorkbenchSessionDetailLoading(true);
+      setWorkbenchSessionDetailError(null);
+      const res = await fetch(
+        `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
+      );
+      if (!res.ok) {
+        if (!shouldApply()) return;
+        if (res.status === 404 || res.status === 502) {
+          const attempts = workbenchSessionRetryRef.current[sessionId] ?? 0;
+          if (attempts < 5) {
+            workbenchSessionRetryRef.current[sessionId] = attempts + 1;
+            setWorkbenchSessionDetailLoading(false);
+            setWorkbenchSessionDetailError(null);
+            window.setTimeout(() => {
+              if (
+                workbenchSessionDetailRequestRef.current === requestId &&
+                activeSessionIdRef.current === sessionId
+              ) {
+                loadWorkbenchSessionDetail(sessionId).catch(() => {});
+              }
+            }, 500);
+            return;
+          }
+        }
+        const text = await res.text().catch(() => "");
+        throw new Error(text || res.statusText);
+      }
+      const detail = await res.json().catch(() => null);
+      if (!shouldApply()) return;
+      setWorkbenchSessionDetail(
+        detail && typeof detail === "object"
+          ? (detail as SessionDetailResponse)
+          : null,
+      );
+      setWorkbenchSessionDetailError(null);
+    } catch (err) {
+      if (!shouldApply()) return;
+      setWorkbenchSessionDetail(
+        null,
+      );
+      setWorkbenchSessionDetailError(
+        err instanceof Error ? err.message : "Failed to load session detail",
+      );
+    } finally {
+      if (shouldApply()) {
+        setWorkbenchSessionDetailLoading(false);
+      }
+    }
+  }, []);
+
+  const scheduleWorkbenchRefresh = useCallback(() => {
+    if (!activeSessionId) return;
+    if (workbenchRefreshTimeoutRef.current) {
+      window.clearTimeout(workbenchRefreshTimeoutRef.current);
+    }
+    const sessionId = activeSessionId;
+    workbenchRefreshTimeoutRef.current = window.setTimeout(() => {
+      if (activeSessionIdRef.current !== sessionId) return;
+      loadWorkbenchSessionDetail(sessionId).catch(() => {});
+    }, 900);
+  }, [activeSessionId, loadWorkbenchSessionDetail]);
+
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId;
+    if (workbenchRefreshTimeoutRef.current) {
+      window.clearTimeout(workbenchRefreshTimeoutRef.current);
+      workbenchRefreshTimeoutRef.current = null;
+    }
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (workbenchRefreshTimeoutRef.current) {
+        window.clearTimeout(workbenchRefreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setWorkbenchSessionDetail(null);
+      setWorkbenchSessionDetailError(null);
+      setWorkbenchSessionDetailLoading(false);
+      return;
+    }
+    loadWorkbenchSessionDetail(activeSessionId).catch(() => {});
+  }, [activeSessionId, loadWorkbenchSessionDetail]);
+
+  const applyFeedbackUpdate = useCallback((
+    messageRefId: string,
+    feedback: FeedbackEntry | null,
+  ) => {
+    setWorkbenchSessionDetail((prev) => {
+      if (!prev) return prev;
+      const existing = prev.feedback ?? [];
+      if (!feedback) {
+        if (!existing.length) return prev;
+        return {
+          ...prev,
+          feedback: existing.filter((entry) =>
+            entry.messageRefId !== messageRefId
+          ),
+        };
+      }
+      const index = existing.findIndex((entry) =>
+        entry.messageRefId === messageRefId
+      );
+      const nextFeedback = index >= 0
+        ? existing.map((entry, idx) => (idx === index ? feedback : entry))
+        : [feedback, ...existing];
+      return { ...prev, feedback: nextFeedback };
+    });
+    scheduleWorkbenchRefresh();
+  }, [scheduleWorkbenchRefresh]);
+
+  const applyFlagsUpdate = useCallback((flags: GradingFlag[]) => {
+    setWorkbenchSessionDetail((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        meta: {
+          ...(prev.meta ?? {}),
+          gradingFlags: flags,
+        },
+      };
+    });
+    scheduleWorkbenchRefresh();
+  }, [scheduleWorkbenchRefresh]);
+
+  const optimisticToggleFlag = useCallback((item: {
+    refId: string;
+    runId: string;
+    turnIndex?: number;
+  }) => {
+    setWorkbenchSessionDetail((prev) => {
+      if (!prev) return prev;
+      const meta = prev.meta ?? {};
+      const existing = Array.isArray(
+          (meta as { gradingFlags?: unknown })
+            .gradingFlags,
+        )
+        ? ((meta as { gradingFlags?: unknown }).gradingFlags as GradingFlag[])
+        : [];
+      const isFlagged = existing.some((flag) => flag.refId === item.refId);
+      const nextFlags = isFlagged
+        ? existing.filter((flag) => flag.refId !== item.refId)
+        : [
+          {
+            id: `optimistic:${item.refId}:${Date.now()}`,
+            refId: item.refId,
+            runId: item.runId,
+            turnIndex: item.turnIndex,
+            createdAt: new Date().toISOString(),
+          },
+          ...existing,
+        ];
+      return {
+        ...prev,
+        meta: {
+          ...meta,
+          gradingFlags: nextFlags,
+        },
+      };
+    });
+    scheduleWorkbenchRefresh();
+  }, [scheduleWorkbenchRefresh]);
+
+  const optimisticFlagReason = useCallback((refId: string, reason: string) => {
+    setWorkbenchSessionDetail((prev) => {
+      if (!prev) return prev;
+      const meta = prev.meta ?? {};
+      const existing = Array.isArray(
+          (meta as { gradingFlags?: unknown })
+            .gradingFlags,
+        )
+        ? ((meta as { gradingFlags?: unknown }).gradingFlags as GradingFlag[])
+        : [];
+      if (!existing.length) return prev;
+      return {
+        ...prev,
+        meta: {
+          ...meta,
+          gradingFlags: existing.map((flag) =>
+            flag.refId === refId ? { ...flag, reason } : flag
+          ),
+        },
+      };
+    });
+    scheduleWorkbenchRefresh();
+  }, [scheduleWorkbenchRefresh]);
 
   useEffect(() => {
     const loadBundleStamp = async () => {
@@ -1194,92 +1408,126 @@ function App() {
 
   return (
     <>
-      <div className="app-root">
-        <div className="top-nav">
-          <div className="top-nav-left">
-            <Button
-              variant={sessionsDrawerOpen ? "primary-deemph" : "ghost"}
-              className={classNames(
-                "sessions-toggle",
-                sessionsDrawerOpen && "active",
-              )}
-              onClick={() => setSessionsDrawerOpen(true)}
-              data-testid="nav-sessions"
-            >
-              <Icon
-                name="hamburgerMenu"
-                size={17}
-                style={{ color: "var(--color-text)" }}
-              />
-            </Button>
+      <div className="app-frame">
+        <div className="app-root">
+          <div className="top-nav">
+            <div className="top-nav-left">
+              <Button
+                variant={sessionsDrawerOpen ? "primary-deemph" : "ghost"}
+                className={classNames(
+                  "sessions-toggle",
+                  sessionsDrawerOpen && "active",
+                )}
+                onClick={() => setSessionsDrawerOpen(true)}
+                data-testid="nav-sessions"
+              >
+                <Icon
+                  name="hamburgerMenu"
+                  size={17}
+                  style={{ color: "var(--color-text)" }}
+                />
+              </Button>
+            </div>
+            <Tabs
+              className="top-nav-buttons"
+              activeId={currentPage}
+              onChange={(next) =>
+                navigate(
+                  next === "docs"
+                    ? DOCS_PATH
+                    : next === "build"
+                    ? "/build"
+                    : next === "test"
+                    ? testBotPath
+                    : next === "grade"
+                    ? gradePath
+                    : debugPath,
+                )}
+              tabs={[
+                { id: "docs", label: "Docs", testId: "nav-docs" },
+                ...(buildTabEnabled
+                  ? [{ id: "build", label: "Build", testId: "nav-build" }]
+                  : []),
+                { id: "test", label: "Test", testId: "nav-test" },
+                { id: "grade", label: "Grade", testId: "nav-grade" },
+                { id: "debug", label: "Debug", testId: "nav-debug" },
+              ]}
+            />
+            <div className="top-nav-center">
+              <span className="top-nav-deck" title={deckPath}>
+                {deckLabel}
+              </span>
+            </div>
+            <div className="top-nav-right">
+              <div className="top-nav-actions">
+                {navActions}
+                <Button
+                  variant={workbenchDrawerOpen ? "primary-deemph" : "ghost"}
+                  className={classNames(
+                    "workbench-toggle",
+                    workbenchDrawerOpen && "active",
+                  )}
+                  onClick={() => setWorkbenchDrawerOpen(true)}
+                  aria-label="Open workbench drawer"
+                  data-testid="nav-workbench"
+                >
+                  <Icon
+                    name="flag"
+                    size={16}
+                    style={{ color: "var(--color-text)" }}
+                  />
+                </Button>
+              </div>
+            </div>
           </div>
-          <Tabs
-            className="top-nav-buttons"
-            activeId={currentPage}
-            onChange={(next) =>
-              navigate(
-                next === "docs"
-                  ? DOCS_PATH
-                  : next === "build"
-                  ? "/build"
-                  : next === "test"
-                  ? testBotPath
-                  : next === "grade"
-                  ? gradePath
-                  : debugPath,
+          <div className="page-shell">
+            {currentPage === "docs"
+              ? <DocsPage />
+              : currentPage === "build"
+              ? <BuildPage setNavActions={setNavActions} />
+              : currentPage === "debug"
+              ? (
+                <SimulatorApp
+                  basePath={simulatorBasePath}
+                  setNavActions={setNavActions}
+                  sessionsApi={sessionsApi}
+                  onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
+                  activeSessionId={activeSessionId}
+                />
+              )
+              : currentPage === "test"
+              ? (
+                <TestBotPage
+                  onReplaceTestBotSession={handleReplaceTestBotSession}
+                  onResetTestBotSession={handleResetTestBotSession}
+                  activeSessionId={activeSessionId}
+                  resetToken={testBotResetToken}
+                  setNavActions={setNavActions}
+                  onFeedbackUpdate={applyFeedbackUpdate}
+                />
+              )
+              : (
+                <GradePage
+                  setNavActions={setNavActions}
+                  onAppPathChange={handleAppPathChange}
+                  activeSessionId={activeSessionId}
+                  onFlagsUpdate={applyFlagsUpdate}
+                  onOptimisticToggleFlag={optimisticToggleFlag}
+                  onOptimisticFlagReason={optimisticFlagReason}
+                />
               )}
-            tabs={[
-              { id: "docs", label: "Docs", testId: "nav-docs" },
-              ...(buildTabEnabled
-                ? [{ id: "build", label: "Build", testId: "nav-build" }]
-                : []),
-              { id: "test", label: "Test", testId: "nav-test" },
-              { id: "grade", label: "Grade", testId: "nav-grade" },
-              { id: "debug", label: "Debug", testId: "nav-debug" },
-            ]}
+          </div>
+        </div>
+        {workbenchDrawerOpen && (
+          <WorkbenchDrawer
+            open={workbenchDrawerOpen}
+            onClose={() => setWorkbenchDrawerOpen(false)}
+            loading={workbenchSessionDetailLoading}
+            error={workbenchSessionDetailError}
+            sessionId={activeSessionId}
+            sessionDetail={workbenchSessionDetail}
           />
-          <div className="top-nav-center">
-            <span className="top-nav-deck" title={deckPath}>
-              {deckLabel}
-            </span>
-          </div>
-          <div className="top-nav-right">
-            {navActions && <div className="top-nav-actions">{navActions}</div>}
-          </div>
-        </div>
-        <div className="page-shell">
-          {currentPage === "docs"
-            ? <DocsPage />
-            : currentPage === "build"
-            ? <BuildPage setNavActions={setNavActions} />
-            : currentPage === "debug"
-            ? (
-              <SimulatorApp
-                basePath={simulatorBasePath}
-                setNavActions={setNavActions}
-                sessionsApi={sessionsApi}
-                onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
-                activeSessionId={activeSessionId}
-              />
-            )
-            : currentPage === "test"
-            ? (
-              <TestBotPage
-                onReplaceTestBotSession={handleReplaceTestBotSession}
-                onResetTestBotSession={handleResetTestBotSession}
-                activeSessionId={activeSessionId}
-                resetToken={testBotResetToken}
-                setNavActions={setNavActions}
-              />
-            )
-            : (
-              <GradePage
-                setNavActions={setNavActions}
-                onAppPathChange={handleAppPathChange}
-                activeSessionId={activeSessionId}
-              />
-            )}
-        </div>
+        )}
       </div>
       <SessionsDrawer
         open={sessionsDrawerOpen}
@@ -1300,6 +1548,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <BuildChatProvider>
+      <App />
+    </BuildChatProvider>
   </React.StrictMode>,
 );

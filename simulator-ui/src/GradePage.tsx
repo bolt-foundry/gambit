@@ -5,7 +5,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-import CalibrateDrawer from "./CalibrateDrawer.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -45,10 +44,24 @@ import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 
 function GradePage(
-  { setNavActions, onAppPathChange, activeSessionId }: {
+  {
+    setNavActions,
+    onAppPathChange,
+    activeSessionId,
+    onFlagsUpdate,
+    onOptimisticToggleFlag,
+    onOptimisticFlagReason,
+  }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
     activeSessionId?: string | null;
+    onFlagsUpdate?: (flags: GradingFlag[]) => void;
+    onOptimisticToggleFlag?: (item: {
+      refId: string;
+      runId: string;
+      turnIndex?: number;
+    }) => void;
+    onOptimisticFlagReason?: (refId: string, reason: string) => void;
   },
 ) {
   const [loading, setLoading] = useState(true);
@@ -63,10 +76,6 @@ function GradePage(
   const [sessionDetail, setSessionDetail] = useState<
     SessionDetailResponse | null
   >(null);
-  const [sessionDetailError, setSessionDetailError] = useState<string | null>(
-    null,
-  );
-  const [sessionDetailLoading, setSessionDetailLoading] = useState(false);
   const initialCalibrateSessionRef = useRef<string | null>(
     getGradeSessionIdFromLocation(),
   );
@@ -202,16 +211,12 @@ function GradePage(
   useEffect(() => {
     if (!selectedSessionId) {
       setSessionDetail(null);
-      setSessionDetailError(null);
-      setSessionDetailLoading(false);
       return;
     }
     let active = true;
     const loadSessionDetail = async () => {
       try {
-        setSessionDetailLoading(true);
         setSessionDetail(null);
-        setSessionDetailError(null);
         const res = await fetch(
           `/api/session?sessionId=${encodeURIComponent(selectedSessionId)}`,
         );
@@ -222,22 +227,21 @@ function GradePage(
         const data = await res.json() as SessionDetailResponse;
         if (!active) return;
         setSessionDetail(data);
-        setSessionDetailError(null);
       } catch (err) {
         if (!active) return;
-        setSessionDetailError(
+        setSessionDetail(null);
+        console.error(
           err instanceof Error ? err.message : "Failed to load session details",
         );
-        setSessionDetail(null);
       } finally {
-        if (active) setSessionDetailLoading(false);
+        if (!active) return;
       }
     };
     loadSessionDetail();
     return () => {
       active = false;
     };
-  }, [selectedSessionId]);
+  }, [onFlagsUpdate, onOptimisticToggleFlag, selectedSessionId]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -360,20 +364,6 @@ function GradePage(
     () => runSections.flatMap((section) => section.items),
     [runSections],
   );
-  const runLabelById = useMemo(() => {
-    const map = new Map<string, string>();
-    runSections.forEach((section) => {
-      map.set(section.run.id, section.label);
-    });
-    return map;
-  }, [runSections]);
-  const runItemByRefId = useMemo(() => {
-    const map = new Map<string, (typeof runItems)[number]>();
-    runItems.forEach((item) => {
-      map.set(item.refId, item);
-    });
-    return map;
-  }, [runItems]);
   const gradingFlags = useMemo(
     () => extractGradingFlags(sessionDetail?.meta),
     [sessionDetail?.meta],
@@ -447,6 +437,7 @@ function GradePage(
     turnIndex?: number;
   }) => {
     if (!selectedSessionId) return;
+    onOptimisticToggleFlag?.(item);
     try {
       const res = await fetch("/api/calibrate/flag", {
         method: "POST",
@@ -476,6 +467,7 @@ function GradePage(
           },
         };
       });
+      onFlagsUpdate?.(data.flags);
       setFlagReasonDrafts((prev) => {
         const next = { ...prev };
         const isNowFlagged = data.flags?.some((flag) =>
@@ -506,6 +498,7 @@ function GradePage(
   const updateFlagReason = useCallback(
     async (refId: string, reason: string) => {
       if (!selectedSessionId) return;
+      onOptimisticFlagReason?.(refId, reason);
       try {
         const res = await fetch("/api/calibrate/flag/reason", {
           method: "POST",
@@ -532,11 +525,12 @@ function GradePage(
             },
           };
         });
+        onFlagsUpdate?.(data.flags);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save reason");
       }
     },
-    [selectedSessionId],
+    [onFlagsUpdate, onOptimisticFlagReason, selectedSessionId],
   );
 
   const scheduleFlagReasonSave = useCallback((
@@ -1064,15 +1058,6 @@ function GradePage(
             </>
           )}
         </Panel>
-        <CalibrateDrawer
-          statePath={selectedSession?.statePath}
-          loading={sessionDetailLoading}
-          error={sessionDetailError}
-          sessionId={selectedSessionId}
-          sessionDetail={sessionDetail}
-          runLabelById={runLabelById}
-          runItemByRefId={runItemByRefId}
-        />
       </PageGrid>
     </PageShell>
   );

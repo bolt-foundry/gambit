@@ -281,6 +281,10 @@ export const buildTabEnabled = Boolean(
   (window as unknown as { __GAMBIT_BUILD_TAB_ENABLED__?: boolean })
     .__GAMBIT_BUILD_TAB_ENABLED__,
 );
+export const chatAccordionEnabled = Boolean(
+  (window as unknown as { __GAMBIT_CHAT_ACCORDION_ENABLED__?: boolean })
+    .__GAMBIT_CHAT_ACCORDION_ENABLED__,
+);
 
 export type BuildBotStreamEvent = {
   type: "buildBotStream";
