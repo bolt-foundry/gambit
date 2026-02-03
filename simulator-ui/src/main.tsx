@@ -1054,7 +1054,7 @@ function App() {
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
-  const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(false);
+  const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true);
   const sessionsApi = useSessions();
   const [testBotResetToken, setTestBotResetToken] = useState(0);
   const activeSessionId = getSessionIdFromPath(path);
