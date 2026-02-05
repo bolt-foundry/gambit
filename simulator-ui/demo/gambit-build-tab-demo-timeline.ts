@@ -2,6 +2,7 @@ import type { DemoTimelineStep } from "./gambit-ui-demo-timeline.ts";
 
 export function buildTabDemoTimeline(opts: {
   userPrompts: Array<string>;
+  scenarioLabels?: Array<string>;
 }): DemoTimelineStep[] {
   const beatOpenBuild: DemoTimelineStep[] = [
     { type: "wait-for", selector: '[data-testid="nav-build"]' },
@@ -113,11 +114,36 @@ export function buildTabDemoTimeline(opts: {
     { type: "screenshot", label: "04-build-recent-changes" },
   ];
 
-  const beatCheckTabs: DemoTimelineStep[] = [
+  const beatCheckTabs: DemoTimelineStep[] = [];
+  beatCheckTabs.push(
     { type: "click", selector: '[data-testid="nav-test"]' },
     { type: "wait-for", selector: '[data-testid="testbot-run"]' },
     { type: "wait", ms: 400 },
     { type: "screenshot", label: "04-test-tab" },
+  );
+  const scenarioLabels = (opts.scenarioLabels ?? []).filter((label) =>
+    label.trim().length > 0
+  );
+  if (scenarioLabels.length > 0) {
+    scenarioLabels.forEach((label, index) => {
+      beatCheckTabs.push(
+        { type: "click", selector: ".gds-listbox-trigger" },
+        { type: "wait-for", selector: ".gds-listbox-popover" },
+        { type: "click", text: label },
+        { type: "wait", ms: 200 },
+        { type: "click", selector: '[data-testid="testbot-run"]' },
+        {
+          type: "wait-for",
+          selector: '[data-testid="testbot-status"]',
+          text: "Completed",
+          timeoutMs: 180_000,
+        },
+        { type: "wait", ms: 200 },
+        { type: "screenshot", label: `04-test-run-${index + 1}` },
+      );
+    });
+  }
+  beatCheckTabs.push(
     { type: "click", selector: '[data-testid="nav-grade"]' },
     { type: "wait-for", text: "Run a grader" },
     { type: "wait", ms: 400 },
@@ -126,7 +152,7 @@ export function buildTabDemoTimeline(opts: {
     { type: "wait-for", selector: '[data-testid="build-chat-input"]' },
     { type: "wait", ms: 400 },
     { type: "screenshot", label: "06-build-tab-return" },
-  ];
+  );
 
   return [
     ...beatOpenBuild,

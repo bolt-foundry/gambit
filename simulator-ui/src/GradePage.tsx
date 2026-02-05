@@ -109,7 +109,10 @@ function GradePage(
   const loadCalibrateData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/calibrate");
+      const params = new URLSearchParams();
+      if (activeSessionId) params.set("sessionId", activeSessionId);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/api/calibrate${query}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as CalibrateResponse;
       const nextGraders = Array.isArray(data.graderDecks)
@@ -145,7 +148,7 @@ function GradePage(
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeSessionId]);
 
   useEffect(() => {
     loadCalibrateData();
@@ -624,10 +627,9 @@ function GradePage(
           )}
           {graders.length === 0 && (
             <div className="placeholder">
-              No grader decks found. Add <code>[[graders]]</code> (or legacy
-              {" "}
-              <code>[[graderDecks]]</code>) to your deck front matter to surface
-              graders here.
+              No graders found in the workspace root deck. Add{" "}
+              <code>[[graders]]</code> to <code>PROMPT.md</code>{" "}
+              (prefer the Build tab) to enable grading.
             </div>
           )}
           {sessions.length > 0 && graders.length > 0 && (

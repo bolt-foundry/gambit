@@ -107,7 +107,7 @@ async function resolveCliVersion(): Promise<string> {
 }
 
 function resolveBotDeckPath(): string {
-  const url = new URL("./decks/gambit-bot.deck.md", import.meta.url);
+  const url = new URL("./decks/gambit-bot/PROMPT.md", import.meta.url);
   if (url.protocol !== "file:") {
     throw new Error("Unable to resolve bot deck path.");
   }
@@ -235,7 +235,7 @@ async function main() {
 
     if (
       !deckPath && args.cmd !== "grade" && args.cmd !== "export" &&
-      args.cmd !== "bot"
+      args.cmd !== "bot" && args.cmd !== "serve"
     ) {
       printUsage();
       Deno.exit(1);
@@ -699,7 +699,7 @@ async function main() {
 
     if (args.cmd === "serve") {
       await handleServeCommand({
-        deckPath,
+        deckPath: deckPath || undefined,
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,

@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { type ToolCallSummary } from "./utils.ts";
+import { type ToolCallSummary, workspaceOnboardingEnabled } from "./utils.ts";
 import PageShell from "./gds/PageShell.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import Panel from "./gds/Panel.tsx";
@@ -117,7 +117,8 @@ export default function BuildPage(props: {
     setFileListLoading(true);
     setFileListError(null);
     try {
-      const res = await fetch("/api/build/files");
+      const query = run.id ? `?workspaceId=${encodeURIComponent(run.id)}` : "";
+      const res = await fetch(`/api/build/files${query}`);
       const data = await res.json().catch(() => ({})) as {
         entries?: BuildFileEntry[];
         error?: string;
@@ -134,7 +135,7 @@ export default function BuildPage(props: {
     } finally {
       setFileListLoading(false);
     }
-  }, []);
+  }, [run.id]);
 
   useEffect(() => {
     refreshFileList().catch(() => {});
@@ -227,9 +228,13 @@ export default function BuildPage(props: {
     const fetchPreview = async () => {
       setFilePreview({ status: "loading" });
       try {
-        const res = await fetch(
-          `/api/build/file?path=${encodeURIComponent(selectedPath)}`,
-        );
+        const params = new URLSearchParams({
+          path: selectedPath,
+        });
+        if (run.id) {
+          params.set("workspaceId", run.id);
+        }
+        const res = await fetch(`/api/build/file?${params.toString()}`);
         const data = await res.json().catch(() => ({})) as {
           contents?: string;
           tooLarge?: boolean;
@@ -377,6 +382,13 @@ export default function BuildPage(props: {
           className="flex-column gap-8 flex-1 build-files-panel"
           style={{ minHeight: 0 }}
         >
+          {workspaceOnboardingEnabled && (
+            <div className="placeholder emphasis">
+              Workspace scaffold created. Use the Build chat to refine
+              <code>PROMPT.md</code>,{" "}
+              <code>INTENT.md</code>, and the default scenario/grader decks.
+            </div>
+          )}
           {fileListError && <div className="error">{fileListError}</div>}
           <div className="build-files-preview">
             <div className="build-files-preview-header">

@@ -56,6 +56,10 @@ function findProjectRoot(startDir: string): string | undefined {
   return undefined;
 }
 
+export function resolveProjectRoot(startDir: string): string | undefined {
+  return findProjectRoot(startDir);
+}
+
 export function defaultSessionRoot(deckPath: string): string {
   const resolvedDeckPath = path.resolve(deckPath);
   const deckDir = path.dirname(resolvedDeckPath);

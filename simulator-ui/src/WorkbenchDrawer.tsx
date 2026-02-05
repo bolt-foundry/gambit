@@ -302,10 +302,17 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
               title: (
                 <div className="workbench-accordion-title">
                   {chatHistory.length > 0 && (
-                    <button
-                      type="button"
+                    <span
+                      role="button"
+                      tabIndex={0}
                       className="workbench-chat-history-toggle"
                       onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setChatHistoryOpen((prev) => !prev);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
                         event.preventDefault();
                         event.stopPropagation();
                         setChatHistoryOpen((prev) => !prev);
@@ -319,7 +326,7 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                         size={12}
                         className="workbench-chat-history-arrow"
                       />
-                    </button>
+                    </span>
                   )}
                   <span>Chat</span>
                   <Badge status={run.status}>{runStatusLabel}</Badge>

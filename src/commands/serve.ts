@@ -1,12 +1,14 @@
 import * as path from "@std/path";
+import { existsSync } from "@std/fs";
 import { startWebSocketSimulator } from "../server.ts";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
-import { parsePortValue } from "../cli_utils.ts";
+import { parsePortValue, resolveProjectRoot } from "../cli_utils.ts";
+import { createWorkspaceScaffold } from "../workspace.ts";
 
 const logger = console;
 
 export async function handleServeCommand(opts: {
-  deckPath: string;
+  deckPath?: string;
   model?: string;
   modelForce?: string;
   modelProvider: ModelProvider;
@@ -20,6 +22,40 @@ export async function handleServeCommand(opts: {
   platform?: string;
   responsesMode?: boolean;
 }) {
+  const cwd = Deno.cwd();
+  const baseRoot = opts.deckPath ? resolveProjectRoot(cwd) ?? cwd : cwd;
+  const workspaceBaseDir = path.join(baseRoot, ".gambit", "workspaces");
+  const sessionsDir = path.join(baseRoot, ".gambit", "sessions");
+  let resolvedDeckPath = opts.deckPath?.trim();
+  let workspaceConfig:
+    | {
+      id: string;
+      rootDeckPath: string;
+      rootDir: string;
+      onboarding?: boolean;
+      scaffoldEnabled?: boolean;
+      scaffoldRoot?: string;
+    }
+    | undefined;
+  if (!resolvedDeckPath) {
+    const localPrompt = path.join(cwd, "PROMPT.md");
+    if (existsSync(localPrompt)) {
+      resolvedDeckPath = localPrompt;
+    } else {
+      const workspace = await createWorkspaceScaffold({
+        baseDir: workspaceBaseDir,
+      });
+      resolvedDeckPath = workspace.rootDeckPath;
+      workspaceConfig = {
+        id: workspace.id,
+        rootDeckPath: workspace.rootDeckPath,
+        rootDir: workspace.rootDir,
+        onboarding: true,
+        scaffoldEnabled: true,
+        scaffoldRoot: workspaceBaseDir,
+      };
+    }
+  }
   const envMode = (Deno.env.get("GAMBIT_ENV") ?? Deno.env.get("NODE_ENV") ?? "")
     .toLowerCase();
   const isDevEnv = envMode === "development" || envMode === "dev" ||
@@ -44,7 +80,7 @@ export async function handleServeCommand(opts: {
   }
   const startServer = () =>
     startWebSocketSimulator({
-      deckPath: opts.deckPath,
+      deckPath: resolvedDeckPath ?? opts.deckPath ?? "",
       model: opts.model,
       modelForce: opts.modelForce,
       modelProvider: opts.modelProvider,
@@ -52,6 +88,8 @@ export async function handleServeCommand(opts: {
       contextProvided: opts.contextProvided,
       port,
       verbose: opts.verbose,
+      sessionDir: workspaceConfig ? sessionsDir : undefined,
+      workspace: workspaceConfig,
       autoBundle,
       forceBundle,
       sourceMap,
@@ -67,7 +105,7 @@ export async function handleServeCommand(opts: {
 
   const watchTargets = Array.from(
     new Set([
-      path.dirname(opts.deckPath),
+      resolvedDeckPath ? path.dirname(resolvedDeckPath) : path.resolve("."),
       path.resolve("src"),
     ]),
   ).filter((p) => {

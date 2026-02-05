@@ -18,3 +18,7 @@ flags = [
 +++
 
 Starts the debug UI server (default at `http://localhost:8000/`).
+
+If no deck path is provided, Gambit creates a new workspace scaffold (root
+`PROMPT.md`, `INTENT.md`, plus default scenario/grader decks) and opens the
+simulator UI in workspace onboarding mode.
