@@ -107,16 +107,12 @@ export default function Chat() {
 
   return (
     <div className="test-bot-sidebar flex-column gap-8 flex-1 build-chat-panel">
-      <div className="flex-row gap-8 items-center">
-        <div className="flex-column flex-1 gap-4">
+      <div className="test-bot-thread">
+        <div className="imessage-thread" ref={transcriptRef}>
           <div className="placeholder">
             Use this chat to update deck files via Gambit Bot. Tool calls show
             file writes and why they happened.
           </div>
-        </div>
-      </div>
-      <div className="test-bot-thread">
-        <div className="imessage-thread" ref={transcriptRef}>
           {run.messages.length === 0 && (
             <div className="placeholder">No messages yet.</div>
           )}

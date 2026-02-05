@@ -26,6 +26,11 @@ export type ModelParams = {
   frequency_penalty?: number;
   presence_penalty?: number;
   max_tokens?: number;
+  /**
+   * Provider-specific pass-through parameters. Values must be JSON-serializable.
+   * Top-level supported fields take precedence when keys overlap.
+   */
+  additionalParams?: Record<string, JSONValue>;
 };
 
 export type Guardrails = {

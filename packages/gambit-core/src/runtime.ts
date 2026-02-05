@@ -185,6 +185,7 @@ function toProviderParams(
   if (!params) return undefined;
   const {
     model: _model,
+    additionalParams,
     temperature,
     top_p,
     frequency_penalty,
@@ -192,6 +193,16 @@ function toProviderParams(
     max_tokens,
   } = params;
   const out: Record<string, unknown> = {};
+  if (
+    additionalParams &&
+    typeof additionalParams === "object" &&
+    !Array.isArray(additionalParams)
+  ) {
+    for (const [key, value] of Object.entries(additionalParams)) {
+      if (value === undefined) continue;
+      out[key] = value;
+    }
+  }
   if (temperature !== undefined) out.temperature = temperature;
   if (top_p !== undefined) out.top_p = top_p;
   if (frequency_penalty !== undefined) {
