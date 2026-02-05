@@ -9,10 +9,11 @@ import {
 } from "../providers/ollama.ts";
 import { createOpenRouterProvider } from "../providers/openrouter.ts";
 import { ensureDirectory, ensureOpenRouterEnv } from "./scaffold_utils.ts";
+import { createWorkspaceScaffoldAtRoot } from "../workspace.ts";
 
 const logger = console;
 
-const DEFAULT_PROJECT_DIR = "gambit";
+const DEFAULT_PROJECT_DIR = ".";
 const INIT_ROOT_ENV = "GAMBIT_INIT_ROOT";
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -31,9 +32,23 @@ export async function handleInitCommand(
   const rootDir = path.resolve(Deno.cwd(), projectPath);
   await ensureDirectory(rootDir);
 
-  const rootDeckPath = path.join(rootDir, "root.deck.md");
-  const testDeckPath = path.join(rootDir, "tests", "first.test.deck.md");
-  if (await exists(rootDeckPath) || await exists(testDeckPath)) {
+  const rootDeckPath = path.join(rootDir, "PROMPT.md");
+  const scenarioDeckPath = path.join(
+    rootDir,
+    "scenarios",
+    "default",
+    "PROMPT.md",
+  );
+  const graderDeckPath = path.join(rootDir, "graders", "default", "PROMPT.md");
+  const intentPath = path.join(rootDir, "INTENT.md");
+  const policyPath = path.join(rootDir, "POLICY.md");
+  if (
+    await exists(rootDeckPath) ||
+    await exists(scenarioDeckPath) ||
+    await exists(graderDeckPath) ||
+    await exists(intentPath) ||
+    await exists(policyPath)
+  ) {
     logger.error(
       "Init output files already exist. Remove them or choose a new target.",
     );
@@ -81,7 +96,9 @@ export async function handleInitCommand(
 
   Deno.env.set(INIT_ROOT_ENV, rootDir);
 
-  if (opts.interactive === false) {
+  if (opts.interactive !== true) {
+    await createWorkspaceScaffoldAtRoot(rootDir);
+    logger.log("Next: run `gambit serve` to open the simulator UI.");
     return;
   }
 
