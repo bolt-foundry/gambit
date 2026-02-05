@@ -11,7 +11,7 @@ import {
 } from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
-import { mergeZodObjects } from "./schema.ts";
+import { mergeZodObjects, toJsonSchema } from "./schema.ts";
 import { resolveBuiltinSchemaPath } from "./builtins.ts";
 import type {
   ActionDeckDefinition,
@@ -48,6 +48,27 @@ When you are done, call the \`${GAMBIT_TOOL_RESPOND}\` tool with a JSON object t
 const END_TEXT = `
 If the entire workflow is finished and no further user turns should be sent, call the \`${GAMBIT_TOOL_END}\` tool with optional \`message\` and \`payload\` fields to explicitly end the session.
 `.trim();
+
+function normalizeJsonSchema(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeJsonSchema(entry));
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      out[key] = normalizeJsonSchema(record[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function schemasMatchDeep(a: ZodTypeAny, b: ZodTypeAny): boolean {
+  const aJson = normalizeJsonSchema(toJsonSchema(a as never));
+  const bJson = normalizeJsonSchema(toJsonSchema(b as never));
+  return JSON.stringify(aJson) === JSON.stringify(bJson);
+}
 
 function warnLegacyMarker(
   marker: keyof typeof LEGACY_MARKER_WARNINGS,
@@ -472,6 +493,23 @@ export async function loadMarkdownDeck(
   if (executor && deckMeta.modelParams) {
     logger.warn(
       `[gambit] deck at ${resolved} sets execute + modelParams; modelParams will be ignored.`,
+    );
+  }
+
+  if (
+    contextSchema && executeContextSchema &&
+    !schemasMatchDeep(contextSchema, executeContextSchema)
+  ) {
+    logger.warn(
+      `[gambit] deck at ${resolved} has mismatched contextSchema between PROMPT.md and execute module (pre-1.0: warn; 1.0+: error)`,
+    );
+  }
+  if (
+    responseSchema && executeResponseSchema &&
+    !schemasMatchDeep(responseSchema, executeResponseSchema)
+  ) {
+    logger.warn(
+      `[gambit] deck at ${resolved} has mismatched responseSchema between PROMPT.md and execute module (pre-1.0: warn; 1.0+: error)`,
     );
   }
 

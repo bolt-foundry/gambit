@@ -97,8 +97,8 @@ Schema deck.
   const deck = await loadMarkdownDeck(deckPath);
 
   assert(deck.contextSchema, "expected context schema to resolve");
-  const parsed = deck.contextSchema.parse({ status: "ok" });
-  assertEquals(parsed, { status: "ok" });
+  const parsed = deck.contextSchema.parse({ status: 200 });
+  assertEquals(parsed, { status: 200 });
 });
 
 Deno.test("markdown deck warns on legacy schema URIs", async () => {

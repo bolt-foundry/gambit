@@ -1837,3 +1837,40 @@ Deck.
 
   assert(Array.isArray(resolvedInput.model));
 });
+
+Deno.test("modelParams.additionalParams pass through and top-level wins", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "root.deck.md",
+    `
++++
+modelParams = { model = "dummy-model", temperature = 0.2, additionalParams = { temperature = 0.9, seed = 42, my_param = "x" } }
++++
+
+Deck.
+`.trim(),
+  );
+
+  let seenParams: Record<string, unknown> | undefined;
+  const provider: ModelProvider = {
+    chat: (input) => {
+      seenParams = input.params;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(seenParams?.temperature, 0.2);
+  assertEquals(seenParams?.seed, 42);
+  assertEquals(seenParams?.my_param, "x");
+});
