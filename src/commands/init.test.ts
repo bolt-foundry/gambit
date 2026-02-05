@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import { handleInitCommand } from "./init.ts";
 
 Deno.test({
-  name: "init prepares the default gambit directory without running the chat",
+  name: "init prepares the default directory without running the chat",
   permissions: { read: true, write: true, env: true },
 }, async () => {
   const tempDir = await Deno.makeTempDir();
@@ -14,19 +14,23 @@ Deno.test({
   try {
     Deno.chdir(tempDir);
     await handleInitCommand(undefined, { interactive: false });
-    const projectRoot = path.join(tempDir, "gambit");
+    const projectRoot = tempDir;
     assert(await exists(projectRoot), "project root should exist");
     assert(
       !await exists(path.join(projectRoot, ".env")),
       "should not create .env when OPENROUTER_API_KEY is set",
     );
     assert(
-      !await exists(path.join(projectRoot, "root.deck.md")),
-      "init should not write root.deck.md before the chat runs",
+      await exists(path.join(projectRoot, "PROMPT.md")),
+      "init should write PROMPT.md in non-interactive mode",
     );
     assert(
-      !await exists(path.join(projectRoot, "tests", "first.test.deck.md")),
-      "init should not write test deck before the chat runs",
+      await exists(path.join(projectRoot, "scenarios", "default", "PROMPT.md")),
+      "init should write the default scenario deck",
+    );
+    assert(
+      await exists(path.join(projectRoot, "graders", "default", "PROMPT.md")),
+      "init should write the default grader deck",
     );
   } finally {
     Deno.chdir(originalCwd);
@@ -52,6 +56,10 @@ Deno.test({
     await handleInitCommand("custom/project", { interactive: false });
     const projectRoot = path.join(tempDir, "custom", "project");
     assert(await exists(projectRoot), "custom project root should exist");
+    assert(
+      await exists(path.join(projectRoot, "PROMPT.md")),
+      "init should write PROMPT.md in custom path",
+    );
   } finally {
     Deno.chdir(originalCwd);
     if (originalKey === undefined) {
@@ -96,11 +104,15 @@ Deno.test({
   try {
     Deno.chdir(tempDir);
     await handleInitCommand(undefined, { interactive: false });
-    const projectRoot = path.join(tempDir, "gambit");
+    const projectRoot = tempDir;
     assert(await exists(projectRoot), "project root should exist");
     assert(
       !await exists(path.join(projectRoot, ".env")),
       "should not create .env when Ollama is available",
+    );
+    assert(
+      await exists(path.join(projectRoot, "PROMPT.md")),
+      "init should write PROMPT.md when Ollama is available",
     );
   } finally {
     Deno.chdir(originalCwd);
