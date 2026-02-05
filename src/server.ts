@@ -6,6 +6,7 @@ import { sanitizeNumber } from "./test_bot.ts";
 import { makeConsoleTracer } from "./trace.ts";
 import { defaultSessionRoot } from "./cli_utils.ts";
 import { loadDeck } from "@bolt-foundry/gambit-core";
+import { createWorkspaceScaffold } from "./workspace.ts";
 import {
   appendDurableStreamEvent,
   handleDurableStreamRequest,
@@ -717,6 +718,14 @@ export function startWebSocketSimulator(opts: {
   verbose?: boolean;
   signal?: AbortSignal;
   sessionDir?: string;
+  workspace?: {
+    id: string;
+    rootDeckPath: string;
+    rootDir: string;
+    onboarding?: boolean;
+    scaffoldEnabled?: boolean;
+    scaffoldRoot?: string;
+  };
   autoBundle?: boolean;
   forceBundle?: boolean;
   sourceMap?: boolean;
@@ -729,7 +738,13 @@ export function startWebSocketSimulator(opts: {
     (initialContext !== undefined);
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = resolveDeckPath(opts.deckPath);
-  let buildBotRootCache: string | null = null;
+  const buildBotRootCache = new Map<string, string>();
+  const activeWorkspaceId = opts.workspace?.id ?? null;
+  const activeWorkspaceOnboarding = Boolean(opts.workspace?.onboarding);
+  const workspaceScaffoldEnabled = Boolean(opts.workspace?.scaffoldEnabled);
+  const workspaceScaffoldRoot = opts.workspace?.scaffoldRoot
+    ? path.resolve(opts.workspace.scaffoldRoot)
+    : null;
   const sessionsRoot = (() => {
     const base = opts.sessionDir
       ? path.resolve(opts.sessionDir)
@@ -745,19 +760,26 @@ export function startWebSocketSimulator(opts: {
     }
     return base;
   })();
-  const buildRunsRoot = (() => {
-    const dir = path.join(sessionsRoot, "build-runs");
-    try {
-      Deno.mkdirSync(dir, { recursive: true });
-    } catch (err) {
-      logger.warn(
-        `[sim] unable to ensure build runs directory ${dir}: ${
-          err instanceof Error ? err.message : err
-        }`,
-      );
+  const workspaceRoot = (() => {
+    const dir = workspaceScaffoldRoot ??
+      path.join(path.dirname(sessionsRoot), "workspaces");
+    if (workspaceScaffoldEnabled) {
+      try {
+        Deno.mkdirSync(dir, { recursive: true });
+      } catch (err) {
+        logger.warn(
+          `[sim] unable to ensure workspace directory ${dir}: ${
+            err instanceof Error ? err.message : err
+          }`,
+        );
+      }
     }
     return dir;
   })();
+  const workspaceById = new Map<
+    string,
+    { id: string; rootDir: string; rootDeckPath: string; createdAt: string }
+  >();
   const ensureDir = (dir: string) => {
     try {
       Deno.mkdirSync(dir, { recursive: true });
@@ -835,18 +857,91 @@ export function startWebSocketSimulator(opts: {
   };
   const buildBotRuns = new Map<string, BuildBotRunEntry>();
 
-  const resolveBuildBotRoot = async (): Promise<string> => {
-    if (buildBotRootCache) return buildBotRootCache;
+  const registerWorkspace = (record: {
+    id: string;
+    rootDir: string;
+    rootDeckPath: string;
+    createdAt: string;
+  }) => {
+    workspaceById.set(record.id, record);
+    return record;
+  };
+
+  const resolveWorkspaceRecord = (
+    workspaceId?: string | null,
+  ):
+    | { id: string; rootDir: string; rootDeckPath: string; createdAt: string }
+    | null => {
+    if (!workspaceId) return null;
+    const cached = workspaceById.get(workspaceId);
+    if (cached) return cached;
+    const state = readSessionState(workspaceId);
+    const meta = state?.meta ?? {};
+    const deckPath = typeof (meta as { workspaceRootDeckPath?: unknown })
+        .workspaceRootDeckPath === "string"
+      ? (meta as { workspaceRootDeckPath: string }).workspaceRootDeckPath
+      : typeof meta.deck === "string"
+      ? meta.deck
+      : undefined;
+    const rootDir =
+      typeof (meta as { workspaceRootDir?: unknown }).workspaceRootDir ===
+          "string"
+        ? (meta as { workspaceRootDir: string }).workspaceRootDir
+        : deckPath
+        ? path.dirname(deckPath)
+        : undefined;
+    if (!deckPath || !rootDir) return null;
+    const createdAt =
+      typeof (meta as { workspaceCreatedAt?: unknown }).workspaceCreatedAt ===
+          "string"
+        ? (meta as { workspaceCreatedAt: string }).workspaceCreatedAt
+        : typeof meta.sessionCreatedAt === "string"
+        ? meta.sessionCreatedAt
+        : new Date().toISOString();
+    return registerWorkspace({
+      id: workspaceId,
+      rootDir,
+      rootDeckPath: deckPath,
+      createdAt,
+    });
+  };
+
+  const resolveBuildBotRoot = async (
+    workspaceId?: string | null,
+  ): Promise<string> => {
     const override = Deno.env.get("GAMBIT_SIMULATOR_BUILD_BOT_ROOT")?.trim();
-    const candidate = override || path.dirname(resolvedDeckPath);
+    if (override) {
+      const root = await Deno.realPath(override);
+      const info = await Deno.stat(root);
+      if (!info.isDirectory) {
+        throw new Error(`Build bot root is not a directory: ${root}`);
+      }
+      return root;
+    }
+    const cacheKey = workspaceId ?? "default";
+    const cached = buildBotRootCache.get(cacheKey);
+    if (cached) return cached;
+    const record = resolveWorkspaceRecord(workspaceId);
+    const candidate = record?.rootDir ?? path.dirname(resolvedDeckPath);
     const root = await Deno.realPath(candidate);
     const info = await Deno.stat(root);
     if (!info.isDirectory) {
       throw new Error(`Build bot root is not a directory: ${root}`);
     }
-    buildBotRootCache = root;
+    buildBotRootCache.set(cacheKey, root);
     return root;
   };
+
+  if (
+    opts.workspace?.id && opts.workspace.rootDir && opts.workspace.rootDeckPath
+  ) {
+    registerWorkspace({
+      id: opts.workspace.id,
+      rootDir: opts.workspace.rootDir,
+      rootDeckPath: opts.workspace.rootDeckPath,
+      createdAt: new Date().toISOString(),
+    });
+  }
 
   const MAX_FILE_PREVIEW_BYTES = 250_000;
 
@@ -938,6 +1033,7 @@ export function startWebSocketSimulator(opts: {
   } => {
     const meta = { ...(state.meta ?? {}) };
     const now = new Date();
+    meta.sessionUpdatedAt = now.toISOString();
     if (typeof meta.sessionId !== "string") {
       const stamp = now.toISOString().replace(/[:.]/g, "-");
       meta.sessionId = `${deckSlug}-${stamp}`;
@@ -1287,6 +1383,115 @@ export function startWebSocketSimulator(opts: {
     }
     return undefined;
   };
+
+  const buildWorkspaceMeta = (
+    record: { id: string; rootDir: string; rootDeckPath: string },
+    base?: Record<string, unknown>,
+  ): Record<string, unknown> => {
+    const createdAt =
+      typeof (base as { sessionCreatedAt?: unknown })?.sessionCreatedAt ===
+          "string"
+        ? (base as { sessionCreatedAt: string }).sessionCreatedAt
+        : typeof (base as { workspaceCreatedAt?: unknown })
+            ?.workspaceCreatedAt === "string"
+        ? (base as { workspaceCreatedAt: string }).workspaceCreatedAt
+        : new Date().toISOString();
+    return {
+      ...(base ?? {}),
+      workspaceId: record.id,
+      workspaceRootDeckPath: record.rootDeckPath,
+      workspaceRootDir: record.rootDir,
+      workspaceCreatedAt: (base as { workspaceCreatedAt?: string } | undefined)
+        ?.workspaceCreatedAt ?? createdAt,
+      sessionCreatedAt: (base as { sessionCreatedAt?: string } | undefined)
+        ?.sessionCreatedAt ?? createdAt,
+      deck: record.rootDeckPath,
+      deckSlug: deckSlugFromPath(record.rootDeckPath),
+      sessionId: record.id,
+    };
+  };
+
+  const createWorkspaceSession = async (
+    opts?: { onboarding?: boolean },
+  ): Promise<{
+    id: string;
+    rootDir: string;
+    rootDeckPath: string;
+    createdAt: string;
+  }> => {
+    const createdAt = new Date().toISOString();
+    if (workspaceScaffoldEnabled) {
+      const scaffold = await createWorkspaceScaffold({
+        baseDir: workspaceRoot,
+      });
+      const record = registerWorkspace(scaffold);
+      persistSessionState({
+        runId: record.id,
+        messages: [],
+        meta: buildWorkspaceMeta(record, {
+          sessionCreatedAt: record.createdAt,
+          workspaceCreatedAt: record.createdAt,
+          workspaceOnboarding: opts?.onboarding ?? false,
+        }),
+      });
+      return record;
+    }
+    const workspaceId = randomId("workspace");
+    const rootDeckPath = resolvedDeckPath;
+    const rootDir = path.dirname(rootDeckPath);
+    const record = registerWorkspace({
+      id: workspaceId,
+      rootDir,
+      rootDeckPath,
+      createdAt,
+    });
+    persistSessionState({
+      runId: record.id,
+      messages: [],
+      meta: buildWorkspaceMeta(record, {
+        sessionCreatedAt: createdAt,
+        workspaceCreatedAt: createdAt,
+        workspaceOnboarding: opts?.onboarding ?? false,
+      }),
+    });
+    return record;
+  };
+
+  if (
+    opts.workspace?.id && opts.workspace.rootDir && opts.workspace.rootDeckPath
+  ) {
+    const existing = readSessionState(opts.workspace.id);
+    if (!existing) {
+      persistSessionState({
+        runId: opts.workspace.id,
+        messages: [],
+        meta: buildWorkspaceMeta(
+          {
+            id: opts.workspace.id,
+            rootDir: opts.workspace.rootDir,
+            rootDeckPath: opts.workspace.rootDeckPath,
+          },
+          {
+            sessionCreatedAt: new Date().toISOString(),
+            workspaceCreatedAt: new Date().toISOString(),
+            workspaceOnboarding: activeWorkspaceOnboarding,
+          },
+        ),
+      });
+    }
+  }
+
+  const activateWorkspaceDeck = async (workspaceId?: string | null) => {
+    if (!workspaceId) return;
+    const record = resolveWorkspaceRecord(workspaceId);
+    if (!record) return;
+    const nextPath = resolveDeckPath(record.rootDeckPath);
+    if (nextPath === resolvedDeckPath) return;
+    resolvedDeckPath = nextPath;
+    buildBotRootCache.delete("default");
+    reloadPrimaryDeck();
+    await deckLoadPromise.catch(() => null);
+  };
   const deleteSessionState = (sessionId: string): boolean => {
     if (
       !sessionId ||
@@ -1369,71 +1574,37 @@ export function startWebSocketSimulator(opts: {
     return true;
   };
 
-  const buildRunPath = (runId: string): string =>
-    path.join(buildRunsRoot, runId, "run.json");
-  const buildRunStatePath = (runId: string): string =>
-    path.join(buildRunsRoot, runId, "state.json");
-
-  const persistBuildRun = (run: BuildBotRunStatus) => {
-    if (!isSafeRunId(run.id)) return;
-    const filePath = buildRunPath(run.id);
-    writeJsonAtomic(filePath, {
-      ...run,
-      updatedAt: new Date().toISOString(),
-    });
-  };
-
-  const persistBuildRunState = (runId: string, state: SavedState) => {
-    if (!isSafeRunId(runId)) return;
-    const filePath = buildRunStatePath(runId);
-    const snapshot = materializeSnapshot(state);
-    writeJsonAtomic(filePath, snapshot);
-  };
-
-  const readBuildRun = (runId: string): BuildBotRunStatus | undefined => {
-    if (!isSafeRunId(runId)) return undefined;
-    const filePath = buildRunPath(runId);
-    try {
-      const text = Deno.readTextFileSync(filePath);
-      const parsed = JSON.parse(text) as BuildBotRunStatus;
-      if (parsed && typeof parsed === "object" && parsed.id === runId) {
-        return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return undefined;
-  };
-
-  const readBuildRunState = (runId: string): SavedState | undefined => {
-    if (!isSafeRunId(runId)) return undefined;
-    const filePath = buildRunStatePath(runId);
-    try {
-      const text = Deno.readTextFileSync(filePath);
-      const parsed = JSON.parse(text) as SavedState;
-      if (parsed && typeof parsed === "object") {
-        return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return undefined;
-  };
-
   const listBuildRuns = (): Array<BuildRunMeta> => {
     try {
       const entries: Array<BuildRunMeta> = [];
-      for (const entry of Deno.readDirSync(buildRunsRoot)) {
-        if (!entry.isDirectory) continue;
-        const run = readBuildRun(entry.name);
-        if (!run) continue;
+      for (const session of listSessions()) {
+        const state = readSessionState(session.id);
+        const meta = state?.meta ?? {};
+        const buildStatus =
+          typeof (meta as { buildStatus?: unknown }).buildStatus === "string"
+            ? (meta as { buildStatus: BuildBotRunStatus["status"] })
+              .buildStatus
+            : "idle";
+        const buildChat = extractBuildChatState(state);
         entries.push({
-          id: run.id,
-          status: run.status,
-          startedAt: run.startedAt,
-          finishedAt: run.finishedAt,
-          updatedAt: (run as { updatedAt?: string }).updatedAt,
-          messageCount: run.messages?.length ?? 0,
+          id: session.id,
+          status: buildStatus,
+          startedAt:
+            typeof (meta as { buildStartedAt?: unknown }).buildStartedAt ===
+                "string"
+              ? (meta as { buildStartedAt: string }).buildStartedAt
+              : session.createdAt,
+          finishedAt:
+            typeof (meta as { buildFinishedAt?: unknown }).buildFinishedAt ===
+                "string"
+              ? (meta as { buildFinishedAt: string }).buildFinishedAt
+              : undefined,
+          updatedAt:
+            typeof (meta as { sessionUpdatedAt?: unknown }).sessionUpdatedAt ===
+                "string"
+              ? (meta as { sessionUpdatedAt: string }).sessionUpdatedAt
+              : session.createdAt,
+          messageCount: buildChat?.messages?.length ?? 0,
         });
       }
       entries.sort((a, b) => {
@@ -1798,6 +1969,54 @@ export function startWebSocketSimulator(opts: {
     run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
   };
 
+  const extractBuildChatState = (
+    state?: SavedState,
+  ): SavedState | null => {
+    const meta = state?.meta;
+    if (!meta || typeof meta !== "object") return null;
+    const candidate = (meta as { buildChat?: unknown }).buildChat;
+    if (!candidate || typeof candidate !== "object") return null;
+    return candidate as SavedState;
+  };
+
+  const buildRunFromWorkspace = (
+    workspaceId: string,
+    state?: SavedState,
+  ): BuildBotRunStatus => {
+    const meta = state?.meta;
+    const buildChatState = extractBuildChatState(state) ?? undefined;
+    const status = typeof (meta as { buildStatus?: unknown })?.buildStatus ===
+        "string"
+      ? (meta as { buildStatus: BuildBotRunStatus["status"] }).buildStatus
+      : buildChatState
+      ? "completed"
+      : "idle";
+    const run: BuildBotRunStatus = {
+      id: workspaceId,
+      status,
+      error: typeof (meta as { buildError?: unknown })?.buildError === "string"
+        ? (meta as { buildError: string }).buildError
+        : undefined,
+      startedAt:
+        typeof (meta as { buildStartedAt?: unknown })?.buildStartedAt ===
+            "string"
+          ? (meta as { buildStartedAt: string }).buildStartedAt
+          : undefined,
+      finishedAt:
+        typeof (meta as { buildFinishedAt?: unknown })?.buildFinishedAt ===
+            "string"
+          ? (meta as { buildFinishedAt: string }).buildFinishedAt
+          : undefined,
+      messages: [],
+      traces: [],
+      toolInserts: [],
+    };
+    if (buildChatState) {
+      syncBuildBotRunFromState(run, buildChatState);
+    }
+    return run;
+  };
+
   const startTestBotRun = (runOpts: {
     maxTurnsOverride?: number;
     deckInput?: unknown;
@@ -1809,6 +2028,9 @@ export function startWebSocketSimulator(opts: {
       args: Record<string, unknown>;
       result: Record<string, unknown>;
     };
+    sessionId?: string;
+    workspaceRecord?: { id: string; rootDir: string; rootDeckPath: string };
+    baseMeta?: Record<string, unknown>;
   } = {}): TestBotRunStatus => {
     const botDeckPath = typeof runOpts.botDeckPath === "string"
       ? runOpts.botDeckPath
@@ -1855,6 +2077,10 @@ export function startWebSocketSimulator(opts: {
     const run = entry.run;
     if (runOpts.initFill) run.initFill = runOpts.initFill;
     let savedState: SavedState | undefined = undefined;
+    const baseMeta = runOpts.baseMeta ?? {};
+    const workspaceMeta = runOpts.workspaceRecord
+      ? buildWorkspaceMeta(runOpts.workspaceRecord, baseMeta)
+      : baseMeta;
     let lastCount = 0;
     const capturedTraces: Array<TraceEvent> = [];
     if (runOpts.initFillTrace) {
@@ -1998,13 +2224,14 @@ export function startWebSocketSimulator(opts: {
             responsesMode: opts.responsesMode,
             onStateUpdate: (state) => {
               const nextMeta = {
-                ...(savedState?.meta ?? {}),
+                ...workspaceMeta,
                 ...(state.meta ?? {}),
                 testBot: true,
                 testBotRunId: runId,
                 testBotConfigPath: botConfigPath,
                 testBotName,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
+                ...(runOpts.sessionId ? { sessionId: runOpts.sessionId } : {}),
               };
               const enriched = persistSessionState({
                 ...state,
@@ -2060,13 +2287,14 @@ export function startWebSocketSimulator(opts: {
             responsesMode: opts.responsesMode,
             onStateUpdate: (state) => {
               const nextMeta = {
-                ...(savedState?.meta ?? {}),
+                ...workspaceMeta,
                 ...(state.meta ?? {}),
                 testBot: true,
                 testBotRunId: runId,
                 testBotConfigPath: botConfigPath,
                 testBotName,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
+                ...(runOpts.sessionId ? { sessionId: runOpts.sessionId } : {}),
               };
               const enriched = persistSessionState({
                 ...state,
@@ -2204,7 +2432,7 @@ export function startWebSocketSimulator(opts: {
       })
       .then((deck) => {
         resolvedDeckPath = deck.path;
-        buildBotRootCache = null;
+        buildBotRootCache.clear();
         deckSlug = deckSlugFromPath(resolvedDeckPath);
         rootStartMode = deck.startMode === "assistant" ||
             deck.startMode === "user"
@@ -2374,6 +2602,10 @@ export function startWebSocketSimulator(opts: {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
         }
+        const sessionId = url.searchParams.get("sessionId") ?? undefined;
+        if (sessionId) {
+          await activateWorkspaceDeck(sessionId);
+        }
         await deckLoadPromise.catch(() => null);
         const sessions = listSessions();
         return new Response(
@@ -2398,6 +2630,7 @@ export function startWebSocketSimulator(opts: {
             throw new Error("Missing sessionId");
           }
           const sessionId = body.sessionId;
+          await activateWorkspaceDeck(sessionId);
           await deckLoadPromise.catch(() => null);
           const grader = body.graderId
             ? resolveGraderDeck(body.graderId)
@@ -2888,6 +3121,8 @@ export function startWebSocketSimulator(opts: {
 
       if (url.pathname === "/api/test") {
         if (req.method === "GET") {
+          const sessionId = url.searchParams.get("sessionId") ?? undefined;
+          await activateWorkspaceDeck(sessionId);
           await deckLoadPromise.catch(() => null);
           const requestedDeck = url.searchParams.get("deckPath");
           const selection = requestedDeck
@@ -2951,6 +3186,7 @@ export function startWebSocketSimulator(opts: {
         let inheritBotInput = false;
         let userProvidedDeckInput = false;
         let initFillRequestMissing: Array<string> | undefined = undefined;
+        let sessionId: string | undefined = undefined;
         try {
           const body = await req.json() as {
             maxTurns?: number;
@@ -2961,6 +3197,7 @@ export function startWebSocketSimulator(opts: {
             botDeckPath?: string;
             inheritBotInput?: unknown;
             initFill?: { missing?: unknown };
+            sessionId?: string;
           };
           if (
             typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
@@ -2985,6 +3222,9 @@ export function startWebSocketSimulator(opts: {
               typeof entry === "string" && entry.trim().length > 0
             ) as Array<string>;
           }
+          if (typeof body.sessionId === "string") {
+            sessionId = body.sessionId;
+          }
           if (typeof body.botDeckPath === "string") {
             const resolved = resolveTestDeck(body.botDeckPath);
             if (!resolved) {
@@ -3008,6 +3248,9 @@ export function startWebSocketSimulator(opts: {
           }
         } catch {
           // ignore parse errors; use defaults
+        }
+        if (sessionId) {
+          await activateWorkspaceDeck(sessionId);
         }
         if (deckInput === undefined) {
           try {
@@ -3199,6 +3442,20 @@ export function startWebSocketSimulator(opts: {
             { status: 400, headers: { "content-type": "application/json" } },
           );
         }
+        const existingSessionState = sessionId
+          ? readSessionState(sessionId)
+          : undefined;
+        const workspaceRecord = sessionId
+          ? resolveWorkspaceRecord(sessionId) ?? {
+            id: sessionId,
+            rootDir: path.dirname(resolvedDeckPath),
+            rootDeckPath: resolvedDeckPath,
+            createdAt: new Date().toISOString(),
+          }
+          : undefined;
+        if (workspaceRecord && !resolveWorkspaceRecord(sessionId)) {
+          registerWorkspace(workspaceRecord);
+        }
         const run = startTestBotRun({
           maxTurnsOverride,
           deckInput,
@@ -3207,6 +3464,10 @@ export function startWebSocketSimulator(opts: {
           botDeckPath: botDeckSelection.path,
           initFill: initFillInfo,
           initFillTrace,
+          sessionId,
+          workspaceRecord,
+          baseMeta: existingSessionState?.meta as Record<string, unknown> ??
+            undefined,
         });
         return new Response(
           JSON.stringify({ run }),
@@ -3241,6 +3502,9 @@ export function startWebSocketSimulator(opts: {
         const sessionId = typeof payload.sessionId === "string"
           ? payload.sessionId
           : undefined;
+        if (sessionId) {
+          await activateWorkspaceDeck(sessionId);
+        }
         let savedState = sessionId
           ? readSessionState(sessionId, { withTraces: true })
           : undefined;
@@ -3258,6 +3522,23 @@ export function startWebSocketSimulator(opts: {
             : savedState.runId;
         }
         runId = runId ?? randomId("testbot");
+        const workspaceRecord = sessionId
+          ? resolveWorkspaceRecord(sessionId) ?? {
+            id: sessionId,
+            rootDir: path.dirname(resolvedDeckPath),
+            rootDeckPath: resolvedDeckPath,
+            createdAt: new Date().toISOString(),
+          }
+          : undefined;
+        if (workspaceRecord && !resolveWorkspaceRecord(sessionId)) {
+          registerWorkspace(workspaceRecord);
+        }
+        const workspaceMeta = workspaceRecord
+          ? buildWorkspaceMeta(
+            workspaceRecord,
+            savedState?.meta as Record<string, unknown> ?? {},
+          )
+          : (savedState?.meta ?? {});
         const existingEntry = testBotRuns.get(runId);
         if (existingEntry?.promise) {
           return new Response(
@@ -3429,12 +3710,13 @@ export function startWebSocketSimulator(opts: {
                 onStateUpdate: (state) => {
                   if (isAborted()) return;
                   const nextMeta = {
-                    ...(savedState?.meta ?? {}),
+                    ...workspaceMeta,
                     ...(state.meta ?? {}),
                     testBot: true,
                     testBotRunId: runId,
                     testBotConfigPath: botConfigPath,
                     testBotName,
+                    ...(sessionId ? { sessionId } : {}),
                   };
                   const enriched = persistSessionState({
                     ...state,
@@ -3517,6 +3799,9 @@ export function startWebSocketSimulator(opts: {
       if (url.pathname === "/api/test/status") {
         const runId = url.searchParams.get("runId") ?? undefined;
         const sessionId = url.searchParams.get("sessionId") ?? undefined;
+        if (sessionId) {
+          await activateWorkspaceDeck(sessionId);
+        }
         let entry = runId ? testBotRuns.get(runId) : undefined;
         if (!entry && sessionId) {
           for (const candidate of testBotRuns.values()) {
@@ -3635,16 +3920,23 @@ export function startWebSocketSimulator(opts: {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
         }
-        const runId = url.searchParams.get("runId") ?? undefined;
-        const entry = runId ? buildBotRuns.get(runId) : undefined;
-        const storedRun = runId && !entry ? readBuildRun(runId) : undefined;
-        const run = entry?.run ?? storedRun ?? {
-          id: runId ?? "",
-          status: "idle",
-          messages: [],
-          traces: [],
-          toolInserts: [],
-        };
+        const workspaceId = url.searchParams.get("workspaceId") ??
+          url.searchParams.get("runId") ??
+          activeWorkspaceId ??
+          undefined;
+        const entry = workspaceId ? buildBotRuns.get(workspaceId) : undefined;
+        const workspaceState = workspaceId
+          ? readSessionState(workspaceId, { withTraces: true })
+          : undefined;
+        const run = workspaceId
+          ? entry?.run ?? buildRunFromWorkspace(workspaceId, workspaceState)
+          : {
+            id: "",
+            status: "idle",
+            messages: [],
+            traces: [],
+            toolInserts: [],
+          };
         return new Response(JSON.stringify({ run }), {
           headers: { "content-type": "application/json" },
         });
@@ -3654,20 +3946,28 @@ export function startWebSocketSimulator(opts: {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
-        let runId: string | undefined = undefined;
+        let workspaceId: string | undefined = undefined;
         try {
-          const body = await req.json() as { runId?: string };
-          if (typeof body.runId === "string") runId = body.runId;
+          const body = await req.json() as {
+            runId?: string;
+            workspaceId?: string;
+          };
+          if (typeof body.workspaceId === "string") {
+            workspaceId = body.workspaceId;
+          }
+          if (typeof body.runId === "string" && !workspaceId) {
+            workspaceId = body.runId;
+          }
         } catch {
           // ignore
         }
-        if (!runId) {
+        if (!workspaceId) {
           return new Response(
-            JSON.stringify({ error: "Missing runId" }),
+            JSON.stringify({ error: "Missing workspaceId" }),
             { status: 400, headers: { "content-type": "application/json" } },
           );
         }
-        const entry = buildBotRuns.get(runId);
+        const entry = buildBotRuns.get(workspaceId);
         if (entry?.abort) {
           entry.abort.abort();
         }
@@ -3677,13 +3977,24 @@ export function startWebSocketSimulator(opts: {
           }
           entry.run.finishedAt = entry.run.finishedAt ??
             new Date().toISOString();
-          persistBuildRun(entry.run);
+          const state = readSessionState(workspaceId);
+          if (state) {
+            persistSessionState({
+              ...state,
+              meta: {
+                ...(state.meta ?? {}),
+                buildStatus: entry.run.status,
+                buildFinishedAt: entry.run.finishedAt,
+                buildError: entry.run.error,
+              },
+            });
+          }
         }
-        buildBotRuns.delete(runId);
+        buildBotRuns.delete(workspaceId);
         broadcastBuildBot({
           type: "buildBotStatus",
           run: {
-            id: runId,
+            id: workspaceId,
             status: "idle",
             messages: [],
             traces: [],
@@ -3701,6 +4012,7 @@ export function startWebSocketSimulator(opts: {
         }
         let payload: {
           runId?: unknown;
+          workspaceId?: unknown;
           message?: unknown;
           model?: unknown;
           modelForce?: unknown;
@@ -3710,18 +4022,30 @@ export function startWebSocketSimulator(opts: {
         } catch {
           // ignore
         }
-        const runId = typeof payload.runId === "string" ? payload.runId : "";
-        if (!runId) {
-          return new Response(
-            JSON.stringify({ error: "Missing runId" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
+        let workspaceId = typeof payload.workspaceId === "string"
+          ? payload.workspaceId
+          : typeof payload.runId === "string"
+          ? payload.runId
+          : activeWorkspaceId ?? undefined;
+        if (!workspaceId) {
+          const created = await createWorkspaceSession();
+          workspaceId = created.id;
         }
         const message = typeof payload.message === "string"
           ? payload.message
           : "";
 
-        const existingEntry = buildBotRuns.get(runId);
+        const workspaceRecord = resolveWorkspaceRecord(workspaceId) ?? {
+          id: workspaceId,
+          rootDir: path.dirname(resolvedDeckPath),
+          rootDeckPath: resolvedDeckPath,
+          createdAt: new Date().toISOString(),
+        };
+        if (!resolveWorkspaceRecord(workspaceId)) {
+          registerWorkspace(workspaceRecord);
+        }
+
+        const existingEntry = buildBotRuns.get(workspaceId);
         if (existingEntry?.promise) {
           return new Response(
             JSON.stringify({ error: "Run already in progress" }),
@@ -3731,7 +4055,7 @@ export function startWebSocketSimulator(opts: {
 
         const entry = existingEntry ?? {
           run: {
-            id: runId,
+            id: workspaceId,
             status: "idle",
             messages: [],
             traces: [],
@@ -3741,15 +4065,16 @@ export function startWebSocketSimulator(opts: {
           promise: null,
           abort: null,
         };
-        buildBotRuns.set(runId, entry);
+        buildBotRuns.set(workspaceId, entry);
 
-        if (!entry.state && (entry.run.messages?.length ?? 0) > 0) {
-          return new Response(
-            JSON.stringify({
-              error: "Run history loaded without resumable state",
-            }),
-            { status: 409, headers: { "content-type": "application/json" } },
-          );
+        if (!entry.state) {
+          const workspaceState = readSessionState(workspaceId, {
+            withTraces: true,
+          });
+          const buildChat = extractBuildChatState(workspaceState);
+          if (buildChat) {
+            entry.state = buildChat;
+          }
         }
 
         const run = entry.run;
@@ -3760,21 +4085,47 @@ export function startWebSocketSimulator(opts: {
           syncBuildBotRunFromState(run, entry.state);
         }
         broadcastBuildBot({ type: "buildBotStatus", run });
-        persistBuildRun(run);
+        const workspaceBaseState = readSessionState(workspaceId) ?? {
+          runId: workspaceId,
+          messages: [],
+          meta: {},
+        };
+        persistSessionState({
+          ...workspaceBaseState,
+          meta: {
+            ...buildWorkspaceMeta(
+              workspaceRecord,
+              workspaceBaseState.meta ?? {},
+            ),
+            buildStatus: run.status,
+            buildStartedAt: run.startedAt,
+          },
+        });
 
         const controller = new AbortController();
         entry.abort = controller;
         const isAborted = () => controller.signal.aborted;
 
         const botDeckUrl = new URL(
-          "./decks/gambit-bot.deck.md",
+          "./decks/gambit-bot/PROMPT.md",
           import.meta.url,
         );
         if (botDeckUrl.protocol !== "file:") {
           run.status = "error";
           run.error = "Unable to resolve Gambit Bot deck path";
           broadcastBuildBot({ type: "buildBotStatus", run });
-          persistBuildRun(run);
+          const state = readSessionState(workspaceId);
+          if (state) {
+            persistSessionState({
+              ...state,
+              meta: {
+                ...(state.meta ?? {}),
+                buildStatus: "error",
+                buildError: run.error,
+                buildFinishedAt: new Date().toISOString(),
+              },
+            });
+          }
           return new Response(
             JSON.stringify({ error: run.error }),
             { status: 500, headers: { "content-type": "application/json" } },
@@ -3784,13 +4135,24 @@ export function startWebSocketSimulator(opts: {
 
         let botRoot: string;
         try {
-          botRoot = await resolveBuildBotRoot();
+          botRoot = await resolveBuildBotRoot(workspaceId);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           run.status = "error";
           run.error = msg;
           broadcastBuildBot({ type: "buildBotStatus", run });
-          persistBuildRun(run);
+          const state = readSessionState(workspaceId);
+          if (state) {
+            persistSessionState({
+              ...state,
+              meta: {
+                ...(state.meta ?? {}),
+                buildStatus: "error",
+                buildError: msg,
+                buildFinishedAt: new Date().toISOString(),
+              },
+            });
+          }
           return new Response(
             JSON.stringify({ error: msg }),
             { status: 400, headers: { "content-type": "application/json" } },
@@ -3813,8 +4175,22 @@ export function startWebSocketSimulator(opts: {
           syncBuildBotRunFromState(run, state);
           run.traces = Array.isArray(state.traces) ? [...state.traces] : [];
           broadcastBuildBot({ type: "buildBotStatus", run });
-          persistBuildRun(run);
-          persistBuildRunState(runId, state);
+          const base = readSessionState(workspaceId) ?? {
+            runId: workspaceId,
+            messages: [],
+            meta: {},
+          };
+          persistSessionState({
+            ...base,
+            meta: {
+              ...buildWorkspaceMeta(workspaceRecord, base.meta ?? {}),
+              buildStatus: run.status,
+              buildStartedAt: run.startedAt,
+              buildFinishedAt: run.finishedAt,
+              buildError: run.error,
+              buildChat: state,
+            },
+          });
         };
 
         entry.promise = (async () => {
@@ -3854,7 +4230,7 @@ export function startWebSocketSimulator(opts: {
                 onStreamText: (chunk) =>
                   broadcastBuildBot({
                     type: "buildBotStream",
-                    runId,
+                    runId: workspaceId,
                     role: "assistant",
                     chunk,
                     turn,
@@ -3864,7 +4240,7 @@ export function startWebSocketSimulator(opts: {
               if (shouldStream) {
                 broadcastBuildBot({
                   type: "buildBotStreamEnd",
-                  runId,
+                  runId: workspaceId,
                   role: "assistant",
                   turn,
                   ts: Date.now(),
@@ -3898,6 +4274,23 @@ export function startWebSocketSimulator(opts: {
             run.finishedAt = new Date().toISOString();
             entry.abort = null;
             entry.promise = null;
+            const base = readSessionState(workspaceId) ?? {
+              runId: workspaceId,
+              messages: [],
+              meta: {},
+            };
+            const buildChatState = entry.state ?? extractBuildChatState(base);
+            persistSessionState({
+              ...base,
+              meta: {
+                ...buildWorkspaceMeta(workspaceRecord, base.meta ?? {}),
+                buildStatus: run.status,
+                buildStartedAt: run.startedAt,
+                buildFinishedAt: run.finishedAt,
+                buildError: run.error,
+                buildChat: buildChatState ?? undefined,
+              },
+            });
             try {
               reloadPrimaryDeck();
             } catch (err) {
@@ -3908,7 +4301,6 @@ export function startWebSocketSimulator(opts: {
               );
             }
             broadcastBuildBot({ type: "buildBotStatus", run });
-            persistBuildRun(run);
             if (prevBotRoot === undefined) {
               try {
                 Deno.env.delete("GAMBIT_BOT_ROOT");
@@ -3931,7 +4323,10 @@ export function startWebSocketSimulator(opts: {
           return new Response("Method not allowed", { status: 405 });
         }
         try {
-          const root = await resolveBuildBotRoot();
+          const workspaceId = url.searchParams.get("workspaceId") ??
+            activeWorkspaceId ??
+            undefined;
+          const root = await resolveBuildBotRoot(workspaceId);
           const entries = await listBuildBotFiles(root);
           return new Response(JSON.stringify({ root, entries }), {
             headers: { "content-type": "application/json" },
@@ -3957,7 +4352,10 @@ export function startWebSocketSimulator(opts: {
           });
         }
         try {
-          const root = await resolveBuildBotRoot();
+          const workspaceId = url.searchParams.get("workspaceId") ??
+            activeWorkspaceId ??
+            undefined;
+          const root = await resolveBuildBotRoot(workspaceId);
           const resolved = await resolveBuildBotPath(root, inputPath);
           if (!resolved.stat.isFile) {
             return new Response(
@@ -4747,7 +5145,10 @@ export function startWebSocketSimulator(opts: {
         await deckLoadPromise.catch(() => null);
         const resolvedLabel = deckLabel ?? toDeckLabel(resolvedDeckPath);
         return new Response(
-          simulatorReactHtml(resolvedDeckPath, resolvedLabel),
+          simulatorReactHtml(resolvedDeckPath, resolvedLabel, {
+            workspaceId: activeWorkspaceId ?? null,
+            onboarding: activeWorkspaceOnboarding,
+          }),
           {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
@@ -4755,6 +5156,10 @@ export function startWebSocketSimulator(opts: {
       }
 
       if (url.pathname === "/schema") {
+        const sessionId = url.searchParams.get("sessionId") ?? undefined;
+        if (sessionId) {
+          await activateWorkspaceDeck(sessionId);
+        }
         const desc = await schemaPromise;
         const deck = await deckLoadPromise.catch(() => null);
         const modelParams = deck && typeof deck === "object"
@@ -4863,6 +5268,31 @@ export function startWebSocketSimulator(opts: {
           headers: { "content-type": "application/json; charset=utf-8" },
         });
       }
+      if (url.pathname === "/api/workspace/new") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspace = await createWorkspaceSession();
+          await activateWorkspaceDeck(workspace.id);
+          return new Response(
+            JSON.stringify({
+              workspaceId: workspace.id,
+              deckPath: workspace.rootDeckPath,
+              workspaceDir: workspace.rootDir,
+              createdAt: workspace.createdAt,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          return new Response(
+            JSON.stringify({
+              error: err instanceof Error ? err.message : String(err),
+            }),
+            { status: 500, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
       if (url.pathname === "/api/build/runs") {
         const runs = listBuildRuns();
         return new Response(JSON.stringify({ runs }), {
@@ -4874,35 +5304,32 @@ export function startWebSocketSimulator(opts: {
           return new Response("Method not allowed", { status: 405 });
         }
         try {
-          const body = await req.json() as { runId?: string };
-          if (!body.runId || !isSafeRunId(body.runId)) {
-            throw new Error("Missing runId");
+          const body = await req.json() as {
+            runId?: string;
+            workspaceId?: string;
+          };
+          const workspaceId = body.workspaceId ?? body.runId ?? "";
+          if (!workspaceId || !isSafeRunId(workspaceId)) {
+            throw new Error("Missing workspaceId");
           }
-          const saved = readBuildRun(body.runId);
-          if (!saved) {
+          const state = readSessionState(workspaceId, { withTraces: true });
+          if (!state) {
             return new Response(
-              JSON.stringify({ error: "Run not found" }),
+              JSON.stringify({ error: "Workspace not found" }),
               { status: 404, headers: { "content-type": "application/json" } },
             );
           }
-          const savedState = readBuildRunState(body.runId);
-          const hydratedState = savedState
-            ? {
-              ...savedState,
-              traces: Array.isArray(saved.traces)
-                ? [...saved.traces]
-                : savedState.traces,
-            }
-            : null;
+          const buildChat = extractBuildChatState(state);
+          const run = buildRunFromWorkspace(workspaceId, state);
           const entry: BuildBotRunEntry = {
-            run: saved,
-            state: hydratedState,
+            run,
+            state: buildChat,
             promise: null,
             abort: null,
           };
-          buildBotRuns.set(body.runId, entry);
-          broadcastBuildBot({ type: "buildBotStatus", run: saved });
-          return new Response(JSON.stringify({ run: saved }), {
+          buildBotRuns.set(workspaceId, entry);
+          broadcastBuildBot({ type: "buildBotStatus", run });
+          return new Response(JSON.stringify({ run }), {
             headers: { "content-type": "application/json" },
           });
         } catch (err) {
@@ -5045,16 +5472,21 @@ async function readRemoteBundle(
   }
 }
 
-function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
+function simulatorReactHtml(
+  deckPath: string,
+  deckLabel?: string,
+  opts?: { workspaceId?: string | null; onboarding?: boolean },
+): string {
   const safeDeckPath = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const safeDeckLabel =
     deckLabel?.replaceAll("<", "&lt;").replaceAll(">", "&gt;") ?? null;
   const buildTabEnabled = (() => {
-    const raw = Deno.env.get("GAMBIT_SIMULATOR_BUILD_TAB") ?? "";
+    const raw = Deno.env.get("GAMBIT_SIMULATOR_BUILD_TAB");
+    if (raw === undefined) return true;
     const normalized = raw.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" ||
-      normalized === "yes" ||
-      normalized === "on";
+    return !(normalized === "0" || normalized === "false" ||
+      normalized === "no" ||
+      normalized === "off");
   })();
   const chatAccordionEnabled = (() => {
     const raw = Deno.env.get("GAMBIT_SIMULATOR_CHAT_ACCORDION");
@@ -5076,6 +5508,8 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
   const bundleUrl = bundleStamp
     ? `/ui/bundle.js?v=${bundleStamp}`
     : "/ui/bundle.js";
+  const workspaceId = opts?.workspaceId ?? null;
+  const workspaceOnboarding = Boolean(opts?.onboarding);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -5097,6 +5531,12 @@ function simulatorReactHtml(deckPath: string, deckLabel?: string): string {
     window.__GAMBIT_CHAT_ACCORDION_ENABLED__ = ${
     JSON.stringify(
       chatAccordionEnabled,
+    )
+  };
+    window.__GAMBIT_WORKSPACE_ID__ = ${JSON.stringify(workspaceId)};
+    window.__GAMBIT_WORKSPACE_ONBOARDING__ = ${
+    JSON.stringify(
+      workspaceOnboarding,
     )
   };
   </script>

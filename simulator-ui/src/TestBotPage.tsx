@@ -138,7 +138,7 @@ export default function TestBotPage(props: {
       text: string;
     } | null
   >(null);
-  const deckSchema = useHttpSchema();
+  const deckSchema = useHttpSchema({ sessionId: activeSessionId });
   const deckInputSchema = deckSchema.schemaResponse?.schema;
   const deckSchemaDefaults = deckSchema.schemaResponse?.defaults;
   const deckSchemaError = deckSchema.schemaResponse?.error ??
@@ -174,6 +174,7 @@ export default function TestBotPage(props: {
     const fetchTestBotConfig = async (deckId?: string) => {
       const params = new URLSearchParams();
       if (deckId) params.set("deckPath", deckId);
+      if (activeSessionId) params.set("sessionId", activeSessionId);
       const query = params.toString() ? `?${params.toString()}` : "";
       return fetch(`/api/test${query}`);
     };
@@ -238,7 +239,7 @@ export default function TestBotPage(props: {
     } catch (err) {
       console.error(err);
     }
-  }, [deckStorageKey]);
+  }, [activeSessionId, deckStorageKey]);
 
   useEffect(() => {
     loadTestBot();
@@ -464,6 +465,12 @@ export default function TestBotPage(props: {
       : deriveInitialFromSchema(botInputSchema);
     setBotInputValue(nextBotInput);
   }, [botInputSchema, botInputDirty, botInputDefaults]);
+
+  useEffect(() => {
+    if (run.status === "error" && run.error) {
+      console.error("[test-bot] run error (state)", run.error);
+    }
+  }, [run.error, run.status]);
 
   const missingBotInput = useMemo(() => {
     if (!botInputSchema) return [];
@@ -721,6 +728,7 @@ export default function TestBotPage(props: {
         initFill: missingDeckInit.length > 0
           ? { missing: missingDeckInit }
           : undefined,
+        sessionId: activeSessionId ?? undefined,
       };
       const res = await fetch("/api/test/run", {
         method: "POST",
@@ -745,9 +753,13 @@ export default function TestBotPage(props: {
             data.sessionPath,
           );
         }
+        const errorMessage = typeof data.error === "string"
+          ? data.error
+          : res.statusText;
+        console.error("[test-bot] run error", errorMessage);
         setRun({
           status: "error",
-          error: typeof data.error === "string" ? data.error : res.statusText,
+          error: errorMessage,
           initFill: data.initFill,
           messages: [],
           traces: [],
@@ -774,7 +786,10 @@ export default function TestBotPage(props: {
           toolInserts: [],
         });
       }
-      refreshStatus({ runId: data.run?.id });
+      refreshStatus({
+        runId: data.run?.id,
+        sessionId: activeSessionId ?? undefined,
+      });
     } catch (err) {
       allowRunSessionNavRef.current = false;
       console.error(err);
@@ -786,6 +801,7 @@ export default function TestBotPage(props: {
     refreshStatus,
     selectedDeckId,
     missingDeckInit,
+    activeSessionId,
   ]);
 
   const stopRun = useCallback(async () => {
@@ -975,7 +991,7 @@ export default function TestBotPage(props: {
       const payload: Record<string, unknown> = {
         message: "",
         runId: nextRunId,
-        sessionId: run.sessionId,
+        sessionId: run.sessionId ?? activeSessionId ?? undefined,
         botDeckPath: selectedDeckId ?? undefined,
       };
       if (!run.sessionId) {
@@ -1015,6 +1031,7 @@ export default function TestBotPage(props: {
     run.id,
     run.sessionId,
     selectedDeckId,
+    activeSessionId,
   ]);
 
   const handleSendChat = useCallback(async () => {
@@ -1042,7 +1059,7 @@ export default function TestBotPage(props: {
       const payload: Record<string, unknown> = {
         message,
         runId: nextRunId,
-        sessionId: run.sessionId,
+        sessionId: run.sessionId ?? activeSessionId ?? undefined,
         botDeckPath: selectedDeckId ?? undefined,
       };
       if (!run.sessionId) {
@@ -1082,6 +1099,7 @@ export default function TestBotPage(props: {
     run.sessionId,
     run.status,
     selectedDeckId,
+    activeSessionId,
   ]);
 
   return (
@@ -1121,11 +1139,9 @@ export default function TestBotPage(props: {
             )}
             {testDecks.length === 0 && (
               <div className="placeholder">
-                No deck-defined personas found. Add <code>[[scenarios]]</code>
-                {" "}
-                (or legacy{" "}
-                <code>[[testDecks]]</code>) to your deck front matter to drive
-                the Test Bot.
+                No scenarios found in the workspace root deck. Add{" "}
+                <code>[[scenarios]]</code> to <code>PROMPT.md</code>{" "}
+                (prefer the Build tab) to enable Test runs.
               </div>
             )}
             {botDescription && (

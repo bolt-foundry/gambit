@@ -217,61 +217,51 @@ Deno.test("build bot endpoint streams status and runs", async () => {
     },
   };
 
-  const prevFlag = Deno.env.get("GAMBIT_SIMULATOR_BUILD_TAB");
-  Deno.env.set("GAMBIT_SIMULATOR_BUILD_TAB", "1");
-  try {
-    const server = startWebSocketSimulator({
-      deckPath,
-      modelProvider: provider,
-      port: 0,
-    });
-    const port = (server.addr as Deno.NetAddr).port;
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
 
-    const homepage = await fetch(`http://127.0.0.1:${port}/build`);
-    const html = await homepage.text();
-    assert(html.includes("__GAMBIT_BUILD_TAB_ENABLED__"));
+  const homepage = await fetch(`http://127.0.0.1:${port}/build`);
+  const html = await homepage.text();
+  assert(html.includes("__GAMBIT_BUILD_TAB_ENABLED__"));
 
-    const runId = "test-build-run";
-    const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runId, message: "" }),
-    });
-    const body = await res.json().catch(() => ({})) as {
-      run?: { id?: string; status?: string };
-      error?: string;
+  const runId = "test-build-run";
+  const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ runId, message: "" }),
+  });
+  const body = await res.json().catch(() => ({})) as {
+    run?: { id?: string; status?: string };
+    error?: string;
+  };
+  assertEquals(res.ok, true);
+  assertEquals(body.run?.id, runId);
+
+  let status: unknown = null;
+  for (let i = 0; i < 20; i += 1) {
+    const sres = await fetch(
+      `http://127.0.0.1:${port}/api/build/status?runId=${
+        encodeURIComponent(runId)
+      }`,
+    );
+    const sb = await sres.json().catch(() => ({})) as {
+      run?: { status?: string; messages?: Array<{ content?: string }> };
     };
-    assertEquals(res.ok, true);
-    assertEquals(body.run?.id, runId);
-
-    let status: unknown = null;
-    for (let i = 0; i < 20; i += 1) {
-      const sres = await fetch(
-        `http://127.0.0.1:${port}/api/build/status?runId=${
-          encodeURIComponent(runId)
-        }`,
-      );
-      const sb = await sres.json().catch(() => ({})) as {
-        run?: { status?: string; messages?: Array<{ content?: string }> };
-      };
-      status = sb.run?.status ?? null;
-      if (sb.run?.status === "completed") {
-        assert((sb.run.messages?.[0]?.content ?? "").length > 0);
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 50));
+    status = sb.run?.status ?? null;
+    if (sb.run?.status === "completed") {
+      assert((sb.run.messages?.[0]?.content ?? "").length > 0);
+      break;
     }
-    assertEquals(status, "completed");
-
-    await server.shutdown();
-    await server.finished;
-  } finally {
-    if (prevFlag === undefined) {
-      Deno.env.delete("GAMBIT_SIMULATOR_BUILD_TAB");
-    } else {
-      Deno.env.set("GAMBIT_SIMULATOR_BUILD_TAB", prevFlag);
-    }
+    await new Promise((r) => setTimeout(r, 50));
   }
+  assertEquals(status, "completed");
+
+  await server.shutdown();
+  await server.finished;
 });
 
 Deno.test("simulator appends feedback log entries", async () => {

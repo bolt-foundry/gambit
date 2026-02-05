@@ -268,6 +268,7 @@ export const SESSIONS_BASE_PATH = "/sessions";
 export const DOCS_PATH = "/docs";
 export const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
 export const DEFAULT_TEST_PATH = `${SESSIONS_BASE_PATH}/new/test`;
+export const DEFAULT_BUILD_PATH = `${SESSIONS_BASE_PATH}/new/build`;
 export const GRADE_PATH_SUFFIX = "/grade";
 export const buildGradePath = (sessionId: string) =>
   `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}${GRADE_PATH_SUFFIX}`;
@@ -281,6 +282,13 @@ export const buildTabEnabled = Boolean(
   (window as unknown as { __GAMBIT_BUILD_TAB_ENABLED__?: boolean })
     .__GAMBIT_BUILD_TAB_ENABLED__,
 );
+export const workspaceOnboardingEnabled = Boolean(
+  (window as unknown as { __GAMBIT_WORKSPACE_ONBOARDING__?: boolean })
+    .__GAMBIT_WORKSPACE_ONBOARDING__,
+);
+export const workspaceIdFromWindow = (
+  window as unknown as { __GAMBIT_WORKSPACE_ID__?: string | null }
+).__GAMBIT_WORKSPACE_ID__ ?? null;
 export const chatAccordionEnabled = Boolean(
   (window as unknown as { __GAMBIT_CHAT_ACCORDION_ENABLED__?: boolean })
     .__GAMBIT_CHAT_ACCORDION_ENABLED__,
@@ -608,7 +616,7 @@ export function getSessionIdFromPath(
     : window.location.pathname;
   const normalizedTarget = target.replace(/\/+$/, "");
   const canonical = normalizedTarget.match(
-    /^\/sessions\/([^/]+)(?:\/(debug|grade|test))?$/,
+    /^\/sessions\/([^/]+)(?:\/(debug|grade|test|build))?$/,
   );
   if (canonical) {
     const id = canonical[1];
@@ -1116,6 +1124,12 @@ export function normalizeAppPath(input: string): string {
     }
     return DEFAULT_TEST_PATH;
   }
+  if (trimmed === "/build") {
+    if (window.location.pathname !== DEFAULT_BUILD_PATH) {
+      window.history.replaceState({}, "", DEFAULT_BUILD_PATH);
+    }
+    return DEFAULT_BUILD_PATH;
+  }
   if (
     trimmed === "/debug" || trimmed === "/simulate" ||
     trimmed === SESSIONS_BASE_PATH
@@ -1125,7 +1139,7 @@ export function normalizeAppPath(input: string): string {
     }
     return DEFAULT_SESSION_PATH;
   }
-  if (/^\/sessions\/[^/]+\/(debug|test|grade)$/.test(trimmed)) {
+  if (/^\/sessions\/[^/]+\/(debug|test|grade|build)$/.test(trimmed)) {
     return trimmed;
   }
   if (/^\/sessions\/[^/]+\/grade/.test(trimmed)) {
@@ -1140,7 +1154,8 @@ export function normalizeAppPath(input: string): string {
   }
   if (
     trimmed.startsWith("/sessions/") && !trimmed.includes("/debug") &&
-    trimmed !== DEFAULT_SESSION_PATH
+    !trimmed.includes("/test") && !trimmed.includes("/grade") &&
+    !trimmed.includes("/build") && trimmed !== DEFAULT_SESSION_PATH
   ) {
     const remainder = trimmed.slice("/sessions/".length);
     if (remainder && remainder !== "new") {

@@ -67,9 +67,13 @@ type BuildChatContextValue = {
 const BuildChatContext = createContext<BuildChatContextValue | null>(null);
 
 export function BuildChatProvider(
-  props: { children: React.ReactNode },
+  props: {
+    children: React.ReactNode;
+    workspaceId?: string | null;
+    onWorkspaceChange?: (workspaceId: string) => void;
+  },
 ) {
-  const { children } = props;
+  const { children, workspaceId, onWorkspaceChange } = props;
   const [run, setRun] = useState<BuildRun>({
     id: "",
     status: "idle",
@@ -92,8 +96,10 @@ export function BuildChatProvider(
     { runId: string; turn: number; text: string } | null
   >(null);
 
-  const refreshStatus = useCallback(async (opts?: { runId?: string }) => {
-    const query = opts?.runId ? `?runId=${encodeURIComponent(opts.runId)}` : "";
+  const refreshStatus = useCallback(async (opts?: { workspaceId?: string }) => {
+    const query = opts?.workspaceId
+      ? `?workspaceId=${encodeURIComponent(opts.workspaceId)}`
+      : "";
     const res = await fetch(`/api/build/status${query}`);
     const data = await res.json().catch(() => ({})) as { run?: BuildRun };
     if (data.run) {
@@ -107,11 +113,31 @@ export function BuildChatProvider(
         runIdRef.current = data.run.id;
       }
     }
-  }, []);
+  }, [onWorkspaceChange]);
 
   useEffect(() => {
+    if (workspaceId) {
+      runIdRef.current = workspaceId;
+      refreshStatus({ workspaceId }).catch(() => {});
+      return;
+    }
     refreshStatus().catch(() => {});
-  }, [refreshStatus]);
+  }, [refreshStatus, workspaceId]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (runIdRef.current === workspaceId) return;
+    runIdRef.current = workspaceId;
+    setRun((prev) => ({
+      ...prev,
+      id: workspaceId,
+    }));
+    setChatError(null);
+    setStreamingAssistant(null);
+    setOptimisticUser(null);
+    setToolCallsOpen({});
+    refreshStatus({ workspaceId }).catch(() => {});
+  }, [refreshStatus, workspaceId]);
 
   useEffect(() => {
     const streamId = BUILD_STREAM_ID;
@@ -182,17 +208,51 @@ export function BuildChatProvider(
     [run.traces],
   );
 
-  const ensureRunId = useCallback(() => {
+  const ensureWorkspaceId = useCallback(async () => {
+    if (workspaceId) return workspaceId;
     if (runIdRef.current) return runIdRef.current;
-    const next = `build-ui-${crypto.randomUUID()}`;
-    runIdRef.current = next;
-    setRun((prev) => ({ ...prev, id: next }));
-    return next;
-  }, []);
+    try {
+      const res = await fetch("/api/workspace/new", {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({})) as {
+        workspaceId?: string;
+      };
+      if (res.ok && typeof data.workspaceId === "string") {
+        const nextWorkspaceId = data.workspaceId;
+        runIdRef.current = nextWorkspaceId;
+        setRun((prev) => ({ ...prev, id: nextWorkspaceId }));
+        onWorkspaceChange?.(nextWorkspaceId);
+        return nextWorkspaceId;
+      }
+    } catch {
+      // ignore
+    }
+    const fallback = `workspace-${crypto.randomUUID()}`;
+    runIdRef.current = fallback;
+    setRun((prev) => ({ ...prev, id: fallback }));
+    return fallback;
+  }, [onWorkspaceChange, workspaceId]);
 
   const resetChat = useCallback(async () => {
-    const runId = runIdRef.current;
-    if (!runId) {
+    const res = await fetch("/api/workspace/new", { method: "POST" }).catch(
+      () => null,
+    );
+    const data = res
+      ? await res.json().catch(() => ({})) as { workspaceId?: string }
+      : {};
+    if (res && res.ok && typeof data.workspaceId === "string") {
+      runIdRef.current = data.workspaceId;
+      setRun({
+        id: data.workspaceId,
+        status: "idle",
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      });
+      onWorkspaceChange?.(data.workspaceId);
+    } else {
+      runIdRef.current = "";
       setRun({
         id: "",
         status: "idle",
@@ -200,42 +260,23 @@ export function BuildChatProvider(
         traces: [],
         toolInserts: [],
       });
-      setChatDraft("");
-      setChatError(null);
-      setStreamingAssistant(null);
-      setOptimisticUser(null);
-      setToolCallsOpen({});
-      return;
     }
-    await fetch("/api/build/reset", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runId }),
-    }).catch(() => {});
-    runIdRef.current = "";
-    setRun({
-      id: "",
-      status: "idle",
-      messages: [],
-      traces: [],
-      toolInserts: [],
-    });
     setChatDraft("");
     setChatError(null);
     setStreamingAssistant(null);
     setOptimisticUser(null);
     setToolCallsOpen({});
-  }, []);
+  }, [onWorkspaceChange]);
 
   const sendMessage = useCallback(async (message: string) => {
-    const runId = ensureRunId();
+    const runId = await ensureWorkspaceId();
     setChatSending(true);
     setChatError(null);
     try {
       const res = await fetch("/api/build/message", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId, message }),
+        body: JSON.stringify({ workspaceId: runId, message }),
       });
       const data = await res.json().catch(() => ({})) as {
         run?: BuildRun;
@@ -260,7 +301,7 @@ export function BuildChatProvider(
     } finally {
       setChatSending(false);
     }
-  }, [ensureRunId]);
+  }, [ensureWorkspaceId]);
 
   const loadChat = useCallback(async (runId: string) => {
     setChatSending(true);
@@ -269,7 +310,7 @@ export function BuildChatProvider(
       const res = await fetch("/api/build/load", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId }),
+        body: JSON.stringify({ workspaceId: runId }),
       });
       const data = await res.json().catch(() => ({})) as {
         run?: BuildRun;
@@ -289,6 +330,9 @@ export function BuildChatProvider(
         });
         if (typeof data.run.id === "string" && data.run.id) {
           runIdRef.current = data.run.id;
+        }
+        if (typeof data.run.id === "string" && data.run.id) {
+          onWorkspaceChange?.(data.run.id);
         }
         setChatDraft("");
         setOptimisticUser(null);

@@ -34,7 +34,7 @@ export type ConversationMessage = {
   respond?: RespondInfo;
 };
 
-export function useHttpSchema() {
+export function useHttpSchema(opts?: { sessionId?: string | null }) {
   const [schemaResponse, setSchemaResponse] = useState<SchemaResponse | null>(
     null,
   );
@@ -45,7 +45,10 @@ export function useHttpSchema() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/schema");
+      const params = new URLSearchParams();
+      if (opts?.sessionId) params.set("sessionId", opts.sessionId);
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(`/schema${query}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as SchemaResponse;
       setSchemaResponse(data);
@@ -54,7 +57,7 @@ export function useHttpSchema() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [opts?.sessionId]);
 
   useEffect(() => {
     refresh();
