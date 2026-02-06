@@ -28,7 +28,7 @@ Process:
 
 1. Ask for the bot's purpose and 2-3 example user prompts.
 2. Draft a Deck Format 1.0 root deck in the project root with `PROMPT.md` (and
-   optional `INTENT.md` + `POLICY.md` if helpful).
+   optional `INTENT.md` + `policy/*.md` if helpful).
 3. Create a starter scenario deck at `scenarios/default/PROMPT.md` that
    exercises the primary intent and uses the default plain chat schemas.
 4. Create a starter grader deck at `graders/default/PROMPT.md` that checks the

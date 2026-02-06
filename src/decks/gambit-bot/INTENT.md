@@ -17,7 +17,8 @@
 
 ## Constraints
 
-- `PROMPT.md` is the canonical entrypoint; INTENT/POLICY are guidance only.
+- `PROMPT.md` is the canonical entrypoint; `INTENT.md` and `policy/*.md` are
+  guidance only.
 - Use existing Gambit runtime and test-bot primitives; do not fork pipelines.
 - Avoid introducing remote dependencies without explicit opt-in.
 

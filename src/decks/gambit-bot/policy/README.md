@@ -1,0 +1,26 @@
+# Gambit Bot Policy Guide
+
+Use this folder as the policy source of truth for Gambit Bot.
+
+## Quick explainer
+
+- [`core-invariants.md`](./core-invariants.md): Non-negotiable guardrails
+  (local-first, Deck Format v1.0, bot-root boundaries, canonical `PROMPT.md`
+  entrypoint).
+- [`interaction.md`](./interaction.md): Conversation and workflow behavior
+  expectations (minimal questions, scenario wording, starter scenario + grader
+  creation).
+- [`safety-reliability.md`](./safety-reliability.md): Safety checks and fallback
+  behavior when workflows may break or model/runtime setup is invalid.
+- [`frontmatter-guardrails.md`](./frontmatter-guardrails.md): Rules and
+  checklist for safe frontmatter and schema editing.
+- [`deck-format-1.0.md`](./deck-format-1.0.md): Full Deck Format v1.0
+  specification and folder contract.
+
+## Usage
+
+- Root decks should call `policy_search` with a short change summary.
+- `policy_search` reads relevant policy docs internally and returns a usable
+  `summaries` array with scoped guidance.
+- Root decks should use those summaries and should not read policy files
+  directly.
