@@ -176,7 +176,19 @@ export function resolveInvokePrefix(): string {
   return "gambit";
 }
 
+function isPathWithinDotGambit(pathValue: string): boolean {
+  const normalized = path.normalize(path.resolve(pathValue));
+  const segments = normalized.split(/[/\\]+/).filter(Boolean);
+  return segments.includes(".gambit");
+}
+
 export async function ensureOpenRouterEnv(envPath: string): Promise<boolean> {
+  if (isPathWithinDotGambit(envPath)) {
+    throw new Error(
+      `Refusing to write OPENROUTER_API_KEY inside .gambit metadata: ${envPath}`,
+    );
+  }
+
   const envKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
   if (envKey) {
     return false;
