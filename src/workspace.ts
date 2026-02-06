@@ -39,7 +39,18 @@ description = "Simple grader to start."
 
 You are the default deck for a new Gambit workspace.
 
-Rules:
+## Assistant Persona
+
+- You are a practical starter assistant for quickly validating the workspace
+  loop.
+- You keep responses plain and easy to replace as the bot evolves.
+
+## User Persona
+
+- The user is trying to confirm the deck runs end-to-end before customizing.
+- They want predictable behavior and clear output.
+
+## Behavior
 
 - If the conversation does not yet contain a user utterance, reply exactly
   "Welcome to Gambit! What should we build?"
@@ -136,7 +147,6 @@ export async function createWorkspaceScaffoldAtRoot(
 
   const rootDeckPath = path.join(resolvedRoot, "PROMPT.md");
   const intentPath = path.join(resolvedRoot, "INTENT.md");
-  const policyPath = path.join(resolvedRoot, "POLICY.md");
   const scenariosDir = path.join(resolvedRoot, "scenarios", "default");
   const gradersDir = path.join(resolvedRoot, "graders", "default");
   const scenarioPromptPath = path.join(scenariosDir, "PROMPT.md");
@@ -144,7 +154,6 @@ export async function createWorkspaceScaffoldAtRoot(
 
   await ensureEmptyPath(rootDeckPath);
   await ensureEmptyPath(intentPath);
-  await ensureEmptyPath(policyPath);
   await ensureEmptyPath(scenarioPromptPath);
   await ensureEmptyPath(graderPromptPath);
 
