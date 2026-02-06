@@ -1,6 +1,7 @@
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { loadState, saveState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { enrichStateMeta } from "../cli_utils.ts";
 
 const logger = console;
@@ -19,6 +20,8 @@ export async function handleRunCommand(opts: {
   stream?: boolean;
   statePath?: string;
   responsesMode?: boolean;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
 }) {
   const state = opts.statePath ? loadState(opts.statePath) : undefined;
   const onStateUpdate = opts.statePath
@@ -41,6 +44,8 @@ export async function handleRunCommand(opts: {
     state,
     onStateUpdate,
     responsesMode: opts.responsesMode,
+    workspacePermissions: opts.workspacePermissions,
+    workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
   });
 
   if (isGambitEndSignal(result)) {

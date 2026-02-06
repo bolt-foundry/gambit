@@ -39,6 +39,7 @@ import {
 import {
   createModelAliasResolver,
   loadProjectConfig,
+  resolveWorkspacePermissions,
 } from "./project_config.ts";
 
 const logger = console;
@@ -253,6 +254,9 @@ async function main() {
       Deno.exit(1);
     }
     const modelAliasResolver = createModelAliasResolver(
+      projectConfig?.config,
+    );
+    const workspacePermissions = resolveWorkspacePermissions(
       projectConfig?.config,
     );
     const warnedMissingAliases = new Set<string>();
@@ -793,6 +797,8 @@ async function main() {
       stream: args.stream,
       statePath: args.statePath,
       responsesMode,
+      workspacePermissions,
+      workspacePermissionsBaseDir: projectConfig?.root,
     });
   } catch (err) {
     logger.error(err instanceof Error ? err.message : String(err));

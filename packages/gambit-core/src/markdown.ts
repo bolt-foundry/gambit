@@ -11,6 +11,10 @@ import {
 } from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
+import {
+  normalizePermissionDeclaration,
+  type PermissionDeclarationInput,
+} from "./permissions.ts";
 import { mergeZodObjects, toJsonSchema } from "./schema.ts";
 import { resolveBuiltinSchemaPath } from "./builtins.ts";
 import type {
@@ -129,6 +133,7 @@ type DeckRef = {
   label?: string;
   description?: string;
   id?: string;
+  permissions?: PermissionDeclarationInput;
 };
 
 function normalizeDeckRefs<T extends DeckRef>(
@@ -157,6 +162,13 @@ function normalizeDeckRefs<T extends DeckRef>(
       if (typeof rec.description !== "string") delete normalized.description;
       if (typeof rec.label !== "string") delete normalized.label;
       if (typeof rec.id !== "string") delete normalized.id;
+      if (rec.permissions !== undefined) {
+        const parsed = normalizePermissionDeclaration(
+          rec.permissions as PermissionDeclarationInput,
+          path.dirname(basePath),
+        );
+        if (parsed) normalized.permissions = parsed;
+      }
       if (opts?.requireDescription) {
         const desc = typeof rec.description === "string"
           ? rec.description.trim()
@@ -338,6 +350,10 @@ export async function loadMarkdownCard(
   const embeddedCards = replaced.embeds;
   const respondFlag = Boolean((attrs as { respond?: unknown }).respond);
   const allowEndFlag = Boolean((attrs as { allowEnd?: unknown }).allowEnd);
+  const permissions = normalizePermissionDeclaration(
+    (attrs as { permissions?: PermissionDeclarationInput }).permissions,
+    path.dirname(resolved),
+  );
 
   return {
     kind: "gambit.card",
@@ -355,6 +371,7 @@ export async function loadMarkdownCard(
       resolved,
     ),
     cards: embeddedCards,
+    permissions,
     contextFragment,
     responseFragment,
     inputFragment: contextFragment,
@@ -605,6 +622,10 @@ export async function loadMarkdownDeck(
   const embeddedGraderDecks = allCards.flatMap((card) =>
     card.graderDecks ?? []
   );
+  const permissions = normalizePermissionDeclaration(
+    deckMeta.permissions,
+    path.dirname(resolved),
+  );
 
   return {
     kind: "gambit.deck",
@@ -638,6 +659,7 @@ export async function loadMarkdownDeck(
       replaced.respond ||
       allCards.some((c) => c.respond),
     inlineEmbeds: true,
+    permissions,
   };
 }
 

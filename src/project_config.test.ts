@@ -3,6 +3,7 @@ import * as path from "@std/path";
 import {
   createModelAliasResolver,
   loadProjectConfig,
+  resolveWorkspacePermissions,
 } from "./project_config.ts";
 
 Deno.test("loadProjectConfig finds the nearest gambit.toml", async () => {
@@ -87,4 +88,19 @@ Deno.test("createModelAliasResolver flags missing aliases", () => {
   assertEquals(resolution.applied, false);
   assertEquals(resolution.missingAlias, true);
   assertEquals(resolution.model, "nonexistent");
+});
+
+Deno.test("resolveWorkspacePermissions returns workspace ceiling", () => {
+  const permissions = resolveWorkspacePermissions({
+    workspace: {
+      permissions: {
+        read: ["./decks"],
+        run: { commands: ["deno"] },
+      },
+    },
+  });
+  assertEquals(permissions, {
+    read: ["./decks"],
+    run: { commands: ["deno"] },
+  });
 });

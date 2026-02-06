@@ -1,5 +1,10 @@
 import type { ZodTypeAny } from "zod";
 import type { SavedState } from "./state.ts";
+import type {
+  PermissionDeclaration,
+  PermissionDeclarationInput,
+  PermissionTrace,
+} from "./permissions.ts";
 
 export type JSONValue =
   | string
@@ -46,6 +51,7 @@ export type DeckReferenceDefinition = {
   label?: Label;
   description?: string;
   id?: string;
+  permissions?: PermissionDeclarationInput;
 };
 
 export type ActionDeckDefinition = DeckReferenceDefinition & {
@@ -103,6 +109,7 @@ export type BaseDefinition = {
   actionDecks?: ReadonlyArray<ActionDeckDefinition>;
   testDecks?: ReadonlyArray<TestDeckDefinition>;
   graderDecks?: ReadonlyArray<GraderDeckDefinition>;
+  permissions?: PermissionDeclarationInput;
   guardrails?: Partial<Guardrails>;
 };
 
@@ -349,6 +356,7 @@ export type LoadedCard = WithDeckRefs<CardDefinition> & {
   actions: Array<ActionDeckDefinition>;
   testDecks: Array<TestDeckDefinition>;
   graderDecks: Array<GraderDeckDefinition>;
+  permissions?: PermissionDeclaration;
 };
 
 export type LoadedDeck = WithDeckRefs<DeckDefinition> & {
@@ -364,6 +372,7 @@ export type LoadedDeck = WithDeckRefs<DeckDefinition> & {
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
   inlineEmbeds?: boolean;
+  permissions?: PermissionDeclaration;
 };
 
 export type ToolCallResult = {
@@ -382,6 +391,7 @@ export type TraceEvent =
       deckPath?: string;
       input?: JSONValue;
       initialUserMessage?: JSONValue;
+      permissions?: PermissionTrace;
     }
     | {
       type: "message.user";
@@ -398,6 +408,7 @@ export type TraceEvent =
       deckPath: string;
       actionCallId: string;
       parentActionCallId?: string;
+      permissions?: PermissionTrace;
     }
     | {
       type: "deck.end";
@@ -413,6 +424,7 @@ export type TraceEvent =
       name: string;
       path: string;
       parentActionCallId?: string;
+      permissions?: PermissionTrace;
     }
     | {
       type: "action.end";

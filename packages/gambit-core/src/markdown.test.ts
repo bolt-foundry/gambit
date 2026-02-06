@@ -272,6 +272,45 @@ Root deck.
   );
 });
 
+Deno.test("markdown deck resolves deck and action permissions from owner paths", async () => {
+  const dir = await Deno.makeTempDir();
+  const actionDir = path.join(dir, "actions", "do");
+  await Deno.mkdir(actionDir, { recursive: true });
+  await writeTempDeck(
+    actionDir,
+    "PROMPT.md",
+    `+++
+label = "do"
+permissions.read = ["./action-only"]
++++
+Action deck.
+`,
+  );
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+permissions.read = ["./workspace"]
+
+[[actions]]
+name = "do_thing"
+path = "./actions/do/PROMPT.md"
+description = "run do thing"
+permissions.read = ["./action-overrides"]
++++
+Root deck.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+  assertEquals(deck.permissions?.read, [path.resolve(dir, "workspace")]);
+  assertEquals(deck.actionDecks[0].permissions?.read, [
+    path.resolve(dir, "action-overrides"),
+  ]);
+});
+
 Deno.test("markdown execute deck loads module and PROMPT overrides schemas", async () => {
   const dir = await Deno.makeTempDir();
   const execPath = path.join(dir, "exec.ts");

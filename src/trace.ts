@@ -18,6 +18,12 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
   const now = () => performance.now();
   const fmtMs = (start?: number) =>
     start !== undefined ? ` elapsed_ms=${Math.round(now() - start)}` : "";
+  const fmtPermissions = (
+    permissions?: { effective?: unknown },
+  ) =>
+    permissions?.effective !== undefined
+      ? ` permissions=${JSON.stringify(permissions.effective)}`
+      : "";
 
   return (event: TraceEvent) => {
     switch (event.type) {
@@ -36,7 +42,7 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
             event.input !== undefined
               ? ` input=${JSON.stringify(event.input)}`
               : ""
-          }`,
+          }${fmtPermissions(event.permissions)}`,
         );
         break;
       case "run.end": {
@@ -56,7 +62,9 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
       case "deck.start":
         started.set(event.actionCallId, now());
         logger.log(
-          `[trace] deck.start runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}`,
+          `[trace] deck.start runId=${event.runId} actionCallId=${event.actionCallId} deck=${event.deckPath}${
+            fmtPermissions(event.permissions)
+          }`,
         );
         break;
       case "deck.end": {
@@ -72,7 +80,9 @@ export function makeConsoleTracer(): (event: TraceEvent) => void {
       case "action.start":
         started.set(event.actionCallId, now());
         logger.log(
-          `[trace] action.start runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} path=${event.path}`,
+          `[trace] action.start runId=${event.runId} actionCallId=${event.actionCallId} name=${event.name} path=${event.path}${
+            fmtPermissions(event.permissions)
+          }`,
         );
         break;
       case "action.end": {
