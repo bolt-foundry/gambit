@@ -41,6 +41,7 @@ import {
   loadProjectConfig,
   resolveWorkspacePermissions,
 } from "./project_config.ts";
+import { resolveProjectRoot } from "./cli_utils.ts";
 
 const logger = console;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -140,11 +141,29 @@ async function resolveBotRoot(opts: {
 }
 
 async function loadGambitEnv() {
-  const envPath = path.resolve(Deno.cwd(), "gambit", ".env");
-  try {
-    await loadDotenv({ envPath, export: true });
-  } catch (err) {
-    if (!(err instanceof Deno.errors.NotFound)) {
+  const cwd = Deno.cwd();
+  const projectRoot = resolveProjectRoot(cwd);
+  const candidates = new Set<string>();
+
+  if (projectRoot) {
+    candidates.add(path.join(projectRoot, ".env"));
+  }
+  candidates.add(path.join(cwd, ".env"));
+
+  // Legacy fallback for old gambit demo layout; prefer root/local .env above.
+  if (projectRoot) {
+    candidates.add(path.join(projectRoot, "gambit", ".env"));
+  }
+  candidates.add(path.join(cwd, "gambit", ".env"));
+
+  for (const envPath of candidates) {
+    try {
+      const info = await Deno.stat(envPath);
+      if (!info.isFile) continue;
+      await loadDotenv({ envPath, export: true });
+      return;
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) continue;
       throw err;
     }
   }
