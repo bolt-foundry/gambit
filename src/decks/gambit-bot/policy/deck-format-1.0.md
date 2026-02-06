@@ -158,24 +158,23 @@ Every deck folder MUST include:
 Deck folders SHOULD include:
 
 - `INTENT.md`
-- `POLICY.md`
+- `policy/`
 
 Notes (recommended behavior):
 
-- Gambit tooling looks for `INTENT.md` and `POLICY.md` and MAY scaffold them if
-  missing.
+- Gambit tooling looks for `INTENT.md` and MAY scaffold it if missing.
 - `INTENT.md` SHOULD follow the canonical intent headings from
   `policy/templates/INTENT.md`.
 - `INTENT.md` explains **what** the deck should accomplish and why: goals,
   non-goals, constraints, tradeoffs, and escalation conditions. It is the source
   of truth for human alignment and for Gambit Bot decisions about what to build.
-- `POLICY.md` explains **what must not happen** or what must always hold:
+- `policy/*.md` explains **what must not happen** or what must always hold:
   guardrails, invariants, and lightweight acceptance tests. It is non-
   programmatic and keeps the bot and humans aligned on safe behavior.
-- Neither `INTENT.md` nor `POLICY.md` are executable; do not treat them as a
+- Neither `INTENT.md` nor policy docs are executable; do not treat them as a
   second prompt surface or as model instructions.
-- Keep both files short and scannable (headings plus bullets). If it gets long,
-  move deeper background into `README.md` or `policies/`.
+- Keep these files short and scannable (headings plus bullets). If they get
+  long, move deeper background into `README.md` or split across `policy/*.md`.
 
 ### Optional files/folders
 
@@ -184,7 +183,7 @@ Deck folders MAY include:
 - `README.md` (recommended)
 - `samples/` (recommended)
 - `snippets/` (recommended)
-- `policies/` (optional additional policy docs; `POLICY.md` remains canonical)
+- `policy/` (optional policy docs)
 - `reviews/` (optional AARs / retros)
 - `actions/`, `scenarios/`, `graders/` (recommended organization only)
 

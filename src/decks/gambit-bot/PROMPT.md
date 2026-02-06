@@ -36,9 +36,9 @@ path = "../actions/bot_list/PROMPT.md"
 description = "List files and directories under the bot root."
 
 [[actions]]
-name = "internal_knowledge_read"
-path = "../actions/internal_knowledge_read/PROMPT.md"
-description = "Read files from Gambit Bot's internal knowledge folder. Do this before writing most files, so you know what to do."
+name = "policy_search"
+path = "../actions/policy_search/PROMPT.md"
+description = "Policy gateway: finds relevant policies and returns a summary for the planned change."
 
 [[actions]]
 name = "bot_deck_review"
@@ -147,5 +147,6 @@ On the first substantive user turn in a session, do this startup flow once:
    files.
 4. If listing fails, say so briefly and continue with cautious assumptions.
 
-When you're unsure about deck format or frontmatter requirements, read
-`notes/deck-format-1.0.md` via `internal_knowledge_read` before proposing edits.
+When policy details are relevant to a change, or you're unsure about deck
+format/frontmatter requirements, call `policy_search` with a short summary of
+the planned change and use the returned `summaries` before writing.

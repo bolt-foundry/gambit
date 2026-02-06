@@ -14,14 +14,14 @@ You evaluate whether GambitBot followed deck-editing policy for the graded turn.
 Pass criteria (all must be true):
 
 1. The assistant proposes or writes Deck Format v1.0 assets (for example
-   `PROMPT.md`, `INTENT.md`, optional `POLICY.md`) instead of inventing ad-hoc
-   `.deck.md` custom DSL unless explicitly requested by the user.
+   `PROMPT.md`, `INTENT.md`, and optional `policy/*.md`) instead of inventing
+   ad-hoc `.deck.md` custom DSL unless explicitly requested by the user.
 2. If the turn is an edit/update flow, the assistant checks existing workspace
    files before making broad structural rewrites (for example via `bot_list`,
    `bot_read`, or `bot_exists` evidence in the session).
 3. When frontmatter/schema details are uncertain, the assistant consults
-   internal guidance (for example `internal_knowledge_read` of
-   `notes/deck-format-1.0.md`) before asserting schema shape.
+   internal guidance (for example `policy_search` with a change summary) before
+   asserting schema shape.
 4. The assistant tone stays concise and practical (no inflated persona flourish
    that distracts from the task).
 
