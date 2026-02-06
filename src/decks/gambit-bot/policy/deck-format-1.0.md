@@ -52,7 +52,9 @@ Schema requirements:
     - For plain chat output, `responseSchema` SHOULD be a string schema (for
       example, `gambit://schemas/scenarios/plain_chat_output.zod.ts`).
   - Grader decks MUST be compatible with the built-in grader schemas:
-    `gambit://schemas/graders/contexts/turn.zod.ts` or
+    `gambit://schemas/graders/contexts/turn.zod.ts`,
+    `gambit://schemas/graders/contexts/turn_tools.zod.ts`,
+    `gambit://schemas/graders/contexts/conversation_tools.zod.ts`, or
     `gambit://schemas/graders/contexts/conversation.zod.ts` (context) and
     `gambit://schemas/graders/grader_output.zod.ts` (response).
     - Compatibility rule (deep): base fields MUST be present and unchanged
@@ -124,13 +126,15 @@ Schemas are referenced by path strings in `PROMPT.md` frontmatter (for example
 
 Built-in schemas (v1.0):
 
-| URI                                                     | Purpose                                                         |
-| ------------------------------------------------------- | --------------------------------------------------------------- |
-| `gambit://schemas/graders/respond.zod.ts`               | Shared respond-envelope schema used by decks and graders.       |
-| `gambit://schemas/graders/grader_output.zod.ts`         | Canonical grader output schema (`score`, `reason`, `evidence`). |
-| `gambit://schemas/graders/contexts/turn.zod.ts`         | Schema for per-turn grader context (single exchange).           |
-| `gambit://schemas/graders/contexts/conversation.zod.ts` | Schema for full-conversation grader context.                    |
-| `gambit://schemas/scenarios/plain_chat_output.zod.ts`   | Canonical string output for plain-chat scenario/test decks.     |
+| URI                                                           | Purpose                                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `gambit://schemas/graders/respond.zod.ts`                     | Shared respond-envelope schema used by decks and graders.           |
+| `gambit://schemas/graders/grader_output.zod.ts`               | Canonical grader output schema (`score`, `reason`, `evidence`).     |
+| `gambit://schemas/graders/contexts/turn.zod.ts`               | Schema for per-turn grader context (single exchange).               |
+| `gambit://schemas/graders/contexts/turn_tools.zod.ts`         | Per-turn grader context including assistant `tool_calls`.           |
+| `gambit://schemas/graders/contexts/conversation_tools.zod.ts` | Conversation-level grader context including assistant `tool_calls`. |
+| `gambit://schemas/graders/contexts/conversation.zod.ts`       | Schema for full-conversation grader context.                        |
+| `gambit://schemas/scenarios/plain_chat_output.zod.ts`         | Canonical string output for plain-chat scenario/test decks.         |
 
 ## Stdlib decks (built-in Gambit namespace)
 

@@ -55,30 +55,25 @@ label = "Deck format policy guard (turn) LLM"
 path = "./graders/deck_format_policy_llm/PROMPT.md"
 description = "LLM guard for policy-compliant deck editing behavior."
 
-[[scenarios]]
-label = "Recipe selection on-ramp tester"
-path = "./scenarios/recipe_selection/PROMPT.md"
-description = "Synthetic user that asks Gambit Bot to build a recipe selection chatbot."
+[[graders]]
+label = "First deck location guard (turn)"
+path = "./graders/first_deck_root_prompt_guard/PROMPT.md"
+description = "Checks that the first created deck is root PROMPT.md (not a subfolder PROMPT.md)."
+
+[[graders]]
+label = "First deck location guard (tools)"
+path = "./graders/first_deck_root_prompt_guard_tools/PROMPT.md"
+description = "Checks first created deck location using tool-call-aware grading context."
+
+[[graders]]
+label = "First deck location guard (tools, conversation)"
+path = "./graders/first_deck_root_prompt_guard_tools_conversation/PROMPT.md"
+description = "Conversation-level check of first created deck location with tool-call-aware context."
 
 [[scenarios]]
-label = "Recipe selection (no skip)"
-path = "./scenarios/recipe_selection_no_skip/PROMPT.md"
-description = "Synthetic user that completes the question flow without skipping to building."
-
-[[scenarios]]
-label = "Build tab demo prompt"
-path = "./scenarios/build_tab_demo/PROMPT.md"
-description = "Synthetic user prompt for the build tab demo."
-
-[[scenarios]]
-label = "NUX from scratch demo prompt"
-path = "./scenarios/nux_from_scratch_demo/PROMPT.md"
-description = "Synthetic user prompt for the NUX from-scratch build demo."
-
-[[scenarios]]
-label = "Investor FAQ regression"
-path = "./scenarios/investor_faq_regression/PROMPT.md"
-description = "Replays the investor FAQ build flow that previously produced a non-v1.0 deck format."
+label = "FAQ bot build flow"
+path = "./scenarios/faq_bot_build_flow/PROMPT.md"
+description = "Synthetic user flow that builds an FAQ bot, checks policy alignment, and requests a root-level deck move."
 +++
 
 You are GambitBot, an AI assistant designed to help people build other AI
