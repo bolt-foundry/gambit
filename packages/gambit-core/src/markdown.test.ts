@@ -101,6 +101,101 @@ Schema deck.
   assertEquals(parsed, { status: 200 });
 });
 
+Deno.test("markdown deck resolves tool-call-aware grader context schema", async () => {
+  const dir = await Deno.makeTempDir();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "turn-tools-schema.deck.md",
+    `+++
+label = "turn-tools-schema"
+contextSchema = "gambit://schemas/graders/contexts/turn_tools.zod.ts"
++++
+
+Schema deck.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+
+  assert(deck.contextSchema, "expected context schema to resolve");
+  const parsed = deck.contextSchema.parse({
+    session: {
+      messages: [
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              function: {
+                name: "bot_write",
+                arguments: '{"path":"PROMPT.md"}',
+              },
+            },
+          ],
+        },
+      ],
+    },
+    messageToGrade: {
+      role: "assistant",
+      tool_calls: [
+        {
+          function: {
+            name: "bot_write",
+          },
+        },
+      ],
+    },
+  });
+
+  assertEquals(parsed.messageToGrade.role, "assistant");
+  assertEquals(
+    parsed.session.messages?.[0].tool_calls?.[0].function.name,
+    "bot_write",
+  );
+});
+
+Deno.test("markdown deck resolves conversation-level tool-call grader context schema", async () => {
+  const dir = await Deno.makeTempDir();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "conversation-tools-schema.deck.md",
+    `+++
+label = "conversation-tools-schema"
+contextSchema = "gambit://schemas/graders/contexts/conversation_tools.zod.ts"
++++
+
+Schema deck.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+
+  assert(deck.contextSchema, "expected context schema to resolve");
+  const parsed = deck.contextSchema.parse({
+    session: {
+      messages: [
+        {
+          role: "assistant",
+          tool_calls: [
+            {
+              function: {
+                name: "bot_write",
+                arguments: '{"path":"faq-bot/PROMPT.md"}',
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assertEquals(
+    parsed.session.messages?.[0].tool_calls?.[0].function.name,
+    "bot_write",
+  );
+});
+
 Deno.test("markdown deck warns on legacy schema URIs", async () => {
   const dir = await Deno.makeTempDir();
   const deckPath = await writeTempDeck(

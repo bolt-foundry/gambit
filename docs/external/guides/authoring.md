@@ -124,6 +124,11 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   invalid JSON or schema-violating output blocks the run with a clear error.
 - `graderDecks` describe calibration decks that score transcripts/artifacts. The
   simulator Calibrate page will run these decks against stored runs.
+- For graders that inspect assistant tool usage, set
+  `contextSchema = "gambit://schemas/graders/contexts/turn_tools.zod.ts"` so
+  `session.messages[*].tool_calls` is available in the grader input.
+- For conversation-level tool-call grading (single score for the whole run), use
+  `contextSchema = "gambit://schemas/graders/contexts/conversation_tools.zod.ts"`.
 - Configure `acceptsUserTurns` alongside these references:
   - Markdown roots default to `true`; TypeScript decks default to `false`
     everywhere. Set it to `false` for any workflow deck that should never accept
