@@ -6,6 +6,10 @@ import {
   TOOL_NAME_PATTERN,
 } from "./constants.ts";
 import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
+import {
+  normalizePermissionDeclaration,
+  type PermissionDeclarationInput,
+} from "./permissions.ts";
 import { mergeZodObjects } from "./schema.ts";
 import {
   isMarkdownFile,
@@ -120,6 +124,10 @@ function normalizeActionDecks(
     path: a.path.startsWith("gambit://") || !basePath
       ? a.path
       : path.resolve(path.dirname(basePath), a.path),
+    permissions: normalizePermissionDeclaration(
+      a.permissions,
+      basePath ? path.dirname(basePath) : Deno.cwd(),
+    ),
   }));
 }
 
@@ -138,6 +146,12 @@ function normalizeCompanionDecks<T extends { path: string }>(
     path: deck.path.startsWith("gambit://") || !basePath
       ? deck.path
       : path.resolve(path.dirname(basePath), deck.path),
+    permissions: normalizePermissionDeclaration(
+      (deck as { permissions?: unknown }).permissions as
+        | PermissionDeclarationInput
+        | undefined,
+      basePath ? path.dirname(basePath) : Deno.cwd(),
+    ),
   })) as Array<T>;
 }
 
@@ -216,6 +230,10 @@ async function loadCardInternal(
     path: resolved,
     cards: [],
     ...fragments,
+    permissions: normalizePermissionDeclaration(
+      card.permissions,
+      path.dirname(resolved),
+    ),
   };
 }
 
@@ -372,6 +390,10 @@ export async function loadDeck(
     executor,
     handlers,
     respond: deck.respond,
+    permissions: normalizePermissionDeclaration(
+      deck.permissions,
+      path.dirname(resolved),
+    ),
   };
 }
 

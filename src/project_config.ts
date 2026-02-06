@@ -1,5 +1,6 @@
 import { parse as parseToml } from "@std/toml";
 import * as path from "@std/path";
+import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 
 export type WorkspaceConfig = {
   decks?: string;
@@ -7,6 +8,7 @@ export type WorkspaceConfig = {
   graders?: string;
   tests?: string;
   schemas?: string;
+  permissions?: PermissionDeclarationInput;
 };
 
 export type ModelAliasConfig = {
@@ -146,4 +148,12 @@ export function createModelAliasResolver(
     const missingAlias = hasAliases && !model.includes("/");
     return { model, applied: false, missingAlias };
   };
+}
+
+export function resolveWorkspacePermissions(
+  config?: GambitConfig | null,
+): PermissionDeclarationInput | undefined {
+  const raw = config?.workspace?.permissions;
+  if (!isPlainObject(raw)) return undefined;
+  return raw as PermissionDeclarationInput;
 }

@@ -41,6 +41,20 @@ export type {
 } from "./src/types.ts";
 /** Test deck definition shape. */
 export type { TestDeckDefinition } from "./src/types.ts";
+/** Permission declaration shape used by deck metadata and config layers. */
+export type {
+  PermissionDeclaration,
+  PermissionDeclarationInput,
+  PermissionTrace,
+} from "./src/permissions.ts";
+/** Permission contract helpers (normalization/intersection/matching). */
+export {
+  canRunCommand,
+  canRunPath,
+  intersectPermissions,
+  normalizePermissionDeclaration,
+  resolveEffectivePermissions,
+} from "./src/permissions.ts";
 /** Check if a value is an explicit end-of-run signal. */
 export { isGambitEndSignal } from "./src/runtime.ts";
 /** Run a deck and return its execution result. */

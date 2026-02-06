@@ -1193,6 +1193,9 @@ Deno.test("run.start traces input and gambit_context payload", async () => {
       inputSchema: z.object({ question: z.string() }),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
+      permissions: {
+        read: ["./docs"],
+      },
     });
     `,
   );
@@ -1222,6 +1225,12 @@ Deno.test("run.start traces input and gambit_context payload", async () => {
   >;
   assertEquals(start.deckPath, deckPath);
   assertEquals(start.input, input);
+  assert(start.permissions, "expected permissions trace on run.start");
+  assertEquals(start.permissions.layers.map((layer) => layer.name), [
+    "host",
+    "declaration",
+  ]);
+  assertEquals(start.permissions.effective.read, [path.resolve(dir, "docs")]);
 
   const initCall = traces.find((t) =>
     t.type === "tool.call" && t.name === "gambit_context"

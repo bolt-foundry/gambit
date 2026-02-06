@@ -9,6 +9,7 @@ import {
   GAMBIT_TOOL_RESPOND,
 } from "./constants.ts";
 import { loadDeck } from "./loader.ts";
+import { resolveEffectivePermissions } from "./permissions.ts";
 import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
 import type {
   ExecutionContext,
@@ -23,6 +24,11 @@ import type {
   ToolDefinition,
 } from "./types.ts";
 import type { MessageRef, SavedState } from "./state.ts";
+import type {
+  NormalizedPermissionSet,
+  PermissionDeclarationInput,
+  PermissionTrace,
+} from "./permissions.ts";
 
 export type GambitEndSignal = {
   __gambitEnd: true;
@@ -77,6 +83,13 @@ type RunOptions = {
   onStreamText?: (chunk: string) => void;
   allowRootStringInput?: boolean;
   responsesMode?: boolean;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  parentPermissions?: NormalizedPermissionSet;
+  referencePermissions?: PermissionDeclarationInput;
+  referencePermissionsBaseDir?: string;
 };
 
 export async function runDeck(opts: RunOptions): Promise<unknown> {
@@ -93,6 +106,31 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   const runId = opts.runId ?? opts.state?.runId ?? randomId("run");
 
   const deck = await loadDeck(opts.path);
+  const permissions = resolveEffectivePermissions({
+    baseDir: path.dirname(deck.path),
+    parent: opts.parentPermissions,
+    workspace: opts.workspacePermissions
+      ? {
+        baseDir: opts.workspacePermissionsBaseDir ?? path.dirname(deck.path),
+        permissions: opts.workspacePermissions,
+      }
+      : undefined,
+    declaration: deck.permissions
+      ? { baseDir: path.dirname(deck.path), permissions: deck.permissions }
+      : undefined,
+    reference: opts.referencePermissions
+      ? {
+        baseDir: opts.referencePermissionsBaseDir ?? path.dirname(deck.path),
+        permissions: opts.referencePermissions,
+      }
+      : undefined,
+    session: opts.sessionPermissions
+      ? {
+        baseDir: opts.sessionPermissionsBaseDir ?? Deno.cwd(),
+        permissions: opts.sessionPermissions,
+      }
+      : undefined,
+  });
   const deckGuardrails = deck.guardrails ?? {};
   const effectiveGuardrails: Guardrails = {
     ...guardrails,
@@ -124,6 +162,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       input: validatedInput as unknown as import("./types.ts").JSONValue,
       initialUserMessage: opts
         .initialUserMessage as unknown as import("./types.ts").JSONValue,
+      permissions: permissions.trace,
     });
   }
   try {
@@ -148,6 +187,12 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         onStateUpdate: opts.onStateUpdate,
         onStreamText: opts.onStreamText,
         responsesMode: opts.responsesMode,
+        permissions: permissions.effective,
+        permissionsTrace: permissions.trace,
+        workspacePermissions: opts.workspacePermissions,
+        workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+        sessionPermissions: opts.sessionPermissions,
+        sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
       });
     }
 
@@ -171,6 +216,12 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       stream: opts.stream,
       onStreamText: opts.onStreamText,
       responsesMode: opts.responsesMode,
+      permissions: permissions.effective,
+      permissionsTrace: permissions.trace,
+      workspacePermissions: opts.workspacePermissions,
+      workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+      sessionPermissions: opts.sessionPermissions,
+      sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
     });
   } finally {
     if (shouldEmitRun) {
@@ -535,6 +586,12 @@ type RuntimeCtxBase = {
   onStateUpdate?: (state: SavedState) => void;
   onStreamText?: (chunk: string) => void;
   responsesMode?: boolean;
+  permissions: NormalizedPermissionSet;
+  permissionsTrace: PermissionTrace;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
 };
 
 async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
@@ -600,6 +657,11 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
         responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
         inputProvided: true,
+        parentPermissions: ctx.permissions,
+        workspacePermissions: ctx.workspacePermissions,
+        workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+        sessionPermissions: ctx.sessionPermissions,
+        sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
       });
     },
     fail: (opts) => {
@@ -658,6 +720,11 @@ async function runLlmDeck(
     onStreamText: ctx.onStreamText,
     pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
     responsesMode: ctx.responsesMode,
+    permissions: ctx.permissions,
+    workspacePermissions: ctx.workspacePermissions,
+    workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+    sessionPermissions: ctx.sessionPermissions,
+    sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
   });
   let streamingBuffer = "";
   let streamingCommitted = false;
@@ -733,6 +800,7 @@ async function runLlmDeck(
     deckPath: deck.path,
     actionCallId,
     parentActionCallId: ctx.parentActionCallId,
+    permissions: ctx.permissionsTrace,
   });
   let passes = 0;
   try {
@@ -1025,6 +1093,17 @@ async function runLlmDeck(
             continue;
           }
 
+          const actionRef = deck.actionDecks.find((a) => a.name === call.name);
+          const actionPermissions = resolveEffectivePermissions({
+            baseDir: path.dirname(deck.path),
+            parent: ctx.permissions,
+            reference: actionRef?.permissions
+              ? {
+                baseDir: path.dirname(deck.path),
+                permissions: actionRef.permissions,
+              }
+              : undefined,
+          });
           ctx.trace?.({
             type: "action.start",
             runId,
@@ -1032,6 +1111,7 @@ async function runLlmDeck(
             name: call.name,
             path: call.name,
             parentActionCallId: actionCallId,
+            permissions: actionPermissions.trace,
           });
           ctx.trace?.({
             type: "tool.call",
@@ -1058,6 +1138,11 @@ async function runLlmDeck(
             inputProvided: true,
             idle: idleController,
             responsesMode: ctx.responsesMode,
+            permissions: ctx.permissions,
+            workspacePermissions: ctx.workspacePermissions,
+            workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+            sessionPermissions: ctx.sessionPermissions,
+            sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
           });
           ctx.trace?.({
             type: "tool.result",
@@ -1215,6 +1300,11 @@ async function handleToolCall(
     inputProvided?: boolean;
     idle?: IdleController;
     responsesMode?: boolean;
+    permissions: NormalizedPermissionSet;
+    workspacePermissions?: PermissionDeclarationInput;
+    workspacePermissionsBaseDir?: string;
+    sessionPermissions?: PermissionDeclarationInput;
+    sessionPermissionsBaseDir?: string;
   },
 ): Promise<ToolCallResult> {
   const action = ctx.parentDeck.actionDecks.find((a) => a.name === call.name);
@@ -1286,6 +1376,13 @@ async function handleToolCall(
         onStreamText: ctx.onStreamText,
         responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
+        parentPermissions: ctx.permissions,
+        referencePermissions: action.permissions,
+        referencePermissionsBaseDir: path.dirname(ctx.parentDeck.path),
+        workspacePermissions: ctx.workspacePermissions,
+        workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+        sessionPermissions: ctx.sessionPermissions,
+        sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
       });
       return { ok: true, result };
     } catch (err) {
@@ -1317,6 +1414,11 @@ async function handleToolCall(
         onStreamText: ctx.onStreamText,
         responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
+        permissions: ctx.permissions,
+        workspacePermissions: ctx.workspacePermissions,
+        workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+        sessionPermissions: ctx.sessionPermissions,
+        sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
       });
       if (envelope.length) {
         extraMessages.push(...envelope.map(sanitizeMessage));
@@ -1402,6 +1504,11 @@ async function handleToolCall(
           onStreamText: ctx.onStreamText,
           responsesMode: ctx.responsesMode,
           initialUserMessage: undefined,
+          permissions: ctx.permissions,
+          workspacePermissions: ctx.workspacePermissions,
+          workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+          sessionPermissions: ctx.sessionPermissions,
+          sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
         });
         if (envelope.length) {
           extraMessages.push(...envelope.map(sanitizeMessage));
@@ -1482,6 +1589,11 @@ async function runBusyHandler(args: {
   onStreamText?: (chunk: string) => void;
   initialUserMessage?: unknown;
   responsesMode?: boolean;
+  permissions: NormalizedPermissionSet;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
 }): Promise<Array<ModelMessage>> {
   try {
     const input = {
@@ -1511,6 +1623,11 @@ async function runBusyHandler(args: {
       responsesMode: args.responsesMode,
       initialUserMessage: args.initialUserMessage,
       inputProvided: true,
+      parentPermissions: args.permissions,
+      workspacePermissions: args.workspacePermissions,
+      workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+      sessionPermissions: args.sessionPermissions,
+      sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
     });
     const elapsedMs = Math.floor(args.elapsedMs);
     let message: string | undefined;
@@ -1555,6 +1672,11 @@ function createIdleController(args: {
   onStreamText?: (chunk: string) => void;
   pushMessages: (msgs: Array<ModelMessage>) => void;
   responsesMode?: boolean;
+  permissions: NormalizedPermissionSet;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
 }): IdleController {
   if (!args.cfg?.path) {
     return {
@@ -1601,6 +1723,11 @@ function createIdleController(args: {
           stream: args.stream,
           onStreamText: args.onStreamText,
           responsesMode: args.responsesMode,
+          permissions: args.permissions,
+          workspacePermissions: args.workspacePermissions,
+          workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+          sessionPermissions: args.sessionPermissions,
+          sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
         });
         if (envelope.length) args.pushMessages(envelope.map(sanitizeMessage));
       } catch {
@@ -1651,6 +1778,11 @@ async function runIdleHandler(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   responsesMode?: boolean;
+  permissions: NormalizedPermissionSet;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
 }): Promise<Array<ModelMessage>> {
   try {
     const input = {
@@ -1679,6 +1811,11 @@ async function runIdleHandler(args: {
       responsesMode: args.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
+      parentPermissions: args.permissions,
+      workspacePermissions: args.workspacePermissions,
+      workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+      sessionPermissions: args.sessionPermissions,
+      sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
     });
     const elapsedMs = Math.floor(args.elapsedMs);
     let message: string | undefined;
@@ -1724,6 +1861,11 @@ async function maybeHandleError(args: {
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
     responsesMode?: boolean;
+    permissions: NormalizedPermissionSet;
+    workspacePermissions?: PermissionDeclarationInput;
+    workspacePermissionsBaseDir?: string;
+    sessionPermissions?: PermissionDeclarationInput;
+    sessionPermissionsBaseDir?: string;
   };
   action: { name: string; path: string; label?: string; description?: string };
 }): Promise<ToolCallResult | undefined> {
@@ -1762,6 +1904,11 @@ async function maybeHandleError(args: {
       responsesMode: args.ctx.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
+      parentPermissions: args.ctx.permissions,
+      workspacePermissions: args.ctx.workspacePermissions,
+      workspacePermissionsBaseDir: args.ctx.workspacePermissionsBaseDir,
+      sessionPermissions: args.ctx.sessionPermissions,
+      sessionPermissionsBaseDir: args.ctx.sessionPermissionsBaseDir,
     });
 
     const parsed = typeof handlerOutput === "object" && handlerOutput !== null
