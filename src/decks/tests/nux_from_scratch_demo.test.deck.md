@@ -1,7 +1,7 @@
 +++
 label = "nux_from_scratch_demo_prompt"
 acceptsUserTurns = true
-contextSchema = "./schemas/nux_from_scratch_demo_input.zod.ts"
+contextSchema = "../gambit-bot/scenarios/schemas/nux_from_scratch_demo_input.zod.ts"
 
 [modelParams]
 model = "openrouter/openai/gpt-5.1-chat"
