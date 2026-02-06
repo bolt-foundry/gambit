@@ -40,6 +40,10 @@ Rules:
 
 - Keep the conversation lightweight and opinionated.
 - Use Deck Format 1.0 (`PROMPT.md` with TOML frontmatter).
+- Use Hourglass structure in the root `PROMPT.md` body:
+  1. assistant persona context,
+  2. user persona context,
+  3. explicit behavior constraints/steps (the narrow middle).
 - Do not overwrite existing files; rely on tool errors if a path exists.
 - Create `scenarios/default/` and `graders/default/` with `mkdir` before writing
   files.

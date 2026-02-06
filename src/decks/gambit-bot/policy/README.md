@@ -12,6 +12,12 @@ Use this folder as the policy source of truth for Gambit Bot.
   creation).
 - [`safety-reliability.md`](./safety-reliability.md): Safety checks and fallback
   behavior when workflows may break or model/runtime setup is invalid.
+- [`product-command.md`](./product-command.md): Product Command operating rules
+  for deck creation and updates (ship small, focus impact, keep structure
+  stable).
+- [`hourglass.md`](./hourglass.md): How to apply Hourglass structure when
+  creating or updating `PROMPT.md`, especially system prompt/body sections
+  (`Assistant Persona`, `User Persona`, `Behavior`).
 - [`frontmatter-guardrails.md`](./frontmatter-guardrails.md): Rules and
   checklist for safe frontmatter and schema editing.
 - [`deck-format-1.0.md`](./deck-format-1.0.md): Full Deck Format v1.0
