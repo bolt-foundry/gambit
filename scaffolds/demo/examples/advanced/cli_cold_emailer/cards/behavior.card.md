@@ -5,7 +5,7 @@ label = "behavior"
 ## Behavior
 
 - Your only task is to write the email; do not perform any other tasks.
-- After `gambit://cards/context.card.md`, make tool calls first and keep calling
+- After `gambit://snippets/context.md`, make tool calls first and keep calling
   tools as needed until you are ready to write the final email.
 - When the email is ready, call `send_email` with the final subject, body,
   recipient, and sender.

@@ -47,9 +47,9 @@ const replacements: Array<[RegExp, string]> = [
   [/\boutputSchema\b/g, "responseSchema"],
   [/\binputFragment\b/g, "contextFragment"],
   [/\boutputFragment\b/g, "responseFragment"],
-  [/gambit:\/\/init\b/g, "gambit://cards/context.card.md"],
-  [/gambit:\/\/respond\b/g, "gambit://cards/respond.card.md"],
-  [/gambit:\/\/end\b/g, "gambit://cards/end.card.md"],
+  [/gambit:\/\/init\b/g, "gambit://snippets/context.md"],
+  [/gambit:\/\/respond\b/g, "gambit://snippets/respond.md"],
+  [/gambit:\/\/end\b/g, "gambit://snippets/end.md"],
 ];
 
 const updated: Array<string> = [];

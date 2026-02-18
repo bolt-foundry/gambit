@@ -4,7 +4,7 @@ What it shows
 
 - A modular voice receptionist that mirrors a patient call tree: identity,
   routing, and specialized task decks.
-- Persona/behavior cards that encode the architecture (identity behaviors,
+- Persona/behavior snippets that encode the architecture (identity behaviors,
   routing, scheduling/refill/insurance/billing guidance).
 - Deterministic TypeScript actions for each flow (patient lookup, new-patient
   capture, scheduling, results, billing, refills, insurance, FAQs, transfers,
@@ -22,7 +22,7 @@ Key files
   identity, routing, scheduling, results, billing, refills, insurance, FAQs,
   transfers, and callback logging.
 - `init/examples/advanced/voice_front_desk/cards/*.card.md` — persona, identity,
-  routing, and per-flow behavior cards that each deck imports as needed.
+  routing, and per-flow behavior snippets that each deck imports as needed.
 - `init/examples/advanced/voice_front_desk/actions/*.deck.ts` — deterministic
   TypeScript compute decks for patient lookup, new-patient capture,
   scheduling_ops, results_lookup, billing_support, refill_ops, insurance_check,
@@ -37,7 +37,7 @@ Why it’s structured this way
 - The modular voice architecture keeps the persona focused on the live caller
   while dedicated decks handle structured work such as lookup, scheduling,
   refills, or insurance.
-- Behavior cards keep identity gathering, routing, and per-flow questions
+- Behavior snippets keep identity gathering, routing, and per-flow questions
   separate, so you can edit the call tree without touching the deck body.
 - Deterministic actions make it easy to test scenarios locally; each tool
   exposes a narrow schema with predictable outputs that the assistant can read

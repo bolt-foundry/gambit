@@ -20,7 +20,7 @@ the needed context and tone.
 
 ## Applying to Gambit
 
-- Use separate cards for assistant persona, user persona, and behavior; embed
+- Use separate snippets for assistant persona, user persona, and behavior; embed
   them into the deck body to keep concerns isolated.
 - Keep the “pinch” (behavior/constraints) closest to the model call, and keep
   personas above it so they influence style without diluting instructions.
@@ -29,11 +29,11 @@ the needed context and tone.
 - Keep schemas tight so actions/tools stay aligned with the narrow middle of the
   hourglass.
 
-## Skeleton (deck + cards)
+## Skeleton (deck + snippets)
 
 ```
 src/decks/
-  gambit-assistant.deck.md     # root deck embeds the cards below
+  gambit-assistant.deck.md     # root deck embeds the snippets below
   cards/
     assistant_persona.card.md  # who the assistant is
     user_persona.card.md       # who the user is / goals / constraints
@@ -42,15 +42,15 @@ src/decks/
 
 Deck body outline:
 
-1. Assistant persona card content.
-2. User persona card content.
-3. Behavior card content: steps/constraints/output shape.
+1. Assistant persona snippet content.
+2. User persona snippet content.
+3. Behavior snippet content: steps/constraints/output shape.
 4. (Optional) Examples or edge cases.
 
 ## Tips
 
 - Keep the behavior “pinch” short and specific; move narrative/tone into persona
-  cards.
+  snippets.
 - Declare turn order explicitly (assistant-first vs. user-seeded message).
 - Use numbered steps and bullets; avoid long prose in the middle section.
 - When adding tools/actions, restate when to call each and what to return after

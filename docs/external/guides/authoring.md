@@ -8,8 +8,8 @@ verification.
 
 - Decks are single units of work. They can be LLM-powered (via `modelParams`) or
   compute-only (via `run`/`execute`).
-- Cards are reusable prompt fragments. Embedding cards merges their deck
-  references (action/test/grader) and schema fragments into the parent deck.
+- Snippets are reusable prompt fragments. Embedding snippets merges their deck
+  references (action/scenario/grader) and schema fragments into the parent deck.
 - Action decks are child decks exposed as model tools. Names must match
   `^[A-Za-z_][A-Za-z0-9_]*$` and avoid the `gambit_` prefix (reserved).
 - Persona/scenario decks may accept free-form user turns. Use the
@@ -19,12 +19,12 @@ verification.
 
 ## Pick a format
 
-- Markdown deck/card: great for quick prompt-first flows. Front matter declares
-  label/model/actions/scenarios/graders/handlers; body is the prompt. Embeds via
-  image syntax pull in cards or special markers.
-- TypeScript deck/card: best when you need compute logic or co-locate schemas.
-  Export `defineDeck`/`defineCard` with Zod schemas and a `run`/`execute` for
-  compute decks.
+- Markdown deck/snippet: great for quick prompt-first flows. Front matter
+  declares label/model/actions/scenarios/graders/handlers; body is the prompt.
+  Embeds via image syntax pull in snippets or special markers.
+- TypeScript deck/snippet: best when you need compute logic or co-locate
+  schemas. Export `defineDeck`/`defineCard` with Zod schemas and a
+  `run`/`execute` for compute decks.
 
 ## Minimal examples
 
@@ -36,7 +36,7 @@ label = "hello_world"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
 +++
 
-![init](gambit://cards/context.card.md) # seed input if provided via CLI
+![init](gambit://snippets/context.md) # seed input if provided via CLI
 
 Rules:
 
@@ -64,8 +64,8 @@ export default defineDeck({
 
 - Non-root decks must declare `contextSchema` and `responseSchema` (Zod). Roots
   default to permissive string-ish input/output if omitted.
-- Card `contextFragment`/`responseFragment` merge into the deck’s schemas;
-  deck-level definitions win on conflicts.
+- Snippet `contextFragment`/`responseFragment` values merge into the deck’s
+  schemas; deck-level definitions win on conflicts.
 - LLM outputs are validated against `responseSchema`; compute decks validate
   returned payloads as well.
 
@@ -81,7 +81,7 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 
 - Add action decks in front matter or TS definitions:
   `actions = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
-- Action decks defined on embedded cards are merged into the deck; duplicates
+- Action decks defined on embedded snippets are merged into the deck; duplicates
   are overridden by the deck’s own entries.
 - In compute decks, call child decks with `ctx.spawnAndWait({ path, input })`.
 - In LLM decks, the model chooses action decks via tool calls. Provide clear
@@ -152,15 +152,16 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   `handlers.onError` point to other decks. Inputs are structured (see
   `../reference/handlers.md`); errors inside handlers are swallowed.
 
-## Embeds (cards)
+## Embeds (snippets)
 
-- In Markdown, use image syntax to embed:
-  `![behavior](./cards/behavior.card.md)`. Special markers:
-  `gambit://cards/context.card.md` hints init tool,
-  `gambit://cards/respond.card.md` injects respond instructions, and
-  `gambit://cards/end.card.md` enables the `gambit_end` hang-up tool.
-- Cards can also be TS files exported with `defineCard`. They may contain
-  action/test/grader deck references and schema fragments, but no handlers.
+- In Markdown, use image syntax to embed snippets:
+  `![behavior](./cards/behavior.card.md)`. Local snippet files often still live
+  under `cards/` with a `.card.md` suffix for legacy compatibility. Special
+  markers: `gambit://snippets/context.md` hints init tool,
+  `gambit://snippets/respond.md` injects respond instructions, and
+  `gambit://snippets/end.md` enables the `gambit_end` hang-up tool.
+- Snippets can also be TS files exported with `defineCard`. They may contain
+  action/scenario/grader deck references and schema fragments, but no handlers.
 
 ## Running and debugging
 

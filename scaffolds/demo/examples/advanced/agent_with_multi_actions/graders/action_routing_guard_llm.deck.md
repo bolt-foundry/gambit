@@ -53,4 +53,4 @@ Data supplied:
 4. Check the assistant reply length and that it includes the tool result.
 5. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

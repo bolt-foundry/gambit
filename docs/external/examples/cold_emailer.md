@@ -32,9 +32,9 @@ Key files
 - `init/examples/advanced/cli_cold_emailer/cards/behavior.card.md` — behavior
   rules and output format guidance.
 - `init/examples/advanced/cli_cold_emailer/cards/send_email.card.md` — action
-  card for sending the drafted email.
+  snippet for sending the drafted email.
 - `init/examples/advanced/cli_cold_emailer/cards/log_revision_plan.card.md` —
-  action card for logging the revision plan.
+  action snippet for logging the revision plan.
 - `init/examples/advanced/cli_cold_emailer/lookup_profile.deck.ts` — TypeScript
   action with hard-coded demo profile data.
 - `init/examples/advanced/cli_cold_emailer/schemas/research_input.zod.ts` —

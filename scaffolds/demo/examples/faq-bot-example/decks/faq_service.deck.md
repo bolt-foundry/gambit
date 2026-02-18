@@ -34,4 +34,4 @@ Respond with JSON:
 { "matches": [ { "question": "...", "answer": "..." } ] }
 ```
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

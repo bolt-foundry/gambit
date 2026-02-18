@@ -32,4 +32,4 @@ Instructions:
    extra detail in `summary`.
 7. Always include a one-sentence `summary` for the root deck.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

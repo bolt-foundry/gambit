@@ -43,4 +43,4 @@ Scoring rules:
 3. If no booking claims exist, output 0.
 4. If any claim lacks proof, output -3 with short quotes; otherwise +3.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

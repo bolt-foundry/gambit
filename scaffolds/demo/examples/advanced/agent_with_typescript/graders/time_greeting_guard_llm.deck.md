@@ -41,4 +41,4 @@ Scoring rules:
 3. Check the assistant reply for timestamp inclusion, echo, and brevity.
 4. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

@@ -56,4 +56,4 @@ Scoring rules:
 4. Decide whether they satisfy the spoken style criteria and provide evidence
    only from assistant text when failing.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

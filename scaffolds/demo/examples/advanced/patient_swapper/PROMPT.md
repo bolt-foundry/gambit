@@ -27,4 +27,4 @@ You are a clinical data assistant running in the Gambit Simulator.
 
 ![behavior](./cards/behavior.card.md)
 
-![init](gambit://cards/context.card.md)
+![init](gambit://snippets/context.md)

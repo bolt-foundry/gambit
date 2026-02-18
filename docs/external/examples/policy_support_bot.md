@@ -7,12 +7,12 @@ support bot grounded entirely in a curated FAQ.
 Key ideas:
 
 1. **FAQ ingestion** – `cards/faq_knowledge.card.md` is the canonical knowledge
-   base. The Markdown action deck `actions/search_faq.deck.md` reads that card
-   directly, selects the best entries, and emits structured matches with manual
-   confidence scores (no external vector store required).
+   base. The Markdown action deck `actions/search_faq.deck.md` reads that
+   snippet directly, selects the best entries, and emits structured matches with
+   manual confidence scores (no external vector store required).
 2. **Policy-aware orchestration** – `policy_support_bot.deck.md` embeds persona,
-   grounding, and refusal cards, calls `search_faq`, enforces citation
-   formatting, and uses `gambit://cards/respond.card.md` with a schema so the
+   grounding, and refusal snippets, calls `search_faq`, enforces citation
+   formatting, and uses `gambit://snippets/respond.md` with a schema so the
    UI/CLI always receives structured envelopes.
 3. **Tests + demos** – `tests/faq_dataset.test.ts` guards the FAQ knowledge base
    (category headings, IDs, entry counts), while `demo-script.md` lists prompts

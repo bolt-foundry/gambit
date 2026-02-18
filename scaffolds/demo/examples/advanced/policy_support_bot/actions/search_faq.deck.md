@@ -5,7 +5,7 @@ contextSchema = "../schemas/search_faq_input.zod.ts"
 responseSchema = "../schemas/search_faq_output.zod.ts"
 +++
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 You are the AcmeFlow FAQ retrieval assistant. Given a user question, read the
 embedded knowledge base and return the best-matching FAQ entries.

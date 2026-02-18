@@ -38,4 +38,4 @@ Scoring rules:
 2. Apply the appropriate criteria based on whether the request exists.
 3. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

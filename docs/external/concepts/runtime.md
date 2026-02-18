@@ -21,14 +21,14 @@ safe/observable.
 - `gambit_context`: sent once when `--context` (formerly `--init`) is provided;
   payload is the raw input. Useful for assistant-first flows so the model can
   read input without a user turn. `gambit_init` remains as a deprecated alias.
-- `gambit_respond`: enable with the `gambit://cards/respond.card.md` marker in
+- `gambit_respond`: enable with the `gambit://snippets/respond.md` marker in
   Markdown (or `respond: true` in TypeScript decks). Required for LLM decks that
   should finish with a structured envelope
   `{ payload, status?, message?, code?, meta? }`.
 - `gambit_complete`: emitted automatically for child completions and handled
   errors so the parent can see
   `{ runId, actionCallId, source, status?, payload?, message?, code?, meta? }`.
-- `gambit_end`: enable with `![end](gambit://cards/end.card.md)` in Markdown (or
+- `gambit_end`: enable with `![end](gambit://snippets/end.md)` in Markdown (or
   `allowEnd: true` in TypeScript decks). Calling it returns a sentinel
   `{ __gambitEnd: true, payload?, status?, message?, code?, meta? }` so
   CLI/scenario loops stop reinjecting the closing assistant turn.

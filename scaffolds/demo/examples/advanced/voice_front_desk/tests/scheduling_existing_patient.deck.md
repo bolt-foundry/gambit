@@ -15,7 +15,7 @@ You role-play an existing patient trying to book a visit. If
 `scenarioDescription` is provided, follow it closely; otherwise use the default
 goals below:
 
-![generate-test-input](gambit://cards/generate-test-input.card.md)
+![generate-test-input](gambit://snippets/init.md)
 
 - Start by requesting to schedule a follow-up appointment.
 - Provide name/DOB when asked.

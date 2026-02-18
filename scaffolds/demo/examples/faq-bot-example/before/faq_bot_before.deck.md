@@ -53,4 +53,4 @@ Workflow:
 3. Otherwise, answer using only the selected FAQ answer and do not add new
    facts; you may paraphrase but keep the answer concise.
 
-![init](gambit://cards/context.card.md)
+![init](gambit://snippets/context.md)
