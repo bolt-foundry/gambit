@@ -36,9 +36,44 @@ const TRACE_EVENT_TYPES = new Set<string>([
   "tool.result",
   "model.call",
   "model.result",
+  "model.stream.event",
   "log",
   "monolog",
 ]);
+
+function isTraceEventType(type: string): boolean {
+  if (TRACE_EVENT_TYPES.has(type)) return true;
+  if (type.startsWith("response.")) return true;
+  if (type.startsWith("gambit.")) {
+    const suffix = type.slice("gambit.".length);
+    if (TRACE_EVENT_TYPES.has(suffix)) return true;
+  }
+  return false;
+}
+
+function normalizePersistedTraceRecord(
+  record: Record<string, unknown>,
+): TraceEvent | null {
+  const type = typeof record.type === "string" ? record.type : "";
+  if (!type) return null;
+  if (TRACE_EVENT_TYPES.has(type) || type.startsWith("response.")) {
+    return record as TraceEvent;
+  }
+  if (!type.startsWith("gambit.")) return null;
+  const rawMeta = record._gambit;
+  const meta = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? rawMeta as Record<string, unknown>
+    : undefined;
+  const sourceType = typeof meta?.source_type === "string" &&
+      meta.source_type.trim().length > 0
+    ? meta.source_type.trim()
+    : type.slice("gambit.".length);
+  if (!TRACE_EVENT_TYPES.has(sourceType)) return null;
+  return {
+    ...record,
+    type: sourceType,
+  } as TraceEvent;
+}
 
 function loadTraceEventsFromSession(
   statePath: string,
@@ -57,8 +92,9 @@ function loadTraceEventsFromSession(
         const record = JSON.parse(line) as Record<string, unknown>;
         const kind = typeof record.kind === "string" ? record.kind : "";
         const type = typeof record.type === "string" ? record.type : "";
-        if (kind === "trace" || TRACE_EVENT_TYPES.has(type)) {
-          traces.push(record as TraceEvent);
+        if (kind === "trace" || isTraceEventType(type)) {
+          const normalized = normalizePersistedTraceRecord(record);
+          if (normalized) traces.push(normalized);
         }
       } catch {
         // ignore invalid lines
@@ -158,6 +194,7 @@ export async function runGraderAgainstState(opts: {
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
   responsesMode?: boolean;
+  workerSandbox?: boolean;
 }) {
   const state = loadState(opts.statePath);
   if (!state) {
@@ -215,6 +252,7 @@ export async function runGraderAgainstState(opts: {
           defaultModel: opts.model,
           trace: opts.trace,
           responsesMode: opts.responsesMode,
+          workerSandbox: opts.workerSandbox,
         });
       }
 
@@ -232,6 +270,7 @@ export async function runGraderAgainstState(opts: {
           defaultModel: opts.model,
           trace: opts.trace,
           responsesMode: opts.responsesMode,
+          workerSandbox: opts.workerSandbox,
         });
         turns.push({
           index: idx,

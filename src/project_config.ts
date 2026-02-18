@@ -19,6 +19,12 @@ export type ModelAliasConfig = {
 
 export type GambitConfig = {
   workspace?: WorkspaceConfig;
+  execution?: {
+    workerSandbox?: boolean;
+    worker_sandbox?: boolean;
+    legacyExec?: boolean;
+    legacy_exec?: boolean;
+  };
   models?: {
     aliases?: Record<string, ModelAliasConfig>;
   };
@@ -156,4 +162,35 @@ export function resolveWorkspacePermissions(
   const raw = config?.workspace?.permissions;
   if (!isPlainObject(raw)) return undefined;
   return raw as PermissionDeclarationInput;
+}
+
+function resolveBooleanField(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  return undefined;
+}
+
+export function resolveWorkerSandboxSetting(
+  config?: GambitConfig | null,
+): boolean | undefined {
+  const execution = config?.execution;
+  if (!isPlainObject(execution)) return undefined;
+
+  const workerSandbox = resolveBooleanField(
+    execution.workerSandbox ?? execution.worker_sandbox,
+  );
+  const legacyExec = resolveBooleanField(
+    execution.legacyExec ?? execution.legacy_exec,
+  );
+
+  if (workerSandbox !== undefined && legacyExec !== undefined) {
+    if (workerSandbox === legacyExec) {
+      throw new Error(
+        "gambit.toml execution config is conflicting: worker_sandbox and legacy_exec must be opposites when both are set.",
+      );
+    }
+  }
+
+  if (workerSandbox !== undefined) return workerSandbox;
+  if (legacyExec !== undefined) return !legacyExec;
+  return undefined;
 }

@@ -20,13 +20,13 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit@^0.5.3-dev/cli serve demo.deck.md
+deno run -A jsr:@bolt-foundry/gambit@^0.5.3-dev/cli serve PROMPT.md
 ```
 
-## Run a test bot (UI)
+## Run a scenario (UI)
 
 1. Open the simulator UI and go to the "Test" tab.
-2. Click "Run test bot".
+2. Click "Run scenario".
 3. Switch to the "Grade" tab and click "Run grader".
 4. After the grader completes, review run 2 (expect a -3 score).
 5. Share the failing run details with Codex and ask it to fix the prompt.
@@ -34,6 +34,6 @@ deno run -A jsr:@bolt-foundry/gambit@^0.5.3-dev/cli serve demo.deck.md
 
 ## Notes
 
-- Test decks are registered in `cards/test_decks.card.md`.
+- Scenario decks are registered in `cards/test_decks.card.md`.
 - Graders are registered in `cards/grader_decks.card.md`.
-- Instruction cards live in `cards/` and are included by `demo.deck.md`.
+- Instruction cards live in `cards/` and are included by `PROMPT.md`.

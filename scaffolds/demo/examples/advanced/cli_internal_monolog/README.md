@@ -18,12 +18,12 @@ export OPENROUTER_API_KEY="your-key-here"
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./internal_monolog_parent.deck.md \
+deno run -A jsr:@bolt-foundry/gambit/cli run ./PROMPT.md \
   --message '"What is the capital of France?"' --stream
 ```
 
 ## Notes
 
 - The child deck is `monolog_child.deck.md` and schemas live in `schemas/`.
-- The test bot deck is `tests/internal_monolog_test.deck.md`.
-- The test bot hangup card is `cards/test_bot_hangup.card.md`.
+- The scenario deck is `tests/internal_monolog_test.deck.md`.
+- The scenario hangup card is `cards/test_bot_hangup.card.md`.

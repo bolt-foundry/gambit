@@ -31,11 +31,11 @@ export type ModelParams = {
   frequency_penalty?: number;
   presence_penalty?: number;
   max_tokens?: number;
-  /**
-   * Provider-specific pass-through parameters. Values must be JSON-serializable.
-   * Top-level supported fields take precedence when keys overlap.
-   */
-  additionalParams?: Record<string, JSONValue>;
+  verbosity?: "low" | "medium" | "high";
+  reasoning?: {
+    effort?: "none" | "low" | "medium" | "high" | "xhigh";
+    summary?: "concise" | "detailed" | "auto";
+  };
 };
 
 export type Guardrails = {
@@ -56,6 +56,15 @@ export type DeckReferenceDefinition = {
 
 export type ActionDeckDefinition = DeckReferenceDefinition & {
   name: string;
+  execute?: string;
+  contextSchema?: ZodTypeAny;
+  responseSchema?: ZodTypeAny;
+};
+
+export type ExternalToolDefinition = {
+  name: string;
+  description?: string;
+  inputSchema?: ZodTypeAny;
 };
 
 export type TestDeckDefinition = DeckReferenceDefinition;
@@ -116,6 +125,7 @@ export type BaseDefinition = {
 export type DeckDefinition<Input = unknown> = BaseDefinition & {
   kind: "gambit.deck";
   modelParams?: ModelParams;
+  tools?: ReadonlyArray<ExternalToolDefinition>;
   handlers?: HandlersConfig;
   prompt?: string; // deprecated; prefer body
   body?: string;
@@ -162,8 +172,18 @@ export type ExecutionContext<Input = unknown> = {
   depth: number;
   label?: Label;
   input: Input;
+  initialUserMessage?: unknown;
+  getSessionMeta: <T = unknown>(key: string) => T | undefined;
+  setSessionMeta: (key: string, value: unknown) => void;
+  appendMessage: (
+    message: { role: "user" | "assistant"; content: string },
+  ) => void;
   log: (entry: LogEntry | string) => void;
-  spawnAndWait: (opts: { path: string; input: unknown }) => Promise<unknown>;
+  spawnAndWait: (opts: {
+    path: string;
+    input: unknown;
+    initialUserMessage?: unknown;
+  }) => Promise<unknown>;
   fail: (
     opts: { message: string; code?: string; details?: JSONValue },
   ) => never;
@@ -199,7 +219,9 @@ export type ToolDefinition = {
 
 export type ResponseTextContent =
   | { type: "input_text"; text: string }
-  | { type: "output_text"; text: string };
+  | { type: "output_text"; text: string }
+  | { type: "summary_text"; text: string }
+  | { type: "reasoning_text"; text: string };
 
 export type ResponseMessageItem = {
   type: "message";
@@ -223,10 +245,19 @@ export type ResponseFunctionCallOutputItem = {
   id?: string;
 };
 
+export type ResponseReasoningItem = {
+  type: "reasoning";
+  id?: string;
+  content?: Array<ResponseTextContent>;
+  summary: Array<ResponseTextContent>;
+  encrypted_content?: string | null;
+};
+
 export type ResponseItem =
   | ResponseMessageItem
   | ResponseFunctionCallItem
-  | ResponseFunctionCallOutputItem;
+  | ResponseFunctionCallOutputItem
+  | ResponseReasoningItem;
 
 export type ResponseToolDefinition = {
   type: "function";
@@ -238,9 +269,37 @@ export type ResponseToolDefinition = {
 };
 
 export type ResponseToolChoice =
+  | "none"
   | "auto"
   | "required"
-  | { type: "function"; function: { name: string } };
+  | { type: "function"; function: { name: string } }
+  | {
+    type: "allowed_tools";
+    tools: Array<{ type: "function"; name: string }>;
+    mode?: "none" | "auto" | "required";
+  };
+
+export type ResponseReasoningConfig = {
+  effort?: "none" | "low" | "medium" | "high" | "xhigh" | null;
+  summary?: "auto" | "concise" | "detailed" | null;
+};
+
+export type ResponseTextConfig = {
+  format?:
+    | { type: "text" }
+    | { type: "json_object" }
+    | {
+      type: "json_schema";
+      name?: string;
+      description?: string | null;
+      schema?: JSONValue | null;
+      strict?: boolean;
+    }
+    | null;
+  verbosity?: "low" | "medium" | "high";
+};
+
+export type ResponseAllowedTool = { type: "function"; name: string };
 
 export type CreateResponseRequest = {
   model: string;
@@ -248,9 +307,30 @@ export type CreateResponseRequest = {
   instructions?: string;
   tools?: Array<ResponseToolDefinition>;
   tool_choice?: ResponseToolChoice;
+  allowed_tools?: Array<ResponseAllowedTool>;
+  previous_response_id?: string;
+  store?: boolean;
+  reasoning?: ResponseReasoningConfig;
+  parallel_tool_calls?: boolean;
+  max_tool_calls?: number;
+  temperature?: number;
+  top_p?: number;
+  frequency_penalty?: number;
+  presence_penalty?: number;
   stream?: boolean;
+  stream_options?: {
+    include_obfuscation?: boolean;
+  };
+  background?: boolean;
   max_output_tokens?: number;
+  top_logprobs?: number;
+  truncation?: "auto" | "disabled";
+  text?: ResponseTextConfig;
+  service_tier?: "auto" | "default" | "flex" | "priority";
+  include?: Array<string>;
   metadata?: Record<string, JSONValue>;
+  safety_identifier?: string;
+  prompt_cache_key?: string;
   params?: Record<string, unknown>;
 };
 
@@ -258,51 +338,163 @@ export type ResponseUsage = {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  reasoningTokens?: number;
 };
 
 export type CreateResponseResponse = {
   id: string;
   object: "response";
   model?: string;
+  created_at?: number;
+  completed_at?: number | null;
+  previous_response_id?: string | null;
+  instructions?: string | null;
+  reasoning?: ResponseReasoningConfig | null;
   created?: number;
   status?: "completed" | "in_progress" | "failed";
   output: Array<ResponseItem>;
+  tools?: Array<ResponseToolDefinition>;
+  tool_choice?: ResponseToolChoice;
+  parallel_tool_calls?: boolean;
+  truncation?: "auto" | "disabled";
+  text?: ResponseTextConfig;
+  top_p?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  top_logprobs?: number;
+  temperature?: number;
+  max_output_tokens?: number | null;
+  max_tool_calls?: number | null;
+  store?: boolean;
+  background?: boolean;
+  service_tier?: "auto" | "default" | "flex" | "priority";
+  metadata?: Record<string, JSONValue>;
+  safety_identifier?: string | null;
+  prompt_cache_key?: string | null;
   usage?: ResponseUsage;
-  error?: { code?: string; message?: string };
+  error?: { code?: string; message?: string } | null;
+  updatedState?: SavedState;
 };
 
 export type ResponseEvent =
-  | { type: "response.created"; response: CreateResponseResponse }
+  | {
+    type: "response.created";
+    response: CreateResponseResponse;
+    sequence_number?: number;
+  }
+  | {
+    type: "tool.call";
+    actionCallId: string;
+    name: string;
+    args?: JSONValue;
+  }
+  | {
+    type: "tool.result";
+    actionCallId: string;
+    name: string;
+    result?: JSONValue;
+  }
   | {
     type: "response.output_text.delta";
     output_index: number;
     delta: string;
     item_id?: string;
+    content_index?: number;
+    sequence_number?: number;
+    logprobs?: Array<{
+      token?: string;
+      logprob?: number;
+    }>;
   }
   | {
     type: "response.output_text.done";
     output_index: number;
     text: string;
     item_id?: string;
+    content_index?: number;
+    sequence_number?: number;
   }
   | {
     type: "response.output_item.added";
     output_index: number;
     item: ResponseItem;
+    sequence_number?: number;
   }
   | {
     type: "response.output_item.done";
     output_index: number;
     item: ResponseItem;
+    sequence_number?: number;
   }
-  | { type: "response.completed"; response: CreateResponseResponse }
-  | { type: "response.failed"; error: { code?: string; message?: string } };
+  | {
+    type: "response.reasoning.delta";
+    output_index: number;
+    item_id: string;
+    content_index: number;
+    delta: string;
+    sequence_number?: number;
+    obfuscation?: string;
+  }
+  | {
+    type: "response.reasoning.done";
+    output_index: number;
+    item_id: string;
+    content_index: number;
+    text: string;
+    sequence_number?: number;
+  }
+  | {
+    type: "response.reasoning_summary_text.delta";
+    output_index: number;
+    item_id: string;
+    summary_index: number;
+    delta: string;
+    sequence_number?: number;
+    obfuscation?: string;
+  }
+  | {
+    type: "response.reasoning_summary_text.done";
+    output_index: number;
+    item_id: string;
+    summary_index: number;
+    text: string;
+    sequence_number?: number;
+  }
+  | {
+    type: "response.reasoning_summary_part.added";
+    output_index: number;
+    item_id: string;
+    summary_index: number;
+    part: ResponseTextContent;
+    sequence_number?: number;
+  }
+  | {
+    type: "response.reasoning_summary_part.done";
+    output_index: number;
+    item_id: string;
+    summary_index: number;
+    part: ResponseTextContent;
+    sequence_number?: number;
+  }
+  | {
+    type: "response.completed";
+    response: CreateResponseResponse;
+    sequence_number?: number;
+  }
+  | {
+    type: "response.failed";
+    error: { code?: string; message?: string };
+    sequence_number?: number;
+  };
 
 export type ModelProvider = {
   responses?: (input: {
     request: CreateResponseRequest;
     state?: SavedState;
+    deckPath?: string;
+    signal?: AbortSignal;
     onStreamEvent?: (event: ResponseEvent) => void;
+    onTraceEvent?: (event: ProviderTraceEvent) => void;
   }) => Promise<CreateResponseResponse>;
   resolveModel?: (input: {
     model: string | Array<string>;
@@ -318,7 +510,11 @@ export type ModelProvider = {
     tools?: Array<ToolDefinition>;
     stream?: boolean;
     state?: SavedState;
+    deckPath?: string;
+    signal?: AbortSignal;
     onStreamText?: (chunk: string) => void;
+    onStreamEvent?: (event: Record<string, JSONValue>) => void;
+    onTraceEvent?: (event: ProviderTraceEvent) => void;
     /**
      * Provider-specific pass-through parameters (e.g. OpenAI chat completion
      * fields like temperature/max_tokens).
@@ -337,9 +533,33 @@ export type ModelProvider = {
       promptTokens: number;
       completionTokens: number;
       totalTokens: number;
+      reasoningTokens?: number;
     };
   }>;
 };
+
+export type ProviderTraceEvent =
+  | TraceEvent
+  | (
+    & Omit<
+      Extract<TraceEvent, { type: "tool.call" }>,
+      "runId" | "parentActionCallId"
+    >
+    & {
+      runId?: string;
+      parentActionCallId?: string;
+    }
+  )
+  | (
+    & Omit<
+      Extract<TraceEvent, { type: "tool.result" }>,
+      "runId" | "parentActionCallId"
+    >
+    & {
+      runId?: string;
+      parentActionCallId?: string;
+    }
+  );
 
 type WithDeckRefs<T> = Omit<
   T,
@@ -369,6 +589,7 @@ export type LoadedDeck = WithDeckRefs<DeckDefinition> & {
   actions: Array<ActionDeckDefinition>;
   testDecks: Array<TestDeckDefinition>;
   graderDecks: Array<GraderDeckDefinition>;
+  tools: Array<ExternalToolDefinition>;
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
   inlineEmbeds?: boolean;
@@ -379,6 +600,8 @@ export type ToolCallResult = {
   toolContent: string;
   extraMessages?: Array<ModelMessage>;
 };
+
+export type ToolKind = "action" | "external" | "mcp_bridge" | "internal";
 
 export type TraceEvent =
   & {
@@ -440,6 +663,7 @@ export type TraceEvent =
       actionCallId: string;
       name: string;
       args: JSONValue;
+      toolKind: ToolKind;
       parentActionCallId?: string;
     }
     | {
@@ -448,6 +672,7 @@ export type TraceEvent =
       actionCallId: string;
       name: string;
       result: JSONValue;
+      toolKind: ToolKind;
       parentActionCallId?: string;
     }
     | {
@@ -480,9 +705,35 @@ export type TraceEvent =
         args: JSONValue;
       }>;
       stateMessages?: number;
+      usage?: {
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        reasoningTokens?: number;
+      };
       mode?: "chat" | "responses";
       responseItems?: Array<ResponseItem>;
       parentActionCallId?: string;
+    }
+    | {
+      type: "model.stream.event";
+      runId: string;
+      actionCallId: string;
+      deckPath?: string;
+      model: string;
+      event: Record<string, JSONValue>;
+      parentActionCallId?: string;
+    }
+    | {
+      type: `response.${string}`;
+      _gambit?: {
+        run_id?: string;
+        action_call_id?: string;
+        parent_action_call_id?: string;
+        deck_path?: string;
+        model?: string;
+      } & Record<string, JSONValue>;
+      [key: string]: JSONValue | undefined;
     }
     | {
       type: "log";

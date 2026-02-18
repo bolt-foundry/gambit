@@ -1,13 +1,26 @@
 +++
 [release]
-since = "849762245925cce325c04da1d604088370ec3723"
+since = "fd93f8898e9a4a7210b44a75a7f5bde463374356"
 +++
 
 # Changelog
 
-## Unreleased (v0.8.4)
+## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.1
+
+- feat(gambit): remove `gambit init`; onboarding now routes through
+  `gambit serve`
+- feat(gambit): add `createDefaultedRuntime` and defaulted `runDeck` wrapper
+  with CLI-equivalent provider/model routing for library callers
+- refactor(gambit): route CLI runtime/provider setup through shared
+  `default_runtime` construction path
+- feat(demo-runner): migrate demo test-deck prompt generation to Gambit default
+  runtime wrapper (no hardwired OpenRouter provider)
+- docs(gambit): add migration guidance for `runDeck` wrapper and `runDeckCore`
+  replacement mapping
 
 ## v0.8.3
 

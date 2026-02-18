@@ -112,6 +112,14 @@ export default defineCard({
 });
 ```
 
+For built-in Gambit schemas in TypeScript/compute decks, use canonical module
+subpaths:
+
+```
+import contextSchema from "@bolt-foundry/gambit-core/schemas/scenarios/plain_chat_input_optional.zod.ts";
+import responseSchema from "@bolt-foundry/gambit-core/schemas/scenarios/plain_chat_output.zod.ts";
+```
+
 ## Running decks programmatically
 
 The runtime loads the deck (Markdown or TS) and steps through each pass. Provide
@@ -145,13 +153,32 @@ When the deck defines `run`/`execute`, the runtime hands you an
 [`ExecutionContext`](src/types.ts) with:
 
 - `ctx.input`: validated input (narrowable when you type the schema).
-- `ctx.spawnAndWait({ path, input })`: call another deck and await the result.
+- `ctx.initialUserMessage`: current turn user message when provided by caller.
+- `ctx.getSessionMeta(key)`: read persisted run/session metadata.
+- `ctx.setSessionMeta(key, value)`: persist metadata for later turns.
+- `ctx.appendMessage({ role, content })`: append chat transcript messages from
+  execute decks.
+- `ctx.spawnAndWait({ path, input, initialUserMessage? })`: call another deck
+  and await the result; user message is inherited by default unless overridden.
 - `ctx.return(payload)`: respond early without running guards again.
 - `ctx.fail({ message, code?, details? })`: aborts the run (throws).
 - `ctx.log(...)`: emit structured trace entries for observability.
 
 Pass `guardrails`, `initialUserMessage`, `modelOverride`, and
 `allowRootStringInput` to `runDeck` when scripting custom runtimes.
+
+### Worker sandbox behavior in `runDeck`
+
+`gambit-core` keeps worker sandboxing opt-in:
+
+- `runDeck` enables worker sandboxing only when `workerSandbox: true` is passed.
+- You can also opt in via `GAMBIT_DECK_WORKER_SANDBOX=1` (or `true` / `yes`).
+- If neither is set, `runDeck` executes without worker sandboxing by default.
+
+Why this is opt-in: `@bolt-foundry/gambit-core` is intended to run in multiple
+hosts (Node, Bun, Deno). Worker sandboxing relies on Deno-specific worker
+permission controls, so host apps must opt in when they run in an environment
+that supports it.
 
 ## Loading Markdown decks and cards
 
@@ -211,7 +238,7 @@ stream them to your own observability stack.
 
 ## Local development
 
-From `packages/gambit-core/`:
+From this package directory:
 
 ```
 deno task fmt      # format sources

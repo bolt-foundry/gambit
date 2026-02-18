@@ -91,3 +91,47 @@ Deno.test({
     "no fallback provider configured",
   );
 });
+
+Deno.test({
+  name: "check accepts codex-cli-prefixed models without remote checks",
+  permissions: { read: true, write: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "root.deck.md", "codex-cli/default");
+
+  await handleCheckCommand({
+    deckPath,
+    checkOnline: false,
+  });
+});
+
+Deno.test({
+  name: "check accepts bare codex-cli as default alias",
+  permissions: { read: true, write: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "root.deck.md", "codex-cli");
+
+  await handleCheckCommand({
+    deckPath,
+    checkOnline: false,
+  });
+});
+
+Deno.test({
+  name: "check rejects legacy codex-prefixed models",
+  permissions: { read: true, write: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "root.deck.md", "codex/default");
+
+  await assertRejects(
+    () =>
+      handleCheckCommand({
+        deckPath,
+        checkOnline: false,
+      }),
+    Error,
+    "legacy codex prefix is unsupported",
+  );
+});

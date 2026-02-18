@@ -2,7 +2,7 @@ import { defineDeck } from "jsr:@bolt-foundry/gambit";
 import { z } from "npm:zod";
 import contextSchema, {
   type graderMessageWithToolsSchema as messageSchema,
-} from "../../../../../../gambit-core/schemas/graders/contexts/turn_tools.ts";
+} from "../../../../../packages/gambit-core/schemas/graders/contexts/turn_tools.ts";
 
 const responseSchema = z.object({
   score: z.number().int().min(-3).max(3),

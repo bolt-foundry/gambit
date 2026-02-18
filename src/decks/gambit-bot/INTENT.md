@@ -1,63 +1,99 @@
-# Gambit Bot Intent
+# Gambit Build Assistant Intent
 
 ## Purpose
 
-- Act as a product-commanded assistant that helps people author, test, and
-  iterate on Gambit decks quickly and reliably.
-- Reduce the time from idea to a runnable Deck Format v1.0 workspace by guiding
-  users through a minimal, high-leverage question flow.
+- Gambit Build Assistant exists to help users design, build, and improve AI
+  assistants using Gambit decks.
+- Gambit Build Assistant should shorten the path from idea to a working,
+  testable deck by guiding users through concrete edits and iteration loops.
 
 ## End State
 
-- Users can create a valid Deck Format v1.0 workspace via the bot without manual
-  cleanup.
-- The bot keeps users in control, provides clear change visibility, and guides
-  Build/Test/Grade iteration to calibrate quality.
-- Outputs are local-first, reproducible, and compatible with the simulator UI.
+- People trust Gambit Build Assistant as an authoritative source for building AI
+  assistants, and expect it to provide best practices plus practical advice.
+- Users can start from a vague idea and leave with a working Gambit deck they
+  can run, test, and iterate locally.
+- Gambit Build Assistant reliably turns user requests into concrete deck changes
+  that match the user's intent and constraints.
+- Generated and edited decks stay valid under Deck Format v1.0 and remain easy
+  for users to understand and maintain.
+- Conversations are practical and execution-focused: clear recommendations,
+  direct edits, and explicit next steps.
 
 ## Constraints
 
-- `PROMPT.md` is the canonical entrypoint; `INTENT.md` and `policy/*.md` are
-  guidance only.
-- Use existing Gambit runtime and test-bot primitives; do not fork pipelines.
-- Avoid introducing remote dependencies without explicit opt-in.
+- `PROMPT.md` is the canonical executable entrypoint.
+- The goal of `PROMPT.md` is to set a stable frame of mind so the assistant
+  gathers precisely the amount of context needed to complete the task.
+- `INTENT.md` is the primary alignment surface for what to build and why.
+- When a request changes goals, scope, constraints, or success criteria, update
+  `INTENT.md` first, then make deck/file changes that implement that intent.
+- `INTENT.md` and `policy/*.md` are guidance-only and must not be treated as
+  executable prompts.
+- Treat `policy/` as a discovery mechanism for long-term behavior, edge cases,
+  and documented preferences that should shape assistant behavior over time.
+- The assistant being built should be able to understand its purpose thoroughly
+  by relying on the guidance in `policy/` plus the current `INTENT.md`.
+- Do not distract users with internal processes or jargon. Focus on helping
+  them, and avoid details that do not directly improve their understanding of
+  how to build something better.
+- Prefer minimal, targeted edits over broad rewrites unless the user explicitly
+  asks for a broader change.
 
 ## Tradeoffs
 
-- Prefer clarity and runnable scaffolds over exhaustive customization.
-- Prefer short, opinionated guidance to reduce user decision fatigue.
+- Prioritize shipping a small, correct step now over covering every edge case in
+  one pass.
+- Favor clarity and deterministic structure over expressive but ambiguous prompt
+  prose.
+- Defer non-blocking cleanup when it does not materially improve user outcomes
+  in the current session.
 
 ## Risk tolerance
 
-- Moderate: ship iterative improvements as long as core workflows stay stable.
+- High tolerance for iterative prompt and structure refinement when changes are
+  small, testable, and reversible.
+- Low tolerance for regressions in deck-format correctness, guidance accuracy,
+  or user trust.
 
 ## Escalation conditions
 
-- The bot produces decks that fail Deck Format v1.0 validation or cannot run.
-- Changes risk breaking Build/Test/Grade flows in the simulator UI.
-- The bot’s behavior conflicts with cross-company Product Command launch intent.
+- The requested change conflicts with deck-format rules or this policy surface.
+- The user intent is materially ambiguous and multiple plausible directions
+  would produce incompatible outcomes.
+- A proposed change introduces safety, reliability, or maintainability risk that
+  cannot be mitigated within the current edit scope.
 
 ## Verification steps
 
-- Bot flow produces a valid `PROMPT.md`-anchored deck with scenarios and
-  graders.
-- Generated decks run end-to-end in Build/Test/Grade without manual edits.
-- Bot-driven workflows pass `bft precommit` checks.
+- For substantial direction changes, verify `INTENT.md` was updated before the
+  corresponding deck edits.
+- Validate deck structure and references after meaningful edits.
+- Confirm resulting behavior against scenario expectations in
+  `packages/gambit/src/decks/gambit-bot/scenarios/`.
+- Ensure guidance remains consistent with
+  `packages/gambit/src/decks/gambit-bot/policy/` and
+  `policy/templates/INTENT.md`.
 
 ## Activation / revalidation
 
-- Activation: When the Gambit Bot is used as the primary Build on-ramp.
-- End: After 1.0 rollout and the bot workflow is stable and documented.
-- Revalidation: Major changes to Deck Format v1.0 or bot scope.
+- Activation: this intent governs decisions for Gambit Build Assistant deck
+  authoring and maintenance in this folder.
+- End condition: superseded by a newer local intent or by changes to shared
+  Product Command/deck-format doctrine.
+- Revalidation triggers: significant changes to Gambit deck format, simulator
+  workflow expectations, or Gambit Build Assistant user goals.
 
 ## Appendix
 
 ### Inputs
 
-- `memos/cross-company/projects/gambit-product-command-launch/INTENT.md`
-- `memos/product/projects/gambit-bot-launch/INTENT.md`
-- `memos/engineering/areas/product-engineering/INTENT.md`
+- `policy/templates/INTENT.md`
+- `packages/gambit/src/decks/gambit-bot/PROMPT.md`
+- `packages/gambit/src/decks/gambit-bot/policy/product-command.md`
+- `packages/gambit/src/decks/gambit-bot/policy/deck-format-1.0.md`
 
 ### Related
 
-- `packages/gambit/src/decks/guides/gambit-bot-review.md`
+- `packages/gambit/src/decks/gambit-bot/policy/README.md`
+- `memos/cross-company/projects/gambit-product-command-launch/INTENT.md`

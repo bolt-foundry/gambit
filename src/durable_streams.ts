@@ -160,5 +160,35 @@ export async function handleDurableStreamRequest(
 }
 
 function formatSseEvent(event: StreamEvent): string {
-  return `id: ${event.offset}\ndata: ${JSON.stringify(event)}\n\n`;
+  const payload = normalizeSsePayload(event.data);
+  const type = payload.type;
+  return `id: ${event.offset}\nevent: ${type}\ndata: ${
+    JSON.stringify(payload)
+  }\n\n`;
+}
+
+function normalizeSsePayload(
+  value: unknown,
+): { type: string; [key: string]: unknown } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const rawType = typeof record.type === "string"
+      ? record.type.trim()
+      : "gambit.event";
+    const type = sanitizeSseEventType(rawType);
+    return {
+      ...record,
+      type,
+    };
+  }
+  return {
+    type: "gambit.event",
+    value,
+  };
+}
+
+function sanitizeSseEventType(value: string): string {
+  if (!value) return "gambit.event";
+  const normalized = value.replace(/[^A-Za-z0-9_.-]/g, "_");
+  return normalized.length > 0 ? normalized : "gambit.event";
 }

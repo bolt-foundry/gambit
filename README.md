@@ -22,15 +22,14 @@ npx @bolt-foundry/gambit demo
 Downloads example files (hello decks plus the `examples/` gallery) and sets
 environment variables.
 
-To scaffold a starter project that you can customize, run:
+To start onboarding with the simulator, run:
 
 ```
-npx @bolt-foundry/gambit init my-project
+npx @bolt-foundry/gambit serve gambit/hello.deck.md
+open http://localhost:8000/debug
 ```
 
-This creates a structured skeleton (`decks/`, `actions/`, `graders/`, `tests/`,
-`schemas/`, `.gambit/`) with README guides so you can start authoring your own
-workflows immediately.
+Use the Build tab to draft your own workspace decks and scenarios.
 
 Run an example in the terminal (`repl`):
 
@@ -100,10 +99,10 @@ Drop into a REPL (streams by default):
 npx @bolt-foundry/gambit repl <deck>
 ```
 
-Run a persona against a root deck (test bot):
+Run a persona against a root deck (scenario):
 
 ```
-npx @bolt-foundry/gambit test-bot <root-deck> --test-deck <persona-deck>
+npx @bolt-foundry/gambit scenario <root-deck> --test-deck <persona-deck>
 ```
 
 Grade a saved session:
@@ -123,6 +122,23 @@ Tracing and state: 
 `--trace <file>` for JSONL traces\
 `--verbose` to print events\
 `--state <file>` to persist a session.
+
+### Worker sandbox defaults
+
+- Deck-executing CLI surfaces default to worker sandbox execution.
+- Use `--no-worker-sandbox` (or `--legacy-exec`) to force legacy in-process
+  execution.
+- `--worker-sandbox` explicitly forces worker execution on.
+- `--sandbox` / `--no-sandbox` are deprecated aliases.
+- `gambit.toml` equivalent:
+  ```toml
+  [execution]
+  worker_sandbox = false # same as --no-worker-sandbox
+  # legacy_exec = true    # equivalent rollback toggle
+  ```
+
+The npm launcher (`npx @bolt-foundry/gambit ...`) runs the Gambit CLI binary for
+your platform, so these defaults and flags apply there as well.
 
 ## Using the Simulator
 
@@ -172,6 +188,59 @@ Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
 `run`/`execute` for compute decks. To call a child deck from code, use\
 `ctx.spawnAndWait({ path, input })`. Emit structured trace events with\
 `ctx.log(...)`.
+
+### Runtime defaults for programmatic `runDeck`
+
+`runDeck` from `@bolt-foundry/gambit` now uses CLI-equivalent provider/model
+defaults (alias expansion, provider routing, fallback behavior).
+
+Before (direct-provider setup in each caller):
+
+```ts
+import { createOpenRouterProvider, runDeck } from "jsr:@bolt-foundry/gambit";
+
+const provider = createOpenRouterProvider({
+  apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
+});
+await runDeck({
+  path: "./root.deck.md",
+  input: { message: "hi" },
+  modelProvider: provider,
+});
+```
+
+After (defaulted wrapper):
+
+```ts
+import { runDeck } from "jsr:@bolt-foundry/gambit";
+
+await runDeck({
+  path: "./root.deck.md",
+  input: { message: "hi" },
+});
+```
+
+Per-runtime override (shared runtime object):
+
+```ts
+import { createDefaultedRuntime, runDeck } from "jsr:@bolt-foundry/gambit";
+
+const runtime = await createDefaultedRuntime({
+  fallbackProvider: "codex-cli",
+});
+
+await runDeck({
+  runtime,
+  path: "./root.deck.md",
+  input: { message: "hi" },
+});
+```
+
+Replacement mapping:
+
+- Legacy direct core passthrough export: `runDeck` -> `runDeckCore`
+- Defaulted wrapper export: `runDeck`
+- Runtime builder: `createDefaultedRuntime`
 
 ---
 
@@ -271,8 +340,8 @@ npx @bolt-foundry/gambit serve ./examples/respond_flow/decks/root.deck.ts --port
 Then:
 
 1. Open `http://localhost:8000/test`, pick the **Escalation persona**, and run
-   it. Leave the “Use test deck input for init” toggle on to see persona data
-   seed the init form automatically.
+   it. Leave the “Use scenario deck input for init” toggle on to see persona
+   data seed the init form automatically.
 2. Switch to the Debug tab to inspect the session—the child deck emits a
    `gambit_respond` payload that now shows up as a structured assistant turn.
 3. Head to the Calibrate tab and run the **Respond payload grader** to exercise
@@ -287,12 +356,6 @@ Quickstart:
 ```
 export OPENROUTER_API_KEY=...
 deno run -A jsr:@bolt-foundry/gambit/cli demo
-```
-
-Starter project:
-
-```
-deno run -A jsr:@bolt-foundry/gambit/cli init my-project
 ```
 
 Run a deck:

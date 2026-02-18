@@ -11,8 +11,8 @@ export type RunPermissionInput =
   | boolean
   | Array<string>
   | {
-    paths?: boolean | Array<string>;
-    commands?: boolean | Array<string>;
+    paths?: Array<string>;
+    commands?: Array<string>;
   };
 
 export type PermissionDeclarationInput = Partial<{
@@ -175,19 +175,22 @@ function normalizeRun(
     paths?: unknown;
     commands?: unknown;
   };
+  if (typeof record.paths === "boolean") {
+    throw new Error(
+      "permissions.run.paths must be an array in object form; use permissions.run=true for full run access",
+    );
+  }
+  if (typeof record.commands === "boolean") {
+    throw new Error(
+      "permissions.run.commands must be an array in object form; use permissions.run=true for full run access",
+    );
+  }
   const pathsScope = normalizeList(record.paths, "run", baseDir, {
     resolvePaths: true,
   });
   const commandsScope = normalizeList(record.commands, "run", baseDir, {
     resolvePaths: false,
   });
-  if (pathsScope.all || commandsScope.all) {
-    return {
-      all: true,
-      paths: new Set<string>(),
-      commands: new Set<string>(),
-    };
-  }
   return {
     all: false,
     paths: pathsScope.values,
@@ -424,9 +427,61 @@ export function resolveEffectivePermissions(args: {
   };
 }
 
+/**
+ * Checks whether `target` is covered by `scope`, treating each value as either
+ * an exact path grant or the root of an allowed directory tree.
+ */
 function matchScope(scope: NormalizedScope, target: string): boolean {
   if (scope.all) return true;
-  return scope.values.has(target);
+  const canonicalTarget = canonicalizePath(target);
+  if (!canonicalTarget) return false;
+
+  for (const root of scope.values) {
+    const canonicalRoot = canonicalizePath(root);
+    if (!canonicalRoot) continue;
+    if (pathWithinRoot(canonicalRoot, canonicalTarget)) return true;
+  }
+  return false;
+}
+
+function pathWithinRoot(root: string, target: string): boolean {
+  if (root === target) return true;
+  const rel = path.relative(root, target);
+  return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function canonicalizePath(target: string): string | undefined {
+  const resolved = path.resolve(target);
+  try {
+    return path.resolve(Deno.realPathSync(resolved));
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) {
+      return canonicalizeMissingPath(resolved);
+    }
+    return undefined;
+  }
+}
+
+function canonicalizeMissingPath(target: string): string | undefined {
+  const suffix: Array<string> = [];
+  let probe = target;
+
+  while (true) {
+    try {
+      const canonicalBase = path.resolve(Deno.realPathSync(probe));
+      if (suffix.length === 0) return canonicalBase;
+      return path.resolve(canonicalBase, ...suffix.reverse());
+    } catch (err) {
+      if (err instanceof Deno.errors.NotFound) {
+        const parent = path.dirname(probe);
+        if (parent === probe) return undefined;
+        suffix.push(path.basename(probe));
+        probe = parent;
+        continue;
+      }
+      return undefined;
+    }
+  }
 }
 
 /**
@@ -463,8 +518,22 @@ export function canRunPath(
   targetPath: string,
 ): boolean {
   if (set.run.all) return true;
-  const resolved = path.resolve(set.baseDir, targetPath);
-  return set.run.paths.has(resolved);
+  const resolvedTarget = path.resolve(set.baseDir, targetPath);
+  const canonicalTarget = canonicalizePath(resolvedTarget);
+  if (!canonicalTarget) return false;
+  // Run-path grants are exact binary grants; deny symlink-mediated execution.
+  if (canonicalTarget !== resolvedTarget) return false;
+  for (const allowedPath of set.run.paths) {
+    const resolvedAllowed = path.resolve(set.baseDir, allowedPath);
+    if (resolvedAllowed !== resolvedTarget) continue;
+    const canonicalAllowed = canonicalizePath(
+      resolvedAllowed,
+    );
+    if (!canonicalAllowed) continue;
+    if (canonicalAllowed !== resolvedAllowed) continue;
+    if (canonicalAllowed === canonicalTarget) return true;
+  }
+  return false;
 }
 
 /**

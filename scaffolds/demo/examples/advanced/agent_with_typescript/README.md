@@ -20,17 +20,17 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli serve ./agent_with_typescript.deck.md
+deno run -A jsr:@bolt-foundry/gambit/cli serve ./PROMPT.md
 ```
 
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./agent_with_typescript.deck.md \
+deno run -A jsr:@bolt-foundry/gambit/cli run ./PROMPT.md \
   --message '"hi"' --stream
 ```
 
-## Run a test bot (UI)
+## Run a scenario (UI)
 
 1. Open the simulator UI and go to the "Test" tab.
 2. Choose the "Typescript agent test" persona.
@@ -39,5 +39,5 @@ deno run -A jsr:@bolt-foundry/gambit/cli run ./agent_with_typescript.deck.md \
 ## Notes
 
 - The TypeScript action deck is `get_time.deck.ts`.
-- The test bot deck is `tests/agent_with_typescript_test.deck.md`.
-- The test bot hangup card is `cards/test_bot_hangup.card.md`.
+- The scenario deck is `tests/agent_with_typescript_test.deck.md`.
+- The scenario hangup card is `cards/test_bot_hangup.card.md`.

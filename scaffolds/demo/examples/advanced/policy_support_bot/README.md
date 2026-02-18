@@ -4,8 +4,8 @@ A Gambit example that demonstrates how to build a simple FAQ-driven support bot
 that returns a single-sentence answer grounded in the AcmeFlow FAQ. The example
 includes:
 
-- Markdown root deck (`policy_support_bot.deck.md`) that calls the search action
-  and returns a one-sentence answer.
+- Markdown root deck (`PROMPT.md`) that calls the search action and returns a
+  one-sentence answer.
 - Markdown retrieval action (`actions/search_faq.deck.md`) that reads the
   embedded FAQ knowledge base and returns structured matches with confidence
   scores.
@@ -15,17 +15,17 @@ includes:
 
 | Path                                | Purpose                                                                                                          |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `policy_support_bot.deck.md`        | Main chatbot deck. Calls `search_faq` and returns one-sentence answers.                                          |
+| `PROMPT.md`                         | Main chatbot deck. Calls `search_faq` and returns one-sentence answers.                                          |
 | `actions/search_faq.deck.md`        | Markdown action that reads the FAQ card, selects the best entries, and emits structured match objects.           |
 | `cards/faq_knowledge.card.md`       | Source-of-truth FAQ dataset (id, category, question, answer, URL) embedded inside both the action and bot decks. |
 | `cards/*.card.md`                   | Persona, user persona, and behavior cards reused by the root deck.                                               |
 | `schemas/*.zod.ts`                  | Zod schemas for bot outputs and search inputs.                                                                   |
 | `tests/faq_dataset.test.ts`         | Deno unit tests that ensure the FAQ knowledge base stays intact.                                                 |
-| `tests/new_account_persona.deck.md` | Synthetic persona deck for the Test Bot tab.                                                                     |
+| `tests/new_account_persona.deck.md` | Synthetic persona deck for the Scenario tab.                                                                     |
 | `demo-script.md`                    | Suggested prompts (answers + refusals) for the Gambit Debug UI.                                                  |
 
-To wire synthetic QA personas into the Test Bot tab, add `[[testDecks]]` entries
-to `policy_support_bot.deck.md` that point at persona decks (for example
+To wire synthetic QA personas into the Scenario tab, add `[[testDecks]]` entries
+to `PROMPT.md` that point at persona decks (for example
 `./tests/new_account_persona.deck.md`). Those persona decks should set
 `acceptsUserTurns = true` and can declare an `contextSchema` so the Scenario
 form is auto-generated.
@@ -53,7 +53,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts run \
-     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/PROMPT.md \
      --message '"How much does AcmeFlow cost?"' --stream
    ```
 
@@ -61,7 +61,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts run \
-     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/PROMPT.md \
      --message '"Do you support HIPAA workflows?"' --stream
    ```
 
@@ -69,7 +69,7 @@ pointing the search action to an external data source.
 
    ```bash
    deno run -A src/cli.ts serve \
-     init/examples/advanced/policy_support_bot/policy_support_bot.deck.md \
+     init/examples/advanced/policy_support_bot/PROMPT.md \
      --port 8787 --verbose
    # Open http://localhost:8787 to chat, view traces, and grade runs.
    ```

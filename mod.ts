@@ -25,12 +25,27 @@ export type { Guardrails } from "@bolt-foundry/gambit-core";
 export type { JSONValue } from "@bolt-foundry/gambit-core";
 /** Model provider interface for LLM backends. */
 export type { ModelProvider } from "@bolt-foundry/gambit-core";
-/** Test deck definition shape. */
+/** Scenario deck definition shape. */
 export type { TestDeckDefinition } from "@bolt-foundry/gambit-core";
 /** Check if a value is an explicit end-of-run signal. */
 export { isGambitEndSignal } from "@bolt-foundry/gambit-core";
-/** Run a deck and return its execution result. */
-export { runDeck } from "@bolt-foundry/gambit-core";
+/** Check whether an error represents runtime cancellation. */
+export { isRunCanceledError } from "@bolt-foundry/gambit-core";
+/** Build a runtime with CLI-equivalent provider defaults and routing. */
+export { createDefaultedRuntime } from "./src/default_runtime.ts";
+/** Runtime defaults/options for the `runDeck` wrapper. */
+export type {
+  CreateDefaultedRuntimeOptions,
+  DefaultedRuntime,
+  DefaultedRuntimeRunOptions,
+  RunDeckWithDefaultsOptions,
+} from "./src/default_runtime.ts";
+/** Session artifact persistence config for default runtime runs. */
+export type { SessionArtifactsConfig } from "./src/session_artifacts.ts";
+/** Run a deck with default provider/model/runtime behavior. */
+export { runDeck } from "./src/default_runtime.ts";
+/** Run a deck directly through gambit-core without gambit defaults. */
+export { runDeck as runDeckCore } from "@bolt-foundry/gambit-core";
 /** Signal for explicitly ending a Gambit run. */
 export type { GambitEndSignal } from "@bolt-foundry/gambit-core";
 /** OpenAI Chat Completions compatibility helper for a deck. */

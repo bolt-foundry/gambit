@@ -63,7 +63,11 @@ async function findRoots(): Promise<Array<string>> {
     throw new Error("Unable to locate gambit deno.json(c) in this repo.");
   }
 
-  const coreCandidates = ["packages/gambit-core", "../gambit-core"];
+  const coreCandidates = [
+    "packages/gambit/packages/gambit-core",
+    "packages/gambit-core",
+    "../gambit-core",
+  ];
   for (const candidate of coreCandidates) {
     if (await exists(candidate)) {
       roots.push(candidate);

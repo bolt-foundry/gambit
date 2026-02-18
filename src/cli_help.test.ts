@@ -29,6 +29,8 @@ Deno.test({
   assert(output.includes("gambit help <command>"));
   assert(output.includes("bot       Run the Gambit bot assistant"));
   assert(output.includes("run       Run a deck once"));
+  assert(output.includes("scenario  Run a scenario loop with a persona deck"));
+  assert(!output.includes("init"));
   assert(!output.includes("export    Export a bundle from state"));
 });
 

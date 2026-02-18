@@ -22,6 +22,9 @@ export async function handleRunCommand(opts: {
   responsesMode?: boolean;
   workspacePermissions?: PermissionDeclarationInput;
   workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  workerSandbox?: boolean;
 }) {
   const state = opts.statePath ? loadState(opts.statePath) : undefined;
   const onStateUpdate = opts.statePath
@@ -46,6 +49,9 @@ export async function handleRunCommand(opts: {
     responsesMode: opts.responsesMode,
     workspacePermissions: opts.workspacePermissions,
     workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+    sessionPermissions: opts.sessionPermissions,
+    sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+    workerSandbox: opts.workerSandbox,
   });
 
   if (isGambitEndSignal(result)) {

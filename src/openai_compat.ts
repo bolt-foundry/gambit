@@ -1,8 +1,10 @@
+import * as path from "@std/path";
 import {
   assertZodSchema,
   DEFAULT_GUARDRAILS,
   loadDeck,
   RESERVED_TOOL_PREFIX,
+  resolveEffectivePermissions,
   runDeck,
   toJsonSchema,
 } from "@bolt-foundry/gambit-core";
@@ -11,6 +13,8 @@ import type {
   LoadedDeck,
   ModelMessage,
   ModelProvider,
+  PermissionDeclarationInput,
+  PermissionTrace,
   ToolDefinition,
 } from "@bolt-foundry/gambit-core";
 
@@ -254,12 +258,47 @@ export async function chatCompletionsWithDeck(args: {
   guardrails?: Partial<Guardrails>;
   defaultModel?: string;
   onStreamText?: (chunk: string) => void;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  parentPermissions?: ReturnType<
+    typeof resolveEffectivePermissions
+  >["effective"];
+  workerSandbox?: boolean;
+  trace?: (event: { type: string; permissions?: PermissionTrace }) => void;
 }): Promise<ChatCompletionsResponse> {
   const executeDeckTools = args.executeDeckTools ?? true;
   const guardrails: Guardrails = { ...DEFAULT_GUARDRAILS, ...args.guardrails };
   const runId = randomId("run");
 
   const deck = await loadDeck(args.deckPath);
+  const rootPermissions = resolveEffectivePermissions({
+    baseDir: path.dirname(deck.path),
+    parent: args.parentPermissions,
+    workspace: args.workspacePermissions
+      ? {
+        baseDir: args.workspacePermissionsBaseDir ?? path.dirname(deck.path),
+        permissions: args.workspacePermissions,
+      }
+      : undefined,
+    declaration: deck.permissions
+      ? {
+        baseDir: path.dirname(deck.path),
+        permissions: deck.permissions,
+      }
+      : undefined,
+    session: args.sessionPermissions
+      ? {
+        baseDir: args.sessionPermissionsBaseDir ?? Deno.cwd(),
+        permissions: args.sessionPermissions,
+      }
+      : undefined,
+  });
+  args.trace?.({
+    type: "openai_compat.permissions",
+    permissions: rootPermissions.trace,
+  });
   const systemPrompt = deckSystemPrompt(deck);
 
   const providedMessages = normalizeMessages(args.request.messages);
@@ -300,6 +339,7 @@ export async function chatCompletionsWithDeck(args: {
       messages,
       tools: tools.length ? tools : undefined,
       stream: Boolean(args.request.stream),
+      deckPath: deck.path,
       onStreamText: args.onStreamText,
       params: providerParamsFromRequest(args.request),
     });
@@ -342,6 +382,23 @@ export async function chatCompletionsWithDeck(args: {
         const actionPath = gambit.actionPathByName.get(call.name);
         if (!actionPath) continue;
         try {
+          const actionRef = deck.actionDecks.find((entry) =>
+            entry.name === call.name
+          );
+          const actionPermissions = resolveEffectivePermissions({
+            baseDir: path.dirname(deck.path),
+            parent: rootPermissions.effective,
+            reference: actionRef?.permissions
+              ? {
+                baseDir: path.dirname(deck.path),
+                permissions: actionRef.permissions,
+              }
+              : undefined,
+          });
+          args.trace?.({
+            type: "openai_compat.action.permissions",
+            permissions: actionPermissions.trace,
+          });
           const childResult = await runDeck({
             path: actionPath,
             input: call.args,
@@ -357,6 +414,14 @@ export async function chatCompletionsWithDeck(args: {
             stream: Boolean(args.request.stream),
             onStreamText: args.onStreamText,
             inputProvided: true,
+            parentPermissions: rootPermissions.effective,
+            referencePermissions: actionRef?.permissions,
+            referencePermissionsBaseDir: path.dirname(deck.path),
+            workspacePermissions: args.workspacePermissions,
+            workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+            sessionPermissions: args.sessionPermissions,
+            sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
+            workerSandbox: args.workerSandbox,
           });
           messages.push({
             role: "tool",

@@ -116,19 +116,19 @@ const beatScenario: DemoTimelineStep[] = [
   {
     type: "voiceover",
     text:
-      "The bot takes a typed input schema, so we’ll fill in a concrete FAQ-first scenario about Sunday hours and let the test bot play it out.",
+      "The bot takes a typed input schema, so we’ll fill in a concrete FAQ-first scenario about Sunday hours and let the scenario play it out.",
     showSubtitles: true,
   },
 ];
 
-/** Beat 4: Run + inspect (Test Bot simulates and produces a reproducible session). */
+/** Beat 4: Run + inspect (Scenario simulates and produces a reproducible session). */
 const beatRunInspect: DemoTimelineStep[] = [
   // Demo note: temporarily drop the tool-backed response guardrail and add a "hallucinate wildly" card
   // to force a FAQ hallucination. Then add a grader to flag it, and restore the guardrail to fix.
   {
     type: "voiceover",
     text:
-      "We’ll simulate a patient call with a test bot and watch the workflow run end to end as it streams.",
+      "We’ll simulate a patient call with a scenario and watch the workflow run end to end as it streams.",
     showSubtitles: true,
   },
   {
@@ -184,7 +184,7 @@ const beatDebug: DemoTimelineStep[] = [
   {
     type: "voiceover",
     text:
-      "Then we’ll run the test bot again and rerun the grader to confirm the fix.",
+      "Then we’ll run the scenario again and rerun the grader to confirm the fix.",
     showSubtitles: true,
   },
   {

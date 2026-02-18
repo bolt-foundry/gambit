@@ -1,6 +1,7 @@
 import * as path from "@std/path";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import type { ModelAliasResolver } from "../project_config.ts";
+import { CODEX_PREFIX } from "../providers/codex.ts";
 import { GOOGLE_PREFIX } from "../providers/google.ts";
 import { fetchOllamaTags, OLLAMA_PREFIX } from "../providers/ollama.ts";
 import { OPENROUTER_PREFIX } from "../providers/openrouter.ts";
@@ -193,7 +194,14 @@ export async function handleCheckCommand(opts: {
   const parseProvider = (model: string): {
     providerKey?: ProviderKey;
     strippedModel: string;
+    legacyCodex?: boolean;
   } => {
+    if (model.trim() === "codex-cli") {
+      return {
+        providerKey: "codex-cli",
+        strippedModel: "default",
+      };
+    }
     if (model.startsWith(OPENROUTER_PREFIX)) {
       return {
         providerKey: "openrouter",
@@ -212,6 +220,15 @@ export async function handleCheckCommand(opts: {
         strippedModel: model.slice(GOOGLE_PREFIX.length),
       };
     }
+    if (model.startsWith(CODEX_PREFIX)) {
+      return {
+        providerKey: "codex-cli",
+        strippedModel: model.slice(CODEX_PREFIX.length),
+      };
+    }
+    if (model === "codex" || model.startsWith("codex/")) {
+      return { strippedModel: model, legacyCodex: true };
+    }
     return { strippedModel: model };
   };
 
@@ -220,6 +237,12 @@ export async function handleCheckCommand(opts: {
     skipped?: boolean;
   }> => {
     const parsed = parseProvider(candidate);
+    if (parsed.legacyCodex) {
+      failures.push(
+        `${candidate} (legacy codex prefix is unsupported; use codex-cli/default or codex-cli/<model>)`,
+      );
+      return { available: false };
+    }
     const prefixed = Boolean(parsed.providerKey);
     let providerKey = parsed.providerKey;
     let resolvedModel = parsed.strippedModel;
@@ -288,6 +311,14 @@ export async function handleCheckCommand(opts: {
       }
       failures.push(`${candidate} (google: GOOGLE_API_KEY not set)`);
       return { available: false };
+    }
+
+    if (providerKey === "codex-cli") {
+      if (!resolvedModel.trim()) {
+        failures.push(`${candidate} (codex-cli: missing model name)`);
+        return { available: false };
+      }
+      return { available: true };
     }
 
     failures.push(`${candidate} (unknown provider)`);

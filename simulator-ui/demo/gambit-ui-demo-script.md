@@ -29,11 +29,11 @@ If you can run it, you can inspect it. That is the core promise.
 
 Start from a local checkout. In `packages/gambit`, run
 `deno run -A src/cli.ts serve init/examples/advanced/voice_front_desk/decks/root.deck.md --port 8000`,
-then open `http://localhost:8000/test-bot`.
+then open `http://localhost:8000/test`.
 
-In Test Bot, select the New patient intake persona. Fill the scenario
-description, caller name, and date of birth. The init form comes from the deck
-input schema, so this run stays reproducible.
+In Test, select the New patient intake persona. Fill the scenario description,
+caller name, and date of birth. The init form comes from the deck input schema,
+so this run stays reproducible.
 
 Click Run and let a few turns stream. We now have a session id that ties
 together the transcript, traces, and feedback.
@@ -45,5 +45,5 @@ reason, and the exact turn context that drove the result.
 Go to Debug and inspect the run. The transcript shows every message, the trace
 pane shows every deck and tool event, and timing is captured along the way.
 
-From here the loop is simple. Edit the deck in code, rerun Test Bot, and regrade
-until the behavior is correct.
+From here the loop is simple. Edit the deck in code, rerun the scenario, and
+regrade until the behavior is correct.

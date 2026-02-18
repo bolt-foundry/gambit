@@ -4,29 +4,30 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 
 ## Commands
 
-- Init starter folder: `deno run -A src/cli.ts init`.
+- Onboarding path: `deno run -A src/cli.ts serve <deck> --port 8000`.
 - Help and usage:
   - General usage: `deno run -A src/cli.ts help` (or `-h` / `--help`).
   - Full usage: `deno run -A src/cli.ts help --verbose`.
   - Command help: `deno run -A src/cli.ts help <command>` (or
     `deno run -A src/cli.ts <command> -h`).
 - Run once:
-  `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--responses] [--verbose]`
+  `deno run -A src/cli.ts run <deck> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--trace <file>] [--state <file>] [--stream] [--responses] [--verbose] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]`
 - Check models: `deno run -A src/cli.ts check <deck>`
 - REPL: `deno run -A src/cli.ts repl <deck>` (defaults to
   `src/decks/gambit-assistant.deck.md` in a local checkout). Streams by default
   and keeps state in memory for the session.
-- Test bot (CLI):
-  `deno run -A src/cli.ts test-bot <root-deck> --test-deck <persona-deck> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--responses] [--verbose]`
+- Scenario (CLI):
+  `deno run -A src/cli.ts scenario <root-deck> --test-deck <persona-deck> [--context <json|string>] [--bot-input <json|string>] [--message <json|string>] [--max-turns <n>] [--state <file>] [--grade <grader-deck> ...] [--trace <file>] [--responses] [--verbose] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]`
 - Grade (CLI):
-  `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--responses] [--verbose]`
+  `deno run -A src/cli.ts grade <grader-deck> --state <file> [--model <id>] [--model-force <id>] [--trace <file>] [--responses] [--verbose] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]`
 - Export bundle (CLI):
   `deno run -A src/cli.ts export [<deck>] --state <file> --out <bundle.tar.gz>`
-- Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` then open
+- Debug UI: `deno run -A src/cli.ts serve <deck> --port 8000` or
+  `deno run -A src/cli.ts serve --artifact <bundle.tar.gz>` then open
   http://localhost:8000/. This serves a multi-page UI:
 
   - Debug (default): `http://localhost:8000/debug`
-  - Test: `http://localhost:8000/test-bot`
+  - Test: `http://localhost:8000/test`
   - Calibrate: `http://localhost:8000/calibrate`
 
   The WebSocket server streams turns, traces, and status updates.
@@ -46,21 +47,33 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - `GAMBIT_RESPONSES_MODE=1`: env alternative to `--responses` for runtime/state.
 - `GAMBIT_OPENROUTER_RESPONSES=1`: route OpenRouter calls through the Responses
   API (experimental; chat remains the default path).
+- Worker execution defaults on for deck-executing surfaces. Use
+  `--no-worker-sandbox` (or `--legacy-exec`) to roll back to legacy in-process
+  execution. `--sandbox/--no-sandbox` still work as deprecated aliases.
+- `gambit.toml` config equivalent:
+  ```toml
+  [execution]
+  worker_sandbox = false # same as --no-worker-sandbox
+  # legacy_exec = true    # equivalent rollback toggle
+  ```
 
 ## State and tracing
 
-- `--state <file>` (run/test-bot/grade/export): load/persist messages so you can
+- `--state <file>` (run/scenario/grade/export): load/persist messages so you can
   continue a conversation; skips `gambit_context` on resume. `grade` writes
   `meta.gradingRuns` back into the session state, while `export` reads the state
   file to build the bundle.
 - `--out <file>` (export): bundle output path (tar.gz).
-- `--grade <grader-deck>` (test-bot): can be repeated; graders run in the order
+- `--grade <grader-deck>` (scenario): can be repeated; graders run in the order
   provided and append results to `meta.gradingRuns` in the same session state
   file.
 - `--trace <file>` writes JSONL trace events; `--verbose` prints trace to
   console. Combine with `--stream` to watch live output while capturing traces.
 - `--port <n>` overrides debug UI port (default 8000); `PORT` env is honored
   when `--port` is not provided.
+- `--artifact <bundle.tar.gz>` (serve only): restore and serve a bundle created
+  by `gambit export` (or FAQ download). Mutually exclusive with explicit deck
+  path.
 - `serve` auto-builds the debug UI bundle on every start and generates source
   maps by default in dev environments (set `GAMBIT_ENV=development` or
   `NODE_ENV=development`, or pass `--bundle`/`--sourcemap` explicitly).
@@ -91,17 +104,17 @@ How to run Gambit, the agent harness framework, locally and observe runs.
   `window.gambitFormatTrace` hook in the page; return a string or
   `{role?, summary?, details?, depth?}` to override the entry that appears in
   the Traces & Tools pane.
-- The Test page reuses the same simulator runtime but drives persona/test-bot
+- The Test page reuses the same simulator runtime but drives persona/scenario
   decks so you can batch synthetic conversations, inspect per-turn scoring, and
   export JSONL artifacts for later ingestion. List personas by declaring
   `[[testDecks]]` entries in your root deck (for example
   `gambit/examples/advanced/voice_front_desk/decks/root.deck.md`). Each entry’s
   `path` should point to a persona deck (Markdown or TS) that includes
   `acceptsUserTurns = true`; the persona deck’s own `contextSchema` and defaults
-  power the Scenario/Test Bot form (see
+  power the Scenario form (see
   `gambit/examples/advanced/voice_front_desk/tests/new_patient_intake.deck.md`).
   Editing those deck files is how you add/remove personas now—there is no
-  `.gambit/test-bot.md` override.
+  `.gambit/scenario.md` override.
 - The Calibrate page is the regroup/diagnostics view for graders that run
   against saved Debug/Test sessions; it currently serves as a placeholder until
   the grading transport lands.

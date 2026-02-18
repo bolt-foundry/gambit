@@ -15,7 +15,7 @@ export default function SessionsDrawer(props: {
   onDelete: (sessionId: string) => void;
   onDeleteAll: () => void;
   onClose: () => void;
-  activeSessionId?: string | null;
+  activeWorkspaceId?: string | null;
   bundleStamp: string | null;
 }) {
   const {
@@ -28,7 +28,7 @@ export default function SessionsDrawer(props: {
     onDelete,
     onDeleteAll,
     onClose,
-    activeSessionId,
+    activeWorkspaceId,
     bundleStamp,
   } = props;
   useEffect(() => {
@@ -75,7 +75,7 @@ export default function SessionsDrawer(props: {
             {error && <p className="error">{error}</p>}
             <ul className="sessions-list">
               {sessions.map((session) => {
-                const isActive = activeSessionId === session.id;
+                const isActive = activeWorkspaceId === session.id;
                 return (
                   <li key={session.id}>
                     <button

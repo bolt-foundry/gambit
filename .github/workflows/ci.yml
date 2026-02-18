@@ -54,20 +54,37 @@ jobs:
             };
             const gambitPath = await findPath(
               [
-                "deno.jsonc",
-                "deno.json",
                 "packages/gambit/deno.jsonc",
                 "packages/gambit/deno.json",
+                "deno.jsonc",
+                "deno.json",
               ],
               "gambit deno.json(c)",
             );
             const corePath = await findPath(
-              ["packages/gambit-core/deno.json"],
+              [
+                "packages/gambit-core/deno.json",
+                "packages/gambit/packages/gambit-core/deno.json",
+              ],
               "gambit-core deno.json",
             );
             const gambit = parse(await Deno.readTextFile(gambitPath));
             const core = parse(await Deno.readTextFile(corePath));
+            const unstable = new Set(Array.isArray(gambit.unstable) ? gambit.unstable : []);
+            for (const flag of [
+              "worker-options",
+              "temporal",
+              "net",
+              "bundle",
+              "webgpu",
+            ]) {
+              unstable.add(flag);
+            }
+            gambit.unstable = [...unstable];
             const exportsMap = core.exports ?? {};
+            const coreDir = corePath.includes("/")
+              ? corePath.slice(0, corePath.lastIndexOf("/"))
+              : ".";
             const localImports = {};
             for (const [key, value] of Object.entries(exportsMap)) {
               if (typeof value !== "string") continue;
@@ -76,7 +93,7 @@ jobs:
                 : key;
               const spec = `@bolt-foundry/gambit-core${suffix}`;
               const rel = value.startsWith("./") ? value.slice(2) : value;
-              localImports[spec] = `./packages/gambit-core/${rel}`;
+              localImports[spec] = `./${coreDir}/${rel}`;
             }
             gambit.imports = { ...(gambit.imports ?? {}), ...localImports };
             await Deno.writeTextFile(

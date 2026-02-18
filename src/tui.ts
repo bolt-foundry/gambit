@@ -1,5 +1,6 @@
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import type { SavedState } from "@bolt-foundry/gambit-core";
+import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import * as path from "@std/path";
 
 const encoder = new TextEncoder();
@@ -48,6 +49,11 @@ export async function startTui(opts: {
   initialMessage?: unknown;
   contextProvided?: boolean;
   responsesMode?: boolean;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  workerSandbox?: boolean;
 }) {
   if (!Deno.stdin.isTerminal()) {
     throw new Error("tui requires an interactive TTY.");
@@ -230,6 +236,11 @@ export async function startTui(opts: {
           state = s;
         },
         responsesMode: opts.responsesMode,
+        workspacePermissions: opts.workspacePermissions,
+        workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+        sessionPermissions: opts.sessionPermissions,
+        sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+        workerSandbox: opts.workerSandbox,
         onStreamText: (chunk) => {
           if (!chunk) return;
           modelStreamedText = true;

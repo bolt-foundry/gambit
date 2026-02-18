@@ -92,6 +92,7 @@ Deno.test("openrouter responses maps output and usage", async () => {
     promptTokens: 3,
     completionTokens: 5,
     totalTokens: 8,
+    reasoningTokens: 0,
   });
 });
 
@@ -121,4 +122,42 @@ Deno.test("openrouter chat uses responses when enabled", async () => {
   assertEquals(result.message.content, "Hello there.");
   assertEquals(result.finishReason, "tool_calls");
   assertEquals(result.toolCalls?.[0].args, { query: "hi" });
+});
+
+Deno.test("openrouter responses forwards abort signal to client", async () => {
+  let seenSignal: AbortSignal | undefined;
+  const client = {
+    responses: {
+      create: (_params: Record<string, unknown>, options?: {
+        signal?: AbortSignal;
+      }) => {
+        seenSignal = options?.signal;
+        return Promise.resolve(buildResponseFixture());
+      },
+    },
+    chat: {
+      completions: {
+        create: () => Promise.reject(new Error("chat not expected")),
+      },
+    },
+  } as OpenAIClient;
+  const provider = createOpenRouterProvider({
+    apiKey: "test",
+    client,
+  });
+  const controller = new AbortController();
+
+  await provider.responses?.({
+    request: {
+      model: "openrouter/gpt-4o",
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+    },
+    signal: controller.signal,
+  });
+
+  assertEquals(seenSignal, controller.signal);
 });

@@ -98,21 +98,12 @@ export function buildTabDemoTimeline(opts: {
     { type: "screenshot", label: "03-build-file-policy" },
     {
       type: "wait-for",
-      selector: '[data-testid="build-changes-count"]',
-      text: /[1-9]/,
+      selector: '[data-testid="build-chat-input"]:not([disabled])',
       timeoutMs: 120_000,
     },
     { type: "wait", ms: 500 },
     { type: "screenshot", label: "02-build-start" },
   );
-
-  const beatReviewChanges: DemoTimelineStep[] = [
-    { type: "click", selector: ".build-recent-changes-trigger" },
-    { type: "wait-for", selector: '[data-testid="build-changes-panel"]' },
-    { type: "scroll", selector: '[data-testid="build-changes-panel"]' },
-    { type: "wait", ms: 500 },
-    { type: "screenshot", label: "04-build-recent-changes" },
-  ];
 
   const beatCheckTabs: DemoTimelineStep[] = [];
   beatCheckTabs.push(
@@ -157,7 +148,6 @@ export function buildTabDemoTimeline(opts: {
   return [
     ...beatOpenBuild,
     ...beatPrompt,
-    ...beatReviewChanges,
     ...beatCheckTabs,
   ];
 }

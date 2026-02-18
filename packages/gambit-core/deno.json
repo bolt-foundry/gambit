@@ -1,6 +1,6 @@
 {
   "name": "@bolt-foundry/gambit-core",
-  "version": "0.8.3",
+  "version": "0.8.5-rc.1",
   "description": "Core runtime for Gambit decks.",
   "license": "Apache-2.0",
   "repository": {
@@ -8,7 +8,25 @@
     "url": "git+https://github.com/bolt-foundry/gambit.git"
   },
   "exports": {
-    ".": "./mod.ts"
+    ".": "./mod.ts",
+    "./schemas/graders/respond.ts": "./schemas/graders/respond.ts",
+    "./schemas/graders/respond.zod.ts": "./schemas/graders/respond.zod.ts",
+    "./schemas/graders/grader_output.ts": "./schemas/graders/grader_output.ts",
+    "./schemas/graders/grader_output.zod.ts": "./schemas/graders/grader_output.zod.ts",
+    "./schemas/graders/contexts/turn.ts": "./schemas/graders/contexts/turn.ts",
+    "./schemas/graders/contexts/turn.zod.ts": "./schemas/graders/contexts/turn.zod.ts",
+    "./schemas/graders/contexts/turn_tools.ts": "./schemas/graders/contexts/turn_tools.ts",
+    "./schemas/graders/contexts/turn_tools.zod.ts": "./schemas/graders/contexts/turn_tools.zod.ts",
+    "./schemas/graders/contexts/conversation.ts": "./schemas/graders/contexts/conversation.ts",
+    "./schemas/graders/contexts/conversation.zod.ts": "./schemas/graders/contexts/conversation.zod.ts",
+    "./schemas/graders/contexts/conversation_tools.ts": "./schemas/graders/contexts/conversation_tools.ts",
+    "./schemas/graders/contexts/conversation_tools.zod.ts": "./schemas/graders/contexts/conversation_tools.zod.ts",
+    "./schemas/graders/contexts/tools.ts": "./schemas/graders/contexts/tools.ts",
+    "./schemas/graders/contexts/tools.zod.ts": "./schemas/graders/contexts/tools.zod.ts",
+    "./schemas/scenarios/plain_chat_input_optional.ts": "./schemas/scenarios/plain_chat_input_optional.ts",
+    "./schemas/scenarios/plain_chat_input_optional.zod.ts": "./schemas/scenarios/plain_chat_input_optional.zod.ts",
+    "./schemas/scenarios/plain_chat_output.ts": "./schemas/scenarios/plain_chat_output.ts",
+    "./schemas/scenarios/plain_chat_output.zod.ts": "./schemas/scenarios/plain_chat_output.zod.ts"
   },
   "tasks": {
     "fmt": "deno fmt",

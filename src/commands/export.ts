@@ -42,9 +42,44 @@ const TRACE_EVENT_TYPES = new Set<string>([
   "tool.result",
   "model.call",
   "model.result",
+  "model.stream.event",
   "log",
   "monolog",
 ]);
+
+function isTraceEventType(type: string): boolean {
+  if (TRACE_EVENT_TYPES.has(type)) return true;
+  if (type.startsWith("response.")) return true;
+  if (type.startsWith("gambit.")) {
+    const suffix = type.slice("gambit.".length);
+    if (TRACE_EVENT_TYPES.has(suffix)) return true;
+  }
+  return false;
+}
+
+function normalizePersistedTraceRecord(
+  record: Record<string, unknown>,
+): TraceEvent | null {
+  const type = typeof record.type === "string" ? record.type : "";
+  if (!type) return null;
+  if (TRACE_EVENT_TYPES.has(type) || type.startsWith("response.")) {
+    return record as TraceEvent;
+  }
+  if (!type.startsWith("gambit.")) return null;
+  const rawMeta = record._gambit;
+  const meta = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? rawMeta as Record<string, unknown>
+    : undefined;
+  const sourceType = typeof meta?.source_type === "string" &&
+      meta.source_type.trim().length > 0
+    ? meta.source_type.trim()
+    : type.slice("gambit.".length);
+  if (!TRACE_EVENT_TYPES.has(sourceType)) return null;
+  return {
+    ...record,
+    type: sourceType,
+  } as TraceEvent;
+}
 
 function loadTraceEventsFromSession(
   statePath: string,
@@ -63,8 +98,9 @@ function loadTraceEventsFromSession(
         const record = JSON.parse(line) as Record<string, unknown>;
         const kind = typeof record.kind === "string" ? record.kind : "";
         const type = typeof record.type === "string" ? record.type : "";
-        if (kind === "trace" || TRACE_EVENT_TYPES.has(type)) {
-          traces.push(record as TraceEvent);
+        if (kind === "trace" || isTraceEventType(type)) {
+          const normalized = normalizePersistedTraceRecord(record);
+          if (normalized) traces.push(normalized);
         }
       } catch {
         // ignore invalid lines
@@ -121,17 +157,31 @@ type TraceRunSummary = {
   traceEvents: Array<TraceEvent>;
 };
 
+function traceRunId(event: TraceEvent): string | undefined {
+  if ("runId" in event && typeof event.runId === "string" && event.runId) {
+    return event.runId;
+  }
+  const rawMeta = (event as Record<string, unknown>)._gambit;
+  if (!rawMeta || typeof rawMeta !== "object" || Array.isArray(rawMeta)) {
+    return undefined;
+  }
+  const runId = (rawMeta as Record<string, unknown>).run_id;
+  return typeof runId === "string" && runId ? runId : undefined;
+}
+
 function collectTraceRuns(
   traces: Array<TraceEvent>,
 ): Map<string, TraceRunSummary> {
   const runs = new Map<string, TraceRunSummary>();
   for (const event of traces) {
-    const normalized = normalizeId("run_", event.runId);
+    const sourceRunId = traceRunId(event);
+    if (!sourceRunId) continue;
+    const normalized = normalizeId("run_", sourceRunId);
     let entry = runs.get(normalized);
     if (!entry) {
       entry = {
         runId: normalized,
-        sourceRunId: event.runId,
+        sourceRunId,
         traceEvents: [],
       };
       runs.set(normalized, entry);
@@ -220,6 +270,25 @@ async function readMarkdownSchemaFiles(
   return Array.from(out);
 }
 
+async function readMarkdownToolSchemaFiles(
+  filePath: string,
+): Promise<Array<string>> {
+  if (!filePath.endsWith(".md")) return [];
+  const { attrs, baseDir } = await readMarkdownFrontMatter(filePath);
+  if (!attrs) return [];
+  const out = new Set<string>();
+  const rawTools = attrs.tools;
+  if (!Array.isArray(rawTools)) return [];
+  for (const rawTool of rawTools) {
+    if (!rawTool || typeof rawTool !== "object") continue;
+    const tool = rawTool as { inputSchema?: unknown };
+    if (typeof tool.inputSchema === "string" && tool.inputSchema.trim()) {
+      out.add(path.resolve(baseDir, tool.inputSchema));
+    }
+  }
+  return Array.from(out);
+}
+
 async function readMarkdownFrontMatter(
   filePath: string,
 ): Promise<{ attrs?: Record<string, unknown>; baseDir: string }> {
@@ -274,11 +343,17 @@ async function collectDeckDependencyPaths(
     for (const schemaPath of await readMarkdownSchemaFiles(resolved)) {
       files.add(schemaPath);
     }
+    for (const schemaPath of await readMarkdownToolSchemaFiles(resolved)) {
+      files.add(schemaPath);
+    }
 
     const deck = await loadDeck(resolved);
     for (const card of deck.cards ?? []) {
       files.add(card.path);
       for (const schemaPath of await readMarkdownSchemaFiles(card.path)) {
+        files.add(schemaPath);
+      }
+      for (const schemaPath of await readMarkdownToolSchemaFiles(card.path)) {
         files.add(schemaPath);
       }
       for (const action of card.actionDecks ?? []) {
@@ -442,6 +517,28 @@ export async function exportBundle(
       );
     };
 
+    const sessionStateBundlePath = "session/state.json";
+    const sessionEventsBundlePath = "session/events.jsonl";
+    const sessionStateTarget = path.join(
+      tempDir,
+      ...sessionStateBundlePath.split("/"),
+    );
+    const sessionEventsTarget = path.join(
+      tempDir,
+      ...sessionEventsBundlePath.split("/"),
+    );
+    await Deno.mkdir(path.dirname(sessionStateTarget), { recursive: true });
+    await Deno.copyFile(args.statePath, sessionStateTarget);
+    await Deno.mkdir(path.dirname(sessionEventsTarget), { recursive: true });
+    const sourceEventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : path.join(path.dirname(args.statePath), "events.jsonl");
+    try {
+      await Deno.copyFile(sourceEventsPath, sessionEventsTarget);
+    } catch {
+      await Deno.writeTextFile(sessionEventsTarget, "");
+    }
+
     const runEntries: Array<Record<string, unknown>> = [];
     const usedRunIds = new Set<string>();
     const rootDeck = await loadDeck(resolvedRootDeckPath);
@@ -603,6 +700,10 @@ export async function exportBundle(
       bundle: {
         id: bundleId,
         deck_hash: deckHash,
+        session_files: {
+          state: sessionStateBundlePath,
+          events: sessionEventsBundlePath,
+        },
       },
       deck: {
         entry_file: entryFile,

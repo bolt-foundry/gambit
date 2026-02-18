@@ -1,13 +1,16 @@
 import Button from "./gds/Button.tsx";
 import { GambitLogo } from "./GambitLogo.tsx";
+import {
+  DEFAULT_GRADE_PATH,
+  DEFAULT_TEST_PATH,
+  DEFAULT_WORKSPACE_DEBUG_PATH,
+} from "./utils.ts";
 
 const GAMBIT_PACKAGE_README =
   "https://github.com/bolt-foundry/gambit/blob/main/README.md";
 const GAMBIT_CLI_DOC =
   "https://github.com/bolt-foundry/gambit/blob/main/docs/cli.md";
-const DEFAULT_TEST_PATH = "/sessions/new/test";
-const DEFAULT_DEBUG_PATH = "/sessions/new/debug";
-const DEFAULT_GRADE_PATH = "/grade";
+const DEFAULT_DEBUG_PATH = DEFAULT_WORKSPACE_DEBUG_PATH;
 
 export default function DocsPage() {
   return (
@@ -48,9 +51,10 @@ export default function DocsPage() {
           <h3>What to do</h3>
           <ul>
             <li>
-              Some examples have a Test input, these are usually optional.
+              If a scenario or assistant deck has schema-backed input, paste the
+              full payload as JSON in the Test tab input panels.
             </li>
-            <li>Click "Run test bot" to start the conversation.</li>
+            <li>Click "Run scenario" to start the conversation.</li>
             <li>Review the agent's response.</li>
           </ul>
           <h3>If something looks wrong</h3>
@@ -60,7 +64,7 @@ export default function DocsPage() {
           </ul>
           <h3>Grade the agent</h3>
           <ul>
-            <li>Click the "Grade" tab to see all test bot runs.</li>
+            <li>Click the "Grade" tab to see all scenario runs.</li>
             <li>Run graders to measure quality and identify issues.</li>
             <li>Flag grader results you want to keep track of.</li>
           </ul>

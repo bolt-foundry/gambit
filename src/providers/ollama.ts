@@ -23,7 +23,10 @@ export const DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1";
 
 type OpenAIClient = {
   responses: {
-    create: (params: unknown) => Promise<unknown>;
+    create: (
+      params: unknown,
+      options?: { signal?: AbortSignal },
+    ) => Promise<unknown>;
   };
 };
 
@@ -151,6 +154,26 @@ function mapStatus(
   return "failed";
 }
 
+function mapReasoning(
+  reasoning: CreateResponseRequest["reasoning"],
+): Record<string, unknown> | undefined {
+  if (!reasoning) return undefined;
+  const out: Record<string, unknown> = {};
+  if (reasoning.effort !== undefined) out.effort = reasoning.effort;
+  if (reasoning.summary !== undefined) out.summary = reasoning.summary;
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function stripUndefined<T extends Record<string, unknown>>(input: T): T {
+  const out = { ...input };
+  for (const [key, value] of Object.entries(out)) {
+    if (value === undefined) {
+      delete out[key as keyof T];
+    }
+  }
+  return out;
+}
+
 function mapError(
   error: OpenAI.Responses.ResponseError | null | undefined,
 ): { code?: string; message?: string } | undefined {
@@ -242,13 +265,42 @@ function appendSyntheticTools(
 
 function mapToolChoice(
   toolChoice: CreateResponseRequest["tool_choice"],
-):
-  | OpenAI.Responses.ToolChoiceOptions
-  | OpenAI.Responses.ToolChoiceFunction
-  | undefined {
+): Record<string, unknown> | string | undefined {
   if (!toolChoice) return undefined;
-  if (toolChoice === "auto" || toolChoice === "required") return toolChoice;
+  if (
+    toolChoice === "none" || toolChoice === "auto" ||
+    toolChoice === "required"
+  ) {
+    return toolChoice;
+  }
+  if (toolChoice.type === "allowed_tools") {
+    return {
+      type: "allowed_tools",
+      tools: toolChoice.tools,
+      mode: toolChoice.mode ?? "auto",
+    };
+  }
   return { type: "function", name: toolChoice.function.name };
+}
+
+function mapResponseContentPart(
+  part: { type?: string; text?: string },
+): ResponseTextContent | null {
+  if (!part || typeof part !== "object") return null;
+  if (typeof part.text !== "string") return null;
+  if (part.type === "output_text") {
+    return { type: "output_text", text: part.text };
+  }
+  if (part.type === "summary_text") {
+    return { type: "summary_text", text: part.text };
+  }
+  if (part.type === "reasoning_text") {
+    return { type: "reasoning_text", text: part.text };
+  }
+  if (part.type === "input_text") {
+    return { type: "input_text", text: part.text };
+  }
+  return null;
 }
 
 function mapOpenAIOutputItem(
@@ -257,12 +309,11 @@ function mapOpenAIOutputItem(
   const itemType = (item as { type?: string }).type;
   if (itemType === "message") {
     const message = item as OpenAI.Responses.ResponseOutputMessage;
-    const content: Array<ResponseTextContent> = [];
-    for (const part of message.content ?? []) {
-      if (part.type === "output_text") {
-        content.push({ type: "output_text", text: part.text });
-      }
-    }
+    const content: Array<ResponseTextContent> = (message.content ?? [])
+      .map((part) =>
+        mapResponseContentPart(part as { type?: string; text?: string })
+      )
+      .filter((part): part is ResponseTextContent => Boolean(part));
     if (content.length === 0) return null;
     return {
       type: "message",
@@ -281,6 +332,27 @@ function mapOpenAIOutputItem(
       id: call.id,
     };
   }
+  if (itemType === "reasoning") {
+    const reasoning = item as {
+      id?: string;
+      content?: Array<{ type?: string; text?: string }>;
+      summary?: Array<{ type?: string; text?: string }>;
+      encrypted_content?: string | null;
+    };
+    const content = (reasoning.content ?? [])
+      .map((part) => mapResponseContentPart(part))
+      .filter((part): part is ResponseTextContent => Boolean(part));
+    const summary = (reasoning.summary ?? [])
+      .map((part) => mapResponseContentPart(part))
+      .filter((part): part is ResponseTextContent => Boolean(part));
+    return {
+      type: "reasoning",
+      id: reasoning.id,
+      content: content.length > 0 ? content : undefined,
+      summary,
+      encrypted_content: reasoning.encrypted_content,
+    };
+  }
   return null;
 }
 
@@ -294,11 +366,27 @@ function normalizeOpenAIResponse(
     id: response.id,
     object: "response",
     model: response.model,
+    created_at: response.created_at,
     created: response.created_at,
+    completed_at: (response as { completed_at?: number | null }).completed_at ??
+      null,
+    previous_response_id: response.previous_response_id ?? null,
+    instructions: response.instructions ?? null,
+    reasoning: (response as { reasoning?: CreateResponseResponse["reasoning"] })
+      .reasoning ?? null,
     status: mapStatus(response.status ?? undefined),
     output: outputItems,
     usage: mapUsage(response.usage),
-    error: mapError(response.error),
+    error: mapError(response.error) ?? null,
+    metadata: (response as {
+      metadata?: Record<string, JSONValue>;
+    }).metadata,
+    max_output_tokens: response.max_output_tokens ?? null,
+    max_tool_calls:
+      (response as { max_tool_calls?: number | null }).max_tool_calls ?? null,
+    parallel_tool_calls:
+      (response as { parallel_tool_calls?: boolean }).parallel_tool_calls,
+    store: (response as { store?: boolean }).store,
   };
 }
 
@@ -323,13 +411,30 @@ function toOpenAIInputItems(
               text: part.text,
             };
           }
+          if (part.type === "summary_text") {
+            return {
+              type: "summary_text",
+              text: part.text,
+            };
+          }
+          if (part.type === "reasoning_text") {
+            return {
+              type: "reasoning_text",
+              text: part.text,
+            };
+          }
           return null;
         })
         .filter((
           part,
-        ): part is { type: "input_text" | "output_text"; text: string } =>
-          Boolean(part)
-        );
+        ): part is {
+          type:
+            | "input_text"
+            | "output_text"
+            | "summary_text"
+            | "reasoning_text";
+          text: string;
+        } => Boolean(part));
       if (content.length === 0) continue;
       mapped.push({
         type: "message",
@@ -355,6 +460,22 @@ function toOpenAIInputItems(
         call_id: item.call_id,
         output: item.output,
         id: item.id,
+      });
+      continue;
+    }
+    if (item.type === "reasoning") {
+      mapped.push({
+        type: "reasoning",
+        id: item.id,
+        content: (item.content ?? []).map((part) => ({
+          type: part.type,
+          text: part.text,
+        })),
+        summary: item.summary.map((part) => ({
+          type: part.type,
+          text: part.text,
+        })),
+        encrypted_content: item.encrypted_content ?? null,
       });
     }
   }
@@ -462,6 +583,7 @@ function responseItemsToChat(items: Array<ResponseItem>): {
 async function createResponse(
   client: OpenAIClient,
   request: CreateResponseRequest,
+  signal?: AbortSignal,
   onStreamEvent?: (event: ResponseEvent) => void,
 ): Promise<CreateResponseResponse> {
   const baseParams: Record<string, unknown> = {
@@ -470,6 +592,24 @@ async function createResponse(
     instructions: request.instructions,
     tools: undefined,
     tool_choice: mapToolChoice(request.tool_choice),
+    previous_response_id: request.previous_response_id,
+    reasoning: mapReasoning(request.reasoning),
+    parallel_tool_calls: request.parallel_tool_calls,
+    max_tool_calls: request.max_tool_calls,
+    store: request.store,
+    include: request.include,
+    text: request.text,
+    stream_options: request.stream_options,
+    background: request.background,
+    truncation: request.truncation,
+    service_tier: request.service_tier,
+    top_logprobs: request.top_logprobs,
+    safety_identifier: request.safety_identifier,
+    prompt_cache_key: request.prompt_cache_key,
+    temperature: request.temperature,
+    top_p: request.top_p,
+    frequency_penalty: request.frequency_penalty,
+    presence_penalty: request.presence_penalty,
     stream: request.stream,
     max_output_tokens: request.max_output_tokens,
     metadata: request.metadata,
@@ -479,12 +619,13 @@ async function createResponse(
   if (mappedTools.length > 0) {
     baseParams.tools = mappedTools;
   }
-  const params = { ...(request.params ?? {}), ...baseParams };
+  const params = { ...(request.params ?? {}), ...stripUndefined(baseParams) };
   const debugResponses = Deno.env.get("GAMBIT_DEBUG_RESPONSES") === "1";
   let responseOrStream: unknown;
   try {
     responseOrStream = await client.responses.create(
       params as unknown as OpenAI.Responses.ResponseCreateParams,
+      signal ? { signal } : undefined,
     );
   } catch (err) {
     if (debugResponses) {
@@ -510,7 +651,12 @@ async function createResponse(
       switch (event.type) {
         case "response.created": {
           const mapped = normalizeOpenAIResponse(event.response);
-          onStreamEvent?.({ type: "response.created", response: mapped });
+          onStreamEvent?.({
+            type: "response.created",
+            response: mapped,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
+          });
           break;
         }
         case "response.output_text.delta":
@@ -519,6 +665,12 @@ async function createResponse(
             output_index: event.output_index,
             delta: event.delta,
             item_id: event.item_id,
+            content_index: event.content_index,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
+            logprobs: (event as {
+              logprobs?: Array<{ token?: string; logprob?: number }>;
+            }).logprobs,
           });
           break;
         case "response.output_text.done":
@@ -527,6 +679,9 @@ async function createResponse(
             output_index: event.output_index,
             text: event.text,
             item_id: event.item_id,
+            content_index: event.content_index,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
           });
           break;
         case "response.output_item.added": {
@@ -536,6 +691,8 @@ async function createResponse(
               type: "response.output_item.added",
               output_index: event.output_index,
               item,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
             });
           }
           break;
@@ -547,13 +704,106 @@ async function createResponse(
               type: "response.output_item.done",
               output_index: event.output_index,
               item,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
             });
           }
           break;
         }
+        case "response.reasoning.delta":
+          if (typeof event.delta === "string") {
+            onStreamEvent?.({
+              type: "response.reasoning.delta",
+              output_index: event.output_index,
+              item_id: event.item_id,
+              content_index: event.content_index,
+              delta: event.delta,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
+              obfuscation: (event as { obfuscation?: string }).obfuscation,
+            });
+          }
+          break;
+        case "response.reasoning.done":
+          onStreamEvent?.({
+            type: "response.reasoning.done",
+            output_index: event.output_index,
+            item_id: event.item_id,
+            content_index: event.content_index,
+            text: event.text,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
+          });
+          break;
+        case "response.reasoning_summary_text.delta":
+          if (typeof event.delta === "string") {
+            onStreamEvent?.({
+              type: "response.reasoning_summary_text.delta",
+              output_index: event.output_index,
+              item_id: event.item_id,
+              summary_index: event.summary_index,
+              delta: event.delta,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
+              obfuscation: (event as { obfuscation?: string }).obfuscation,
+            });
+          }
+          break;
+        case "response.reasoning_summary_text.done":
+          onStreamEvent?.({
+            type: "response.reasoning_summary_text.done",
+            output_index: event.output_index,
+            item_id: event.item_id,
+            summary_index: event.summary_index,
+            text: event.text,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
+          });
+          break;
+        case "response.reasoning_summary_part.added":
+          if (
+            event.part && typeof event.part === "object" &&
+            "type" in event.part &&
+            "text" in event.part &&
+            typeof (event.part as { text?: unknown }).text === "string"
+          ) {
+            onStreamEvent?.({
+              type: "response.reasoning_summary_part.added",
+              output_index: event.output_index,
+              item_id: event.item_id,
+              summary_index: event.summary_index,
+              part: event.part as ResponseTextContent,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
+            });
+          }
+          break;
+        case "response.reasoning_summary_part.done":
+          if (
+            event.part && typeof event.part === "object" &&
+            "type" in event.part &&
+            "text" in event.part &&
+            typeof (event.part as { text?: unknown }).text === "string"
+          ) {
+            onStreamEvent?.({
+              type: "response.reasoning_summary_part.done",
+              output_index: event.output_index,
+              item_id: event.item_id,
+              summary_index: event.summary_index,
+              part: event.part as ResponseTextContent,
+              sequence_number: (event as { sequence_number?: number })
+                .sequence_number,
+            });
+          }
+          break;
         case "response.completed": {
           completed = normalizeOpenAIResponse(event.response);
-          onStreamEvent?.({ type: "response.completed", response: completed });
+          onStreamEvent?.({
+            type: "response.completed",
+            response: completed,
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
+          });
           break;
         }
         case "response.failed": {
@@ -561,6 +811,8 @@ async function createResponse(
           onStreamEvent?.({
             type: "response.failed",
             error: error ?? {},
+            sequence_number: (event as { sequence_number?: number })
+              .sequence_number,
           });
           break;
         }
@@ -590,7 +842,12 @@ export function createOllamaProvider(opts: {
 
   return {
     async responses(input) {
-      return await createResponse(client, input.request, input.onStreamEvent);
+      return await createResponse(
+        client,
+        input.request,
+        input.signal,
+        input.onStreamEvent,
+      );
     },
     async chat(input) {
       const response = await createResponse(
@@ -602,6 +859,7 @@ export function createOllamaProvider(opts: {
           stream: input.stream,
           params: input.params ?? {},
         },
+        input.signal,
         (event) => {
           if (event.type === "response.output_text.delta") {
             input.onStreamText?.(event.delta);

@@ -1,6 +1,6 @@
 # simpsons_explainer_user_notest
 
-Local dev example for testing the Test tab with no test decks configured and
+Local dev example for testing the Test tab with no scenario decks configured and
 `startMode = "user"`.
 
 ## Prereqs
@@ -19,7 +19,7 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit@^0.8.3/cli serve root.deck.md
+deno run -A jsr:@bolt-foundry/gambit@^0.8.3/cli serve PROMPT.md
 ```
 
 ## Start the assistant (UI)
@@ -31,4 +31,4 @@ deno run -A jsr:@bolt-foundry/gambit@^0.8.3/cli serve root.deck.md
 ## Notes
 
 - Graders are registered in `cards/grader_decks.card.md`.
-- Instruction cards live in `cards/` and are included by `root.deck.md`.
+- Instruction cards live in `cards/` and are included by `PROMPT.md`.

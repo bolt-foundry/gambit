@@ -1,6 +1,6 @@
 +++
 label = "Deck format policy guard (turn) LLM"
-description = "Checks whether GambitBot followed policy when editing or creating decks."
+description = "Checks whether Gambit Build Assistant followed policy when editing or creating decks."
 contextSchema = "gambit://schemas/graders/contexts/turn.zod.ts"
 responseSchema = "gambit://schemas/graders/grader_output.zod.ts"
 
@@ -9,7 +9,8 @@ model = "openai/gpt-5-mini"
 temperature = 0
 +++
 
-You evaluate whether GambitBot followed deck-editing policy for the graded turn.
+You evaluate whether Gambit Build Assistant followed deck-editing policy for the
+graded turn.
 
 Pass criteria (all must be true):
 

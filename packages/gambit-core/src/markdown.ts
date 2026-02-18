@@ -9,17 +9,18 @@ import {
   RESERVED_TOOL_PREFIX,
   TOOL_NAME_PATTERN,
 } from "./constants.ts";
-import { isCardDefinition, isDeckDefinition } from "./definitions.ts";
+import { isCardDefinition } from "./definitions.ts";
 import { loadCard } from "./loader.ts";
 import {
   normalizePermissionDeclaration,
   type PermissionDeclarationInput,
 } from "./permissions.ts";
-import { mergeZodObjects, toJsonSchema } from "./schema.ts";
+import { mergeZodObjects } from "./schema.ts";
 import { resolveBuiltinSchemaPath } from "./builtins.ts";
 import type {
   ActionDeckDefinition,
   DeckDefinition,
+  ExternalToolDefinition,
   GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
@@ -52,27 +53,6 @@ When you are done, call the \`${GAMBIT_TOOL_RESPOND}\` tool with a JSON object t
 const END_TEXT = `
 If the entire workflow is finished and no further user turns should be sent, call the \`${GAMBIT_TOOL_END}\` tool with optional \`message\` and \`payload\` fields to explicitly end the session.
 `.trim();
-
-function normalizeJsonSchema(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => normalizeJsonSchema(entry));
-  }
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(record).sort()) {
-      out[key] = normalizeJsonSchema(record[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-function schemasMatchDeep(a: ZodTypeAny, b: ZodTypeAny): boolean {
-  const aJson = normalizeJsonSchema(toJsonSchema(a as never));
-  const bJson = normalizeJsonSchema(toJsonSchema(b as never));
-  return JSON.stringify(aJson) === JSON.stringify(bJson);
-}
 
 function warnLegacyMarker(
   marker: keyof typeof LEGACY_MARKER_WARNINGS,
@@ -114,6 +94,29 @@ function warnLegacyFragment(
 function toFileUrl(p: string): string {
   const abs = path.resolve(p);
   return path.toFileUrl(abs).href;
+}
+
+function startsWithFrontMatterDelimiter(raw: string): boolean {
+  const normalized = raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+  const trimmed = normalized.trimStart();
+  return /^(\+\+\+|---)\s*(\r?\n|$)/.test(trimmed);
+}
+
+function parseFrontMatterOrRaw(
+  raw: string,
+  resolvedPath: string,
+): { attrs: ParsedFrontmatter; body: string } {
+  try {
+    return extract(raw) as { attrs: ParsedFrontmatter; body: string };
+  } catch (err) {
+    if (!startsWithFrontMatterDelimiter(raw)) {
+      return { attrs: {}, body: raw };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Failed to parse front matter in ${resolvedPath}: ${message}`,
+    );
+  }
 }
 
 async function maybeLoadSchema(
@@ -198,20 +201,122 @@ function mergeDeckRefs<T extends DeckRef>(
   return Array.from(merged.values());
 }
 
-function normalizeActionDecks(
+async function normalizeActionDecks(
   entries: unknown,
   basePath: string,
   opts?: { requirePrompt?: boolean; requireDescription?: boolean },
-): Array<ActionDeckDefinition> {
-  return normalizeDeckRefs<ActionDeckDefinition>(entries, basePath, opts).map(
-    (entry) => {
-      const name = "name" in entry ? String(entry.name ?? "").trim() : "";
-      if (!name) {
-        throw new Error(`Action deck must include a name (${basePath})`);
-      }
-      return { ...entry, name };
-    },
-  );
+): Promise<Array<ActionDeckDefinition>> {
+  if (!Array.isArray(entries)) return [];
+  const out: Array<ActionDeckDefinition> = [];
+  for (const rawEntry of entries) {
+    if (!rawEntry || typeof rawEntry !== "object") continue;
+    const rec = rawEntry as Record<string, unknown>;
+    const name = String(rec.name ?? "").trim();
+    if (!name) {
+      throw new Error(`Action deck must include a name (${basePath})`);
+    }
+
+    const desc = typeof rec.description === "string"
+      ? rec.description.trim()
+      : "";
+    if (opts?.requireDescription && !desc) {
+      throw new Error(
+        `Action deck must include a description (${basePath})`,
+      );
+    }
+
+    const rawPath = typeof rec.path === "string" ? rec.path.trim() : "";
+    const rawExecute = typeof rec.execute === "string"
+      ? rec.execute.trim()
+      : "";
+    const hasPath = rawPath.length > 0;
+    const hasExecute = rawExecute.length > 0;
+    if (hasPath === hasExecute) {
+      throw new Error(
+        `Action deck must include exactly one of path or execute (${basePath})`,
+      );
+    }
+    if (hasPath && opts?.requirePrompt && !rawPath.endsWith("PROMPT.md")) {
+      throw new Error(
+        `Deck reference must point to PROMPT.md (${basePath})`,
+      );
+    }
+
+    const actionContextSchema = await maybeLoadSchema(
+      rec.contextSchema,
+      basePath,
+    );
+    const actionResponseSchema = await maybeLoadSchema(
+      rec.responseSchema,
+      basePath,
+    );
+    if (hasExecute && (!actionContextSchema || !actionResponseSchema)) {
+      throw new Error(
+        `Action execute target must include contextSchema and responseSchema (${basePath})`,
+      );
+    }
+
+    const selectedTarget = hasPath ? rawPath : rawExecute;
+    const normalizedPath = selectedTarget.startsWith("gambit://")
+      ? selectedTarget
+      : path.resolve(path.dirname(basePath), selectedTarget);
+    const normalized: ActionDeckDefinition = {
+      name,
+      path: normalizedPath,
+      description: desc || undefined,
+      label: typeof rec.label === "string" ? rec.label : undefined,
+      id: typeof rec.id === "string" ? rec.id : undefined,
+      execute: hasExecute ? normalizedPath : undefined,
+      contextSchema: actionContextSchema,
+      responseSchema: actionResponseSchema,
+    };
+    if (rec.permissions !== undefined) {
+      const parsed = normalizePermissionDeclaration(
+        rec.permissions as PermissionDeclarationInput,
+        path.dirname(basePath),
+      );
+      if (parsed) normalized.permissions = parsed;
+    }
+    out.push(normalized);
+  }
+  return out;
+}
+
+async function normalizeExternalTools(
+  refs: unknown,
+  basePath: string,
+): Promise<Array<ExternalToolDefinition>> {
+  if (!Array.isArray(refs)) return [];
+  const out: Array<ExternalToolDefinition> = [];
+  for (const entry of refs) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    const name = String(rec.name ?? "").trim();
+    if (!name) {
+      throw new Error(`External tool must include a name (${basePath})`);
+    }
+    if (name.startsWith(RESERVED_TOOL_PREFIX)) {
+      throw new Error(
+        `External tool name ${name} is reserved (prefix ${RESERVED_TOOL_PREFIX})`,
+      );
+    }
+    if (
+      !TOOL_NAME_PATTERN.test(name) || name.length > MAX_TOOL_NAME_LENGTH
+    ) {
+      throw new Error(
+        `External tool name ${name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
+      );
+    }
+    const inputSchema = await maybeLoadSchema(rec.inputSchema, basePath);
+    out.push({
+      name,
+      description: typeof rec.description === "string"
+        ? rec.description
+        : undefined,
+      inputSchema,
+    });
+  }
+  return out;
 }
 
 async function expandEmbedsInBody(args: {
@@ -278,16 +383,7 @@ export async function loadMarkdownCard(
   }
   const nextStack = [...stack, resolved];
   const raw = await Deno.readTextFile(resolved);
-  let attrs: ParsedFrontmatter;
-  let body: string;
-  try {
-    const parsed = extract(raw) as { attrs: ParsedFrontmatter; body: string };
-    attrs = parsed.attrs;
-    body = parsed.body;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse front matter in ${resolved}: ${message}`);
-  }
+  const { attrs, body } = parseFrontMatterOrRaw(raw, resolved);
   const candidate = attrs as unknown;
   if (isCardDefinition(candidate)) {
     // treat attrs as ts-shaped card
@@ -299,7 +395,7 @@ export async function loadMarkdownCard(
   }
   const hasNewActionField = (attrs as { actionDecks?: unknown }).actionDecks;
   const legacyActions = (attrs as { actions?: unknown }).actions;
-  const actionDecks = normalizeActionDecks(
+  const actionDecks = await normalizeActionDecks(
     hasNewActionField ?? legacyActions,
     resolved,
   );
@@ -388,29 +484,33 @@ export async function loadMarkdownDeck(
     ? path.resolve(path.dirname(parentPath), filePath)
     : path.resolve(filePath);
   const raw = await Deno.readTextFile(resolved);
-  let attrs: ParsedFrontmatter;
-  let body: string;
-  try {
-    const parsed = extract(raw) as { attrs: ParsedFrontmatter; body: string };
-    attrs = parsed.attrs;
-    body = parsed.body;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse front matter in ${resolved}: ${message}`);
-  }
+  const { attrs, body } = parseFrontMatterOrRaw(raw, resolved);
   const deckAttrs = attrs as { deck?: DeckDefinition } & DeckDefinition;
   const deckMeta: Partial<DeckDefinition> =
     (deckAttrs.deck ?? deckAttrs) as DeckDefinition;
+  if ((deckMeta as { mcpServers?: unknown }).mcpServers !== undefined) {
+    throw new Error(
+      `Deck-level [[mcpServers]] is unsupported in this phase (${resolved})`,
+    );
+  }
+  if ((deckMeta as { execute?: unknown }).execute !== undefined) {
+    throw new Error(
+      `Top-level execute in PROMPT.md is unsupported (${resolved})`,
+    );
+  }
 
   const hasNewActionDecks = (deckMeta as {
     actionDecks?: unknown;
   }).actionDecks;
   const canonicalActions = (deckMeta as { actions?: unknown }).actions;
-  const actionDecks = normalizeActionDecks(canonicalActions, resolved, {
+  const actionDecks = await normalizeActionDecks(canonicalActions, resolved, {
     requirePrompt: true,
     requireDescription: true,
   });
-  const legacyActionDecks = normalizeActionDecks(hasNewActionDecks, resolved);
+  const legacyActionDecks = await normalizeActionDecks(
+    hasNewActionDecks,
+    resolved,
+  );
   if (hasNewActionDecks) {
     logger.warn(
       `[gambit] deck at ${resolved} uses deprecated "actionDecks"; use "[[actions]]" instead.`,
@@ -480,56 +580,6 @@ export async function loadMarkdownDeck(
     warnLegacySchema(resolved, "outputSchema", "responseSchema");
   }
 
-  const executePath = (deckMeta as { execute?: unknown }).execute;
-  let executor: DeckDefinition["run"] | DeckDefinition["execute"] | undefined;
-  let executeContextSchema: ZodTypeAny | undefined;
-  let executeResponseSchema: ZodTypeAny | undefined;
-  if (typeof executePath === "string" && executePath.trim()) {
-    const execResolved = path.resolve(path.dirname(resolved), executePath);
-    const mod = await import(toFileUrl(execResolved));
-    const executeDeck = mod.default;
-    if (!isDeckDefinition(executeDeck)) {
-      throw new Error(
-        `Execute module at ${execResolved} did not export a valid deck definition`,
-      );
-    }
-    executor = typeof executeDeck.run === "function"
-      ? executeDeck.run
-      : typeof executeDeck.execute === "function"
-      ? executeDeck.execute
-      : undefined;
-    if (!executor) {
-      throw new Error(
-        `Execute module at ${execResolved} must export a deck with run(ctx)`,
-      );
-    }
-    executeContextSchema = executeDeck.contextSchema ?? executeDeck.inputSchema;
-    executeResponseSchema = executeDeck.responseSchema ??
-      executeDeck.outputSchema;
-  }
-  if (executor && deckMeta.modelParams) {
-    logger.warn(
-      `[gambit] deck at ${resolved} sets execute + modelParams; modelParams will be ignored.`,
-    );
-  }
-
-  if (
-    contextSchema && executeContextSchema &&
-    !schemasMatchDeep(contextSchema, executeContextSchema)
-  ) {
-    logger.warn(
-      `[gambit] deck at ${resolved} has mismatched contextSchema between PROMPT.md and execute module (pre-1.0: warn; 1.0+: error)`,
-    );
-  }
-  if (
-    responseSchema && executeResponseSchema &&
-    !schemasMatchDeep(responseSchema, executeResponseSchema)
-  ) {
-    logger.warn(
-      `[gambit] deck at ${resolved} has mismatched responseSchema between PROMPT.md and execute module (pre-1.0: warn; 1.0+: error)`,
-    );
-  }
-
   const allCards = flattenCards(cards);
   const cleanedBody = replaced.body;
   const allowEnd = Boolean(deckMeta.allowEnd) ||
@@ -546,8 +596,8 @@ export async function loadMarkdownDeck(
     mergedActions[action.name] = action;
   }
 
-  let mergedContextSchema = contextSchema ?? executeContextSchema;
-  let mergedResponseSchema = responseSchema ?? executeResponseSchema;
+  let mergedContextSchema = contextSchema;
+  let mergedResponseSchema = responseSchema;
   for (const card of allCards) {
     mergedContextSchema = mergeZodObjects(
       mergedContextSchema,
@@ -610,6 +660,18 @@ export async function loadMarkdownDeck(
     : undefined;
 
   const mergedActionDecks = Object.values(mergedActions);
+  const tools = await normalizeExternalTools(
+    (deckMeta as { tools?: unknown }).tools,
+    resolved,
+  );
+  const actionNameSet = new Set(mergedActionDecks.map((action) => action.name));
+  for (const tool of tools) {
+    if (actionNameSet.has(tool.name)) {
+      logger.warn(
+        `[gambit] tool ${tool.name} is shadowed by an action in ${resolved}`,
+      );
+    }
+  }
   const rootTestDecks = normalizeDeckRefs<TestDeckDefinition>(
     (deckMeta as { testDecks?: unknown }).testDecks,
     resolved,
@@ -634,6 +696,7 @@ export async function loadMarkdownDeck(
     allowEnd,
     actionDecks: mergedActionDecks,
     actions: mergedActionDecks,
+    tools,
     testDecks: mergeDeckRefs(
       scenarioDecks,
       rootTestDecks,
@@ -647,13 +710,13 @@ export async function loadMarkdownDeck(
     cards: allCards,
     label: deckMeta.label,
     startMode: deckMeta.startMode,
-    modelParams: executor ? undefined : deckMeta.modelParams,
+    modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
     contextSchema: mergedContextSchema,
     responseSchema: mergedResponseSchema,
     inputSchema: mergedInputSchema,
     outputSchema: mergedOutputSchema,
-    executor,
+    executor: undefined,
     handlers,
     respond: Boolean(deckMeta.respond) ||
       replaced.respond ||

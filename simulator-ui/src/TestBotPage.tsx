@@ -7,69 +7,48 @@ import React, {
 } from "react";
 import {
   botFilename,
-  buildDurableStreamUrl,
   cloneValue,
-  countUserMessages,
-  deckDisplayPath,
-  deckPath,
-  DEFAULT_TEST_PATH,
   deriveInitialFromSchema,
   fileNameFromPath,
   findMissingRequiredFields,
   formatJson,
-  getDurableStreamOffset,
-  normalizedDeckPath,
-  normalizeFsPath,
-  repoRootPath,
-  setDurableStreamOffset,
-  summarizeToolCalls,
-  TEST_STREAM_ID,
-  toRelativePath,
 } from "./utils.ts";
 import type {
-  FeedbackEntry,
   NormalizedSchema,
   TestBotConfigResponse,
   TestBotRun,
-  TestBotSocketMessage,
   TestDeckMeta,
-  TraceEvent,
 } from "./utils.ts";
-import {
-  FeedbackControls,
-  InitForm,
-  ToolCallBubble,
-  useHttpSchema,
-} from "./shared.tsx";
+import { useHttpSchema } from "./shared.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Tabs from "./gds/Tabs.tsx";
-import Badge from "./gds/Badge.tsx";
 import List from "./gds/List.tsx";
 import ListItem from "./gds/ListItem.tsx";
 import Listbox from "./gds/Listbox.tsx";
 import ScrollingText from "./gds/ScrollingText.tsx";
+import { useWorkspaceTest } from "./WorkspaceContext.tsx";
+import TestBotChatPanel from "./TestBotChatPanel.tsx";
 
 export default function TestBotPage(props: {
-  onReplaceTestBotSession: (sessionId: string) => void;
+  onReplaceTestBotSession: (workspaceId: string, runId?: string) => void;
   onResetTestBotSession: () => void;
-  activeSessionId: string | null;
+  activeWorkspaceId: string | null;
+  requestedRunId?: string | null;
   resetToken?: number;
   setNavActions?: (actions: React.ReactNode | null) => void;
-  onFeedbackUpdate?: (
-    messageRefId: string,
-    feedback: FeedbackEntry | null,
-  ) => void;
+  onFeedbackPersisted?: (workspaceId: string) => void;
 }) {
   const {
     onReplaceTestBotSession,
     onResetTestBotSession,
-    activeSessionId,
+    activeWorkspaceId,
+    requestedRunId,
     resetToken,
     setNavActions,
-    onFeedbackUpdate,
+    onFeedbackPersisted,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
@@ -83,62 +62,41 @@ export default function TestBotPage(props: {
   );
   const [botInputValue, setBotInputValue] = useState<unknown>(undefined);
   const [botInputDirty, setBotInputDirty] = useState(false);
-  const [botInputJsonErrors, setBotInputJsonErrors] = useState<
-    Record<string, string | null>
-  >({});
+  const [botInputJsonText, setBotInputJsonText] = useState("");
+  const [botInputJsonError, setBotInputJsonError] = useState<string | null>(
+    null,
+  );
   const [botInputDefaults, setBotInputDefaults] = useState<unknown>(undefined);
   const [initialUserMessage] = useState("");
-  const [run, setRun] = useState<TestBotRun>({
-    status: "idle",
-    messages: [],
-    traces: [],
-    toolInserts: [],
-  });
+  const workspaceTest = useWorkspaceTest();
+  const {
+    run,
+    setRun,
+    streamingUser,
+    streamingAssistant,
+    chatDraft,
+    setChatDraft,
+    chatSending,
+    chatError,
+    optimisticUser,
+  } = workspaceTest;
+  const refreshTestStatusApi = workspaceTest.refreshStatus;
+  const startTestRunApi = workspaceTest.startRun;
+  const startTestAssistantApi = workspaceTest.startAssistant;
+  const sendTestMessageApi = workspaceTest.sendMessage;
+  const stopTestRunApi = workspaceTest.stopRun;
+  const resetTestRunApi = workspaceTest.resetRun;
+  const saveTestFeedbackApi = workspaceTest.saveFeedback;
   const [lastInitFill, setLastInitFill] = useState<
     TestBotRun["initFill"] | null
   >(null);
-  const runRef = useRef<TestBotRun>({
-    status: "idle",
-    messages: [],
-    traces: [],
-    toolInserts: [],
-  });
-  const lastRunMessageCountRef = useRef(0);
-  const [toolCallsOpen, setToolCallsOpen] = useState<
-    Record<number, boolean>
-  >({});
-  const [latencyByTurn, setLatencyByTurn] = useState<
-    Record<number, number>
-  >({});
-  const lastUserEndByTurnRef = useRef<Record<number, number>>({});
-  const firstAssistantTokenByTurnRef = useRef<Record<number, boolean>>({});
+  const [requestedRunNotFound, setRequestedRunNotFound] = useState(false);
+  const runIdRef = useRef<string | undefined>(run.id);
   const [assistantDeckTab, setAssistantDeckTab] = useState<
     "input" | "tools" | "schema"
   >("input");
-
-  useEffect(() => {
-    lastRunMessageCountRef.current = 0;
-    setToolCallsOpen({});
-    setLatencyByTurn({});
-    lastUserEndByTurnRef.current = {};
-    firstAssistantTokenByTurnRef.current = {};
-  }, [run.id]);
-  const [streamingUser, setStreamingUser] = useState<
-    {
-      runId: string;
-      turn: number;
-      text: string;
-      expectedUserCount?: number;
-    } | null
-  >(null);
-  const [streamingAssistant, setStreamingAssistant] = useState<
-    {
-      runId: string;
-      turn: number;
-      text: string;
-    } | null
-  >(null);
-  const deckSchema = useHttpSchema({ sessionId: activeSessionId });
+  const runWorkspaceId = run.workspaceId ?? run.sessionId;
+  const deckSchema = useHttpSchema({ workspaceId: activeWorkspaceId });
   const deckInputSchema = deckSchema.schemaResponse?.schema;
   const deckSchemaDefaults = deckSchema.schemaResponse?.defaults;
   const deckSchemaError = deckSchema.schemaResponse?.error ??
@@ -147,19 +105,12 @@ export default function TestBotPage(props: {
 
   const [deckInitValue, setDeckInitValue] = useState<unknown>(undefined);
   const [deckInitDirty, setDeckInitDirty] = useState(false);
-  const [deckJsonErrors, setDeckJsonErrors] = useState<
-    Record<string, string | null>
-  >({});
-  const [chatDraft, setChatDraft] = useState("");
-  const [chatSending, setChatSending] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const [optimisticUser, setOptimisticUser] = useState<
-    { id: string; text: string } | null
-  >(null);
+  const [deckInitJsonText, setDeckInitJsonText] = useState("");
+  const [deckInitJsonError, setDeckInitJsonError] = useState<string | null>(
+    null,
+  );
   const pollRef = useRef<number | null>(null);
-  const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const runIdRef = useRef<string | undefined>(undefined);
-  const resetSkipRef = useRef(false);
+  const lastResetTokenRef = useRef<number | undefined>(resetToken);
   const handleNewChatRef = useRef<() => void>(() => {});
   const allowRunSessionNavRef = useRef(false);
 
@@ -174,7 +125,7 @@ export default function TestBotPage(props: {
     const fetchTestBotConfig = async (deckId?: string) => {
       const params = new URLSearchParams();
       if (deckId) params.set("deckPath", deckId);
-      if (activeSessionId) params.set("sessionId", activeSessionId);
+      if (activeWorkspaceId) params.set("workspaceId", activeWorkspaceId);
       const query = params.toString() ? `?${params.toString()}` : "";
       return fetch(`/api/test${query}`);
     };
@@ -233,36 +184,29 @@ export default function TestBotPage(props: {
           : null,
       );
       setBotInputDirty(false);
-      setBotInputJsonErrors({});
       setBotInputDefaults(data.defaults?.input);
       setBotInputValue(data.defaults?.input);
+      setBotInputJsonText(formatJson(data.defaults?.input));
+      setBotInputJsonError(null);
     } catch (err) {
       console.error(err);
     }
-  }, [activeSessionId, deckStorageKey]);
+  }, [activeWorkspaceId, deckStorageKey]);
 
   useEffect(() => {
     loadTestBot();
   }, [loadTestBot]);
 
   useEffect(() => {
-    runIdRef.current = run.id;
-    runRef.current = run;
-    setStreamingUser(null);
-    setStreamingAssistant(null);
-  }, [run.id]);
-
-  useEffect(() => {
-    if (!run.sessionId) return;
-    if (
-      activeSessionId && run.sessionId !== activeSessionId &&
-      !allowRunSessionNavRef.current
-    ) {
+    if (!runWorkspaceId) return;
+    if (runWorkspaceId === "new") return;
+    if (!allowRunSessionNavRef.current) return;
+    if (activeWorkspaceId && runWorkspaceId !== activeWorkspaceId) {
       return;
     }
-    onReplaceTestBotSession(run.sessionId);
+    onReplaceTestBotSession(runWorkspaceId, run.id);
     allowRunSessionNavRef.current = false;
-  }, [activeSessionId, onReplaceTestBotSession, run.sessionId]);
+  }, [activeWorkspaceId, onReplaceTestBotSession, run.id, runWorkspaceId]);
 
   useEffect(() => {
     if (!selectedDeckId) return;
@@ -274,174 +218,77 @@ export default function TestBotPage(props: {
   }, [deckStorageKey, selectedDeckId]);
 
   useEffect(() => {
-    runRef.current = run;
-  }, [run]);
-
-  useEffect(() => {
-    const streamId = TEST_STREAM_ID;
-    const streamUrl = buildDurableStreamUrl(
-      streamId,
-      getDurableStreamOffset(streamId),
-    );
-    const source = new EventSource(streamUrl);
-
-    source.onopen = () => {
-      console.info("[test] stream open", streamUrl);
-    };
-
-    source.onmessage = (event) => {
-      let envelope: { offset?: unknown; data?: unknown } | null = null;
-      try {
-        envelope = JSON.parse(event.data) as {
-          offset?: unknown;
-          data?: unknown;
-        };
-      } catch {
-        return;
-      }
-      if (
-        envelope &&
-        typeof envelope.offset === "number" &&
-        Number.isFinite(envelope.offset)
-      ) {
-        setDurableStreamOffset(streamId, envelope.offset + 1);
-      }
-      const msg = envelope?.data as TestBotSocketMessage | undefined;
-      if (!msg) return;
-      const activeRunId = runIdRef.current;
-      if (msg.type === "testBotStatus" && msg.run) {
-        if (activeRunId && msg.run.id === activeRunId) {
-          setRun({
-            ...msg.run,
-            messages: msg.run.messages ?? [],
-            traces: msg.run.traces ?? [],
-            toolInserts: msg.run.toolInserts ?? [],
-          });
-        }
-        return;
-      }
-      if (msg.type === "testBotStream") {
-        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
-        const streamRunId = msg.runId;
-        const turn = typeof msg.turn === "number" ? msg.turn : 0;
-        if (msg.role === "assistant") {
-          if (!firstAssistantTokenByTurnRef.current[turn]) {
-            firstAssistantTokenByTurnRef.current[turn] = true;
-            const userEnd = lastUserEndByTurnRef.current[turn];
-            if (typeof userEnd === "number" && typeof msg.ts === "number") {
-              const delta = msg.ts - userEnd;
-              setLatencyByTurn((prev) => ({
-                ...prev,
-                [turn]: delta,
-              }));
-            }
-          }
-        }
-        if (msg.role === "user") {
-          const expectedUserCount = countUserMessages(runRef.current.messages) +
-            1;
-          setStreamingUser((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? { ...prev, text: prev.text + msg.chunk }
-              : {
-                runId: streamRunId,
-                turn,
-                text: msg.chunk,
-                expectedUserCount,
-              }
-          );
-        } else {
-          setStreamingAssistant((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? { ...prev, text: prev.text + msg.chunk }
-              : { runId: streamRunId, turn, text: msg.chunk }
-          );
-        }
-        return;
-      }
-      if (msg.type === "testBotStreamEnd") {
-        if (!msg.runId || (activeRunId && msg.runId !== activeRunId)) return;
-        const streamRunId = msg.runId;
-        const turn = typeof msg.turn === "number" ? msg.turn : 0;
-        if (msg.role === "user") {
-          lastUserEndByTurnRef.current[turn] = typeof msg.ts === "number"
-            ? msg.ts
-            : Date.now();
-          delete firstAssistantTokenByTurnRef.current[turn];
-        }
-        if (msg.role === "user") {
-          setStreamingUser((prev) => {
-            if (!prev || prev.runId !== streamRunId || prev.turn !== turn) {
-              return prev;
-            }
-            return prev.expectedUserCount ? prev : {
-              ...prev,
-              expectedUserCount: countUserMessages(runRef.current.messages) +
-                1,
-            };
-          });
-        } else {
-          setStreamingAssistant((prev) =>
-            prev && prev.runId === streamRunId && prev.turn === turn
-              ? null
-              : prev
-          );
-        }
-      }
-    };
-
-    source.onerror = (err) => {
-      console.warn("[test] stream error", err);
-    };
-
-    return () => {
-      console.info("[test] stream cleanup");
-      source.close();
-    };
-  }, [deckPath]);
+    runIdRef.current = run.id;
+  }, [run.id]);
 
   const refreshStatus = useCallback(async (
-    opts?: { runId?: string; sessionId?: string },
+    opts?: { runId?: string; workspaceId?: string },
   ) => {
     try {
       const runId = opts?.runId ??
-        (opts?.sessionId ? undefined : run.id);
-      const sessionId = opts?.sessionId;
-      const params = new URLSearchParams();
-      if (runId) params.set("runId", runId);
-      if (sessionId) params.set("sessionId", sessionId);
+        (opts?.workspaceId ? undefined : runIdRef.current);
       const deckParam = testDecks.length
         ? (selectedDeckId || testDecks[0]?.id || "")
         : "";
-      if (deckParam) params.set("deckPath", deckParam);
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/test/status${query}`);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as TestBotConfigResponse & {
-        run?: TestBotRun;
-      };
-      const nextRun = data.run ?? { status: "idle", messages: [] };
-      setRun({
-        ...nextRun,
-        messages: nextRun.messages ?? [],
-        traces: nextRun.traces ?? [],
-        toolInserts: nextRun.toolInserts ?? [],
+      return await refreshTestStatusApi({
+        runId,
+        workspaceId: opts?.workspaceId ?? activeWorkspaceId ??
+          runWorkspaceId ??
+          undefined,
+        deckPath: deckParam || undefined,
       });
     } catch (err) {
       console.error(err);
+      return {
+        status: "idle",
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      } as TestBotRun;
     }
-  }, [run.id, selectedDeckId, testDecks]);
+  }, [
+    activeWorkspaceId,
+    refreshTestStatusApi,
+    runWorkspaceId,
+    selectedDeckId,
+    testDecks,
+  ]);
 
   useEffect(() => {
-    if (activeSessionId) return;
+    if (activeWorkspaceId) return;
+    setRequestedRunNotFound(false);
     refreshStatus();
-  }, [activeSessionId, refreshStatus]);
+  }, [activeWorkspaceId, refreshStatus]);
 
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!activeWorkspaceId) return;
     if (allowRunSessionNavRef.current) return;
-    refreshStatus({ sessionId: activeSessionId });
-  }, [activeSessionId, refreshStatus]);
+    const hydrate = async () => {
+      const hydrated = await refreshStatus({
+        workspaceId: activeWorkspaceId,
+        runId: requestedRunId ?? undefined,
+      });
+      if (
+        requestedRunId &&
+        (!hydrated.id || hydrated.id !== requestedRunId)
+      ) {
+        setRequestedRunNotFound(true);
+        setRun({
+          id: requestedRunId,
+          status: "error",
+          workspaceId: activeWorkspaceId,
+          sessionId: activeWorkspaceId,
+          error: `Run "${requestedRunId}" was not found.`,
+          messages: [],
+          traces: [],
+          toolInserts: [],
+        });
+        return;
+      }
+      setRequestedRunNotFound(false);
+    };
+    hydrate().catch((err) => console.error(err));
+  }, [activeWorkspaceId, refreshStatus, requestedRunId, setRun]);
 
   useEffect(() => {
     if (!deckInputSchema) return;
@@ -450,12 +297,9 @@ export default function TestBotPage(props: {
       ? cloneValue(deckSchemaDefaults)
       : deriveInitialFromSchema(deckInputSchema);
     setDeckInitValue(nextInit);
+    setDeckInitJsonText(formatJson(nextInit));
+    setDeckInitJsonError(null);
   }, [deckInputSchema, deckSchemaDefaults, deckInitDirty]);
-
-  const handleDeckInitChange = useCallback((next: unknown) => {
-    setDeckInitValue(next);
-    setDeckInitDirty(true);
-  }, []);
 
   useEffect(() => {
     if (!botInputSchema) return;
@@ -464,11 +308,13 @@ export default function TestBotPage(props: {
       ? cloneValue(botInputDefaults)
       : deriveInitialFromSchema(botInputSchema);
     setBotInputValue(nextBotInput);
+    setBotInputJsonText(formatJson(nextBotInput));
+    setBotInputJsonError(null);
   }, [botInputSchema, botInputDirty, botInputDefaults]);
 
   useEffect(() => {
     if (run.status === "error" && run.error) {
-      console.error("[test-bot] run error (state)", run.error);
+      console.error("[scenario] run error (state)", run.error);
     }
   }, [run.error, run.status]);
 
@@ -478,11 +324,8 @@ export default function TestBotPage(props: {
   }, [botInputSchema, botInputValue]);
 
   const botJsonErrorCount = useMemo(() => {
-    return Object.values(botInputJsonErrors).filter((v) =>
-      typeof v === "string" && v
-    )
-      .length;
-  }, [botInputJsonErrors]);
+    return botInputJsonError ? 1 : 0;
+  }, [botInputJsonError]);
 
   const missingDeckInit = useMemo(() => {
     if (!deckInputSchema) return [];
@@ -490,11 +333,8 @@ export default function TestBotPage(props: {
   }, [deckInputSchema, deckInitValue]);
 
   const deckJsonErrorCount = useMemo(() => {
-    return Object.values(deckJsonErrors).filter((v) =>
-      typeof v === "string" && v
-    )
-      .length;
-  }, [deckJsonErrors]);
+    return deckInitJsonError ? 1 : 0;
+  }, [deckInitJsonError]);
   const deckTools = useMemo(() => {
     const tools = deckSchema.schemaResponse?.tools;
     if (!Array.isArray(tools)) return [];
@@ -525,120 +365,6 @@ export default function TestBotPage(props: {
       );
   }, [deckSchema.schemaResponse?.tools]);
 
-  const toolCallSummaries = useMemo(
-    () => summarizeToolCalls(run.traces ?? []),
-    [run.traces],
-  );
-
-  const toolBuckets = useMemo(() => {
-    const deriveInsertsFromTraces = (
-      traces: TraceEvent[],
-      messageCount: number,
-    ) => {
-      const inserts: Array<{
-        actionCallId?: string;
-        parentActionCallId?: string;
-        name?: string;
-        index: number;
-      }> = [];
-      let messageIndex = 0;
-      for (const trace of traces) {
-        if (!trace || typeof trace !== "object") continue;
-        const traceRecord = trace as Record<string, unknown>;
-        const type = typeof traceRecord.type === "string"
-          ? traceRecord.type
-          : "";
-        if (type === "message.user") {
-          messageIndex++;
-          continue;
-        }
-        if (type === "model.result") {
-          const finishReason = typeof traceRecord.finishReason === "string"
-            ? traceRecord.finishReason
-            : "";
-          if (finishReason !== "tool_calls") {
-            messageIndex++;
-          }
-          continue;
-        }
-        if (type === "tool.call") {
-          const actionCallId = typeof traceRecord.actionCallId === "string"
-            ? traceRecord.actionCallId
-            : undefined;
-          const parentActionCallId =
-            typeof traceRecord.parentActionCallId === "string"
-              ? traceRecord.parentActionCallId
-              : undefined;
-          const name = typeof traceRecord.name === "string"
-            ? traceRecord.name
-            : undefined;
-          inserts.push({
-            actionCallId,
-            parentActionCallId,
-            name,
-            index: Math.min(messageIndex, messageCount),
-          });
-        }
-      }
-      return inserts;
-    };
-    const map = new Map<number, ReturnType<typeof summarizeToolCalls>>();
-    if (!toolCallSummaries.length) return map;
-    const traceInserts = Array.isArray(run.traces) && run.traces.length > 0
-      ? deriveInsertsFromTraces(run.traces, run.messages.length)
-      : [];
-    const insertMap = new Map<
-      string,
-      { index: number; name?: string; parentActionCallId?: string }
-    >();
-    const inserts = traceInserts.length > 0 ? traceInserts : run.toolInserts ??
-      [];
-    inserts.forEach((insert) => {
-      if (
-        typeof insert?.index === "number" &&
-        insert.index >= 0 &&
-        insert.actionCallId
-      ) {
-        insertMap.set(insert.actionCallId, {
-          index: insert.index,
-          name: insert.name ?? undefined,
-          parentActionCallId: insert.parentActionCallId ?? undefined,
-        });
-      }
-    });
-    for (const call of toolCallSummaries) {
-      const insert = call.id ? insertMap.get(call.id) : undefined;
-      const index = insert?.index ?? run.messages.length;
-      const enriched = insert
-        ? {
-          ...call,
-          name: call.name ?? insert.name,
-          parentActionCallId: call.parentActionCallId ??
-            insert.parentActionCallId,
-        }
-        : call;
-      const bucket = map.get(index);
-      if (bucket) {
-        bucket.push(enriched);
-      } else {
-        map.set(index, [enriched]);
-      }
-    }
-    return map;
-  }, [toolCallSummaries, run.toolInserts, run.traces, run.messages.length]);
-  const assistantLatencyByMessageIndex = useMemo(() => {
-    const map: Record<number, number> = {};
-    let assistantTurn = 0;
-    run.messages.forEach((msg, index) => {
-      if (msg.role !== "assistant") return;
-      const latency = latencyByTurn[assistantTurn];
-      if (typeof latency === "number") {
-        map[index] = latency;
-      }
-      assistantTurn += 1;
-    });
-    return map;
-  }, [run.messages, latencyByTurn]);
   const canRunPersona = testDecks.length > 0;
   const hasPersonaSelection = Boolean(selectedDeckId);
   const hasDeckSelection = !canRunPersona || hasPersonaSelection;
@@ -660,56 +386,6 @@ export default function TestBotPage(props: {
     };
   }, [run.status, refreshStatus]);
 
-  useEffect(() => {
-    if (
-      streamingUser?.expectedUserCount !== undefined &&
-      streamingUser.runId === run.id &&
-      countUserMessages(run.messages) >= streamingUser.expectedUserCount
-    ) {
-      setStreamingUser(null);
-    }
-    if (run.status !== "running" && streamingUser) {
-      setStreamingUser(null);
-    }
-    if (optimisticUser) {
-      const lastUser = [...run.messages].reverse().find((msg) =>
-        msg.role === "user"
-      );
-      if (lastUser?.content === optimisticUser.text) {
-        setOptimisticUser(null);
-      }
-    }
-    if (run.status !== "running" && optimisticUser) {
-      setOptimisticUser(null);
-    }
-    if (
-      streamingAssistant &&
-      run.messages.some((msg) =>
-        msg.role === "assistant" &&
-        typeof msg.content === "string" &&
-        msg.content.includes(streamingAssistant.text)
-      )
-    ) {
-      setStreamingAssistant(null);
-    }
-    const el = transcriptRef.current;
-    if (!el) return;
-    const shouldScroll = run.messages.length > lastRunMessageCountRef.current ||
-      Boolean(streamingUser?.text || streamingAssistant?.text);
-    lastRunMessageCountRef.current = run.messages.length;
-    if (!shouldScroll) return;
-    const frame = requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    run.id,
-    run.messages.length,
-    run.status,
-    streamingUser,
-    streamingAssistant?.text,
-  ]);
-
   const startRun = useCallback(async () => {
     try {
       allowRunSessionNavRef.current = true;
@@ -718,7 +394,7 @@ export default function TestBotPage(props: {
         : null;
       if (initFillRequest) {
         setLastInitFill(initFillRequest);
-        console.info("[test-bot] init fill requested", initFillRequest);
+        console.info("[scenario] init fill requested", initFillRequest);
       }
       const payload: Record<string, unknown> = {
         botInput: botInputValue,
@@ -728,35 +404,30 @@ export default function TestBotPage(props: {
         initFill: missingDeckInit.length > 0
           ? { missing: missingDeckInit }
           : undefined,
-        sessionId: activeSessionId ?? undefined,
+        workspaceId: activeWorkspaceId ?? undefined,
       };
-      const res = await fetch("/api/test/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({})) as {
+      const data = await startTestRunApi(payload) as {
         run?: TestBotRun;
         error?: string;
         initFill?: TestBotRun["initFill"];
         sessionPath?: string;
       };
-      if (!res.ok) {
+      if (!data.run) {
         allowRunSessionNavRef.current = false;
         if (data.initFill) {
           setLastInitFill(data.initFill);
-          console.info("[test-bot] init fill error", data.initFill);
+          console.info("[scenario] init fill error", data.initFill);
         }
         if (data.sessionPath) {
           console.info(
-            "[test-bot] init fill session saved",
+            "[scenario] init fill session saved",
             data.sessionPath,
           );
         }
         const errorMessage = typeof data.error === "string"
           ? data.error
-          : res.statusText;
-        console.error("[test-bot] run error", errorMessage);
+          : "Failed to start scenario run";
+        console.error("[scenario] run error", errorMessage);
         setRun({
           status: "error",
           error: errorMessage,
@@ -767,28 +438,13 @@ export default function TestBotPage(props: {
         });
         return;
       }
-      if (data.run) {
-        if (data.run.initFill) {
-          setLastInitFill(data.run.initFill);
-          console.info("[test-bot] init fill applied", data.run.initFill);
-        }
-        setRun({
-          ...data.run,
-          messages: data.run.messages ?? [],
-          traces: data.run.traces ?? [],
-          toolInserts: data.run.toolInserts ?? [],
-        });
-      } else {
-        setRun({
-          status: "running",
-          messages: [],
-          traces: [],
-          toolInserts: [],
-        });
+      if (data.run.initFill) {
+        setLastInitFill(data.run.initFill);
+        console.info("[scenario] init fill applied", data.run.initFill);
       }
       refreshStatus({
         runId: data.run?.id,
-        sessionId: activeSessionId ?? undefined,
+        workspaceId: activeWorkspaceId ?? undefined,
       });
     } catch (err) {
       allowRunSessionNavRef.current = false;
@@ -799,51 +455,41 @@ export default function TestBotPage(props: {
     botInputValue,
     initialUserMessage,
     refreshStatus,
+    startTestRunApi,
     selectedDeckId,
     missingDeckInit,
-    activeSessionId,
+    activeWorkspaceId,
   ]);
 
   const stopRun = useCallback(async () => {
     if (!run.id) return;
     try {
-      await fetch("/api/test/stop", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId: run.id }),
-      });
+      await stopTestRunApi(run.id);
     } catch (err) {
       console.error(err);
     } finally {
       refreshStatus({ runId: run.id });
     }
-  }, [refreshStatus, run.id]);
+  }, [refreshStatus, run.id, stopTestRunApi]);
 
   const handleNewChat = useCallback(async () => {
     if (run.status === "running") {
       await stopRun();
     }
-    setRun({
-      id: "",
-      status: "idle",
-      messages: [],
-      traces: [],
-      toolInserts: [],
-      sessionId: undefined,
-    });
+    resetTestRunApi();
+    setRequestedRunNotFound(false);
     onResetTestBotSession();
-  }, [onResetTestBotSession, run.status, stopRun]);
+  }, [onResetTestBotSession, run.status, stopRun, resetTestRunApi]);
 
   useEffect(() => {
     handleNewChatRef.current = handleNewChat;
   }, [handleNewChat]);
 
   useEffect(() => {
-    if (!resetSkipRef.current) {
-      resetSkipRef.current = true;
-      return;
-    }
     if (resetToken === undefined) return;
+    const previous = lastResetTokenRef.current;
+    lastResetTokenRef.current = resetToken;
+    if (previous === undefined || previous === resetToken) return;
     handleNewChatRef.current();
   }, [resetToken]);
 
@@ -853,79 +499,49 @@ export default function TestBotPage(props: {
     return () => setNavActions(null);
   }, [handleNewChat, setNavActions]);
 
-  const saveTestBotFeedback = useCallback(
-    async (messageRefId: string, score: number | null, reason?: string) => {
-      if (!run.sessionId) return;
-      if (onFeedbackUpdate) {
-        if (score === null) {
-          onFeedbackUpdate(messageRefId, null);
-        } else {
-          onFeedbackUpdate(messageRefId, {
-            id: `optimistic:${messageRefId}:${Date.now()}`,
-            runId: run.id || "optimistic",
-            messageRefId,
-            score,
-            reason,
-            createdAt: new Date().toISOString(),
-          });
-        }
-      }
-      try {
-        const res = await fetch("/api/session/feedback", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: run.sessionId,
-            messageRefId,
-            score,
-            reason,
-          }),
-        });
-        if (!res.ok) throw new Error(res.statusText);
-        const data = await res.json() as {
-          feedback?: FeedbackEntry;
-          deleted?: boolean;
-        };
-        if (data.deleted) {
-          setRun((prev) => ({
-            ...prev,
-            messages: prev.messages.map((msg) =>
-              msg.messageRefId === messageRefId
-                ? { ...msg, feedback: undefined }
-                : msg
-            ),
-          }));
-          onFeedbackUpdate?.(messageRefId, null);
-          return;
-        }
-        if (data.feedback) {
-          setRun((prev) => ({
-            ...prev,
-            messages: prev.messages.map((msg) =>
-              msg.messageRefId === messageRefId
-                ? { ...msg, feedback: data.feedback }
-                : msg
-            ),
-          }));
-          onFeedbackUpdate?.(messageRefId, data.feedback);
-        }
-      } catch (err) {
-        console.error(err);
-      }
-    },
-    [onFeedbackUpdate, run.id, run.sessionId],
-  );
+  const saveTestBotFeedback = useCallback(async (
+    messageRefId: string,
+    score: number | null,
+    reason?: string,
+  ) => {
+    const feedbackWorkspaceId = activeWorkspaceId ?? runWorkspaceId;
+    if (!feedbackWorkspaceId) {
+      throw new Error("Missing workspace context for feedback save");
+    }
+    if (
+      activeWorkspaceId &&
+      runWorkspaceId &&
+      activeWorkspaceId !== runWorkspaceId
+    ) {
+      throw new Error(
+        "Active workspace does not match the current test run workspace",
+      );
+    }
+    await saveTestFeedbackApi({
+      workspaceId: feedbackWorkspaceId,
+      runId: run.id || undefined,
+      messageRefId,
+      score,
+      reason,
+    });
+    onFeedbackPersisted?.(feedbackWorkspaceId);
+  }, [
+    activeWorkspaceId,
+    onFeedbackPersisted,
+    runWorkspaceId,
+    saveTestFeedbackApi,
+  ]);
 
   const handleTestBotScore = useCallback(
-    (messageRefId: string, score: number | null) => {
-      saveTestBotFeedback(messageRefId, score);
+    async (messageRefId: string, score: number | null) => {
+      await saveTestBotFeedback(messageRefId, score);
     },
     [saveTestBotFeedback],
   );
 
   const handleTestBotReason = useCallback(
-    (messageRefId: string, score: number, reason: string) => {
-      saveTestBotFeedback(messageRefId, score, reason);
+    async (messageRefId: string, score: number, reason: string) => {
+      await saveTestBotFeedback(messageRefId, score, reason);
     },
     [saveTestBotFeedback],
   );
@@ -937,6 +553,21 @@ export default function TestBotPage(props: {
     setSelectedDeckId(nextId);
     loadTestBot({ deckId: nextId });
   }, [handleNewChat, loadTestBot, selectedDeckId]);
+
+  const parseRootJsonInput = useCallback(
+    (text: string): { parsed?: unknown; error: string | null } => {
+      if (text.trim() === "") {
+        return { parsed: undefined, error: null };
+      }
+      try {
+        return { parsed: JSON.parse(text), error: null };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Invalid JSON";
+        return { error: `Invalid JSON: ${message}` };
+      }
+    },
+    [],
+  );
 
   const runStatusLabel = run.status === "running"
     ? "Running…"
@@ -959,7 +590,7 @@ export default function TestBotPage(props: {
   const canStartAssistant = showStartOverlay &&
     !chatSending &&
     run.status !== "running" &&
-    (run.sessionId ||
+    (Boolean(runWorkspaceId) ||
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
 
   const canSendChat = hasDeckSelection &&
@@ -967,139 +598,57 @@ export default function TestBotPage(props: {
     !chatSending &&
     chatDraft.trim().length > 0 &&
     !showStartOverlay &&
-    (run.sessionId ||
+    (Boolean(runWorkspaceId) ||
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
 
   const handleStartAssistant = useCallback(async () => {
     if (!hasDeckSelection || chatSending) return;
-    setChatSending(true);
-    setChatError(null);
-    let nextRunId = run.id;
-    if (!nextRunId) {
-      nextRunId = `testbot-ui-${crypto.randomUUID()}`;
-      setRun((prev) => ({
-        ...prev,
-        id: nextRunId,
-        status: "running",
-        error: undefined,
-        messages: prev.messages ?? [],
-        traces: prev.traces ?? [],
-        toolInserts: prev.toolInserts ?? [],
-      }));
-    }
+    allowRunSessionNavRef.current = true;
     try {
-      const payload: Record<string, unknown> = {
-        message: "",
-        runId: nextRunId,
-        sessionId: run.sessionId ?? activeSessionId ?? undefined,
+      await startTestAssistantApi({
+        runId: run.id,
+        workspaceId: activeWorkspaceId ?? undefined,
+        runWorkspaceId: runWorkspaceId ?? undefined,
         botDeckPath: selectedDeckId ?? undefined,
-      };
-      if (!run.sessionId) {
-        payload.context = deckInitValue;
-      }
-      const res = await fetch("/api/test/message", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        context: !runWorkspaceId ? deckInitValue : undefined,
       });
-      const data = await res.json().catch(() => ({})) as {
-        run?: TestBotRun;
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : res.statusText,
-        );
-      }
-      if (data.run) {
-        setRun({
-          ...data.run,
-          messages: data.run.messages ?? [],
-          traces: data.run.traces ?? [],
-          toolInserts: data.run.toolInserts ?? [],
-        });
-      }
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setChatSending(false);
+    } catch {
+      // Error state is set in context.
     }
   }, [
     chatSending,
     deckInitValue,
     hasDeckSelection,
     run.id,
-    run.sessionId,
+    runWorkspaceId,
     selectedDeckId,
-    activeSessionId,
+    activeWorkspaceId,
+    startTestAssistantApi,
   ]);
 
   const handleSendChat = useCallback(async () => {
     const message = chatDraft.trim();
     if (!message) return;
-    setChatSending(true);
-    setChatError(null);
-    let nextRunId = run.id;
-    const optimisticId = crypto.randomUUID();
-    if (!nextRunId) {
-      nextRunId = `testbot-ui-${crypto.randomUUID()}`;
-      setRun((prev) => ({
-        ...prev,
-        id: nextRunId,
-        status: "running",
-        error: undefined,
-        messages: prev.messages ?? [],
-        traces: prev.traces ?? [],
-        toolInserts: prev.toolInserts ?? [],
-      }));
-    }
-    setOptimisticUser({ id: optimisticId, text: message });
-    setChatDraft("");
+    allowRunSessionNavRef.current = true;
     try {
-      const payload: Record<string, unknown> = {
-        message,
-        runId: nextRunId,
-        sessionId: run.sessionId ?? activeSessionId ?? undefined,
+      await sendTestMessageApi(message, {
+        runId: run.id,
+        workspaceId: activeWorkspaceId ?? undefined,
+        runWorkspaceId: runWorkspaceId ?? undefined,
         botDeckPath: selectedDeckId ?? undefined,
-      };
-      if (!run.sessionId) {
-        payload.context = deckInitValue;
-      }
-      const res = await fetch("/api/test/message", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        context: !runWorkspaceId ? deckInitValue : undefined,
       });
-      const data = await res.json().catch(() => ({})) as {
-        run?: TestBotRun;
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : res.statusText,
-        );
-      }
-      if (data.run) {
-        setRun({
-          ...data.run,
-          messages: data.run.messages ?? [],
-          traces: data.run.traces ?? [],
-          toolInserts: data.run.toolInserts ?? [],
-        });
-      }
-    } catch (err) {
-      setChatError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setChatSending(false);
+    } catch {
+      // Error state is set in context.
     }
   }, [
     chatDraft,
     deckInitValue,
     run.id,
-    run.sessionId,
-    run.status,
+    runWorkspaceId,
     selectedDeckId,
-    activeSessionId,
+    activeWorkspaceId,
+    sendTestMessageApi,
   ]);
 
   return (
@@ -1115,7 +664,7 @@ export default function TestBotPage(props: {
           <Panel className="test-bot-sidebar flex-column gap-8 flex-1">
             <div className="flex-row gap-8 items-center">
               <div className="flex-1">
-                <strong>Test deck</strong>
+                <strong>Scenario deck</strong>
               </div>
               <Button
                 variant="primary"
@@ -1123,7 +672,7 @@ export default function TestBotPage(props: {
                 disabled={!canStart}
                 data-testid="testbot-run"
               >
-                Run test bot
+                Run scenario
               </Button>
             </div>
             {testDecks.length > 0 && (
@@ -1147,28 +696,44 @@ export default function TestBotPage(props: {
             {botDescription && (
               <div className="placeholder">{botDescription}</div>
             )}
-            <strong>Test deck input</strong>
+            <strong>Scenario deck input</strong>
             <div style={{ flex: 1 }}>
               {botInputSchemaError && (
                 <div className="error">{botInputSchemaError}</div>
               )}
               {botInputSchema && (
-                <InitForm
-                  schema={botInputSchema}
-                  value={botInputValue}
-                  onChange={(next) => {
-                    setBotInputValue(next);
-                    setBotInputDirty(true);
-                  }}
-                  onJsonErrorChange={(pathKey, err) =>
-                    setBotInputJsonErrors((prev) =>
-                      prev[pathKey] === err ? prev : { ...prev, [pathKey]: err }
-                    )}
-                />
+                <div className="init-field">
+                  <label>
+                    <span>Scenario JSON</span>
+                  </label>
+                  <textarea
+                    className="json-input"
+                    data-testid="testbot-scenario-json-input"
+                    value={botInputJsonText}
+                    placeholder="Paste full scenario JSON payload"
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      setBotInputJsonText(text);
+                      setBotInputDirty(true);
+                      const { parsed, error } = parseRootJsonInput(text);
+                      setBotInputJsonError(error);
+                      if (!error) setBotInputValue(parsed);
+                    }}
+                    style={{ minHeight: 160 }}
+                  />
+                  {botInputJsonError && (
+                    <div className="error">{botInputJsonError}</div>
+                  )}
+                  {!botInputJsonError && (
+                    <div className="secondary-note">
+                      Paste a complete JSON payload matching the schema.
+                    </div>
+                  )}
+                </div>
               )}
               {!botInputSchema && (
                 <div className="placeholder">
-                  No test bot input schema configured.
+                  No scenario input schema configured.
                 </div>
               )}
             </div>
@@ -1202,27 +767,45 @@ export default function TestBotPage(props: {
                 )}
                 {deckInputSchema && (
                   <>
-                    <InitForm
-                      schema={deckInputSchema}
-                      value={deckInitValue}
-                      onChange={handleDeckInitChange}
-                      onJsonErrorChange={(pathKey, err) =>
-                        setDeckJsonErrors((prev) =>
-                          prev[pathKey] === err
-                            ? prev
-                            : { ...prev, [pathKey]: err }
-                        )}
-                    />
+                    <div className="init-field">
+                      <label>
+                        <span>Init JSON</span>
+                      </label>
+                      <textarea
+                        className="json-input"
+                        data-testid="testbot-assistant-init-json-input"
+                        value={deckInitJsonText}
+                        placeholder="Paste full assistant init JSON payload"
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setDeckInitJsonText(text);
+                          setDeckInitDirty(true);
+                          const { parsed, error } = parseRootJsonInput(text);
+                          setDeckInitJsonError(error);
+                          if (!error) setDeckInitValue(parsed);
+                        }}
+                        style={{ minHeight: 160 }}
+                      />
+                      {deckInitJsonError && (
+                        <div className="error">{deckInitJsonError}</div>
+                      )}
+                      {!deckInitJsonError && (
+                        <div className="secondary-note">
+                          Paste a complete JSON payload matching the schema.
+                        </div>
+                      )}
+                    </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <Button
                         variant="ghost"
                         onClick={() => {
                           setDeckInitDirty(false);
-                          setDeckJsonErrors({});
                           const nextInit = deckSchemaDefaults !== undefined
                             ? cloneValue(deckSchemaDefaults)
                             : deriveInitialFromSchema(deckInputSchema);
                           setDeckInitValue(nextInit);
+                          setDeckInitJsonText(formatJson(nextInit));
+                          setDeckInitJsonError(null);
                         }}
                       >
                         Reset init
@@ -1331,340 +914,38 @@ export default function TestBotPage(props: {
           </Panel>
         </div>
 
-        <Panel className="flex-column gap-8">
-          <div className="flex-row gap-8 items-center">
-            <div className="flex-column flex-1 gap-4">
-              <div className="flex-row items-center gap-8">
-                <strong>Test run</strong>
-                <Badge variant={run.status} data-testid="testbot-status">
-                  {runStatusLabel}
-                </Badge>
-              </div>
-            </div>
-            <div className="flex-row row-reverse gap-8 wrap">
-              <Button
-                variant="ghost"
-                onClick={stopRun}
-                disabled={run.status !== "running"}
-                data-testid="testbot-stop"
-              >
-                Stop
-              </Button>
-              <Button variant="secondary" onClick={handleNewChat}>
-                New chat
-              </Button>
-            </div>
-          </div>
-          {run.error && <div className="error">{run.error}</div>}
-          {(run.initFill ?? lastInitFill) && (
-            <div className="patch-card">
-              <div className="patch-summary">Init fill</div>
-              {(run.initFill ?? lastInitFill)?.error && (
-                <div className="error">
-                  {(run.initFill ?? lastInitFill)?.error}
-                </div>
-              )}
-              <div className="patch-meta">
-                Requested: {(run.initFill ?? lastInitFill)?.requested?.length
-                  ? (run.initFill ?? lastInitFill)!.requested.join(", ")
-                  : "none"}
-              </div>
-              {(run.initFill ?? lastInitFill)?.applied !== undefined && (
-                <pre className="trace-json">
-                  {formatJson((run.initFill ?? lastInitFill)?.applied)}
-                </pre>
-              )}
-              {(run.initFill ?? lastInitFill)?.applied === undefined && (
-                <div className="patch-meta">No fills applied.</div>
-              )}
-            </div>
-          )}
-          {!canStart && canRunPersona && (
-            <div className="error">
-              {!hasPersonaSelection
-                ? "Select a persona deck to run."
-                : botJsonErrorCount > 0 || deckJsonErrorCount > 0
-                ? "Fix invalid JSON fields to run."
-                : missingBotInput.length > 0
-                ? `Missing required bot inputs: ${
-                  missingBotInput.slice(0, 6).join(", ")
-                }${missingBotInput.length > 6 ? "…" : ""}`
-                : missingDeckInit.length > 0
-                ? `Missing required init fields: ${
-                  missingDeckInit.slice(0, 6).join(", ")
-                }${missingDeckInit.length > 6 ? "…" : ""}`
-                : ""}
-            </div>
-          )}
-          {canStart && missingDeckInit.length > 0 && (
-            <div className="placeholder">
-              Missing required init fields will be requested from the persona:
-              {" "}
-              {missingDeckInit.slice(0, 6).join(", ")}
-              {missingDeckInit.length > 6 ? "…" : ""}
-            </div>
-          )}
-          <div className="test-bot-thread">
-            <div
-              className="imessage-thread"
-              ref={transcriptRef}
-            >
-              {run.messages.length === 0 && (
-                <div className="placeholder">No messages yet.</div>
-              )}
-              {(() => {
-                const rows: React.ReactNode[] = [];
-                const renderToolBucket = (index: number) => {
-                  const bucket = toolBuckets.get(index);
-                  if (!bucket || bucket.length === 0) return;
-                  const isOpen = Boolean(toolCallsOpen[index]);
-                  let latencyLabel: string | null = null;
-                  for (let i = index; i < run.messages.length; i += 1) {
-                    if (run.messages[i]?.role === "assistant") {
-                      const latency = assistantLatencyByMessageIndex[i];
-                      if (typeof latency === "number") {
-                        latencyLabel = `${Math.max(0, Math.round(latency))}ms`;
-                      }
-                      break;
-                    }
-                  }
-                  rows.push(
-                    <div
-                      key={`tool-bucket-${index}`}
-                      className="tool-calls-collapsible"
-                    >
-                      <button
-                        type="button"
-                        className="tool-calls-toggle"
-                        onClick={() => setToolCallsOpen((prev) => ({
-                          ...prev,
-                          [index]: !prev[index],
-                        }))}
-                      >
-                        <span className="tool-calls-toggle-label">
-                          Tool calls ({bucket.length})
-                          {latencyLabel ? ` · ${latencyLabel}` : ""} ·{" "}
-                          {isOpen ? "Hide" : "Show"}
-                        </span>
-                      </button>
-                      {isOpen && (
-                        <div className="tool-calls-list">
-                          {bucket.map((call, callIdx) => (
-                            <ToolCallBubble
-                              key={`tool-${call.id}-${index}-${callIdx}`}
-                              call={call}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>,
-                  );
-                };
-                renderToolBucket(0);
-                run.messages.forEach((m, idx) => {
-                  const messageKey = m.messageRefId ?? `${m.role}-${idx}`;
-                  rows.push(
-                    <div
-                      key={messageKey}
-                      className={`imessage-row ${
-                        m.role === "user" ? "right" : "left"
-                      }`}
-                    >
-                      <div
-                        className={`imessage-bubble ${
-                          m.role === "user" ? "right" : "left"
-                        }`}
-                        title={m.role}
-                      >
-                        {(
-                            m.respondPayload !== undefined ||
-                            m.respondMeta !== undefined ||
-                            typeof m.respondStatus === "number" ||
-                            typeof m.respondMessage === "string" ||
-                            typeof m.respondCode === "string"
-                          )
-                          ? (
-                            <div className="respond-summary">
-                              <div className="respond-meta">
-                                <Badge>gambit_respond</Badge>
-                                {typeof m.respondStatus === "number" && (
-                                  <Badge variant="ghost">
-                                    status {m.respondStatus}
-                                  </Badge>
-                                )}
-                                {m.respondCode && (
-                                  <Badge variant="ghost">
-                                    code {m.respondCode}
-                                  </Badge>
-                                )}
-                              </div>
-                              {m.respondMessage && (
-                                <div className="respond-message">
-                                  {m.respondMessage}
-                                </div>
-                              )}
-                              {m.respondPayload !== undefined && (
-                                <pre className="bubble-json">
-                                  {formatJson(m.respondPayload)}
-                                </pre>
-                              )}
-                              {m.respondMeta && (
-                                <details className="respond-meta-details">
-                                  <summary>Meta</summary>
-                                  <pre className="bubble-json">
-                                    {formatJson(m.respondMeta)}
-                                  </pre>
-                                </details>
-                              )}
-                            </div>
-                          )
-                          : m.content}
-                        {m.messageRefId && run.sessionId && (
-                          <FeedbackControls
-                            messageRefId={m.messageRefId}
-                            feedback={m.feedback}
-                            onScore={handleTestBotScore}
-                            onReasonChange={handleTestBotReason}
-                          />
-                        )}
-                      </div>
-                    </div>,
-                  );
-                  renderToolBucket(idx + 1);
-                });
-                return rows;
-              })()}
-              {streamingUser?.text && streamingUser.runId === run.id &&
-                (streamingUser.expectedUserCount === undefined ||
-                  countUserMessages(run.messages) <
-                    streamingUser.expectedUserCount) &&
-                (
-                  <div className="imessage-row right">
-                    <div
-                      className="imessage-bubble right imessage-bubble-muted"
-                      title="user"
-                    >
-                      {streamingUser.text}
-                    </div>
-                  </div>
-                )}
-              {optimisticUser && (
-                <div className="imessage-row right">
-                  <div
-                    className="imessage-bubble right"
-                    title="user"
-                  >
-                    {optimisticUser.text}
-                  </div>
-                </div>
-              )}
-              {streamingAssistant?.text &&
-                streamingAssistant.runId === run.id &&
-                (
-                  <div className="imessage-row left">
-                    <div
-                      className="imessage-bubble left imessage-bubble-muted"
-                      title="assistant"
-                    >
-                      {streamingAssistant.text}
-                    </div>
-                  </div>
-                )}
-            </div>
-            <div className="composer">
-              <div className="composer-inputs">
-                {isUserStart && run.messages.length === 0 &&
-                  !streamingAssistant?.text && !streamingUser?.text && (
-                  <div className="placeholder emphasis">
-                    This deck expects a user message to kick things off.
-                  </div>
-                )}
-                <div className="flex-row gap-4 mb-2">
-                  <textarea
-                    className="message-input flex-1"
-                    rows={1}
-                    placeholder={showStartOverlay
-                      ? "Start the assistant to begin..."
-                      : isUserStart && run.messages.length === 0
-                      ? "Send the first message to begin..."
-                      : "Message the assistant..."}
-                    value={chatDraft}
-                    onChange={(e) => setChatDraft(e.target.value)}
-                    disabled={showStartOverlay}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        if (canSendChat) {
-                          handleSendChat();
-                        }
-                      }
-                    }}
-                  />
-                  <div className="composer-actions">
-                    <Button
-                      variant="primary"
-                      onClick={handleSendChat}
-                      disabled={!canSendChat}
-                      data-testid="testbot-chat-send"
-                    >
-                      Send
-                    </Button>
-                  </div>
-                </div>
-              </div>
-              {chatError && <div className="error">{chatError}</div>}
-            </div>
-            {showStartOverlay && (
-              <div className="test-bot-thread-overlay">
-                <div className="test-bot-thread-card">
-                  <strong className="test-bot-thread-title">
-                    Choose how to start
-                  </strong>
-                  <div className="placeholder test-bot-thread-subtitle">
-                    Pick the flow you want: manual conversation or a full test
-                    bot run.
-                  </div>
-                  <div className="test-bot-thread-sections">
-                    <div className="test-bot-thread-section">
-                      <div className="test-bot-thread-section-title">
-                        Start the assistant
-                      </div>
-                      <div className="test-bot-thread-section-body">
-                        Use this when you want to explore the chat manually.
-                      </div>
-                      <Button
-                        variant="secondary"
-                        onClick={handleStartAssistant}
-                        disabled={!canStartAssistant}
-                        data-testid="testbot-start-assistant"
-                      >
-                        Start assistant
-                      </Button>
-                    </div>
-                    <div className="test-bot-thread-section">
-                      <div className="test-bot-thread-section-title">
-                        Run test bot
-                      </div>
-                      <div className="test-bot-thread-section-body">
-                        Run the configured test bot to execute the scenario
-                        end-to-end.
-                      </div>
-                      <Button
-                        variant="primary"
-                        onClick={startRun}
-                        disabled={!canStart}
-                        data-testid="testbot-run-overlay"
-                      >
-                        Run test bot
-                      </Button>
-                    </div>
-                  </div>
-                  {chatError && <div className="error">{chatError}</div>}
-                </div>
-              </div>
-            )}
-          </div>
-        </Panel>
+        <TestBotChatPanel
+          run={run}
+          runWorkspaceId={runWorkspaceId}
+          runStatusLabel={runStatusLabel}
+          activeWorkspaceId={activeWorkspaceId}
+          requestedRunNotFound={requestedRunNotFound}
+          canStart={canStart}
+          canRunPersona={canRunPersona}
+          hasPersonaSelection={hasPersonaSelection}
+          botJsonErrorCount={botJsonErrorCount}
+          deckJsonErrorCount={deckJsonErrorCount}
+          missingBotInput={missingBotInput}
+          missingDeckInit={missingDeckInit}
+          lastInitFill={lastInitFill}
+          isUserStart={isUserStart}
+          showStartOverlay={showStartOverlay}
+          canStartAssistant={canStartAssistant}
+          canSendChat={canSendChat}
+          chatDraft={chatDraft}
+          setChatDraft={setChatDraft}
+          chatError={chatError}
+          optimisticUser={optimisticUser}
+          streamingUser={streamingUser}
+          streamingAssistant={streamingAssistant}
+          startRun={startRun}
+          stopRun={stopRun}
+          handleNewChat={handleNewChat}
+          handleSendChat={handleSendChat}
+          handleStartAssistant={handleStartAssistant}
+          onScore={handleTestBotScore}
+          onReasonChange={handleTestBotReason}
+        />
       </PageGrid>
     </PageShell>
   );

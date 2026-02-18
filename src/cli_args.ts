@@ -5,16 +5,16 @@ import { normalizeFlagList, parsePortValue } from "./cli_utils.ts";
 
 const logger = console;
 let initFlagWarningShown = false;
+let workerSandboxAliasWarningShown = false;
 
 const COMMANDS = [
   "bot",
   "check",
   "demo",
-  "init",
   "run",
   "repl",
   "serve",
-  "test-bot",
+  "scenario",
   "grade",
   "export",
 ] as const;
@@ -29,11 +29,10 @@ const HELP_COMMANDS = [
   "bot",
   "check",
   "demo",
-  "init",
   "run",
   "repl",
   "serve",
-  "test-bot",
+  "scenario",
   "grade",
 ] as const;
 
@@ -63,6 +62,7 @@ type Args = {
   responses?: boolean;
   statePath?: string;
   outPath?: string;
+  artifactPath?: string;
   verbose?: boolean;
   online?: boolean;
   port?: number;
@@ -70,9 +70,233 @@ type Args = {
   bundle?: boolean;
   sourcemap?: boolean;
   platform?: string;
+  allowAll?: boolean;
+  allowRead?: true | Array<string>;
+  allowWrite?: true | Array<string>;
+  allowRun?: true | Array<string>;
+  allowNet?: true | Array<string>;
+  allowEnv?: true | Array<string>;
+  workerSandbox?: boolean;
+  legacyExec?: boolean;
   help?: boolean;
   version?: boolean;
 };
+
+type PermissionFlagValue = {
+  provided: boolean;
+  all: boolean;
+  values: Array<string>;
+};
+
+type ParsedPermissionOverrides = {
+  argv: Array<string>;
+  allowAll: boolean;
+  allowRead: PermissionFlagValue;
+  allowWrite: PermissionFlagValue;
+  allowRun: PermissionFlagValue;
+  allowNet: PermissionFlagValue;
+  allowEnv: PermissionFlagValue;
+  workerSandbox?: boolean;
+  workerSandboxSource?: string;
+  sandboxAliasUsed: boolean;
+  legacyExec: boolean;
+};
+
+const STRING_OPTION_FLAGS = [
+  "deck",
+  "init",
+  "context",
+  "message",
+  "test-deck",
+  "grade",
+  "grader",
+  "bot-input",
+  "bot-root",
+  "max-turns",
+  "model",
+  "model-force",
+  "platform",
+  "trace",
+  "state",
+  "out",
+  "artifact",
+  "port",
+] as const;
+const OPTION_VALUE_FLAGS = new Set(
+  STRING_OPTION_FLAGS.map((flag) => `--${flag}`),
+);
+
+function parseCsvList(input: string): Array<string> {
+  return input
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function createPermissionFlagValue(): PermissionFlagValue {
+  return { provided: false, all: false, values: [] };
+}
+
+function mergePermissionValue(
+  target: PermissionFlagValue,
+  value: string | undefined,
+) {
+  target.provided = true;
+  if (value === undefined) {
+    target.all = true;
+    target.values = [];
+    return;
+  }
+  const parsed = parseCsvList(value);
+  if (parsed.length === 0) {
+    target.all = true;
+    target.values = [];
+    return;
+  }
+  if (!target.all) {
+    target.values.push(...parsed);
+  }
+}
+
+function extractPermissionOverrides(
+  argv: Array<string>,
+): ParsedPermissionOverrides {
+  const out: ParsedPermissionOverrides = {
+    argv: [],
+    allowAll: false,
+    allowRead: createPermissionFlagValue(),
+    allowWrite: createPermissionFlagValue(),
+    allowRun: createPermissionFlagValue(),
+    allowNet: createPermissionFlagValue(),
+    allowEnv: createPermissionFlagValue(),
+    workerSandbox: undefined,
+    workerSandboxSource: undefined,
+    sandboxAliasUsed: false,
+    legacyExec: false,
+  };
+
+  const assignWorkerSandbox = (value: boolean, source: string) => {
+    if (
+      out.workerSandbox !== undefined &&
+      out.workerSandbox !== value
+    ) {
+      throw new Error(
+        `Conflicting worker execution flags: ${out.workerSandboxSource} and ${source}.`,
+      );
+    }
+    out.workerSandbox = value;
+    if (!out.workerSandboxSource) {
+      out.workerSandboxSource = source;
+    }
+  };
+
+  const flagMap = new Map<string, PermissionFlagValue>([
+    ["--allow-read", out.allowRead],
+    ["--allow-write", out.allowWrite],
+    ["--allow-run", out.allowRun],
+    ["--allow-net", out.allowNet],
+    ["--allow-env", out.allowEnv],
+  ]);
+  const isPermissionOverrideToken = (value: string): boolean =>
+    value === "-A" ||
+    value === "--allow-all" ||
+    value === "--sandbox" ||
+    value === "--no-sandbox" ||
+    value.startsWith("--allow-");
+  let consumeNextAsOptionValue = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
+    if (consumeNextAsOptionValue) {
+      out.argv.push(token);
+      consumeNextAsOptionValue = false;
+      continue;
+    }
+
+    if (token === "--") {
+      out.argv.push(...argv.slice(i));
+      break;
+    }
+
+    if (token.startsWith("--")) {
+      const equalsIndex = token.indexOf("=");
+      const flagName = equalsIndex === -1 ? token : token.slice(0, equalsIndex);
+      if (OPTION_VALUE_FLAGS.has(flagName)) {
+        if (equalsIndex === -1 && i + 1 < argv.length) {
+          const nextToken = argv[i + 1];
+          if (isPermissionOverrideToken(nextToken)) {
+            out.argv.push(`${token}=${nextToken}`);
+            i++;
+            continue;
+          }
+          out.argv.push(token);
+          consumeNextAsOptionValue = true;
+          continue;
+        }
+        out.argv.push(token);
+        continue;
+      }
+    }
+
+    if (token === "-A" || token === "--allow-all") {
+      out.allowAll = true;
+      continue;
+    }
+    if (token === "--worker-sandbox") {
+      assignWorkerSandbox(true, "--worker-sandbox");
+      continue;
+    }
+    if (token === "--no-worker-sandbox") {
+      assignWorkerSandbox(false, "--no-worker-sandbox");
+      continue;
+    }
+    if (token === "--legacy-exec") {
+      out.legacyExec = true;
+      assignWorkerSandbox(false, "--legacy-exec");
+      continue;
+    }
+    if (token === "--sandbox") {
+      out.sandboxAliasUsed = true;
+      assignWorkerSandbox(true, "--sandbox");
+      continue;
+    }
+    if (token === "--no-sandbox") {
+      out.sandboxAliasUsed = true;
+      assignWorkerSandbox(false, "--no-sandbox");
+      continue;
+    }
+
+    if (token.startsWith("--allow-")) {
+      let matched = false;
+      for (const [flag, target] of flagMap.entries()) {
+        if (token === flag) {
+          mergePermissionValue(target, undefined);
+          matched = true;
+          break;
+        }
+        if (token.startsWith(`${flag}=`)) {
+          mergePermissionValue(target, token.slice(flag.length + 1));
+          matched = true;
+          break;
+        }
+      }
+      if (matched) continue;
+    }
+
+    out.argv.push(token);
+  }
+
+  return out;
+}
+
+function finalizePermissionFlag(
+  value: PermissionFlagValue,
+): true | Array<string> | undefined {
+  if (!value.provided) return undefined;
+  if (value.all) return true;
+  const normalized = Array.from(new Set(value.values));
+  return normalized.length > 0 ? normalized : true;
+}
 
 type CommandDoc = {
   command: Command;
@@ -185,7 +409,8 @@ function formatCommandDoc(doc: CommandDoc, includeDetails: boolean): string {
 }
 
 export function parseCliArgs(argv: Array<string>): Args {
-  const parsed = parseArgs(argv, {
+  const permissions = extractPermissionOverrides(argv);
+  const parsed = parseArgs(permissions.argv, {
     boolean: [
       "stream",
       "responses",
@@ -198,25 +423,7 @@ export function parseCliArgs(argv: Array<string>): Args {
       "no-bundle",
       "sourcemap",
     ],
-    string: [
-      "deck",
-      "init",
-      "context",
-      "message",
-      "test-deck",
-      "grade",
-      "grader",
-      "bot-input",
-      "bot-root",
-      "max-turns",
-      "model",
-      "model-force",
-      "platform",
-      "trace",
-      "state",
-      "out",
-      "port",
-    ],
+    string: [...STRING_OPTION_FLAGS],
     alias: {
       help: "h",
       version: "V",
@@ -240,22 +447,44 @@ export function parseCliArgs(argv: Array<string>): Args {
     initFlagWarningShown = true;
     logger.warn('[gambit] "--init" is deprecated; use "--context" instead.');
   }
+  if (permissions.sandboxAliasUsed && !workerSandboxAliasWarningShown) {
+    workerSandboxAliasWarningShown = true;
+    logger.warn(
+      '[gambit] "--sandbox/--no-sandbox" are deprecated; use "--worker-sandbox/--no-worker-sandbox" (or "--legacy-exec") instead.',
+    );
+  }
   const contextValue = contextArg ?? legacyInit;
   const contextProvided = contextArg !== undefined || legacyInit !== undefined;
 
   const [cmdRaw, deckPathRaw] = parsed._;
-  const hasBundleFlag = argv.includes("--bundle");
-  const hasNoBundleFlag = argv.includes("--no-bundle");
+  const hasBundleFlag = permissions.argv.includes("--bundle");
+  const hasNoBundleFlag = permissions.argv.includes("--no-bundle");
   if (hasBundleFlag && hasNoBundleFlag) {
     throw new Error("Use either --bundle or --no-bundle, not both.");
   }
-  const hasSourceMapFlag = argv.includes("--sourcemap");
-  const hasNoSourceMapFlag = argv.includes("--no-sourcemap");
+  const hasSourceMapFlag = permissions.argv.includes("--sourcemap");
+  const hasNoSourceMapFlag = permissions.argv.includes("--no-sourcemap");
   if (hasSourceMapFlag && hasNoSourceMapFlag) {
     throw new Error("Use either --sourcemap or --no-sourcemap, not both.");
   }
   const cmd = cmdRaw as Args["cmd"];
   const deckPath = deckPathRaw as string | undefined;
+
+  const allowRead = permissions.allowAll ? true : finalizePermissionFlag(
+    permissions.allowRead,
+  );
+  const allowWrite = permissions.allowAll ? true : finalizePermissionFlag(
+    permissions.allowWrite,
+  );
+  const allowRun = permissions.allowAll ? true : finalizePermissionFlag(
+    permissions.allowRun,
+  );
+  const allowNet = permissions.allowAll ? true : finalizePermissionFlag(
+    permissions.allowNet,
+  );
+  const allowEnv = permissions.allowAll ? true : finalizePermissionFlag(
+    permissions.allowEnv,
+  );
 
   return {
     cmd,
@@ -279,6 +508,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     responses: Boolean(parsed.responses),
     statePath: parsed.state as string | undefined,
     outPath: parsed.out as string | undefined,
+    artifactPath: parsed.artifact as string | undefined,
     verbose: Boolean(parsed.verbose),
     online: Boolean(parsed.online),
     port: parsePortValue(parsed.port),
@@ -286,6 +516,14 @@ export function parseCliArgs(argv: Array<string>): Args {
     bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
     sourcemap: hasNoSourceMapFlag ? false : hasSourceMapFlag ? true : undefined,
     platform: parsed.platform as string | undefined,
+    allowAll: permissions.allowAll ? true : undefined,
+    allowRead,
+    allowWrite,
+    allowRun,
+    allowNet,
+    allowEnv,
+    workerSandbox: permissions.workerSandbox,
+    legacyExec: permissions.legacyExec ? true : undefined,
     help: Boolean(parsed.help),
     version: Boolean(parsed.version),
   };

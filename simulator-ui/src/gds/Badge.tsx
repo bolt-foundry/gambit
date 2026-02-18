@@ -1,4 +1,5 @@
 import React from "react";
+import Tooltip from "./Tooltip.tsx";
 import { classNames } from "../utils.ts";
 
 export type BadgeVariant =
@@ -24,16 +25,17 @@ export default function Badge(
     variant?: BadgeVariant;
     title?: string;
     status?: string;
+    tooltip?: React.ReactNode;
   },
 ) {
-  const { variant, status, className, children, ...rest } = props;
+  const { variant, status, tooltip, className, children, ...rest } = props;
   const statusText = status ??
     (typeof children === "string" ? children : undefined);
   const inferredVariant = statusText
     ? STATUS_VARIANT_MAP[statusText.trim().toLowerCase()]
     : undefined;
 
-  return (
+  const badgeElement = (
     <span
       className={classNames(
         "badge",
@@ -47,4 +49,10 @@ export default function Badge(
       {children}
     </span>
   );
+
+  if (tooltip === undefined || tooltip === null || tooltip === false) {
+    return badgeElement;
+  }
+
+  return <Tooltip content={tooltip}>{badgeElement}</Tooltip>;
 }

@@ -18,12 +18,12 @@ export OPENROUTER_API_KEY="your-key-here"
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./cold_emailer.deck.md \
+deno run -A jsr:@bolt-foundry/gambit/cli run ./PROMPT.md \
   --context "$(cat ./sample_input.json)" --stream
 ```
 
 ## Notes
 
 - Cards live in `cards/` and schemas live in `schemas/`.
-- The test bot deck is `tests/buyer_feedback.deck.md`.
-- The test bot hangup card is `cards/test_bot_hangup.card.md`.
+- The scenario deck is `tests/buyer_feedback.deck.md`.
+- The scenario hangup card is `cards/test_bot_hangup.card.md`.

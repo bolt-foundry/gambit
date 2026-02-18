@@ -1,6 +1,6 @@
-# Gambit Bot Policy Guide
+# Gambit Build Assistant Policy Guide
 
-Use this folder as the policy source of truth for Gambit Bot.
+Use this folder as the policy source of truth for Gambit Build Assistant.
 
 ## Quick explainer
 
@@ -22,6 +22,8 @@ Use this folder as the policy source of truth for Gambit Bot.
   checklist for safe frontmatter and schema editing.
 - [`deck-format-1.0.md`](./deck-format-1.0.md): Full Deck Format v1.0
   specification and folder contract.
+- [`grader-policy.md`](./grader-policy.md): How to map `INTENT.md` to grader
+  design, scoring, and pass/fail decisions.
 
 ## Usage
 

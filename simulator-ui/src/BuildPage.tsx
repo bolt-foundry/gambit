@@ -1,19 +1,16 @@
 import React, {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import { type ToolCallSummary, workspaceOnboardingEnabled } from "./utils.ts";
 import PageShell from "./gds/PageShell.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import Panel from "./gds/Panel.tsx";
-import Badge from "./gds/Badge.tsx";
 import Listbox, { type ListboxOption } from "./gds/Listbox.tsx";
-import { useBuildChat } from "./BuildChatContext.tsx";
+import { useWorkspaceBuild } from "./WorkspaceContext.tsx";
 
 type BuildFileEntry = {
   path: string;
@@ -90,7 +87,7 @@ export default function BuildPage(props: {
 }) {
   const { setNavActions } = props;
 
-  const { run, toolCalls } = useBuildChat();
+  const { run, toolCalls } = useWorkspaceBuild();
   const [fileEntries, setFileEntries] = useState<BuildFileEntry[]>([]);
   const [fileListLoading, setFileListLoading] = useState(false);
   const [fileListError, setFileListError] = useState<string | null>(null);
@@ -98,14 +95,10 @@ export default function BuildPage(props: {
   const [filePreview, setFilePreview] = useState<BuildFilePreview>({
     status: "idle",
   });
-  const [recentChangesOpen, setRecentChangesOpen] = useState(false);
-  const [recentChangesReadCount, setRecentChangesReadCount] = useState(0);
-  const recentChangesTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const recentChangesPopoverRef = useRef<HTMLDivElement | null>(null);
-  const [recentChangesPopoverStyle, setRecentChangesPopoverStyle] = useState<
-    React.CSSProperties | null
-  >(null);
   const lastTraceCountRef = useRef<number>(0);
+  const traceRefreshTimerRef = useRef<number | null>(null);
+  const fileListRefreshInFlightRef = useRef(false);
+  const fileListRefreshQueuedRef = useRef(false);
 
   useEffect(() => {
     if (!setNavActions) return;
@@ -114,28 +107,47 @@ export default function BuildPage(props: {
   }, [setNavActions]);
 
   const refreshFileList = useCallback(async () => {
+    if (fileListRefreshInFlightRef.current) {
+      fileListRefreshQueuedRef.current = true;
+      return;
+    }
+    fileListRefreshInFlightRef.current = true;
     setFileListLoading(true);
     setFileListError(null);
     try {
-      const query = run.id ? `?workspaceId=${encodeURIComponent(run.id)}` : "";
-      const res = await fetch(`/api/build/files${query}`);
-      const data = await res.json().catch(() => ({})) as {
-        entries?: BuildFileEntry[];
-        error?: string;
-      };
-      if (!res.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : res.statusText,
-        );
+      let shouldRun = true;
+      while (shouldRun) {
+        fileListRefreshQueuedRef.current = false;
+        const query = run.id
+          ? `?workspaceId=${encodeURIComponent(run.id)}`
+          : "";
+        const res = await fetch(`/api/build/files${query}`);
+        const data = await res.json().catch(() => ({})) as {
+          entries?: BuildFileEntry[];
+          error?: string;
+        };
+        if (!res.ok) {
+          throw new Error(
+            typeof data.error === "string" ? data.error : res.statusText,
+          );
+        }
+        setFileEntries(Array.isArray(data.entries) ? data.entries : []);
+        shouldRun = fileListRefreshQueuedRef.current;
       }
-      setFileEntries(Array.isArray(data.entries) ? data.entries : []);
     } catch (err) {
       setFileListError(err instanceof Error ? err.message : String(err));
       setFileEntries([]);
     } finally {
+      fileListRefreshInFlightRef.current = false;
       setFileListLoading(false);
     }
   }, [run.id]);
+
+  const clearTraceRefreshTimer = useCallback(() => {
+    if (traceRefreshTimerRef.current === null) return;
+    clearTimeout(traceRefreshTimerRef.current);
+    traceRefreshTimerRef.current = null;
+  }, []);
 
   useEffect(() => {
     refreshFileList().catch(() => {});
@@ -143,10 +155,20 @@ export default function BuildPage(props: {
 
   useEffect(() => {
     const traceCount = run.traces?.length ?? 0;
+    clearTraceRefreshTimer();
     if (traceCount === lastTraceCountRef.current) return;
     lastTraceCountRef.current = traceCount;
-    refreshFileList().catch(() => {});
-  }, [run.traces?.length, refreshFileList]);
+    traceRefreshTimerRef.current = setTimeout(() => {
+      traceRefreshTimerRef.current = null;
+      refreshFileList().catch(() => {});
+    }, 250);
+  }, [clearTraceRefreshTimer, run.traces?.length, refreshFileList]);
+
+  useEffect(() => {
+    return () => {
+      clearTraceRefreshTimer();
+    };
+  }, [clearTraceRefreshTimer]);
 
   const fileEntriesByPath = useMemo(() => {
     const map = new Map<string, BuildFileEntry>();
@@ -195,6 +217,17 @@ export default function BuildPage(props: {
   const selectedEntry = selectedPath
     ? fileEntriesByPath.get(selectedPath)
     : undefined;
+
+  const selectedPathChangeToken = useMemo(() => {
+    if (!selectedPath) return "";
+    for (let i = toolCalls.length - 1; i >= 0; i -= 1) {
+      const change = extractBotWriteChange(toolCalls[i]);
+      if (change?.path === selectedPath) {
+        return `${change.id}:${change.action ?? ""}`;
+      }
+    }
+    return "";
+  }, [selectedPath, toolCalls]);
 
   useEffect(() => {
     const filePaths = Array.from(fileEntriesByPath.keys());
@@ -278,102 +311,13 @@ export default function BuildPage(props: {
     return () => {
       canceled = true;
     };
-  }, [selectedPath]);
-
-  const toolInsertIndexByCall = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const insert of run.toolInserts ?? []) {
-      if (!insert.actionCallId) continue;
-      map.set(
-        insert.actionCallId,
-        typeof insert.index === "number" ? insert.index : 0,
-      );
-    }
-    return map;
-  }, [run.toolInserts]);
-
-  const changes = useMemo(() => {
-    return toolCalls
-      .map(extractBotWriteChange)
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-  }, [toolCalls]);
-
-  const auditTrail = useMemo(() => {
-    const limited = changes.slice(-50);
-    return limited.map((change) => ({
-      ...change,
-      turn: toolInsertIndexByCall.get(change.id),
-    }));
-  }, [changes, toolInsertIndexByCall]);
-
-  const unreadRecentChangesCount = Math.max(
-    0,
-    changes.length - recentChangesReadCount,
-  );
-
-  const updateRecentChangesPopover = useCallback(() => {
-    const trigger = recentChangesTriggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const width = Math.min(380, Math.max(260, window.innerWidth - 24));
-    const left = Math.max(
-      12,
-      Math.min(rect.right - width, window.innerWidth - width - 12),
-    );
-    setRecentChangesPopoverStyle({
-      position: "fixed",
-      top: rect.bottom + 6,
-      left,
-      width,
-    });
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!recentChangesOpen) return;
-    updateRecentChangesPopover();
-  }, [recentChangesOpen, updateRecentChangesPopover]);
-
-  useEffect(() => {
-    if (!recentChangesOpen) {
-      setRecentChangesPopoverStyle(null);
-      return;
-    }
-    const handleOutside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      const isInTrigger = recentChangesTriggerRef.current &&
-        target &&
-        recentChangesTriggerRef.current.contains(target);
-      const isInPopover = recentChangesPopoverRef.current &&
-        target &&
-        recentChangesPopoverRef.current.contains(target);
-      if (!isInTrigger && !isInPopover) {
-        setRecentChangesOpen(false);
-      }
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setRecentChangesOpen(false);
-      }
-    };
-    const handleReposition = () => updateRecentChangesPopover();
-    document.addEventListener("mousedown", handleOutside);
-    document.addEventListener("keydown", handleKey);
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
-    return () => {
-      document.removeEventListener("mousedown", handleOutside);
-      document.removeEventListener("keydown", handleKey);
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
-    };
-  }, [recentChangesOpen, updateRecentChangesPopover]);
-
-  useEffect(() => {
-    setRecentChangesOpen(false);
-    setRecentChangesReadCount(0);
-    setRecentChangesPopoverStyle(null);
-  }, [run.id]);
+  }, [
+    run.id,
+    selectedPath,
+    selectedEntry?.modifiedAt,
+    selectedEntry?.size,
+    selectedPathChangeToken,
+  ]);
 
   return (
     <PageShell>
@@ -410,35 +354,6 @@ export default function BuildPage(props: {
                       {formatBytes(selectedEntry.size)}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className="build-recent-changes-trigger"
-                    onClick={() => {
-                      if (recentChangesOpen) {
-                        setRecentChangesOpen(false);
-                        return;
-                      }
-                      setRecentChangesReadCount(changes.length);
-                      updateRecentChangesPopover();
-                      setRecentChangesOpen(true);
-                    }}
-                    aria-haspopup="dialog"
-                    aria-expanded={recentChangesOpen}
-                    ref={recentChangesTriggerRef}
-                  >
-                    <span className="build-recent-changes-label">
-                      Recent changes
-                    </span>
-                    <Badge
-                      variant={unreadRecentChangesCount > 0
-                        ? "running"
-                        : "ghost"}
-                      data-testid="build-changes-count"
-                      className="build-recent-changes-badge"
-                    >
-                      {unreadRecentChangesCount}
-                    </Badge>
-                  </button>
                 </div>
               </div>
             </div>
@@ -477,48 +392,6 @@ export default function BuildPage(props: {
               )}
             </div>
           </div>
-          {recentChangesOpen && recentChangesPopoverStyle &&
-            createPortal(
-              <div
-                className="build-recent-changes-popover"
-                style={recentChangesPopoverStyle}
-                ref={recentChangesPopoverRef}
-                data-testid="build-changes-panel"
-              >
-                {auditTrail.length === 0
-                  ? <div className="placeholder">No recent changes yet.</div>
-                  : (
-                    <div className="build-recent-changes-list">
-                      {[...auditTrail].reverse().map((change, idx) => (
-                        <button
-                          key={`${change.path}-${idx}`}
-                          type="button"
-                          className="build-recent-change-row"
-                          onClick={() => {
-                            setSelectedPath(change.path);
-                            setRecentChangesOpen(false);
-                          }}
-                        >
-                          <div className="build-recent-change-summary">
-                            {change.action ?? "updated"}:{" "}
-                            <code>{change.path}</code>
-                          </div>
-                          <div className="build-recent-change-meta">
-                            {change.before === null
-                              ? "Created file."
-                              : change.before === undefined
-                              ? "No before snapshot."
-                              : "Updated file."} {change.turn !== undefined
-                              ? `· Turn ${change.turn + 1}`
-                              : ""}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-              </div>,
-              document.body,
-            )}
         </Panel>
       </PageGrid>
     </PageShell>
