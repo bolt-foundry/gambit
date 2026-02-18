@@ -24,7 +24,7 @@ includes:
 | `tests/new_account_persona.deck.md` | Synthetic persona deck for the Scenario tab.                                                                     |
 | `demo-script.md`                    | Suggested prompts (answers + refusals) for the Gambit Debug UI.                                                  |
 
-To wire synthetic QA personas into the Scenario tab, add `[[testDecks]]` entries
+To wire synthetic QA personas into the Scenario tab, add `[[scenarios]]` entries
 to `PROMPT.md` that point at persona decks (for example
 `./tests/new_account_persona.deck.md`). Those persona decks should set
 `acceptsUserTurns = true` and can declare an `contextSchema` so the Scenario

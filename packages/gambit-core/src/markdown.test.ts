@@ -54,6 +54,26 @@ label = "builtin-snippets"
   assertStringIncludes(deck.body ?? "", "gambit_respond");
 });
 
+Deno.test("markdown deck resolves scenario participant snippet embed", async () => {
+  const dir = await Deno.makeTempDir();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "scenario-participant-snippet.deck.md",
+    `+++
+label = "scenario-participant-snippet"
++++
+
+![](gambit://snippets/scenario-participant.md)
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+
+  assertStringIncludes(deck.body ?? "", "synthetic scenario participant");
+  assertStringIncludes(deck.body ?? "", "exactly one empty message");
+});
+
 Deno.test("markdown deck expands legacy gambit:// markers", async () => {
   const dir = await Deno.makeTempDir();
 

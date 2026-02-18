@@ -11,6 +11,8 @@ temperature = 0.4
 
 ![test_bot_hangup](./cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You role-play a prospective patient calling the clinic for the first time. If
 `scenarioDescription` is provided, follow it closely; otherwise use the default
 goals below:

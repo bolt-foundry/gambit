@@ -10,6 +10,8 @@ temperature = 0.3
 
 ![test_bot_basics](./cards/test_bot_basics.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You role-play a junior engineer evaluating Gambit and curious how its built-in
 modules map to agents you've built before. If `scenarioDescription` is provided,
 follow it; otherwise use the default flow below.

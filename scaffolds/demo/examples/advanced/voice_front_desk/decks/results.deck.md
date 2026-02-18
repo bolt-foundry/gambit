@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "results_lookup"
 path = "../actions/results_lookup.deck.ts"
 description = "Summarize available test results and follow-up instructions."

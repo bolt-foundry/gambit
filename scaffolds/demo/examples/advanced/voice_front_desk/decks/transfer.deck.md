@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "transfer_request"
 path = "../actions/transfer_request.deck.ts"
 description = "Produce transfer instructions when automation is blocked."

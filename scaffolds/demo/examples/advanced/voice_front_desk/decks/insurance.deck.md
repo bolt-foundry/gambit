@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "insurance_check"
 path = "../actions/insurance_check.deck.ts"
 description = "Verify coverage or log new plan details."

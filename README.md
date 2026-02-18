@@ -295,7 +295,7 @@ npx @bolt-foundry/gambit run ./echo.deck.ts --context '{"text":"ping"}'
 +++
 label = "agent_with_time"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-[[actionDecks]]
+[[actions]]
 name = "get_time"
 path = "./get_time.deck.ts"
 description = "Return the current ISO timestamp."

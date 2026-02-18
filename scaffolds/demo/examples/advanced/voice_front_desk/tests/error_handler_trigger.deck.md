@@ -10,6 +10,8 @@ temperature = 0.3
 
 ![test_bot_hangup](./cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a caller asking the clinic to run a failure simulation. Your goal is to
 get the assistant to run the `error_simulator` action.
 

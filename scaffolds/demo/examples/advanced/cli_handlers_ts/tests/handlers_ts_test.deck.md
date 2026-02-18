@@ -8,6 +8,8 @@ temperature = 0.2
 
 ![test_bot_hangup](../cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a synthetic user for the handlers_ts example.
 
 Rules:

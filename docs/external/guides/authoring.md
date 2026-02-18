@@ -20,8 +20,8 @@ verification.
 ## Pick a format
 
 - Markdown deck/card: great for quick prompt-first flows. Front matter declares
-  label/model/actionDecks/testDecks/graderDecks/handlers; body is the prompt.
-  Embeds via image syntax pull in cards or special markers.
+  label/model/actions/scenarios/graders/handlers; body is the prompt. Embeds via
+  image syntax pull in cards or special markers.
 - TypeScript deck/card: best when you need compute logic or co-locate schemas.
   Export `defineDeck`/`defineCard` with Zod schemas and a `run`/`execute` for
   compute decks.
@@ -80,18 +80,18 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 ## Action decks, scenario decks, grader decks
 
 - Add action decks in front matter or TS definitions:
-  `actionDecks = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
+  `actions = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
 - Action decks defined on embedded cards are merged into the deck; duplicates
   are overridden by the deck’s own entries.
 - In compute decks, call child decks with `ctx.spawnAndWait({ path, input })`.
 - In LLM decks, the model chooses action decks via tool calls. Provide clear
   descriptions so the model routes correctly.
-- `testDecks` describe persona decks (synthetic users/bots). Each entry points
+- `scenarios` describe persona decks (synthetic users/bots). Each entry points
   to a deck that produces user turns/scenarios—use them for automated QA,
   persona-vs-workflow simulations, or even bot-vs-bot runs.
 - Example (see `init/examples/advanced/voice_front_desk/decks/root.deck.md`):
   ```toml
-  [[testDecks]]
+  [[scenarios]]
   label = "Synthetic caller – new patient intake"
   path = "./tests/new_patient_intake.deck.md"
   description = "Persona deck that stress-tests identity/routing coverage."
@@ -101,9 +101,10 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   should set `acceptsUserTurns = true` and may declare its own `contextSchema`
   (for example `contextSchema = "../schemas/my_persona_test.zod.ts"`) so the
   Test tab renders a schema-driven “Scenario” form for that persona.
-- For persona/scenario decks, you can embed
-  `![generate-test-input](gambit://cards/generate-test-input.card.md)` to
+- For persona/scenario decks, embed `![init](gambit://snippets/init.md)` to
   include the scenario init-fill contract instructions.
+- To keep personas in the participant role and standardize completion, embed
+  `![scenario-participant](gambit://snippets/scenario-participant.md)`.
 - Scenario init fill: when a scenario run is missing required init fields, the
   selected persona deck is asked to supply only the missing values before the
   run begins. The persona receives a single user message containing a JSON
@@ -142,7 +143,7 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   is provided; carries the raw input as the first tool result. `gambit_init`
   remains as a deprecated alias.
 - `gambit_respond`: enable by inserting the
-  `![respond](gambit://cards/respond.card.md)` marker in Markdown decks (or
+  `![respond](gambit://snippets/respond.md)` marker in Markdown decks (or
   `respond: true` in TypeScript). Required for LLM decks finish via a structured
   envelope: `{ status?, payload, message?, code?, meta? }`.
 - `gambit_complete`: emitted by child actions and handled errors to wrap their

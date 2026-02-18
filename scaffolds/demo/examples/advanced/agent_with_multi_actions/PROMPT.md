@@ -4,7 +4,7 @@ label = "agent_with_multi_actions"
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0
-[[testDecks]]
+[[scenarios]]
 label = "Multi-actions scenario"
 path = "./tests/agent_with_multi_actions_test.deck.md"
 description = "Synthetic user that requests a simple translation."

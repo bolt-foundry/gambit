@@ -1,7 +1,7 @@
 +++
 label = "voice_critic_card"
 
-[[actionDecks]]
+[[actions]]
 name = "voice_critic"
 path = "../voice_critic.deck.md"
 description = "Critique the draft tone against a target voice."

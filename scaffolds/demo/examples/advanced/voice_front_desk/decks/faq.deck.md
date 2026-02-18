@@ -6,7 +6,7 @@ responseSchema = "../schemas/faq_context_output.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "frontdesk_faq"
 path = "../actions/frontdesk_faq.deck.ts"
 description = "Fetch raw clinic FAQ content."

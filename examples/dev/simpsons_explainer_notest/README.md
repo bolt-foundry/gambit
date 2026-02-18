@@ -30,6 +30,6 @@ deno run -A jsr:@bolt-foundry/gambit@^0.8.3/cli serve PROMPT.md
 
 ## Notes
 
-- This example intentionally has no `[[testDecks]]`.
+- This example intentionally has no `[[scenarios]]`.
 - Graders are registered in `cards/grader_decks.card.md`.
 - Instruction cards live in `cards/` and are included by `PROMPT.md`.

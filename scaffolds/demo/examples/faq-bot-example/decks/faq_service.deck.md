@@ -6,7 +6,7 @@ responseSchema = "../schemas/faq_service_output.zod.ts"
 model = "openai/gpt-4o-mini"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "load_faq_dataset"
 path = "../actions/load_faq_dataset.deck.ts"
 description = "Load the Gambit FAQ dataset as markdown text."

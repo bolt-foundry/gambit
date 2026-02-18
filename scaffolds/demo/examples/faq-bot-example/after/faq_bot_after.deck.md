@@ -5,12 +5,12 @@ maxTurns = 5
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "faq_service"
 path = "../decks/faq_service.deck.md"
 description = "Find matches in the Gambit FAQ dataset."
 
-[[testDecks]]
+[[scenarios]]
 label = "Voice modules persona"
 path = "../tests/modules_voice_persona.deck.md"
 description = "Voice caller asking about Gambit modules and demanding plain sentences."

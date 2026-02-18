@@ -5,7 +5,7 @@ maxTurns = 4
 [modelParams]
 model = "openai/gpt-4o-mini"
 temperature = 0.7
-[[testDecks]]
+[[scenarios]]
 label = "Arena challenger"
 path = "./tests/arena_challenger.deck.md"
 description = "Synthetic user that asks about a Pokemon and requests a tip."

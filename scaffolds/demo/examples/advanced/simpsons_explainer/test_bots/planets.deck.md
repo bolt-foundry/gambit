@@ -9,6 +9,8 @@ temperature = 0
 
 ![test_bot_hangup](../cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a test user for the Simpsons-metaphor assistant. Ignore any prior
 assistant content.
 

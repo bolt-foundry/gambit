@@ -8,7 +8,7 @@ temperature = 0
 
 [guardrails]
 maxPasses = 10
-[[actionDecks]]
+[[actions]]
 name = "patient_lookup"
 path = "../actions/patient_lookup.deck.ts"
 description = "Resolve an existing patient record once name + DOB are confirmed."

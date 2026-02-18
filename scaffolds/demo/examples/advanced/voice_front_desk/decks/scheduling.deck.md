@@ -8,11 +8,11 @@ temperature = 0
 
 [guardrails]
 maxPasses = 120
-[[actionDecks]]
+[[actions]]
 name = "scheduling_ops"
 path = "../actions/scheduling_ops.deck.ts"
 description = "Return slot options or waitlist guidance."
-[[actionDecks]]
+[[actions]]
 name = "confirm_appointment"
 path = "../actions/confirm_appointment.deck.ts"
 description = "Confirm a selected slot and return a confirmation id."
