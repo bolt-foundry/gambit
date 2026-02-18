@@ -396,6 +396,18 @@ export const fileNameFromPath = (
 export const botFilename = (pathValue?: string | null): string | null =>
   fileNameFromPath(pathValue);
 
+export const scenarioNameFromValue = (
+  value?: string | null,
+): string | null => {
+  const base = fileNameFromPath(value);
+  if (!base) return null;
+  const cleaned = base.replace(/\.deck\.(md|ts)$/i, "")
+    .replace(/\.(md|ts)$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
+};
+
 export function classNames(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }

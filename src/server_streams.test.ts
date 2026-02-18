@@ -411,6 +411,181 @@ Deno.test("workspace durable stream carries build, test, and grade events", asyn
   await server.finished;
 });
 
+Deno.test("turn-mode calibrate running events include selected scenario run metadata", async () => {
+  const dir = await Deno.makeTempDir();
+  const sessionsDir = path.join(dir, "sessions");
+  const modHref = modImportPath();
+  const rootDeckPath = path.join(dir, "turns-metadata-root.deck.ts");
+  const scenarioDeckPath = path.join(dir, "turns-metadata-scenario.deck.ts");
+  const graderDeckPath = path.join(dir, "turns-metadata-grader.deck.ts");
+  const escapedScenarioPath = scenarioDeckPath.replaceAll("\\", "\\\\");
+  const escapedGraderPath = graderDeckPath.replaceAll("\\", "\\\\");
+
+  await Deno.writeTextFile(
+    scenarioDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    graderDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        session: z.any().optional(),
+        messageToGrade: z.any(),
+      }),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    rootDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "turn-scenario",
+        label: "Turn Scenario",
+        path: "${escapedScenarioPath}",
+      }],
+      graderDecks: [{
+        id: "turn-grader",
+        label: "Turn Grader",
+        path: "${escapedGraderPath}",
+      }],
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath: rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+    sessionDir: sessionsDir,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const workspaceRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    {
+      method: "POST",
+    },
+  );
+  assertEquals(workspaceRes.ok, true);
+  const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+  const workspaceId = workspaceBody.workspaceId ?? "";
+  assert(workspaceId.length > 0);
+
+  const scenarioRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      botDeckPath: scenarioDeckPath,
+      maxTurns: 1,
+    }),
+  });
+  const scenarioRunBody = await scenarioRunRes.json().catch(() => ({})) as {
+    error?: string;
+    run?: { id?: string };
+  };
+  assert(
+    scenarioRunRes.ok,
+    `scenario run failed: status=${scenarioRunRes.status} error=${
+      scenarioRunBody.error ?? "unknown"
+    }`,
+  );
+  const scenarioRunId = scenarioRunBody.run?.id ?? "";
+  assert(scenarioRunId.length > 0);
+
+  const gradeRes = await fetch(`http://127.0.0.1:${port}/api/calibrate/run`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      graderId: "turn-grader",
+      scenarioRunId,
+    }),
+  });
+  const gradeBody = await gradeRes.json().catch(() => ({})) as {
+    error?: string;
+    run?: { id?: string };
+  };
+  assert(
+    gradeRes.ok,
+    `grade run failed: status=${gradeRes.status} error=${
+      gradeBody.error ?? "unknown"
+    }`,
+  );
+  const gradeRunId = gradeBody.run?.id ?? "";
+  assert(gradeRunId.length > 0);
+
+  let workspaceEvents = await readDurableStreamEvents(
+    port,
+    "gambit-workspace",
+    0,
+  );
+  if (workspaceEvents.length === 0) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    workspaceEvents = await readDurableStreamEvents(
+      port,
+      "gambit-workspace",
+      0,
+    );
+  }
+
+  const runningEvent = workspaceEvents
+    .map((event) =>
+      event.data as {
+        type?: string;
+        run?: {
+          id?: string;
+          status?: string;
+          input?: { session?: { meta?: { scenarioRunId?: string } } };
+        };
+      }
+    )
+    .find((event) =>
+      event.type === "calibrateSession" &&
+      event.run?.id === gradeRunId &&
+      event.run?.status === "running"
+    );
+
+  assert(runningEvent);
+  assertEquals(
+    runningEvent.run?.input?.session?.meta?.scenarioRunId,
+    scenarioRunId,
+  );
+
+  await server.shutdown();
+  await server.finished;
+});
+
 Deno.test("test stop aborts in-flight runtime execution", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -562,6 +737,265 @@ Deno.test("test assistant start hydrates schema defaults for empty workspace ses
 
   assertEquals(finalStatus, "completed");
   assertEquals(finalError, undefined);
+
+  await server.shutdown();
+  await server.finished;
+});
+
+Deno.test("test assistant start with a new runId in the same workspace starts fresh", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = path.join(dir, "test-start-fresh-run.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      startMode: "assistant",
+      inputSchema: z.object({
+        seed: z.string().default("ready"),
+      }),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const workspaceRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    { method: "POST" },
+  );
+  assertEquals(workspaceRes.ok, true);
+  const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+  const workspaceId = workspaceBody.workspaceId ?? "";
+  assert(workspaceId.length > 0, "missing workspaceId");
+
+  const firstRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      runId: "run-old",
+      message: "hello",
+      stream: false,
+    }),
+  });
+  assertEquals(firstRes.ok, true);
+  await firstRes.text();
+
+  const firstDeadline = Date.now() + 1500;
+  while (Date.now() < firstDeadline) {
+    const statusRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceId)
+      }/test/${encodeURIComponent("run-old")}`,
+    );
+    const statusBody = await statusRes.json().catch(() => ({})) as {
+      test?: { run?: { status?: string } };
+    };
+    const status = statusBody.test?.run?.status;
+    if (status && status !== "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  const secondRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      runId: "run-new",
+      message: "",
+      stream: false,
+    }),
+  });
+  assertEquals(secondRes.ok, true);
+  const secondBody = await secondRes.json() as { run?: { id?: string } };
+  assertEquals(secondBody.run?.id, "run-new");
+
+  const secondDeadline = Date.now() + 1500;
+  let secondRunMessages: Array<{ role?: string; content?: string }> = [];
+  let secondRunStatus: string | undefined;
+  while (Date.now() < secondDeadline) {
+    const statusRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceId)
+      }/test/${encodeURIComponent("run-new")}`,
+    );
+    const statusBody = await statusRes.json().catch(() => ({})) as {
+      test?: {
+        run?: {
+          status?: string;
+          messages?: Array<{ role?: string; content?: string }>;
+        };
+      };
+    };
+    secondRunStatus = statusBody.test?.run?.status;
+    secondRunMessages = statusBody.test?.run?.messages ?? [];
+    if (secondRunStatus && secondRunStatus !== "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  assertEquals(secondRunStatus, "completed");
+  assertEquals(
+    secondRunMessages.some((msg) =>
+      msg.role === "user" && msg.content === "hello"
+    ),
+    false,
+  );
+
+  await server.shutdown();
+  await server.finished;
+});
+
+Deno.test("test assistant start does not hydrate same runId from a different workspace", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = path.join(dir, "test-start-cross-workspace-runid.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      startMode: "assistant",
+      inputSchema: z.object({
+        seed: z.string().default("ready"),
+      }),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const workspaceARes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    { method: "POST" },
+  );
+  assertEquals(workspaceARes.ok, true);
+  const workspaceABody = await workspaceARes.json() as { workspaceId?: string };
+  const workspaceA = workspaceABody.workspaceId ?? "";
+  assert(workspaceA.length > 0, "missing workspaceA");
+
+  const workspaceBRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    { method: "POST" },
+  );
+  assertEquals(workspaceBRes.ok, true);
+  const workspaceBBody = await workspaceBRes.json() as { workspaceId?: string };
+  const workspaceB = workspaceBBody.workspaceId ?? "";
+  assert(workspaceB.length > 0, "missing workspaceB");
+
+  const foreignRunId = "shared-run-id";
+  const foreignRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId: workspaceB,
+      runId: foreignRunId,
+      message: "hello from workspace B",
+      stream: false,
+    }),
+  });
+  assertEquals(foreignRes.ok, true);
+  await foreignRes.text();
+
+  const foreignDeadline = Date.now() + 1500;
+  while (Date.now() < foreignDeadline) {
+    const statusRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceB)
+      }/test/${encodeURIComponent(foreignRunId)}`,
+    );
+    const statusBody = await statusRes.json().catch(() => ({})) as {
+      test?: { run?: { status?: string } };
+    };
+    const status = statusBody.test?.run?.status;
+    if (status && status !== "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  const localStartRes = await fetch(
+    `http://127.0.0.1:${port}/api/test/message`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: workspaceA,
+        runId: foreignRunId,
+        message: "",
+        stream: false,
+      }),
+    },
+  );
+  assertEquals(localStartRes.ok, true);
+  const localStartBody = await localStartRes.json() as {
+    run?: { id?: string };
+  };
+  assertEquals(localStartBody.run?.id, foreignRunId);
+
+  const localDeadline = Date.now() + 1500;
+  let localRunMessages: Array<{ role?: string; content?: string }> = [];
+  let localRunStatus: string | undefined;
+  while (Date.now() < localDeadline) {
+    const statusRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceA)
+      }/test/${encodeURIComponent(foreignRunId)}`,
+    );
+    const statusBody = await statusRes.json().catch(() => ({})) as {
+      test?: {
+        run?: {
+          status?: string;
+          messages?: Array<{ role?: string; content?: string }>;
+        };
+      };
+    };
+    localRunStatus = statusBody.test?.run?.status;
+    localRunMessages = statusBody.test?.run?.messages ?? [];
+    if (localRunStatus && localRunStatus !== "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  assertEquals(localRunStatus, "completed");
+  assertEquals(
+    localRunMessages.some((msg) =>
+      msg.role === "user" && msg.content === "hello from workspace B"
+    ),
+    false,
+  );
 
   await server.shutdown();
   await server.finished;

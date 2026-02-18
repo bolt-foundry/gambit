@@ -1839,86 +1839,6 @@ export function startWebSocketSimulator(opts: {
     const buildEntry = buildBotRuns.get(workspaceId);
     const buildRun = buildEntry?.run ?? buildRunFromProjection(workspaceId);
 
-    const normalizePersistedTestRun = (
-      value: unknown,
-    ): TestBotRunStatus | null => {
-      if (!value || typeof value !== "object") return null;
-      const raw = value as Record<string, unknown>;
-      const id = typeof raw.id === "string" ? raw.id : "";
-      if (!id) return null;
-      const rawStatus = raw.status;
-      const status = rawStatus === "running" || rawStatus === "completed" ||
-          rawStatus === "error" || rawStatus === "canceled"
-        ? rawStatus
-        : "idle";
-      return {
-        id,
-        status,
-        workspaceId: typeof raw.workspaceId === "string"
-          ? raw.workspaceId
-          : workspaceId,
-        sessionId: typeof raw.sessionId === "string"
-          ? raw.sessionId
-          : workspaceId,
-        error: typeof raw.error === "string" ? raw.error : undefined,
-        startedAt: typeof raw.startedAt === "string"
-          ? raw.startedAt
-          : undefined,
-        finishedAt: typeof raw.finishedAt === "string"
-          ? raw.finishedAt
-          : undefined,
-        maxTurns:
-          typeof raw.maxTurns === "number" && Number.isFinite(raw.maxTurns)
-            ? raw.maxTurns
-            : undefined,
-        messages: Array.isArray(raw.messages)
-          ? raw.messages as TestBotRunStatus["messages"]
-          : [],
-        traces: Array.isArray(raw.traces)
-          ? raw.traces as Array<TraceEvent>
-          : [],
-        toolInserts: Array.isArray(raw.toolInserts)
-          ? raw.toolInserts as TestBotRunStatus["toolInserts"]
-          : [],
-      };
-    };
-
-    const readPersistedTestRunById = (
-      sessionState: SavedState,
-      requestedRunId: string,
-    ): TestBotRunStatus | null => {
-      const eventsPath =
-        typeof sessionState.meta?.sessionEventsPath === "string"
-          ? sessionState.meta.sessionEventsPath
-          : undefined;
-      if (!eventsPath) return null;
-      try {
-        const text = Deno.readTextFileSync(eventsPath);
-        let latest: TestBotRunStatus | null = null;
-        for (const line of text.split("\n")) {
-          if (!line.trim()) continue;
-          let parsed: Record<string, unknown> | null = null;
-          try {
-            parsed = JSON.parse(line) as Record<string, unknown>;
-          } catch {
-            continue;
-          }
-          if (!parsed || typeof parsed !== "object") continue;
-          const payload = extractPersistedWorkspacePayload(parsed);
-          if (
-            payload.type !== "testBotStatus" &&
-            payload.type !== "gambit.test.status"
-          ) continue;
-          const normalized = normalizePersistedTestRun(payload.run);
-          if (!normalized || normalized.id !== requestedRunId) continue;
-          latest = normalized;
-        }
-        return latest;
-      } catch {
-        return null;
-      }
-    };
-
     const requestedTestRunId = typeof opts?.requestedTestRunId === "string" &&
         opts.requestedTestRunId.trim().length > 0
       ? opts.requestedTestRunId
@@ -1933,7 +1853,7 @@ export function startWebSocketSimulator(opts: {
       ? requestedTestEntry.run
       : undefined;
     const persistedRequestedRun = requestedTestRunId
-      ? readPersistedTestRunById(state, requestedTestRunId)
+      ? readPersistedTestRunStatusById(state, workspaceId, requestedTestRunId)
       : null;
 
     const testEntry = requestedLiveRun
@@ -2334,6 +2254,124 @@ export function startWebSocketSimulator(opts: {
     return { messages: conversation, assistantTurns };
   };
 
+  const buildScenarioConversationArtifactsFromRun = (
+    run: TestBotRunStatus,
+  ): {
+    messages: Array<ModelMessage>;
+    assistantTurns: Array<{
+      conversationIndex: number;
+      message: ModelMessage;
+      messageRefId?: string;
+    }>;
+  } => {
+    const conversation: Array<ModelMessage> = [];
+    const assistantTurns: Array<{
+      conversationIndex: number;
+      message: ModelMessage;
+      messageRefId?: string;
+    }> = [];
+    const runMessages = Array.isArray(run.messages) ? run.messages : [];
+    for (const msg of runMessages) {
+      if (msg?.role !== "assistant" && msg?.role !== "user") continue;
+      const content = typeof msg.content === "string" ? msg.content.trim() : "";
+      if (!content) continue;
+      const nextMessage: ModelMessage = {
+        role: msg.role,
+        content,
+      };
+      const conversationIndex = conversation.length;
+      conversation.push(nextMessage);
+      if (nextMessage.role === "assistant") {
+        assistantTurns.push({
+          conversationIndex,
+          message: nextMessage,
+          messageRefId: msg.messageRefId,
+        });
+      }
+    }
+    return { messages: conversation, assistantTurns };
+  };
+
+  const normalizePersistedTestRunStatus = (
+    value: unknown,
+    workspaceId: string,
+  ): TestBotRunStatus | null => {
+    if (!value || typeof value !== "object") return null;
+    const raw = value as Record<string, unknown>;
+    const id = typeof raw.id === "string" ? raw.id : "";
+    if (!id) return null;
+    const rawStatus = raw.status;
+    const status = rawStatus === "running" || rawStatus === "completed" ||
+        rawStatus === "error" || rawStatus === "canceled"
+      ? rawStatus
+      : "idle";
+    return {
+      id,
+      status,
+      workspaceId: typeof raw.workspaceId === "string"
+        ? raw.workspaceId
+        : workspaceId,
+      sessionId: typeof raw.sessionId === "string"
+        ? raw.sessionId
+        : workspaceId,
+      error: typeof raw.error === "string" ? raw.error : undefined,
+      startedAt: typeof raw.startedAt === "string" ? raw.startedAt : undefined,
+      finishedAt: typeof raw.finishedAt === "string"
+        ? raw.finishedAt
+        : undefined,
+      maxTurns:
+        typeof raw.maxTurns === "number" && Number.isFinite(raw.maxTurns)
+          ? raw.maxTurns
+          : undefined,
+      messages: Array.isArray(raw.messages)
+        ? raw.messages as TestBotRunStatus["messages"]
+        : [],
+      traces: Array.isArray(raw.traces) ? raw.traces as Array<TraceEvent> : [],
+      toolInserts: Array.isArray(raw.toolInserts)
+        ? raw.toolInserts as TestBotRunStatus["toolInserts"]
+        : [],
+    };
+  };
+
+  const readPersistedTestRunStatusById = (
+    sessionState: SavedState,
+    workspaceId: string,
+    requestedRunId: string,
+  ): TestBotRunStatus | null => {
+    const eventsPath = typeof sessionState.meta?.sessionEventsPath === "string"
+      ? sessionState.meta.sessionEventsPath
+      : undefined;
+    if (!eventsPath) return null;
+    try {
+      const text = Deno.readTextFileSync(eventsPath);
+      let latest: TestBotRunStatus | null = null;
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+        const payload = extractPersistedWorkspacePayload(parsed);
+        if (
+          payload.type !== "testBotStatus" &&
+          payload.type !== "gambit.test.status"
+        ) continue;
+        const normalized = normalizePersistedTestRunStatus(
+          payload.run,
+          workspaceId,
+        );
+        if (!normalized || normalized.id !== requestedRunId) continue;
+        latest = normalized;
+      }
+      return latest;
+    } catch {
+      return null;
+    }
+  };
+
   const resolveMessageByRef = (
     state: SavedState,
     messageRefId: string,
@@ -2541,6 +2579,8 @@ export function startWebSocketSimulator(opts: {
     botInput?: unknown;
     initialUserMessage?: string;
     botDeckPath?: string;
+    botDeckId?: string;
+    botDeckLabel?: string;
     initFill?: TestBotInitFill;
     initFillTrace?: {
       args: Record<string, unknown>;
@@ -2575,6 +2615,8 @@ export function startWebSocketSimulator(opts: {
       /\.deck\.(md|ts)$/i,
       "",
     );
+    const selectedScenarioDeckId = runOpts.botDeckId ?? testBotName;
+    const selectedScenarioDeckLabel = runOpts.botDeckLabel ?? testBotName;
     const runId = randomId("testbot");
     const startedAt = new Date().toISOString();
     const controller = new AbortController();
@@ -2767,7 +2809,8 @@ export function startWebSocketSimulator(opts: {
                 testBotConfigPath: botConfigPath,
                 testBotName,
                 scenarioRunId: runId,
-                selectedScenarioDeckId: testBotName,
+                selectedScenarioDeckId,
+                selectedScenarioDeckLabel,
                 scenarioConfigPath: botConfigPath,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
                 ...(runOpts.workspaceId
@@ -2842,7 +2885,8 @@ export function startWebSocketSimulator(opts: {
                 testBotConfigPath: botConfigPath,
                 testBotName,
                 scenarioRunId: runId,
-                selectedScenarioDeckId: testBotName,
+                selectedScenarioDeckId,
+                selectedScenarioDeckLabel,
                 scenarioConfigPath: botConfigPath,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
                 ...(runOpts.workspaceId
@@ -2917,12 +2961,16 @@ export function startWebSocketSimulator(opts: {
     error: string;
     initFill: TestBotInitFill | undefined;
     botDeckPath: string;
+    botDeckId?: string;
+    botDeckLabel?: string;
   }): { workspaceId?: string; workspacePath?: string } => {
     const failedRunId = randomId("testbot");
     const testBotName = path.basename(args.botDeckPath).replace(
       /\.deck\.(md|ts)$/i,
       "",
     );
+    const selectedScenarioDeckId = args.botDeckId ?? testBotName;
+    const selectedScenarioDeckLabel = args.botDeckLabel ?? testBotName;
     const actionCallId = randomId("initfill");
     const traces: Array<TraceEvent> = [
       {
@@ -2955,7 +3003,8 @@ export function startWebSocketSimulator(opts: {
         testBotConfigPath: args.botDeckPath,
         testBotName,
         scenarioRunId: failedRunId,
-        selectedScenarioDeckId: testBotName,
+        selectedScenarioDeckId,
+        selectedScenarioDeckLabel,
         scenarioConfigPath: args.botDeckPath,
         testBotInitFill: args.initFill,
         testBotInitFillError: args.error,
@@ -3587,6 +3636,7 @@ export function startWebSocketSimulator(opts: {
           const body = await req.json() as {
             workspaceId?: string;
             graderId?: string;
+            scenarioRunId?: string;
           };
           const workspaceId = getWorkspaceIdFromBody(body);
           if (!workspaceId) {
@@ -3605,6 +3655,34 @@ export function startWebSocketSimulator(opts: {
           if (!sessionState) {
             throw new Error("Workspace not found");
           }
+          const requestedScenarioRunId =
+            typeof body.scenarioRunId === "string" &&
+              body.scenarioRunId.trim().length > 0
+              ? body.scenarioRunId
+              : undefined;
+          const requestedLiveRun = requestedScenarioRunId
+            ? testBotRuns.get(requestedScenarioRunId)?.run
+            : undefined;
+          const requestedLiveRunMatchesWorkspace = Boolean(
+            requestedLiveRun &&
+              (requestedLiveRun.workspaceId === workspaceId ||
+                requestedLiveRun.sessionId === workspaceId),
+          );
+          const requestedPersistedRun = requestedScenarioRunId
+            ? readPersistedTestRunStatusById(
+              sessionState,
+              workspaceId,
+              requestedScenarioRunId,
+            )
+            : null;
+          const selectedScenarioRun = requestedLiveRunMatchesWorkspace
+            ? requestedLiveRun
+            : requestedPersistedRun;
+          if (requestedScenarioRunId && !selectedScenarioRun) {
+            throw new Error(
+              `Scenario run "${requestedScenarioRunId}" not found for workspace`,
+            );
+          }
           const graderSchema = await describeDeckInputSchemaFromPath(
             grader.path,
           );
@@ -3619,10 +3697,24 @@ export function startWebSocketSimulator(opts: {
             delete next.gradingRuns;
             return next;
           })();
-          const conversationArtifacts = buildScenarioConversationArtifacts(
-            sessionState,
-          );
+          const conversationArtifacts = selectedScenarioRun
+            ? buildScenarioConversationArtifactsFromRun(selectedScenarioRun)
+            : buildScenarioConversationArtifacts(sessionState);
           const conversationMessages = conversationArtifacts.messages;
+          const activeScenarioRunId = requestedScenarioRunId ??
+            (typeof sessionState.meta?.scenarioRunId === "string" &&
+                sessionState.meta.scenarioRunId.trim().length > 0
+              ? sessionState.meta.scenarioRunId
+              : undefined);
+          const sessionMetaForPayload = {
+            ...(metaForGrading ?? {}),
+            ...(activeScenarioRunId
+              ? {
+                scenarioRunId: activeScenarioRunId,
+                testBotRunId: activeScenarioRunId,
+              }
+              : {}),
+          };
           const sessionPayload = {
             messages: conversationMessages.length > 0
               ? conversationMessages.map((msg) => ({
@@ -3631,7 +3723,7 @@ export function startWebSocketSimulator(opts: {
                 name: msg.name,
               }))
               : undefined,
-            meta: metaForGrading,
+            meta: sessionMetaForPayload,
             notes: sessionState.notes
               ? { text: sessionState.notes.text }
               : undefined,
@@ -3731,6 +3823,7 @@ export function startWebSocketSimulator(opts: {
                 status: "running",
                 runAt: startedAt,
                 gradingRunId: runId,
+                input: { session: sessionPayload },
                 result: { mode: "turns", totalTurns, turns: [] },
               };
               currentState = upsertCalibrationRun(currentState, entry);
@@ -4226,6 +4319,8 @@ export function startWebSocketSimulator(opts: {
                 error: parsed.error,
                 initFill: initFillInfo,
                 botDeckPath: botDeckSelection.path,
+                botDeckId: botDeckSelection.id,
+                botDeckLabel: botDeckSelection.label,
               });
               return new Response(
                 JSON.stringify({
@@ -4298,6 +4393,8 @@ export function startWebSocketSimulator(opts: {
                 error: message,
                 initFill: initFillInfo,
                 botDeckPath: botDeckSelection.path,
+                botDeckId: botDeckSelection.id,
+                botDeckLabel: botDeckSelection.label,
               });
               return new Response(
                 JSON.stringify({
@@ -4341,6 +4438,8 @@ export function startWebSocketSimulator(opts: {
             error: message,
             initFill: initFillInfo,
             botDeckPath: botDeckSelection.path,
+            botDeckId: botDeckSelection.id,
+            botDeckLabel: botDeckSelection.label,
           });
           return new Response(
             JSON.stringify({
@@ -4372,6 +4471,8 @@ export function startWebSocketSimulator(opts: {
           botInput,
           initialUserMessage,
           botDeckPath: botDeckSelection.path,
+          botDeckId: botDeckSelection.id,
+          botDeckLabel: botDeckSelection.label,
           initFill: initFillInfo,
           initFillTrace,
           workspaceId: sessionId,
@@ -4406,9 +4507,10 @@ export function startWebSocketSimulator(opts: {
         } catch {
           // ignore parse errors
         }
-        let runId = typeof payload.runId === "string"
+        const requestedRunId = typeof payload.runId === "string"
           ? payload.runId
           : undefined;
+        let runId = requestedRunId;
         const workspaceId = (() => {
           const workspaceId = typeof payload.workspaceId === "string" &&
               payload.workspaceId.trim().length > 0
@@ -4424,10 +4526,22 @@ export function startWebSocketSimulator(opts: {
         let savedState = workspaceId
           ? readSessionState(workspaceId, { withTraces: true })
           : undefined;
+        if (savedState && requestedRunId) {
+          const savedRunId = typeof savedState.meta?.testBotRunId === "string"
+            ? savedState.meta.testBotRunId
+            : savedState.runId;
+          if (!savedRunId || savedRunId !== requestedRunId) {
+            // Explicit runId in the same workspace means "start a fresh run".
+            savedState = undefined;
+          }
+        }
         if (!savedState && runId) {
           const entry = testBotRuns.get(runId);
           const runWorkspaceId = entry?.run.workspaceId ?? entry?.run.sessionId;
-          if (runWorkspaceId) {
+          if (
+            runWorkspaceId &&
+            (!workspaceId || runWorkspaceId === workspaceId)
+          ) {
             savedState = readSessionState(runWorkspaceId, {
               withTraces: true,
             });
@@ -4487,6 +4601,8 @@ export function startWebSocketSimulator(opts: {
         const testBotName = selection
           ? path.basename(botConfigPath).replace(/\.deck\.(md|ts)$/i, "")
           : toDeckLabel(resolvedDeckPath);
+        const selectedScenarioDeckId = selection?.id ?? testBotName;
+        const selectedScenarioDeckLabel = selection?.label ?? testBotName;
         const message = typeof payload.message === "string"
           ? payload.message.trim()
           : "";
@@ -4647,7 +4763,8 @@ export function startWebSocketSimulator(opts: {
                     testBotConfigPath: botConfigPath,
                     testBotName,
                     scenarioRunId: runId,
-                    selectedScenarioDeckId: testBotName,
+                    selectedScenarioDeckId,
+                    selectedScenarioDeckLabel,
                     scenarioConfigPath: botConfigPath,
                     ...(workspaceId ? { workspaceId } : {}),
                   };

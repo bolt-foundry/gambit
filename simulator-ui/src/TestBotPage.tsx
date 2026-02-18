@@ -12,6 +12,8 @@ import {
   fileNameFromPath,
   findMissingRequiredFields,
   formatJson,
+  formatTimestampShort,
+  scenarioNameFromValue,
 } from "./utils.ts";
 import type {
   NormalizedSchema,
@@ -31,6 +33,45 @@ import Listbox from "./gds/Listbox.tsx";
 import ScrollingText from "./gds/ScrollingText.tsx";
 import { useWorkspaceTest } from "./WorkspaceContext.tsx";
 import TestBotChatPanel from "./TestBotChatPanel.tsx";
+
+const TEST_STATUS_POLL_INTERVAL_MS = 5000;
+
+type TestRunSummary = {
+  runId: string;
+  lastEventSeq?: number;
+  updatedAt?: string;
+  selectedScenarioDeckId?: string;
+  selectedScenarioDeckLabel?: string;
+  scenarioConfigPath?: string;
+};
+
+const getScenarioTitle = (
+  summary: TestRunSummary,
+  opts?: {
+    labelById?: Record<string, string>;
+    labelByPath?: Record<string, string>;
+  },
+): string => {
+  const fromDeckCatalogById = typeof summary.selectedScenarioDeckId === "string"
+    ? opts?.labelById?.[summary.selectedScenarioDeckId]
+    : undefined;
+  const fromDeckCatalogByPath = typeof summary.scenarioConfigPath === "string"
+    ? opts?.labelByPath?.[summary.scenarioConfigPath]
+    : undefined;
+  const fromDeckLabel = typeof summary.selectedScenarioDeckLabel === "string" &&
+      summary.selectedScenarioDeckLabel.trim().length > 0
+    ? summary.selectedScenarioDeckLabel
+    : null;
+  const fromDeckId = typeof summary.selectedScenarioDeckId === "string" &&
+      summary.selectedScenarioDeckId.trim().length > 0
+    ? scenarioNameFromValue(summary.selectedScenarioDeckId) ??
+      summary.selectedScenarioDeckId
+    : null;
+  const fromPath = scenarioNameFromValue(summary.scenarioConfigPath) ??
+    botFilename(summary.scenarioConfigPath);
+  return fromDeckCatalogById ?? fromDeckCatalogByPath ?? fromDeckLabel ??
+    fromDeckId ?? fromPath ?? summary.runId;
+};
 
 export default function TestBotPage(props: {
   onReplaceTestBotSession: (workspaceId: string, runId?: string) => void;
@@ -95,6 +136,7 @@ export default function TestBotPage(props: {
   const [assistantDeckTab, setAssistantDeckTab] = useState<
     "input" | "tools" | "schema"
   >("input");
+  const [testRunHistory, setTestRunHistory] = useState<TestRunSummary[]>([]);
   const runWorkspaceId = run.workspaceId ?? run.sessionId;
   const deckSchema = useHttpSchema({ workspaceId: activeWorkspaceId });
   const deckInputSchema = deckSchema.schemaResponse?.schema;
@@ -109,10 +151,14 @@ export default function TestBotPage(props: {
   const [deckInitJsonError, setDeckInitJsonError] = useState<string | null>(
     null,
   );
-  const pollRef = useRef<number | null>(null);
+  const pollTimeoutRef = useRef<number | null>(null);
+  const pollSeqRef = useRef(0);
+  const pollInFlightRef = useRef(false);
   const lastResetTokenRef = useRef<number | undefined>(resetToken);
   const handleNewChatRef = useRef<() => void>(() => {});
   const allowRunSessionNavRef = useRef(false);
+  const suppressWorkspaceHydrateRef = useRef(false);
+  const lastWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
 
   const loadTestBot = useCallback(async (opts?: { deckId?: string }) => {
     let storedDeckId: string | null = null;
@@ -193,9 +239,116 @@ export default function TestBotPage(props: {
     }
   }, [activeWorkspaceId, deckStorageKey]);
 
+  const loadTestRunHistory = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      setTestRunHistory([]);
+      return;
+    }
+    const parseSummary = (value: unknown): TestRunSummary | null => {
+      if (!value || typeof value !== "object") return null;
+      const summary = value as Record<string, unknown>;
+      const runId = typeof summary.scenarioRunId === "string"
+        ? summary.scenarioRunId
+        : null;
+      if (!runId) return null;
+      return {
+        runId,
+        lastEventSeq: typeof summary.lastEventSeq === "number" &&
+            Number.isFinite(summary.lastEventSeq)
+          ? summary.lastEventSeq
+          : undefined,
+        updatedAt: typeof summary.updatedAt === "string"
+          ? summary.updatedAt
+          : undefined,
+        selectedScenarioDeckId: typeof summary.selectedScenarioDeckId ===
+            "string"
+          ? summary.selectedScenarioDeckId
+          : undefined,
+        selectedScenarioDeckLabel:
+          typeof summary.selectedScenarioDeckLabel === "string"
+            ? summary.selectedScenarioDeckLabel
+            : undefined,
+        scenarioConfigPath: typeof summary.scenarioConfigPath === "string"
+          ? summary.scenarioConfigPath
+          : undefined,
+      };
+    };
+    try {
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}`,
+      );
+      if (!res.ok) return;
+      const body = await res.json().catch(() => ({})) as {
+        session?: { meta?: Record<string, unknown> };
+      };
+      const meta = body.session?.meta && typeof body.session.meta === "object"
+        ? body.session.meta
+        : {};
+      const fromList = Array.isArray(meta.scenarioRunSummaries)
+        ? meta.scenarioRunSummaries.map((entry) => parseSummary(entry))
+        : [];
+      const current = parseSummary(meta.scenarioRunSummary);
+      const all = [
+        ...fromList,
+        current,
+      ].filter((entry): entry is TestRunSummary => Boolean(entry));
+      const deduped = new Map<string, TestRunSummary>();
+      all.forEach((entry) => {
+        const existing = deduped.get(entry.runId);
+        if (!existing) {
+          deduped.set(entry.runId, entry);
+          return;
+        }
+        const existingSeq = existing.lastEventSeq ?? -1;
+        const nextSeq = entry.lastEventSeq ?? -1;
+        if (nextSeq > existingSeq) {
+          deduped.set(entry.runId, entry);
+          return;
+        }
+        if (nextSeq === existingSeq) {
+          const existingStamp = existing.updatedAt ?? "";
+          const nextStamp = entry.updatedAt ?? "";
+          if (nextStamp.localeCompare(existingStamp) > 0) {
+            deduped.set(entry.runId, entry);
+          }
+        }
+      });
+      setTestRunHistory(
+        [...deduped.values()].sort((a, b) => {
+          const aTime = Date.parse(a.updatedAt ?? "");
+          const bTime = Date.parse(b.updatedAt ?? "");
+          const aValidTime = Number.isFinite(aTime) ? aTime : -1;
+          const bValidTime = Number.isFinite(bTime) ? bTime : -1;
+          if (aValidTime !== bValidTime) return bValidTime - aValidTime;
+          const aSeq = a.lastEventSeq ?? -1;
+          const bSeq = b.lastEventSeq ?? -1;
+          if (aSeq !== bSeq) return bSeq - aSeq;
+          return b.runId.localeCompare(a.runId);
+        }),
+      );
+    } catch {
+      // Ignore run history fetch failures; chat still works without this list.
+    }
+  }, [activeWorkspaceId]);
+
   useEffect(() => {
     loadTestBot();
   }, [loadTestBot]);
+
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      setTestRunHistory([]);
+      return;
+    }
+    if (run.status === "running") return;
+    loadTestRunHistory();
+  }, [
+    activeWorkspaceId,
+    loadTestRunHistory,
+    requestedRunId,
+    run.id,
+    run.status,
+  ]);
 
   useEffect(() => {
     if (!runWorkspaceId) return;
@@ -255,6 +408,13 @@ export default function TestBotPage(props: {
   ]);
 
   useEffect(() => {
+    if (lastWorkspaceIdRef.current !== activeWorkspaceId) {
+      lastWorkspaceIdRef.current = activeWorkspaceId;
+      suppressWorkspaceHydrateRef.current = false;
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
     if (activeWorkspaceId) return;
     setRequestedRunNotFound(false);
     refreshStatus();
@@ -263,6 +423,7 @@ export default function TestBotPage(props: {
   useEffect(() => {
     if (!activeWorkspaceId) return;
     if (allowRunSessionNavRef.current) return;
+    if (suppressWorkspaceHydrateRef.current && !requestedRunId) return;
     const hydrate = async () => {
       const hydrated = await refreshStatus({
         workspaceId: activeWorkspaceId,
@@ -374,15 +535,49 @@ export default function TestBotPage(props: {
     deckJsonErrorCount === 0;
 
   useEffect(() => {
+    pollSeqRef.current += 1;
+    const seq = pollSeqRef.current;
+    if (pollTimeoutRef.current !== null) {
+      globalThis.clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
     if (run.status !== "running") {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      pollInFlightRef.current = false;
       return;
     }
-    pollRef.current = window.setInterval(() => {
-      refreshStatus();
-    }, 1500);
+
+    const scheduleNext = () => {
+      if (pollSeqRef.current !== seq) return;
+      pollTimeoutRef.current = globalThis.setTimeout(() => {
+        void tick();
+      }, TEST_STATUS_POLL_INTERVAL_MS);
+    };
+
+    const tick = async () => {
+      if (pollSeqRef.current !== seq) return;
+      if (pollInFlightRef.current) {
+        scheduleNext();
+        return;
+      }
+      pollInFlightRef.current = true;
+      try {
+        await refreshStatus();
+      } finally {
+        pollInFlightRef.current = false;
+      }
+      scheduleNext();
+    };
+
+    scheduleNext();
     return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      if (pollSeqRef.current === seq) {
+        pollSeqRef.current += 1;
+      }
+      pollInFlightRef.current = false;
+      if (pollTimeoutRef.current !== null) {
+        globalThis.clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
     };
   }, [run.status, refreshStatus]);
 
@@ -476,6 +671,8 @@ export default function TestBotPage(props: {
     if (run.status === "running") {
       await stopRun();
     }
+    allowRunSessionNavRef.current = false;
+    suppressWorkspaceHydrateRef.current = true;
     resetTestRunApi();
     setRequestedRunNotFound(false);
     onResetTestBotSession();
@@ -651,6 +848,90 @@ export default function TestBotPage(props: {
     sendTestMessageApi,
   ]);
 
+  const scenarioLabelById = useMemo(() => {
+    const next: Record<string, string> = {};
+    for (const deck of testDecks) {
+      if (!deck?.id || !deck.label) continue;
+      next[deck.id] = deck.label;
+    }
+    return next;
+  }, [testDecks]);
+
+  const scenarioLabelByPath = useMemo(() => {
+    const next: Record<string, string> = {};
+    for (const deck of testDecks) {
+      if (!deck?.path || !deck.label) continue;
+      next[deck.path] = deck.label;
+    }
+    return next;
+  }, [testDecks]);
+
+  const runHistoryOptions = useMemo(() => {
+    const map = new Map<string, TestRunSummary>();
+    testRunHistory.forEach((entry) => {
+      map.set(entry.runId, entry);
+    });
+    if (run.id) {
+      const existing = map.get(run.id);
+      const selectedDeck = selectedDeckId
+        ? testDecks.find((deck) => deck.id === selectedDeckId)
+        : null;
+      map.set(run.id, {
+        ...(existing ?? {}),
+        runId: run.id,
+        updatedAt: run.finishedAt ?? run.startedAt ?? existing?.updatedAt,
+        selectedScenarioDeckId: existing?.selectedScenarioDeckId ??
+          selectedDeck?.id,
+        selectedScenarioDeckLabel: existing?.selectedScenarioDeckLabel ??
+          selectedDeck?.label,
+        scenarioConfigPath: existing?.scenarioConfigPath ?? selectedDeck?.path,
+      });
+    }
+    const currentRequested = requestedRunId ?? null;
+    if (currentRequested && !map.has(currentRequested)) {
+      map.set(currentRequested, { runId: currentRequested });
+    }
+    return [...map.values()].sort((a, b) => {
+      const aTime = Date.parse(a.updatedAt ?? "");
+      const bTime = Date.parse(b.updatedAt ?? "");
+      const aValidTime = Number.isFinite(aTime) ? aTime : -1;
+      const bValidTime = Number.isFinite(bTime) ? bTime : -1;
+      if (aValidTime !== bValidTime) return bValidTime - aValidTime;
+      const aSeq = a.lastEventSeq ?? -1;
+      const bSeq = b.lastEventSeq ?? -1;
+      if (aSeq !== bSeq) return bSeq - aSeq;
+      return b.runId.localeCompare(a.runId);
+    });
+  }, [
+    requestedRunId,
+    run.finishedAt,
+    run.id,
+    run.startedAt,
+    selectedDeckId,
+    testDecks,
+    testRunHistory,
+  ]);
+
+  const selectedRunHistoryValue = requestedRunId ?? run.id ?? "";
+
+  const handleRunHistorySelection = useCallback((nextRunId: string) => {
+    if (!nextRunId || !activeWorkspaceId) return;
+    if (nextRunId === selectedRunHistoryValue) return;
+    suppressWorkspaceHydrateRef.current = false;
+    allowRunSessionNavRef.current = false;
+    setRequestedRunNotFound(false);
+    onReplaceTestBotSession(activeWorkspaceId, nextRunId);
+    refreshStatus({
+      workspaceId: activeWorkspaceId,
+      runId: nextRunId,
+    }).catch(() => {});
+  }, [
+    activeWorkspaceId,
+    onReplaceTestBotSession,
+    refreshStatus,
+    selectedRunHistoryValue,
+  ]);
+
   return (
     <PageShell>
       <PageGrid as="main" className="editor-main">
@@ -662,6 +943,29 @@ export default function TestBotPage(props: {
           }}
         >
           <Panel className="test-bot-sidebar flex-column gap-8 flex-1">
+            <Listbox
+              label="Previous test run"
+              value={selectedRunHistoryValue}
+              onChange={handleRunHistorySelection}
+              disabled={run.status === "running" || chatSending ||
+                runHistoryOptions.length === 0}
+              options={runHistoryOptions.map((entry) => ({
+                value: entry.runId,
+                label: getScenarioTitle(entry, {
+                  labelById: scenarioLabelById,
+                  labelByPath: scenarioLabelByPath,
+                }),
+                meta: [
+                  entry.updatedAt
+                    ? formatTimestampShort(entry.updatedAt)
+                    : null,
+                  entry.runId,
+                ].filter(Boolean).join(" · "),
+              }))}
+              placeholder={runHistoryOptions.length > 0
+                ? "Select previous run"
+                : "No previous runs"}
+            />
             <div className="flex-row gap-8 items-center">
               <div className="flex-1">
                 <strong>Scenario deck</strong>

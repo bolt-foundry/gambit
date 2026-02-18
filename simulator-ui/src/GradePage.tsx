@@ -25,6 +25,7 @@ import {
   getScoreClass,
   GRADE_STREAM_ID,
   isTurnsResult,
+  scenarioNameFromValue,
   setDurableStreamOffset,
 } from "./utils.ts";
 import type {
@@ -40,6 +41,74 @@ import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
 import { useWorkspaceGrade, useWorkspaceRouting } from "./WorkspaceContext.tsx";
+
+type ScenarioRunSummary = {
+  scenarioRunId: string;
+  lastEventSeq?: number;
+  updatedAt?: string;
+  selectedScenarioDeckId?: string;
+  selectedScenarioDeckLabel?: string;
+  scenarioConfigPath?: string;
+};
+
+const parseScenarioRunSummary = (value: unknown): ScenarioRunSummary | null => {
+  if (!value || typeof value !== "object") return null;
+  const summary = value as Record<string, unknown>;
+  const scenarioRunId = typeof summary.scenarioRunId === "string"
+    ? summary.scenarioRunId
+    : null;
+  if (!scenarioRunId) return null;
+  return {
+    scenarioRunId,
+    lastEventSeq: typeof summary.lastEventSeq === "number" &&
+        Number.isFinite(summary.lastEventSeq)
+      ? summary.lastEventSeq
+      : undefined,
+    updatedAt: typeof summary.updatedAt === "string"
+      ? summary.updatedAt
+      : undefined,
+    selectedScenarioDeckId: typeof summary.selectedScenarioDeckId === "string"
+      ? summary.selectedScenarioDeckId
+      : undefined,
+    selectedScenarioDeckLabel:
+      typeof summary.selectedScenarioDeckLabel === "string"
+        ? summary.selectedScenarioDeckLabel
+        : undefined,
+    scenarioConfigPath: typeof summary.scenarioConfigPath === "string"
+      ? summary.scenarioConfigPath
+      : undefined,
+  };
+};
+
+const getScenarioTitle = (summary: ScenarioRunSummary): string => {
+  const fromDeckLabel = typeof summary.selectedScenarioDeckLabel === "string" &&
+      summary.selectedScenarioDeckLabel.trim().length > 0
+    ? summary.selectedScenarioDeckLabel
+    : null;
+  const fromDeckId = typeof summary.selectedScenarioDeckId === "string" &&
+      summary.selectedScenarioDeckId.trim().length > 0
+    ? scenarioNameFromValue(summary.selectedScenarioDeckId) ??
+      summary.selectedScenarioDeckId
+    : null;
+  const fromPath = scenarioNameFromValue(summary.scenarioConfigPath ?? null) ??
+    botFilename(summary.scenarioConfigPath ?? null);
+  return fromDeckLabel ?? fromDeckId ?? fromPath ?? summary.scenarioRunId;
+};
+
+const scenarioRunIdFromCalibrationRun = (
+  run: CalibrationRun,
+): string | null => {
+  if (!run.input || typeof run.input !== "object") return null;
+  const input = run.input as Record<string, unknown>;
+  const session = input.session;
+  if (!session || typeof session !== "object") return null;
+  const meta = (session as { meta?: unknown }).meta;
+  if (!meta || typeof meta !== "object") return null;
+  const scenarioRunId = (meta as { scenarioRunId?: unknown }).scenarioRunId;
+  return typeof scenarioRunId === "string" && scenarioRunId.trim().length > 0
+    ? scenarioRunId
+    : null;
+};
 
 function GradePage(
   {
@@ -79,6 +148,7 @@ function GradePage(
     updateFlagReason: updateGradeFlagReason,
   } = workspaceGrade;
   const workspaceRouting = useWorkspaceRouting();
+  const routedTestRunId = workspaceRouting.testRunId;
   const initialCalibrateSessionRef = useRef<string | null>(
     getGradeWorkspaceIdFromLocation(),
   );
@@ -87,6 +157,9 @@ function GradePage(
   );
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     initialCalibrateSessionRef.current ?? activeWorkspaceId ?? null,
+  );
+  const [selectedTestRunId, setSelectedTestRunId] = useState<string | null>(
+    null,
   );
   const [selectedGraderId, setSelectedGraderId] = useState<string | null>(null);
   useEffect(() => {
@@ -161,12 +234,96 @@ function GradePage(
     () => graders.find((grader) => grader.id === selectedGraderId) ?? null,
     [graders, selectedGraderId],
   );
+  const testRunOptions = useMemo(() => {
+    const meta = sessionDetail?.meta && typeof sessionDetail.meta === "object"
+      ? sessionDetail.meta as Record<string, unknown>
+      : {};
+    const fromList = Array.isArray(meta.scenarioRunSummaries)
+      ? meta.scenarioRunSummaries.map((entry) => parseScenarioRunSummary(entry))
+      : [];
+    const fromCurrent = parseScenarioRunSummary(meta.scenarioRunSummary);
+    const all = [...fromList, fromCurrent].filter(
+      (entry): entry is ScenarioRunSummary => Boolean(entry),
+    );
+    const deduped = new Map<string, ScenarioRunSummary>();
+    all.forEach((entry) => {
+      const existing = deduped.get(entry.scenarioRunId);
+      if (!existing) {
+        deduped.set(entry.scenarioRunId, entry);
+        return;
+      }
+      const existingSeq = existing.lastEventSeq ?? -1;
+      const nextSeq = entry.lastEventSeq ?? -1;
+      if (nextSeq > existingSeq) {
+        deduped.set(entry.scenarioRunId, entry);
+        return;
+      }
+      if (nextSeq === existingSeq) {
+        const existingStamp = existing.updatedAt ?? "";
+        const nextStamp = entry.updatedAt ?? "";
+        if (nextStamp.localeCompare(existingStamp) > 0) {
+          deduped.set(entry.scenarioRunId, entry);
+        }
+      }
+    });
+    return [...deduped.values()].sort((a, b) => {
+      const aTime = Date.parse(a.updatedAt ?? "");
+      const bTime = Date.parse(b.updatedAt ?? "");
+      const aValidTime = Number.isFinite(aTime) ? aTime : -1;
+      const bValidTime = Number.isFinite(bTime) ? bTime : -1;
+      if (aValidTime !== bValidTime) return bValidTime - aValidTime;
+      const aSeq = a.lastEventSeq ?? -1;
+      const bSeq = b.lastEventSeq ?? -1;
+      if (aSeq !== bSeq) return bSeq - aSeq;
+      return b.scenarioRunId.localeCompare(a.scenarioRunId);
+    });
+  }, [sessionDetail?.meta]);
+
+  useEffect(() => {
+    const hasOption = (runId: string | null | undefined): runId is string =>
+      Boolean(
+        runId &&
+          testRunOptions.some((entry) => entry.scenarioRunId === runId),
+      );
+    const meta = sessionDetail?.meta && typeof sessionDetail.meta === "object"
+      ? sessionDetail.meta as Record<string, unknown>
+      : {};
+    const currentScenarioRunId = typeof meta.scenarioRunId === "string" &&
+        meta.scenarioRunId.trim().length > 0
+      ? meta.scenarioRunId
+      : null;
+    const nextRunId = hasOption(routedTestRunId)
+      ? routedTestRunId
+      : hasOption(selectedTestRunId)
+      ? selectedTestRunId
+      : hasOption(currentScenarioRunId)
+      ? currentScenarioRunId
+      : testRunOptions[0]?.scenarioRunId ?? null;
+    if (selectedTestRunId !== nextRunId) {
+      setSelectedTestRunId(nextRunId);
+    }
+    if (routedTestRunId !== nextRunId) {
+      workspaceRouting.setTestRunId(nextRunId);
+    }
+  }, [
+    routedTestRunId,
+    selectedTestRunId,
+    sessionDetail?.meta,
+    testRunOptions,
+    workspaceRouting,
+  ]);
   const sessionRuns = useMemo(() => {
     if (!selectedSession?.gradingRuns) return [];
     return [...selectedSession.gradingRuns].reverse();
   }, [selectedSession]);
+  const filteredSessionRuns = useMemo(() => {
+    if (!selectedTestRunId) return sessionRuns;
+    return sessionRuns.filter((run) =>
+      scenarioRunIdFromCalibrationRun(run) === selectedTestRunId
+    );
+  }, [selectedTestRunId, sessionRuns]);
   const runSections = useMemo(() => {
-    return sessionRuns.map((run) => {
+    return filteredSessionRuns.map((run) => {
       const items: Array<{
         key: string;
         label: string;
@@ -269,7 +426,7 @@ function GradePage(
         items,
       };
     });
-  }, [sessionRuns]);
+  }, [filteredSessionRuns]);
   const runItems = useMemo(
     () => runSections.flatMap((section) => section.items),
     [runSections],
@@ -289,6 +446,7 @@ function GradePage(
     return new Set(gradingFlags.map((flag) => flag.refId));
   }, [gradingFlags]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [optimisticRunId, setOptimisticRunId] = useState<string | null>(null);
   const [expandedResults, setExpandedResults] = useState<
     Record<string, boolean>
   >({});
@@ -305,13 +463,37 @@ function GradePage(
     setExpandedRunId(routeGradeRunId);
     workspaceRouting.setGradeRunId(routeGradeRunId);
   }, [routeGradeRunId, workspaceRouting]);
+  useEffect(() => {
+    if (!optimisticRunId) return;
+    if (!sessionRuns.some((run) => run.id === optimisticRunId)) return;
+    setOptimisticRunId(null);
+  }, [optimisticRunId, sessionRuns]);
+  useEffect(() => {
+    if (!routeGradeRunId || !selectedTestRunId) return;
+    const routeRun = sessionRuns.find((run) => run.id === routeGradeRunId);
+    if (!routeRun) return;
+    if (scenarioRunIdFromCalibrationRun(routeRun) === selectedTestRunId) return;
+    setExpandedRunId(null);
+    setRouteGradeRunId(null);
+    setOptimisticRunId(null);
+    workspaceRouting.setGradeRunId(null);
+    updateCalibratePath(selectedSessionId, { gradeRunId: null });
+  }, [
+    routeGradeRunId,
+    selectedSessionId,
+    selectedTestRunId,
+    sessionRuns,
+    updateCalibratePath,
+    workspaceRouting,
+  ]);
   const routeRunNotFound = useMemo(
     () =>
       Boolean(
         routeGradeRunId &&
-          !runSections.some((section) => section.run.id === routeGradeRunId),
+          routeGradeRunId !== optimisticRunId &&
+          !sessionRuns.some((run) => run.id === routeGradeRunId),
       ),
-    [routeGradeRunId, runSections],
+    [optimisticRunId, routeGradeRunId, sessionRuns],
   );
 
   useEffect(() => {
@@ -416,16 +598,48 @@ function GradePage(
       const data = await runGrade({
         workspaceId: selectedSessionId,
         graderId: selectedGraderId,
+        scenarioRunId: selectedTestRunId ?? undefined,
       });
+      const returnedRun = data.run;
       const runs = Array.isArray(data.session?.gradingRuns)
         ? data.session!.gradingRuns
         : [];
-      const latestRun = runs.length > 0 ? runs[runs.length - 1] : null;
+      const latestRun = (() => {
+        if (
+          returnedRun?.id &&
+          (
+            !selectedTestRunId ||
+            scenarioRunIdFromCalibrationRun(returnedRun) === selectedTestRunId
+          )
+        ) {
+          return returnedRun;
+        }
+        if (!runs.length) return null;
+        if (!selectedTestRunId) {
+          return returnedRun ?? runs[runs.length - 1] ?? null;
+        }
+        for (let i = runs.length - 1; i >= 0; i -= 1) {
+          const candidate = runs[i];
+          if (
+            scenarioRunIdFromCalibrationRun(candidate) === selectedTestRunId
+          ) {
+            return candidate;
+          }
+        }
+        return null;
+      })();
       if (latestRun?.id) {
         setExpandedRunId(latestRun.id);
         setRouteGradeRunId(latestRun.id);
+        setOptimisticRunId(latestRun.id);
         workspaceRouting.setGradeRunId(latestRun.id);
         updateCalibratePath(selectedSessionId, { gradeRunId: latestRun.id });
+      } else {
+        setExpandedRunId(null);
+        setRouteGradeRunId(null);
+        setOptimisticRunId(null);
+        workspaceRouting.setGradeRunId(null);
+        updateCalibratePath(selectedSessionId, { gradeRunId: null });
       }
     } catch (err) {
       console.error(err);
@@ -434,11 +648,29 @@ function GradePage(
     runGrade,
     selectedGraderId,
     selectedSessionId,
+    selectedTestRunId,
     updateCalibratePath,
     workspaceRouting,
   ]);
 
   const canRun = Boolean(selectedSessionId && selectedGraderId && !running);
+
+  const handleTestRunSelection = useCallback((nextRunId: string) => {
+    if (!nextRunId) return;
+    if (nextRunId === selectedTestRunId) return;
+    setExpandedRunId(null);
+    setRouteGradeRunId(null);
+    setOptimisticRunId(null);
+    workspaceRouting.setGradeRunId(null);
+    workspaceRouting.setTestRunId(nextRunId);
+    setSelectedTestRunId(nextRunId);
+    updateCalibratePath(selectedSessionId, { gradeRunId: null });
+  }, [
+    selectedSessionId,
+    selectedTestRunId,
+    updateCalibratePath,
+    workspaceRouting,
+  ]);
 
   useEffect(() => {
     if (!setNavActions) return;
@@ -457,6 +689,24 @@ function GradePage(
             gap: 10,
           }}
         >
+          {testRunOptions.length > 0 && (
+            <Listbox
+              label="Previous test run"
+              value={selectedTestRunId ?? ""}
+              onChange={handleTestRunSelection}
+              options={testRunOptions.map((entry) => ({
+                value: entry.scenarioRunId,
+                label: getScenarioTitle(entry),
+                meta: [
+                  entry.updatedAt
+                    ? formatTimestampShort(entry.updatedAt)
+                    : null,
+                  entry.scenarioRunId,
+                ].filter(Boolean).join(" · "),
+              }))}
+              placeholder="Select previous run"
+            />
+          )}
           <div className="flex-row gap-8 items-center">
             <div className="flex-1">
               <strong>Run a grader</strong>
@@ -525,7 +775,9 @@ function GradePage(
               </div>
               {runItems.length === 0 && (
                 <div className="placeholder">
-                  No grader runs for this session yet.
+                  {selectedTestRunId
+                    ? "No grader runs for this selected test run yet."
+                    : "No grader runs for this session yet."}
                 </div>
               )}
               {routeRunNotFound && selectedSessionId && (
