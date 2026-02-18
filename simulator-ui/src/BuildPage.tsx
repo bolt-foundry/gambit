@@ -17,6 +17,7 @@ type BuildFileEntry = {
   type: "file" | "dir";
   size?: number;
   modifiedAt?: string;
+  label?: string;
 };
 
 type BuildFilePreview =
@@ -195,8 +196,15 @@ export default function BuildPage(props: {
     const rest = paths.filter((path) => !pinnedSet.has(path));
 
     const toOption = (path: string): ListboxOption => {
+      const entry = fileEntriesByPath.get(path);
       const base = fileBaseName(path);
-      return { value: path, label: base, meta: base === path ? null : path };
+      const frontmatterLabel = typeof entry?.label === "string"
+        ? entry.label.trim()
+        : "";
+      const label = frontmatterLabel.length > 0
+        ? `${frontmatterLabel} | ${base}`
+        : base;
+      return { value: path, label, meta: base === path ? null : path };
     };
 
     const options: ListboxOption[] = [];

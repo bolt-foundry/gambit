@@ -1,6 +1,7 @@
 import * as path from "@std/path";
 import { copy, ensureDir, existsSync } from "@std/fs";
 import { parse } from "@std/jsonc";
+import { parse as parseToml } from "@std/toml";
 import {
   isGambitEndSignal,
   isRunCanceledError,
@@ -1377,6 +1378,30 @@ export function startWebSocketSimulator(opts: {
     type: "file" | "dir";
     size?: number;
     modifiedAt?: string;
+    label?: string;
+  };
+
+  const shouldReadBuildDeckLabel = (relativePath: string): boolean => {
+    const lower = path.basename(relativePath).toLowerCase();
+    return lower === "prompt.md" || lower.endsWith(".deck.md");
+  };
+
+  const readBuildDeckLabel = async (
+    fullPath: string,
+  ): Promise<string | undefined> => {
+    try {
+      const text = await Deno.readTextFile(fullPath);
+      const lines = text.split(/\r?\n/);
+      if (lines[0] !== "+++") return undefined;
+      const endIndex = lines.indexOf("+++", 1);
+      if (endIndex === -1) return undefined;
+      const frontmatter = lines.slice(1, endIndex).join("\n");
+      const parsed = parseToml(frontmatter) as Record<string, unknown>;
+      const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
+      return label.length > 0 ? label : undefined;
+    } catch {
+      return undefined;
+    }
   };
 
   const listBuildBotFiles = async (
@@ -1400,11 +1425,15 @@ export function startWebSocketSimulator(opts: {
           await walk(fullPath, relPath);
         } else if (entry.isFile) {
           const info = await Deno.stat(fullPath);
+          const label = shouldReadBuildDeckLabel(relPath)
+            ? await readBuildDeckLabel(fullPath)
+            : undefined;
           entries.push({
             path: relPath,
             type: "file",
             size: info.size,
             modifiedAt: info.mtime ? info.mtime.toISOString() : undefined,
+            label,
           });
         }
       }

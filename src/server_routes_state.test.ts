@@ -214,6 +214,18 @@ Deno.test("build files API excludes .gambit directory entries", async () => {
     "secret",
   );
   await Deno.writeTextFile(path.join(root, "visible.txt"), "visible");
+  await Deno.mkdir(path.join(root, "scenarios", "scenario_a"), {
+    recursive: true,
+  });
+  await Deno.writeTextFile(
+    path.join(root, "scenarios", "scenario_a", "PROMPT.md"),
+    `+++
+label = "Scenario Alpha"
++++
+
+Body
+`,
+  );
 
   const refreshedRes = await fetch(
     `http://127.0.0.1:${port}/api/build/files?workspaceId=${
@@ -222,7 +234,7 @@ Deno.test("build files API excludes .gambit directory entries", async () => {
   );
   assertEquals(refreshedRes.ok, true);
   const refreshedBody = await refreshedRes.json() as {
-    entries?: Array<{ path?: string }>;
+    entries?: Array<{ path?: string; label?: string }>;
   };
   const paths = (refreshedBody.entries ?? [])
     .map((entry) => entry.path ?? "")
@@ -233,6 +245,10 @@ Deno.test("build files API excludes .gambit directory entries", async () => {
     paths.some((value) => value === ".gambit" || value.startsWith(".gambit/")),
     false,
   );
+  const scenarioPrompt = (refreshedBody.entries ?? []).find((entry) =>
+    entry.path === "scenarios/scenario_a/PROMPT.md"
+  );
+  assertEquals(scenarioPrompt?.label, "Scenario Alpha");
 
   await server.shutdown();
   await server.finished;
