@@ -879,7 +879,7 @@ export default function TestBotPage(props: {
       map.set(run.id, {
         ...(existing ?? {}),
         runId: run.id,
-        updatedAt: run.finishedAt ?? run.startedAt ?? existing?.updatedAt,
+        updatedAt: existing?.updatedAt ?? run.finishedAt ?? run.startedAt,
         selectedScenarioDeckId: existing?.selectedScenarioDeckId ??
           selectedDeck?.id,
         selectedScenarioDeckLabel: existing?.selectedScenarioDeckLabel ??
