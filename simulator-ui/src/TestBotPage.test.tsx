@@ -619,3 +619,162 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
     globalThis.EventSource = originalEventSource;
   }
 });
+
+Deno.test("TestBotPage New chat clears current run without rehydrating latest workspace run", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+  const requests: RequestEntry[] = [];
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+
+  try {
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch =
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const pathname = new URL(url, "http://localhost").pathname;
+        let body: Record<string, unknown> | undefined;
+        if (typeof init?.body === "string" && init.body.length > 0) {
+          body = JSON.parse(init.body) as Record<string, unknown>;
+        }
+        requests.push({ url, body });
+
+        if (pathname === "/api/workspaces/ws-1") {
+          return new Response(
+            JSON.stringify({
+              ...createSnapshot(),
+              test: {
+                run: {
+                  id: "run-latest",
+                  status: "completed",
+                  workspaceId: "ws-1",
+                  messages: [{
+                    role: "assistant",
+                    content: "latest workspace run",
+                  }],
+                  traces: [],
+                  toolInserts: [],
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/api/workspaces/ws-1/test/run-1") {
+          return new Response(
+            JSON.stringify({
+              ...createSnapshot(),
+              test: {
+                run: {
+                  id: "run-1",
+                  status: "completed",
+                  workspaceId: "ws-1",
+                  messages: [{
+                    role: "assistant",
+                    content: "requested run message",
+                  }],
+                  traces: [],
+                  toolInserts: [],
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/api/test") {
+          return new Response(
+            JSON.stringify({
+              selectedDeckId: "deck-1",
+              testDecks: [{
+                id: "deck-1",
+                label: "Scenario 1",
+                path: "/tmp/scenario-1.md",
+              }],
+              inputSchema: {
+                kind: "object",
+                optional: false,
+                fields: {
+                  foo: { kind: "string", optional: false },
+                },
+              },
+              defaults: { input: { foo: "preset" } },
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/schema") {
+          return new Response(
+            JSON.stringify({
+              schema: {
+                kind: "object",
+                optional: false,
+                fields: {
+                  contextId: { kind: "string", optional: false },
+                },
+              },
+              defaults: { contextId: "ctx-default" },
+              startMode: "assistant",
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch;
+
+    function Harness() {
+      const [requestedRunId, setRequestedRunId] = React.useState<string | null>(
+        "run-1",
+      );
+      return (
+        <WorkspaceProvider workspaceId="ws-1">
+          <TestBotPage
+            activeWorkspaceId="ws-1"
+            requestedRunId={requestedRunId}
+            onReplaceTestBotSession={() => {}}
+            onResetTestBotSession={() => setRequestedRunId(null)}
+          />
+        </WorkspaceProvider>
+      );
+    }
+
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />);
+    });
+
+    assert(renderer);
+    await flushEffects();
+    await flushEffects();
+
+    const requestedRunText = renderer.root.findAll((node: ReactTestInstance) =>
+      String(node.children.join("")).includes("requested run message")
+    );
+    assert(requestedRunText.length > 0);
+
+    const newChatButton = renderer.root.find((node: ReactTestInstance) =>
+      node.type === "button" && String(node.children.join("")) === "New chat"
+    );
+
+    await act(async () => {
+      await newChatButton.props.onClick();
+    });
+    await flushEffects();
+    await flushEffects();
+
+    const latestRunText = renderer.root.findAll((node: ReactTestInstance) =>
+      String(node.children.join("")).includes("latest workspace run")
+    );
+    assertEquals(latestRunText.length, 0);
+    const placeholder = renderer.root.findAll((node: ReactTestInstance) =>
+      node.props.className === "placeholder" &&
+      String(node.children.join("")).includes("No messages yet.")
+    );
+    assert(placeholder.length > 0);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer.unmount();
+      });
+    }
+    globalThis.fetch = originalFetch;
+    globalThis.EventSource = originalEventSource;
+  }
+});

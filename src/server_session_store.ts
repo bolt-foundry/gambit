@@ -11,6 +11,7 @@ export type ScenarioRunSummary = {
   lastEventSeq: number;
   updatedAt: string;
   selectedScenarioDeckId: string;
+  selectedScenarioDeckLabel?: string;
   scenarioConfigPath: string;
 };
 
@@ -494,6 +495,10 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         : typeof meta.testBotName === "string"
         ? meta.testBotName
         : "unknown";
+    const selectedScenarioDeckLabel =
+      typeof meta.selectedScenarioDeckLabel === "string"
+        ? meta.selectedScenarioDeckLabel
+        : undefined;
     const scenarioConfigPath = typeof meta.scenarioConfigPath === "string"
       ? meta.scenarioConfigPath
       : typeof meta.testBotConfigPath === "string"
@@ -509,6 +514,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       lastEventSeq,
       updatedAt,
       selectedScenarioDeckId,
+      selectedScenarioDeckLabel,
       scenarioConfigPath,
     };
     const existingIdx = previous.findIndex((entry) =>
@@ -536,6 +542,10 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       typeof summary.selectedScenarioDeckId === "string"
         ? summary.selectedScenarioDeckId
         : null;
+    const selectedScenarioDeckLabel =
+      typeof summary.selectedScenarioDeckLabel === "string"
+        ? summary.selectedScenarioDeckLabel
+        : undefined;
     const scenarioConfigPath = typeof summary.scenarioConfigPath === "string"
       ? summary.scenarioConfigPath
       : null;
@@ -550,6 +560,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       lastEventSeq,
       updatedAt,
       selectedScenarioDeckId,
+      selectedScenarioDeckLabel,
       scenarioConfigPath,
     };
   };

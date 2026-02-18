@@ -12,6 +12,7 @@ import {
   type CalibrateResponse,
   type CalibrateSession,
   type CalibrateStreamMessage,
+  type CalibrationRun,
   deriveBuildDisplayMessages,
   type FeedbackEntry,
   getDurableStreamOffset,
@@ -150,8 +151,8 @@ type WorkspaceGradeState = {
   ) => Promise<void>;
   loadSessionDetail: (workspaceId: string | null) => Promise<void>;
   runGrader: (
-    payload: { workspaceId: string; graderId: string },
-  ) => Promise<{ session?: CalibrateSession }>;
+    payload: { workspaceId: string; graderId: string; scenarioRunId?: string },
+  ) => Promise<{ session?: CalibrateSession; run?: CalibrationRun }>;
   toggleFlag: (
     payload: {
       workspaceId: string;
@@ -172,6 +173,7 @@ type WorkspaceContextValue = {
   routing: {
     testRunId: string | null;
     gradeRunId: string | null;
+    setTestRunId: (runId: string | null) => void;
     setGradeRunId: (runId: string | null) => void;
   };
 };
@@ -1356,7 +1358,7 @@ export function WorkspaceProvider(
   );
 
   const runGradeGrader = useCallback(async (
-    payload: { workspaceId: string; graderId: string },
+    payload: { workspaceId: string; graderId: string; scenarioRunId?: string },
   ) => {
     try {
       setGradeRunning(true);
@@ -1369,7 +1371,10 @@ export function WorkspaceProvider(
         const text = await res.text().catch(() => "");
         throw new Error(text || res.statusText);
       }
-      const data = await res.json() as { session?: CalibrateSession };
+      const data = await res.json() as {
+        session?: CalibrateSession;
+        run?: CalibrationRun;
+      };
       if (data.session) {
         setGradeSessions((prev) => {
           const index = prev.findIndex((sess) => sess.id === data.session!.id);
@@ -1511,6 +1516,7 @@ export function WorkspaceProvider(
       routing: {
         testRunId: activeTestRunId,
         gradeRunId: activeGradeRunId,
+        setTestRunId: setActiveTestRunId,
         setGradeRunId: setActiveGradeRunId,
       },
     }),
