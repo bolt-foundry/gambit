@@ -48,6 +48,6 @@ jobs:
         working-directory: packages/gambit-core
 
       - name: Test
-        run: deno task test
+        run: deno test --allow-all --unstable-worker-options
         shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core
