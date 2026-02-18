@@ -238,7 +238,7 @@ jobs:
         working-directory: packages/gambit-core
 
       - name: Test (gambit-core)
-        run: deno task test
+        run: deno test --allow-all --unstable-worker-options
         working-directory: packages/gambit-core
 
       - name: Compute canary version
