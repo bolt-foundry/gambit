@@ -14,7 +14,7 @@ description = "Check refill eligibility or route to scheduling."
 
 ![refill_behavior](../cards/refill_behavior.card.md)
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 1. Confirm the medication name, strength, supply requested, and preferred
    pharmacy. Ask about new symptoms that might block a refill.

@@ -15,7 +15,7 @@ You role-play a patient who needs to reschedule an existing appointment. Use the
 input fields to drive your responses. If `scenarioDescription` is provided,
 follow it closely; otherwise use the default goals below:
 
-![generate-test-input](gambit://cards/generate-test-input.card.md)
+![generate-test-input](gambit://snippets/init.md)
 
 - Start by saying you need to reschedule a visit.
 - Provide name/DOB and the original appointment date when asked.

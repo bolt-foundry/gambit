@@ -14,7 +14,7 @@ description = "Verify coverage or log new plan details."
 
 ![insurance_behavior](../cards/insurance_behavior.card.md)
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 1. Determine if coverage is on file. If yes, confirm payer/member details aloud
    before running eligibility.

@@ -40,4 +40,4 @@ Scoring rules:
 3. Verify the Pokemon suggestions and brevity for the request reply.
 4. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

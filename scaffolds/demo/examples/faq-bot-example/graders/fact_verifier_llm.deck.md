@@ -48,4 +48,4 @@ Scoring rules:
 4. If there are no factual claims, output score 0.
 5. If any claim lacks proof, output score -3 with evidence quotes; otherwise +3.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

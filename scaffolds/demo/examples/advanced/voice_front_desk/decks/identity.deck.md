@@ -16,7 +16,7 @@ description = "Resolve an existing patient record once name + DOB are confirmed.
 
 ![identity_behaviors](../cards/identity_behaviors.card.md)
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 Instructions:
 

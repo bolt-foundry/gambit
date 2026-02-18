@@ -4,7 +4,7 @@ What it shows
 
 - Routing agent that picks exactly one tool from a mixed set of TS/MD child
   decks.
-- Cards contribute action decks and schema fragments that merge into the root
+- Snippets contribute action decks and schema fragments that merge into the root
   deck.
 
 Key files
@@ -12,7 +12,7 @@ Key files
 - `init/examples/advanced/agent_with_multi_actions/agent_with_multi_actions.deck.md`
   — root LLM router with brevity rules.
 - `init/examples/advanced/agent_with_multi_actions/actions/cards/*.card.md` —
-  cards declare action decks/labels/descriptions.
+  snippets declare action decks/labels/descriptions.
 - `init/examples/advanced/agent_with_multi_actions/actions/decks/*` — child
   decks (TS compute and MD LLM) with Zod schemas.
 - `init/examples/advanced/agent_with_multi_actions/schemas/*` — shared
@@ -20,8 +20,8 @@ Key files
 
 Why it’s structured this way
 
-- Action cards keep action-deck definitions close to their prompts and schemas;
-  the loader merges them so the model sees a unified tool list.
+- Action snippets keep action-deck definitions close to their prompts and
+  schemas; the loader merges them so the model sees a unified tool list.
 - Clear descriptions + strict schemas bias the model toward the right action and
   payload shape.
 - Root prompt enforces “exactly one action” to avoid tool-chaining and keeps

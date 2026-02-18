@@ -39,4 +39,4 @@ Scoring rules:
 3. Ensure the reply is exactly one sentence.
 4. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

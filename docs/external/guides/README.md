@@ -2,4 +2,4 @@
 
 Active guides:
 
-- Authoring decks and cards: `./authoring.md`
+- Authoring decks and snippets: `./authoring.md`

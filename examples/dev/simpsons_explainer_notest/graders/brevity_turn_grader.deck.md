@@ -7,7 +7,7 @@ model = "openai/gpt-5.1-chat"
 temperature = 0
 +++
 
-![gambit init](gambit://cards/context.card.md)
+![gambit init](gambit://snippets/context.md)
 
 You evaluate how concise the graded assistant message is. Use the full
 transcript for context, but only score the graded message. Ignore user messages
@@ -45,4 +45,4 @@ Response requirements:
 4. Decide the score based on the criteria above.
 5. Provide a short reason and optional evidence quotes.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

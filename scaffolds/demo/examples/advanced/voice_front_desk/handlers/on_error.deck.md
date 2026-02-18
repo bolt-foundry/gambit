@@ -18,4 +18,4 @@ Return a JSON object with:
 Use `notice` to say you hit a snag and will arrange a callback. Use `error` to
 include the raw error message.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

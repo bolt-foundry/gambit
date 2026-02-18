@@ -3,7 +3,7 @@
 What it shows
 
 - Busy/idle/error handlers authored in Markdown decks, paired with TS actions.
-- Using `gambit://cards/respond.card.md` in an error handler to force structured
+- Using `gambit://snippets/respond.md` in an error handler to force structured
   completion.
 
 Key files

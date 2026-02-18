@@ -37,4 +37,4 @@ Scoring rules:
 2. Apply the exact-match rules.
 3. Score according to the rules above.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

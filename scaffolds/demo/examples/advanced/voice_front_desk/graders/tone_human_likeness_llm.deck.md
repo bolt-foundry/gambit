@@ -34,4 +34,4 @@ Scoring rules:
 2. Decide the score based on the criteria above.
 3. Provide a short reason and optional evidence quotes.
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)

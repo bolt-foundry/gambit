@@ -5,7 +5,7 @@ contextSchema = "./schemas/research_input.zod.ts"
 responseSchema = "./schemas/research_output.zod.ts"
 +++
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 You are a sales research assistant. You only use the provided input; do not
 invent facts or browse.

@@ -41,4 +41,4 @@ You write concise, professional cold outreach emails.
 
 ![behavior](./cards/behavior.card.md)
 
-![init](gambit://cards/context.card.md)
+![init](gambit://snippets/context.md)

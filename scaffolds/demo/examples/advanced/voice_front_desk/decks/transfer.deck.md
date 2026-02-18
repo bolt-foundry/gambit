@@ -14,7 +14,7 @@ description = "Produce transfer instructions when automation is blocked."
 
 ![transfer_rules](../cards/transfer_rules.card.md)
 
-![respond](gambit://cards/respond.card.md)
+![respond](gambit://snippets/respond.md)
 
 1. Capture why automation cannot finish the call (policy stop, caller request,
    after-hours, safety issue).
