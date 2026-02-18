@@ -121,3 +121,50 @@ Deno.test("scenario loop normalizes existing state metadata without new turns", 
   assertEquals(state.meta?.selectedScenarioDeckId, "scenario-persona");
   assertEquals(state.messageRefs?.[0]?.source, "scenario");
 });
+
+Deno.test("scenario loop terminates when persona returns empty message", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const rootDeckPath = path.join(dir, "root.deck.ts");
+  const scenarioDeckPath = path.join(dir, "scenario-persona.deck.ts");
+  const statePath = path.join(dir, "state.json");
+
+  const deckSource = `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+  `;
+  await Deno.writeTextFile(rootDeckPath, deckSource);
+  await Deno.writeTextFile(scenarioDeckPath, deckSource);
+
+  let callCount = 0;
+  const provider: ModelProvider = {
+    chat() {
+      callCount += 1;
+      const content = callCount === 2 ? "   " : "assistant-turn";
+      return Promise.resolve({
+        message: { role: "assistant", content },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runTestBotLoop({
+    rootDeckPath,
+    botDeckPath: scenarioDeckPath,
+    contextProvided: false,
+    maxTurns: 5,
+    modelProvider: provider,
+    statePath,
+  });
+
+  assertEquals(
+    callCount,
+    2,
+    "expected loop to stop immediately after empty persona output",
+  );
+});

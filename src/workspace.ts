@@ -83,6 +83,8 @@ responseSchema = "gambit://schemas/scenarios/plain_chat_output.zod.ts"
 model = ["ollama/hf.co/LiquidAI/LFM2-1.2B-Tool-GGUF:latest", "openrouter/openai/gpt-5.1-chat"]
 +++
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a user testing the assistant.
 
 Conversation plan:

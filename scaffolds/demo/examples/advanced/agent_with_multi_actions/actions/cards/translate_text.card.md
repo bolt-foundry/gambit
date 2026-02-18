@@ -1,7 +1,7 @@
 +++
 label = "translate_text_card"
 
-[[actionDecks]]
+[[actions]]
 name = "translate_text"
 path = "../decks/translate_text.deck.md"
 description = "Translate text into a target language."

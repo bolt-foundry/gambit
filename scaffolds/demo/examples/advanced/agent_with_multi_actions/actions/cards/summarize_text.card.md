@@ -1,7 +1,7 @@
 +++
 label = "summarize_text_card"
 
-[[actionDecks]]
+[[actions]]
 name = "summarize_text"
 path = "../decks/summarize_text.deck.md"
 description = "Summarize provided text into one sentence."

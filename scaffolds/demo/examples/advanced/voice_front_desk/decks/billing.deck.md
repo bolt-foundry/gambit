@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "billing_support"
 path = "../actions/billing_support.deck.ts"
 description = "Capture billing concerns and determine next steps."

@@ -7,6 +7,8 @@ model = "openai/gpt-4o-mini"
 temperature = 0
 +++
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a test user for the Simpsons-metaphor assistant. Ignore any prior
 assistant content.
 

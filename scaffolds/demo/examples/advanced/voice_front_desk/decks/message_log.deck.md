@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "log_message"
 path = "../actions/log_message.deck.ts"
 description = "Capture a voice-ready callback ticket with priority metadata."

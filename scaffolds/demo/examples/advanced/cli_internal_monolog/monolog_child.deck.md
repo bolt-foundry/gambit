@@ -4,7 +4,7 @@ modelParams = { model = "openai/gpt-4o", temperature = 0 }
 guardrails = { maxPasses = 200 }
 contextSchema = "./schemas/child_input.zod.ts"
 responseSchema = "./schemas/child_output.zod.ts"
-[[actionDecks]]
+[[actions]]
 name = "lookup_fact"
 path = "./lookup_fact.deck.ts"
 description = "Return a short factoid to help answer the question."

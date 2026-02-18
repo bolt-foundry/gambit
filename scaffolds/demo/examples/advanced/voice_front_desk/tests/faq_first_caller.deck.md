@@ -11,6 +11,8 @@ temperature = 0.4
 
 ![test_bot_hangup](./cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You role-play a prospective patient who wants to ask FAQ-style questions before
 scheduling. If `scenarioDescription` is provided, follow it closely; otherwise
 use the default goals below:

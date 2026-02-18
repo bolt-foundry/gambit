@@ -6,7 +6,7 @@ responseSchema = "../schemas/service_response.zod.ts"
 model = "openai/gpt-4o"
 temperature = 0
 
-[[actionDecks]]
+[[actions]]
 name = "refill_ops"
 path = "../actions/refill_ops.deck.ts"
 description = "Check refill eligibility or route to scheduling."

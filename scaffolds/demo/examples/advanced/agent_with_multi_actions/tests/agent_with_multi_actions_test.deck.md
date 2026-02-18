@@ -8,6 +8,8 @@ temperature = 0.2
 
 ![test_bot_hangup](../cards/test_bot_hangup.card.md)
 
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
 You are a synthetic user for the agent_with_multi_actions example.
 
 Rules:
@@ -23,5 +25,5 @@ Rules:
      providing the right context at the right time."
   5. Ask to translate "bonjour" to English.
   6. Ask for the result of 12 * 7.
-- After the final request is answered, send a short closing like "Thanks, that's
-  all."
+- After the final request is answered, return an empty message to end the
+  scenario.

@@ -16,7 +16,7 @@ input = {
   ],
 }
 
-[[testDecks]]
+[[scenarios]]
 label = "Buyer feedback QA"
 path = "./tests/buyer_feedback.deck.md"
 description = "Synthetic buyer persona that critiques drafts and requests revisions."

@@ -1,11 +1,11 @@
 +++
 label = "agent_with_typescript"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-[[actionDecks]]
+[[actions]]
 name = "get_time"
 path = "./get_time.deck.ts"
 description = "Return the current ISO timestamp."
-[[testDecks]]
+[[scenarios]]
 label = "Typescript agent scenario"
 path = "./tests/agent_with_typescript_test.deck.md"
 description = "Synthetic user that asks for the current time."

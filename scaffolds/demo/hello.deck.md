@@ -1,7 +1,7 @@
 +++
 label = "hello"
 modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
-[[testDecks]]
+[[scenarios]]
 label = "Hello scenario"
 path = "./hello.test.deck.md"
 description = "Synthetic user that sends a single greeting input."

@@ -8,7 +8,7 @@ temperature = 0
 
 [guardrails]
 maxPasses = 10
-[[actionDecks]]
+[[actions]]
 name = "appointment_lookup"
 path = "../actions/appointment_lookup.deck.ts"
 description = "Resolve a specific appointment to reschedule for the patient."

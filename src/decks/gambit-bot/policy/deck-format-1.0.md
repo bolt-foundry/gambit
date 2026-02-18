@@ -61,6 +61,9 @@ Schema requirements:
   - For scenario decks that need model-filled init inputs, include
     `gambit://snippets/init.md` so the model populates any missing required
     context fields before the run.
+  - For scenario/persona decks that should stay in the synthetic participant
+    role and terminate consistently, include
+    `gambit://snippets/scenario-participant.md`.
   - Scenario decks MAY omit the respond snippet if they are intended to produce
     plain chat output, but they MUST still declare schemas.
     - For plain chat output, `responseSchema` SHOULD be a string schema (for
@@ -112,13 +115,14 @@ the `gambit://snippets/*` namespace, for example:
 
 Built-in snippets (v1.0):
 
-| URI                                        | Purpose                                                                                  |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `gambit://snippets/context.md`             | Context primer; explains the `gambit_context` tool result and how to treat seeded data.  |
-| `gambit://snippets/init.md`                | Init-fill helper; instructs the model to populate missing required init/context fields.  |
-| `gambit://snippets/respond.md`             | Respond instruction; tells the model to call `gambit_respond` with a structured payload. |
-| `gambit://snippets/end.md`                 | Explicit end instruction; documents how/when to call `gambit_end`.                       |
-| `gambit://snippets/generate-test-input.md` | Deprecated alias for `gambit://snippets/init.md` (legacy name).                          |
+| URI                                         | Purpose                                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `gambit://snippets/context.md`              | Context primer; explains the `gambit_context` tool result and how to treat seeded data.    |
+| `gambit://snippets/init.md`                 | Init-fill helper; instructs the model to populate missing required init/context fields.    |
+| `gambit://snippets/scenario-participant.md` | Scenario participant contract; keeps the deck in user role and ends via one empty message. |
+| `gambit://snippets/respond.md`              | Respond instruction; tells the model to call `gambit_respond` with a structured payload.   |
+| `gambit://snippets/end.md`                  | Explicit end instruction; documents how/when to call `gambit_end`.                         |
+| `gambit://snippets/generate-test-input.md`  | Deprecated alias for `gambit://snippets/init.md` (legacy name).                            |
 
 Notes:
 

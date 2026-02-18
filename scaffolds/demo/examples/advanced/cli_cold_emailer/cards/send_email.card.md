@@ -1,7 +1,7 @@
 +++
 label = "send_email_card"
 
-[[actionDecks]]
+[[actions]]
 name = "send_email"
 path = "../send_email.deck.ts"
 description = "Send the drafted email (demo)."
