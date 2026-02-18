@@ -350,15 +350,18 @@ jobs:
                   if (!(err instanceof Deno.errors.NotFound)) throw err;
                 }
               }
-              throw new Error(
-                `Missing init package.json (tried ${initPathCandidates.join(", ")})`,
-              );
+              return undefined;
             })();
-            const init = JSON.parse(await Deno.readTextFile(initPath));
-            init.dependencies ??= {};
-            init.dependencies["@bolt-foundry/gambit-core"] =
-              `npm:@bolt-foundry/gambit-core@${version}`;
-            await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
+            if (initPath) {
+              const init = JSON.parse(await Deno.readTextFile(initPath));
+              init.dependencies ??= {};
+              init.dependencies["@bolt-foundry/gambit-core"] =
+                `npm:@bolt-foundry/gambit-core@${version}`;
+              await Deno.writeTextFile(
+                initPath,
+                JSON.stringify(init, null, 2) + "\n",
+              );
+            }
 
             const initDenoPathCandidates = [
               "scaffolds/init/deno.json",
@@ -543,15 +546,18 @@ jobs:
                   if (!(err instanceof Deno.errors.NotFound)) throw err;
                 }
               }
-              throw new Error(
-                `Missing init package.json (tried ${initPathCandidates.join(", ")})`,
-              );
+              return undefined;
             })();
-            const init = JSON.parse(await Deno.readTextFile(initPath));
-            init.dependencies ??= {};
-            init.dependencies["@bolt-foundry/gambit-core"] =
-              `npm:@bolt-foundry/gambit-core@${version}`;
-            await Deno.writeTextFile(initPath, JSON.stringify(init, null, 2) + "\n");
+            if (initPath) {
+              const init = JSON.parse(await Deno.readTextFile(initPath));
+              init.dependencies ??= {};
+              init.dependencies["@bolt-foundry/gambit-core"] =
+                `npm:@bolt-foundry/gambit-core@${version}`;
+              await Deno.writeTextFile(
+                initPath,
+                JSON.stringify(init, null, 2) + "\n",
+              );
+            }
 
             const initDenoPathCandidates = [
               "scaffolds/init/deno.json",
