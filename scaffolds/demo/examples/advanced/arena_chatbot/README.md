@@ -20,24 +20,24 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli serve ./active.deck.md
+deno run -A jsr:@bolt-foundry/gambit/cli serve ./PROMPT.md
 ```
 
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./active.deck.md \
+deno run -A jsr:@bolt-foundry/gambit/cli run ./PROMPT.md \
   --message '"Tell me one tip about Pikachu"' --stream
 ```
 
-## Run a test bot (UI)
+## Run a scenario (UI)
 
 1. Open the simulator UI and go to the "Test" tab.
 2. Choose the "Arena challenger" persona.
-3. Click "Run test bot".
+3. Click "Run scenario".
 
 ## Notes
 
 - Bot variants live in `bots/`.
-- The test bot deck is `tests/arena_challenger.deck.md`.
-- The test bot hangup card is `cards/test_bot_hangup.card.md`.
+- The scenario deck is `tests/arena_challenger.deck.md`.
+- The scenario hangup card is `cards/test_bot_hangup.card.md`.

@@ -1,5 +1,5 @@
 {
   "imports": {
-    "@bolt-foundry/gambit-core": "../../gambit-core/mod.ts"
+    "@bolt-foundry/gambit-core": "../../packages/gambit-core/mod.ts"
   }
 }

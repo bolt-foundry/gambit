@@ -2,8 +2,8 @@
 
 ## Purpose
 
-- Define how Gambit Bot should structure prompt guidance so behavior is
-  predictable and easy to edit.
+- Define how Gambit Build Assistant should structure prompt guidance so behavior
+  is predictable and easy to edit.
 - Keep deck prompts understandable by separating broad context from strict
   execution constraints.
 - Ensure updates preserve a clear "narrow middle" where tool usage, formatting,

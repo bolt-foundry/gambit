@@ -1,5 +1,48 @@
 import { assertEquals } from "@std/assert";
-import { fetchOllamaTags } from "./ollama.ts";
+import type OpenAI from "@openai/openai";
+import { createOllamaProvider, fetchOllamaTags } from "./ollama.ts";
+
+type OpenAIClient = NonNullable<
+  Parameters<typeof createOllamaProvider>[0]["client"]
+>;
+
+function buildResponseFixture(): OpenAI.Responses.Response {
+  return {
+    id: "resp_1",
+    object: "response",
+    model: "llama3.2",
+    created_at: 1700000000,
+    status: "completed",
+    output_text: "Hello there.",
+    error: null,
+    incomplete_details: null,
+    instructions: null,
+    metadata: null,
+    output: [
+      {
+        type: "message",
+        id: "msg_1",
+        role: "assistant",
+        status: "completed",
+        content: [
+          { type: "output_text", text: "Hello there.", annotations: [] },
+        ],
+      },
+    ],
+    parallel_tool_calls: false,
+    temperature: null,
+    tool_choice: "auto",
+    tools: [],
+    top_p: null,
+    usage: {
+      input_tokens: 3,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 8,
+    },
+  } as OpenAI.Responses.Response;
+}
 
 function mockFetch(handler: (url: string) => Response | Promise<Response>) {
   const originalFetch = globalThis.fetch;
@@ -51,4 +94,34 @@ Deno.test("fetchOllamaTags preserves baseURL path prefix", async () => {
     seen,
     "https://host.boltfoundry.bflocal:8017/ollama/api/tags",
   );
+});
+
+Deno.test("ollama responses forwards abort signal to client", async () => {
+  let seenSignal: AbortSignal | undefined;
+  const client = {
+    responses: {
+      create: (_params: unknown, options?: { signal?: AbortSignal }) => {
+        seenSignal = options?.signal;
+        return Promise.resolve(buildResponseFixture());
+      },
+    },
+  } as OpenAIClient;
+  const provider = createOllamaProvider({
+    client,
+  });
+  const controller = new AbortController();
+
+  await provider.responses?.({
+    request: {
+      model: "ollama/llama3.2",
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+    },
+    signal: controller.signal,
+  });
+
+  assertEquals(seenSignal, controller.signal);
 });

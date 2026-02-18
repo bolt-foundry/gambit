@@ -17,6 +17,7 @@ export type SavedState = {
 export type MessageRef = {
   id: string;
   role: ModelMessage["role"];
+  source?: "scenario" | "manual" | "artifact";
 };
 
 export type FeedbackEntry = {

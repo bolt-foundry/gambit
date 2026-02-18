@@ -343,6 +343,38 @@ Root deck.
   assert(deck.graderDecks[0].path.endsWith("graders/qa/PROMPT.md"));
 });
 
+Deno.test("markdown deck loads without front matter", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `You are a plain markdown deck with no front matter.`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+  assertEquals(deck.label, undefined);
+  assertStringIncludes(deck.body ?? "", "plain markdown deck");
+});
+
+Deno.test("markdown deck rejects malformed explicit front matter", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "broken"
+
+This file is missing a closing delimiter.
+`,
+  );
+
+  await assertRejects(
+    () => loadMarkdownDeck(deckPath),
+    Error,
+    "Failed to parse front matter",
+  );
+});
+
 Deno.test("markdown deck requires action descriptions in 1.0 actions", async () => {
   const dir = await Deno.makeTempDir();
   const deckPath = await writeTempDeck(
@@ -406,31 +438,93 @@ Root deck.
   ]);
 });
 
-Deno.test("markdown execute deck loads module and PROMPT overrides schemas", async () => {
+Deno.test("markdown deck rejects top-level execute", async () => {
   const dir = await Deno.makeTempDir();
-  const execPath = path.join(dir, "exec.ts");
-  const definitionsUrl = path.toFileUrl(
-    path.resolve("packages/gambit-core/src/definitions.ts"),
-  ).href;
-  await Deno.writeTextFile(
-    execPath,
-    `import { defineDeck } from "${definitionsUrl}";
-import { z } from "zod";
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+execute = "./compute.deck.ts"
++++
 
-export default defineDeck({
-  label: "exec",
-  contextSchema: z.object({ fromExec: z.string() }),
-  responseSchema: z.object({ out: z.string() }),
-  run: (_ctx) => ({ out: "ok" }),
-});
+Root deck.
 `,
   );
 
-  const schemaPath = path.join(dir, "context.zod.ts");
+  await assertRejects(
+    () => loadMarkdownDeck(deckPath),
+    Error,
+    "Top-level execute",
+  );
+});
+
+Deno.test("markdown deck rejects action target with both path and execute", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+
+[[actions]]
+name = "do_thing"
+path = "./actions/do/PROMPT.md"
+execute = "./actions/do.deck.ts"
+description = "Run do thing."
+contextSchema = "./schemas/in.zod.ts"
+responseSchema = "./schemas/out.zod.ts"
++++
+
+Root deck.
+`,
+  );
+
+  await assertRejects(
+    () => loadMarkdownDeck(deckPath),
+    Error,
+    "exactly one of path or execute",
+  );
+});
+
+Deno.test("markdown deck rejects action target with neither path nor execute", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+
+[[actions]]
+name = "do_thing"
+description = "Run do thing."
++++
+
+Root deck.
+`,
+  );
+
+  await assertRejects(
+    () => loadMarkdownDeck(deckPath),
+    Error,
+    "exactly one of path or execute",
+  );
+});
+
+Deno.test("markdown deck normalizes actions execute targets with schemas", async () => {
+  const dir = await Deno.makeTempDir();
+  const inputSchemaPath = path.join(dir, "input.zod.ts");
+  const outputSchemaPath = path.join(dir, "output.zod.ts");
   await Deno.writeTextFile(
-    schemaPath,
+    inputSchemaPath,
     `import { z } from "zod";
-export default z.object({ fromPrompt: z.number() });
+export default z.object({ count: z.number() });
+`,
+  );
+  await Deno.writeTextFile(
+    outputSchemaPath,
+    `import { z } from "zod";
+export default z.object({ total: z.number() });
 `,
   );
 
@@ -438,19 +532,31 @@ export default z.object({ fromPrompt: z.number() });
     dir,
     "PROMPT.md",
     `+++
-label = "exec-root"
-execute = "./exec.ts"
-contextSchema = "./context.zod.ts"
+label = "root"
+
+[[actions]]
+name = "compute_rollup"
+execute = "./actions/compute_rollup.deck.ts"
+description = "Compute rollup totals."
+contextSchema = "./input.zod.ts"
+responseSchema = "./output.zod.ts"
 +++
 
-Execute deck.
+Root deck.
 `,
   );
 
   const deck = await loadMarkdownDeck(deckPath);
-  assert(deck.executor, "expected executor to be set");
-  assert(deck.contextSchema, "expected context schema to resolve");
-  deck.contextSchema.parse({ fromPrompt: 123 });
+  assertEquals(deck.actionDecks.length, 1);
+  assert(deck.actionDecks[0].path.endsWith("actions/compute_rollup.deck.ts"));
+  assertEquals(
+    deck.actionDecks[0].execute,
+    deck.actionDecks[0].path,
+  );
+  const parsedInput = deck.actionDecks[0].contextSchema?.parse({ count: 2 });
+  const parsedOutput = deck.actionDecks[0].responseSchema?.parse({ total: 3 });
+  assertEquals(parsedInput, { count: 2 });
+  assertEquals(parsedOutput, { total: 3 });
 });
 
 Deno.test("loadDeck resolves gambit://decks PROMPT.md", async () => {
@@ -458,4 +564,102 @@ Deno.test("loadDeck resolves gambit://decks PROMPT.md", async () => {
     "gambit://decks/openai/codex-sdk/PROMPT.md",
   );
   assertEquals(deck.label, "Codex SDK bridge");
+});
+
+Deno.test("markdown deck rejects unsupported mcpServers declarations", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+
+[[mcpServers]]
+name = "local"
+command = "node"
++++
+Root deck.
+`,
+  );
+
+  await assertRejects(
+    () => loadMarkdownDeck(deckPath),
+    Error,
+    "[[mcpServers]]",
+  );
+});
+
+Deno.test("markdown deck parses tools and warns when action shadows a tool", async () => {
+  const dir = await Deno.makeTempDir();
+  const actionDir = path.join(dir, "actions", "do");
+  await Deno.mkdir(actionDir, { recursive: true });
+  await writeTempDeck(
+    actionDir,
+    "PROMPT.md",
+    `+++
+label = "do"
+contextSchema = "gambit://schemas/graders/respond.zod.ts"
+responseSchema = "gambit://schemas/graders/respond.zod.ts"
++++
+Action deck.
+`,
+  );
+  const schemaPath = path.join(dir, "tool_input.zod.ts");
+  await Deno.writeTextFile(
+    schemaPath,
+    `import { z } from "zod";
+export default z.object({ query: z.string() });
+`,
+  );
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+
+[[actions]]
+name = "search_docs"
+path = "./actions/do/PROMPT.md"
+description = "Run action."
+
+[[tools]]
+name = "search_docs"
+description = "External search."
+inputSchema = "./tool_input.zod.ts"
+
+[[tools]]
+name = "external_lookup"
+description = "External lookup."
+inputSchema = "./tool_input.zod.ts"
++++
+Root deck.
+`,
+  );
+
+  const warnings: Array<string> = [];
+  // deno-lint-ignore no-console
+  const originalWarn = console.warn;
+  // deno-lint-ignore no-console
+  console.warn = (message?: unknown, ...rest: Array<unknown>) => {
+    warnings.push([message, ...rest].map(String).join(" "));
+  };
+  try {
+    const deck = await loadMarkdownDeck(deckPath);
+    assertEquals(deck.tools.length, 2);
+    assertEquals(deck.tools[0].name, "search_docs");
+    assertEquals(deck.tools[1].name, "external_lookup");
+    assert(deck.tools[1].inputSchema, "expected tool input schema");
+    const parsed = deck.tools[1].inputSchema?.parse({ query: "q" });
+    assertEquals(parsed, { query: "q" });
+  } finally {
+    // deno-lint-ignore no-console
+    console.warn = originalWarn;
+  }
+
+  assert(
+    warnings.some((line) =>
+      line.includes("shadowed") && line.includes("search_docs")
+    ),
+    "expected action-shadow warning for tool name collision",
+  );
 });

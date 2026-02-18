@@ -16,7 +16,10 @@ const DEFAULT_GOOGLE_BASE_URL =
 type OpenAIClient = {
   chat: {
     completions: {
-      create: (params: unknown) => Promise<unknown>;
+      create: (
+        params: unknown,
+        options?: { signal?: AbortSignal },
+      ) => Promise<unknown>;
     };
   };
 };
@@ -63,7 +66,13 @@ function toToolChoice(
   choice: ResponseToolChoice | undefined,
 ): OpenAI.Chat.Completions.ChatCompletionToolChoiceOption | undefined {
   if (!choice) return undefined;
-  if (choice === "auto" || choice === "required") return choice;
+  if (choice === "none" || choice === "auto" || choice === "required") {
+    return choice;
+  }
+  if (choice.type === "allowed_tools") {
+    return (choice.mode ??
+      "auto") as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+  }
   return { type: "function", function: { name: choice.function.name } };
 }
 
@@ -171,6 +180,26 @@ export function createGoogleProvider(opts: {
       const request = input.request;
       const params = { ...(request.params ?? {}) } as Record<string, unknown>;
       if (
+        request.temperature !== undefined && params.temperature === undefined
+      ) {
+        params.temperature = request.temperature;
+      }
+      if (request.top_p !== undefined && params.top_p === undefined) {
+        params.top_p = request.top_p;
+      }
+      if (
+        request.frequency_penalty !== undefined &&
+        params.frequency_penalty === undefined
+      ) {
+        params.frequency_penalty = request.frequency_penalty;
+      }
+      if (
+        request.presence_penalty !== undefined &&
+        params.presence_penalty === undefined
+      ) {
+        params.presence_penalty = request.presence_penalty;
+      }
+      if (
         request.max_output_tokens !== undefined &&
         params.max_tokens === undefined
       ) {
@@ -182,18 +211,24 @@ export function createGoogleProvider(opts: {
       );
       const toolChoice = toToolChoice(request.tool_choice);
       if (request.stream) {
-        const stream = await client.chat.completions.create({
-          model: request.model,
-          messages: messages as Array<
-            OpenAI.Chat.Completions.ChatCompletionMessageParam
-          >,
-          tools: request.tools as Array<
-            OpenAI.Chat.Completions.ChatCompletionTool
-          >,
-          tool_choice: toolChoice ?? "auto",
-          stream: true,
-          ...(params as Record<string, unknown>),
-        }) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+        let sequence = 0;
+        const stream = await client.chat.completions.create(
+          {
+            model: request.model,
+            messages: messages as Array<
+              OpenAI.Chat.Completions.ChatCompletionMessageParam
+            >,
+            tools: request.tools as Array<
+              OpenAI.Chat.Completions.ChatCompletionTool
+            >,
+            tool_choice: toolChoice ?? "auto",
+            stream: true,
+            ...(params as Record<string, unknown>),
+          },
+          input.signal ? { signal: input.signal } : undefined,
+        ) as AsyncIterable<
+          OpenAI.Chat.Completions.ChatCompletionChunk
+        >;
 
         const contentParts: Array<string> = [];
         const toolCallMap = new Map<
@@ -202,9 +237,27 @@ export function createGoogleProvider(opts: {
         >();
         let responseId: string | undefined;
         let created: number | undefined;
+        let emittedCreated = false;
         for await (const chunk of stream) {
           responseId = responseId ?? chunk.id;
           created = created ?? chunk.created;
+          if (!emittedCreated) {
+            input.onStreamEvent?.({
+              type: "response.created",
+              sequence_number: sequence++,
+              response: {
+                id: responseId ?? crypto.randomUUID(),
+                object: "response",
+                model: request.model,
+                created_at: created,
+                created,
+                status: "in_progress",
+                output: [],
+                error: null,
+              },
+            });
+            emittedCreated = true;
+          }
           const choice = chunk.choices[0];
           const delta = choice.delta;
           if (typeof delta.content === "string") {
@@ -213,6 +266,7 @@ export function createGoogleProvider(opts: {
               type: "response.output_text.delta",
               output_index: 0,
               delta: delta.content,
+              sequence_number: sequence++,
             });
           } else if (Array.isArray(delta.content)) {
             const text = (delta.content as Array<string | { text?: string }>)
@@ -226,6 +280,7 @@ export function createGoogleProvider(opts: {
                 type: "response.output_text.delta",
                 output_index: 0,
                 delta: text,
+                sequence_number: sequence++,
               });
             }
           }
@@ -270,26 +325,49 @@ export function createGoogleProvider(opts: {
           id: responseId ?? crypto.randomUUID(),
           object: "response",
           model: request.model,
+          created_at: created,
           created,
           status: "completed",
           output,
+          previous_response_id: request.previous_response_id ?? null,
+          instructions: request.instructions ?? null,
+          tool_choice: request.tool_choice,
+          max_output_tokens: request.max_output_tokens ?? null,
+          max_tool_calls: request.max_tool_calls ?? null,
+          parallel_tool_calls: request.parallel_tool_calls,
+          store: request.store,
+          metadata: request.metadata,
+          reasoning: request.reasoning
+            ? {
+              effort: request.reasoning.effort ?? null,
+              summary: request.reasoning.summary ?? null,
+            }
+            : null,
+          error: null,
         };
-        input.onStreamEvent?.({ type: "response.completed", response });
+        input.onStreamEvent?.({
+          type: "response.completed",
+          sequence_number: sequence++,
+          response,
+        });
         return response;
       }
 
-      const response = await client.chat.completions.create({
-        model: request.model,
-        messages: messages as Array<
-          OpenAI.Chat.Completions.ChatCompletionMessageParam
-        >,
-        tools: request.tools as Array<
-          OpenAI.Chat.Completions.ChatCompletionTool
-        >,
-        tool_choice: toolChoice ?? "auto",
-        stream: false,
-        ...(params as Record<string, unknown>),
-      }) as OpenAI.Chat.Completions.ChatCompletion;
+      const response = await client.chat.completions.create(
+        {
+          model: request.model,
+          messages: messages as Array<
+            OpenAI.Chat.Completions.ChatCompletionMessageParam
+          >,
+          tools: request.tools as Array<
+            OpenAI.Chat.Completions.ChatCompletionTool
+          >,
+          tool_choice: toolChoice ?? "auto",
+          stream: false,
+          ...(params as Record<string, unknown>),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      ) as OpenAI.Chat.Completions.ChatCompletion;
 
       const choice = response.choices[0];
       const normalizedMessage = normalizeMessage(choice.message);
@@ -304,28 +382,49 @@ export function createGoogleProvider(opts: {
         id: response.id,
         object: "response",
         model: response.model,
+        created_at: response.created,
         created: response.created,
         status: "completed",
         output: responseItemsFromChatMessage(normalizedMessage, toolCalls),
+        previous_response_id: request.previous_response_id ?? null,
+        instructions: request.instructions ?? null,
+        tool_choice: request.tool_choice,
+        max_output_tokens: request.max_output_tokens ?? null,
+        max_tool_calls: request.max_tool_calls ?? null,
+        parallel_tool_calls: request.parallel_tool_calls,
+        store: request.store,
+        metadata: request.metadata,
+        reasoning: request.reasoning
+          ? {
+            effort: request.reasoning.effort ?? null,
+            summary: request.reasoning.summary ?? null,
+          }
+          : null,
+        error: null,
         usage: mapChatUsage(response.usage),
       };
     },
     async chat(input) {
       const params = input.params ?? {};
       if (input.stream) {
-        const stream = await client.chat.completions.create({
-          model: input.model,
-          messages: input.messages as Array<
-            OpenAI.Chat.Completions.ChatCompletionMessageParam
-          >,
-          tools: input
-            .tools as unknown as Array<
-              OpenAI.Chat.Completions.ChatCompletionTool
+        const stream = await client.chat.completions.create(
+          {
+            model: input.model,
+            messages: input.messages as Array<
+              OpenAI.Chat.Completions.ChatCompletionMessageParam
             >,
-          tool_choice: "auto",
-          stream: true,
-          ...(params as Record<string, unknown>),
-        }) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+            tools: input
+              .tools as unknown as Array<
+                OpenAI.Chat.Completions.ChatCompletionTool
+              >,
+            tool_choice: "auto",
+            stream: true,
+            ...(params as Record<string, unknown>),
+          },
+          input.signal ? { signal: input.signal } : undefined,
+        ) as AsyncIterable<
+          OpenAI.Chat.Completions.ChatCompletionChunk
+        >;
 
         let finishReason: "stop" | "tool_calls" | "length" | null = null;
         const contentParts: Array<string> = [];
@@ -408,20 +507,23 @@ export function createGoogleProvider(opts: {
         };
       }
 
-      const response = await client.chat.completions.create({
-        model: input.model,
-        messages: input
-          .messages as unknown as Array<
-            OpenAI.Chat.Completions.ChatCompletionMessageParam
-          >,
-        tools: input
-          .tools as unknown as Array<
-            OpenAI.Chat.Completions.ChatCompletionTool
-          >,
-        tool_choice: "auto",
-        stream: false,
-        ...(params as Record<string, unknown>),
-      }) as OpenAI.Chat.Completions.ChatCompletion;
+      const response = await client.chat.completions.create(
+        {
+          model: input.model,
+          messages: input
+            .messages as unknown as Array<
+              OpenAI.Chat.Completions.ChatCompletionMessageParam
+            >,
+          tools: input
+            .tools as unknown as Array<
+              OpenAI.Chat.Completions.ChatCompletionTool
+            >,
+          tool_choice: "auto",
+          stream: false,
+          ...(params as Record<string, unknown>),
+        },
+        input.signal ? { signal: input.signal } : undefined,
+      ) as OpenAI.Chat.Completions.ChatCompletion;
 
       const choice = response.choices[0];
       const message = normalizeMessage(choice.message);

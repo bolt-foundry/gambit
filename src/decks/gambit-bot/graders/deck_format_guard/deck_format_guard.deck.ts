@@ -51,7 +51,7 @@ export default defineDeck({
 
     const failures: Array<string> = [];
 
-    // We enforce that GambitBot should not invent ad-hoc .deck.md DSL files.
+    // We enforce that Gambit Build Assistant should not invent ad-hoc .deck.md DSL files.
     for (const call of writeCalls) {
       if (call.path.endsWith(".deck.md")) {
         failures.push(

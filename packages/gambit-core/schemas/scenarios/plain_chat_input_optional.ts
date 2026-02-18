@@ -1,3 +1,6 @@
 import { z } from "zod";
 
-export default z.string().optional();
+const plainChatInputOptionalSchema: z.ZodType<string | undefined> = z.string()
+  .optional();
+
+export default plainChatInputOptionalSchema;

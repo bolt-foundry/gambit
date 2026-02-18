@@ -12,10 +12,10 @@ verification.
   references (action/test/grader) and schema fragments into the parent deck.
 - Action decks are child decks exposed as model tools. Names must match
   `^[A-Za-z_][A-Za-z0-9_]*$` and avoid the `gambit_` prefix (reserved).
-- Persona/test decks may accept free-form user turns. Use the `acceptsUserTurns`
-  flag to control this behavior: root decks default to `true`, while action
-  decks default to `false`. Set it explicitly to `true` for persona/bot decks or
-  to `false` for workflow-only decks.
+- Persona/scenario decks may accept free-form user turns. Use the
+  `acceptsUserTurns` flag to control this behavior: root decks default to
+  `true`, while action decks default to `false`. Set it explicitly to `true` for
+  persona/bot decks or to `false` for workflow-only decks.
 
 ## Pick a format
 
@@ -77,7 +77,7 @@ migrate a repository, run:
 deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 ```
 
-## Action decks, test decks, grader decks
+## Action decks, scenario decks, grader decks
 
 - Add action decks in front matter or TS definitions:
   `actionDecks = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
@@ -101,10 +101,10 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   should set `acceptsUserTurns = true` and may declare its own `contextSchema`
   (for example `contextSchema = "../schemas/my_persona_test.zod.ts"`) so the
   Test tab renders a schema-driven “Scenario” form for that persona.
-- For persona/test decks, you can embed
+- For persona/scenario decks, you can embed
   `![generate-test-input](gambit://cards/generate-test-input.card.md)` to
-  include the Test Bot init-fill contract instructions.
-- Test Bot init fill: when a Test Bot run is missing required init fields, the
+  include the scenario init-fill contract instructions.
+- Scenario init fill: when a scenario run is missing required init fields, the
   selected persona deck is asked to supply only the missing values before the
   run begins. The persona receives a single user message containing a JSON
   payload like:
@@ -133,8 +133,8 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   - Markdown roots default to `true`; TypeScript decks default to `false`
     everywhere. Set it to `false` for any workflow deck that should never accept
     user turns (regardless of how it's run).
-  - Persona/test decks should set `acceptsUserTurns = true` so they can receive
-    messages even when invoked as non-root bots.
+  - Persona/scenario decks should set `acceptsUserTurns = true` so they can
+    receive messages even when invoked as non-root bots.
 
 ## Synthetic tools and handlers
 
@@ -170,7 +170,7 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   http://localhost:8000/debug.
 - Tracing: add `--verbose` for console traces or `--trace out.jsonl` to persist
   events; use `--state state.json` with `run` to persist conversation state
-  between turns. When `--state` is omitted, test-bot/serve sessions default to
+  between turns. When `--state` is omitted, scenario/serve sessions default to
   `<project-root>/.gambit/sessions/...` where each session includes `state.json`
   (materialized snapshot) plus append-only `events.jsonl`, `feedback.jsonl`, and
   `grading.jsonl` for downstream ingestion. The project root is the nearest

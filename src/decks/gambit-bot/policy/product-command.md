@@ -2,7 +2,8 @@
 
 ## Purpose
 
-- Keep Gambit Bot aligned with Product Command for deck creation and updates.
+- Keep Gambit Build Assistant aligned with Product Command for deck creation and
+  updates.
 - Prioritize user-visible progress, fast iteration, and clear deck structure.
 
 ## Policy

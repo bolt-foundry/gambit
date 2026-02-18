@@ -223,17 +223,17 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     setChatHistoryLoading(true);
     setChatHistoryError(null);
     try {
-      const res = await fetch("/api/build/runs");
+      const res = await fetch("/workspaces");
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as {
-        runs?: Array<{ id?: string; updatedAt?: string; startedAt?: string }>;
+        sessions?: Array<{ id?: string; createdAt?: string }>;
       };
-      const runs = Array.isArray(data.runs)
-        ? data.runs.filter((entry) => typeof entry?.id === "string").map(
+      const runs = Array.isArray(data.sessions)
+        ? data.sessions.filter((entry) => typeof entry?.id === "string").map(
           (entry) => ({
             id: entry.id as string,
-            updatedAt: entry.updatedAt,
-            startedAt: entry.startedAt,
+            updatedAt: entry.createdAt,
+            startedAt: entry.createdAt,
           }),
         )
         : [];
@@ -284,14 +284,6 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
   if (!open) return null;
   return (
     <aside className="workbench-drawer-docked" role="dialog">
-      <header className="workbench-drawer-header">
-        <strong>Workbench</strong>
-        {onClose && (
-          <Button variant="ghost" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={14} />
-          </Button>
-        )}
-      </header>
       <Accordion
         allowMultiple
         className="workbench-accordion equal-open"
@@ -411,7 +403,7 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
           {
             id: "workbench-ratings",
             title: "Ratings & flags",
-            defaultOpen: true,
+            defaultOpen: false,
             content: (
               <div className="workbench-ratings">
                 {showCopyStatePath && handleCopyStatePath && (
@@ -445,7 +437,7 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                     {resolvedFeedbackItems.map(({ entry, message, role }) => {
                       const roleLabel = role === "assistant"
                         ? "Assistant message"
-                        : "Test bot message";
+                        : "Scenario message";
                       const displayScore = entry.score;
                       const scoreLabel = displayScore > 0
                         ? `+${displayScore}`

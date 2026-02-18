@@ -9,7 +9,7 @@ export default defineDeck({
   modelParams: { model: "openai/gpt-4o-mini", temperature: 0.4 },
   testDecks: [
     {
-      label: "Schema form test bot",
+      label: "Schema form scenario",
       path: "./tests/schema_form_test.deck.md",
       description: "Synthetic caller that asks for Pokemon advice.",
     },

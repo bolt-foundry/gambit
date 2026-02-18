@@ -4,7 +4,7 @@ import * as path from "@std/path";
 
 const logger = console;
 
-export type ScaffoldKind = "demo" | "init";
+export type ScaffoldKind = "demo";
 
 function resolveCandidate(specifier: string): string | undefined {
   const url = new URL(import.meta.resolve(specifier));

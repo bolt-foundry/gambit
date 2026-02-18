@@ -11,19 +11,19 @@ import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
 import WorkbenchDrawer from "./WorkbenchDrawer.tsx";
 import SessionsDrawer from "./SessionsDrawer.tsx";
-import { BuildChatProvider } from "./BuildChatContext.tsx";
+import { WorkspaceProvider } from "./WorkspaceContext.tsx";
 import {
   buildConversationEntries,
   buildDurableStreamUrl,
   buildGradePath,
   buildTabEnabled,
+  buildTestPath,
   classNames,
   cloneValue,
   deckDisplayPath,
   deckLabel,
   deckPath,
-  DEFAULT_BUILD_PATH,
-  DEFAULT_SESSION_PATH,
+  DEFAULT_GRADE_PATH,
   DEFAULT_TEST_PATH,
   deriveInitialFromSchema,
   DOCS_PATH,
@@ -31,21 +31,22 @@ import {
   findMissingRequiredFields,
   formatTimestamp,
   getDurableStreamOffset,
-  getSessionIdFromPath,
+  getWorkspaceIdFromPath,
+  getWorkspaceRouteFromPath,
   normalizeAppPath,
   normalizeBasePath,
   normalizedDeckPath,
   normalizeFsPath,
   repoRootPath,
   SCORE_VALUES,
-  SESSIONS_BASE_PATH,
   setDurableStreamOffset,
   SIMULATOR_STREAM_ID,
   toRelativePath,
   workspaceIdFromWindow,
+  WORKSPACES_BASE_PATH,
 } from "./utils.ts";
+import { buildWorkspacePath } from "../../src/workspace_contract.ts";
 import type {
-  FeedbackEntry,
   GradingFlag,
   SavedState,
   SessionDetailResponse,
@@ -107,25 +108,18 @@ function useSimulator() {
       setStreamText("");
     };
 
-    source.onmessage = (event) => {
-      let envelope: { offset?: unknown; data?: unknown } | null = null;
+    const handleMessage = (event: MessageEvent<string>) => {
+      let msg: SimulatorMessage | null = null;
       try {
-        envelope = JSON.parse(event.data) as {
-          offset?: unknown;
-          data?: unknown;
-        };
+        msg = JSON.parse(event.data) as SimulatorMessage;
       } catch (err) {
-        console.error("[sim] failed to parse stream envelope", err);
+        console.error("[sim] failed to parse stream event payload", err);
         return;
       }
-      if (
-        envelope &&
-        typeof envelope.offset === "number" &&
-        Number.isFinite(envelope.offset)
-      ) {
-        setDurableStreamOffset(streamId, envelope.offset + 1);
+      const parsedOffset = Number(event.lastEventId);
+      if (Number.isFinite(parsedOffset)) {
+        setDurableStreamOffset(streamId, parsedOffset + 1);
       }
-      const msg = envelope?.data as SimulatorMessage | undefined;
       if (!msg || typeof msg !== "object") return;
       if (msg.type === "state") {
         setSavedState(msg.state);
@@ -151,7 +145,23 @@ function useSimulator() {
       }
     };
 
+    const simulatorEventTypes: Array<SimulatorMessage["type"]> = [
+      "ready",
+      "pong",
+      "stream",
+      "result",
+      "trace",
+      "state",
+      "error",
+    ];
+    for (const type of simulatorEventTypes) {
+      source.addEventListener(type, handleMessage as EventListener);
+    }
+
     return () => {
+      for (const type of simulatorEventTypes) {
+        source.removeEventListener(type, handleMessage as EventListener);
+      }
       source.close();
       setConnectionStatus("closed");
       setIsRunning(false);
@@ -181,7 +191,7 @@ function useSimulator() {
             resetState: opts.resetState ?? false,
             trace: opts.trace ?? true,
             stream: true,
-            sessionId,
+            workspaceId: sessionId,
           }),
         });
         const payload = await res.json().catch(() => ({}));
@@ -208,7 +218,12 @@ function useSimulator() {
         const res = await fetch("/api/simulator/feedback", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, messageRefId, score, reason }),
+          body: JSON.stringify({
+            workspaceId: sessionId,
+            messageRefId,
+            score,
+            reason,
+          }),
         });
         if (!res.ok) throw new Error(res.statusText);
       } catch (err) {
@@ -224,7 +239,7 @@ function useSimulator() {
       const res = await fetch("/api/simulator/load-session", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ workspaceId: sessionId }),
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -252,7 +267,7 @@ function useSimulator() {
         const res = await fetch("/api/simulator/notes", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, text }),
+          body: JSON.stringify({ workspaceId: sessionId, text }),
         });
         if (!res.ok) throw new Error(res.statusText);
       } catch (err) {
@@ -271,7 +286,7 @@ function useSimulator() {
         const res = await fetch("/api/simulator/conversation-score", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId, score }),
+          body: JSON.stringify({ workspaceId: sessionId, score }),
         });
         if (!res.ok) throw new Error(res.statusText);
       } catch (err) {
@@ -328,7 +343,7 @@ function useSessions() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/sessions");
+      const res = await fetch("/workspaces");
       if (!res.ok) throw new Error(res.statusText);
       const body = await res.json() as { sessions?: SessionMeta[] };
       setSessions(byNewest(body.sessions ?? []));
@@ -348,7 +363,7 @@ function useSessions() {
       const res = await fetch("/api/session/delete", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionId }),
+        body: JSON.stringify({ workspaceId: sessionId }),
       });
       if (!res.ok) throw new Error(res.statusText);
       await refresh();
@@ -367,7 +382,7 @@ function useSessions() {
     try {
       let targetSessions = scope;
       if (!targetSessions) {
-        const res = await fetch("/sessions");
+        const res = await fetch("/workspaces");
         if (!res.ok) throw new Error(res.statusText);
         const body = await res.json() as { sessions?: SessionMeta[] };
         targetSessions = body.sessions ?? [];
@@ -377,7 +392,7 @@ function useSessions() {
           fetch("/api/session/delete", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sessionId: session.id }),
+            body: JSON.stringify({ workspaceId: session.id }),
           })
         ),
       );
@@ -449,13 +464,13 @@ function SimulatorApp(
     setNavActions,
     sessionsApi,
     onOpenSessionsDrawer,
-    activeSessionId,
+    activeWorkspaceId,
   }: {
     basePath: string;
     setNavActions?: (actions: React.ReactNode | null) => void;
     sessionsApi: SessionsApi;
     onOpenSessionsDrawer: () => void;
-    activeSessionId?: string | null;
+    activeWorkspaceId?: string | null;
   },
 ) {
   const simulator = useSimulator();
@@ -467,18 +482,20 @@ function SimulatorApp(
     refresh,
   } = sessionsApi;
   const { resetLocal } = simulator;
-  const normalizedBase = normalizeBasePath(basePath || SESSIONS_BASE_PATH);
+  const normalizedBase = normalizeBasePath(basePath || WORKSPACES_BASE_PATH);
   const rootPath = normalizedBase === "" ? "/" : normalizedBase;
-  const sessionBasePath = rootPath === "/" ? SESSIONS_BASE_PATH : rootPath;
+  const sessionBasePath = rootPath === "/" ? WORKSPACES_BASE_PATH : rootPath;
   const normalizedSessionBase = normalizeBasePath(sessionBasePath);
   const newSessionPath = `${
-    normalizedSessionBase === "" ? "/sessions" : normalizedSessionBase
+    normalizedSessionBase === "" ? WORKSPACES_BASE_PATH : normalizedSessionBase
   }/new`.replace(/\/{2,}/g, "/");
   const buildSessionUrl = useCallback(
     (sessionId: string) =>
-      `${normalizedSessionBase === "" ? "/sessions" : normalizedSessionBase}/${
-        encodeURIComponent(sessionId)
-      }/debug`.replace(/\/{2,}/g, "/"),
+      `${
+        normalizedSessionBase === ""
+          ? WORKSPACES_BASE_PATH
+          : normalizedSessionBase
+      }/${encodeURIComponent(sessionId)}/debug`.replace(/\/{2,}/g, "/"),
     [normalizedSessionBase],
   );
   const [message, setMessage] = useState("");
@@ -646,8 +663,8 @@ function SimulatorApp(
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
-    const initialSession = getSessionIdFromPath(undefined, sessionBasePath) ??
-      getSessionIdFromPath();
+    const initialSession = getWorkspaceIdFromPath(undefined, sessionBasePath) ??
+      getWorkspaceIdFromPath();
     if (initialSession) {
       navigateToSession(initialSession, { replace: true });
       return;
@@ -656,20 +673,20 @@ function SimulatorApp(
   }, [navigateToSession, startNewChat, sessionBasePath]);
 
   useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeWorkspaceId) {
       externalSessionIdRef.current = null;
       return;
     }
-    if (externalSessionIdRef.current === activeSessionId) return;
-    externalSessionIdRef.current = activeSessionId;
-    adoptSessionFromPath(activeSessionId);
-  }, [activeSessionId, adoptSessionFromPath]);
+    if (externalSessionIdRef.current === activeWorkspaceId) return;
+    externalSessionIdRef.current = activeWorkspaceId;
+    adoptSessionFromPath(activeWorkspaceId);
+  }, [activeWorkspaceId, adoptSessionFromPath]);
 
   useEffect(() => {
     const handler = () => {
       const sessionFromPath =
-        getSessionIdFromPath(undefined, sessionBasePath) ??
-          getSessionIdFromPath();
+        getWorkspaceIdFromPath(undefined, sessionBasePath) ??
+          getWorkspaceIdFromPath();
       if (sessionFromPath) {
         adoptSessionFromPath(sessionFromPath);
       } else {
@@ -1049,7 +1066,7 @@ function SimulatorApp(
 }
 
 function App() {
-  const simulatorBasePath = SESSIONS_BASE_PATH;
+  const simulatorBasePath = WORKSPACES_BASE_PATH;
   const [path, setPath] = useState(() =>
     normalizeAppPath(window.location.pathname)
   );
@@ -1057,13 +1074,30 @@ function App() {
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true);
+  const [workspaceRunIds, setWorkspaceRunIds] = useState<{
+    testRunId: string | null;
+    gradeRunId: string | null;
+  }>({
+    testRunId: null,
+    gradeRunId: null,
+  });
   const sessionsApi = useSessions();
   const [testBotResetToken, setTestBotResetToken] = useState(0);
-  const pathSessionId = getSessionIdFromPath(path);
-  const pathRequestsNewSession = /^\/sessions\/new(?:\/|$)/.test(path);
-  const activeSessionId = pathRequestsNewSession
+  const pathRoute = getWorkspaceRouteFromPath(path);
+  const livePath = window.location.pathname.replace(/\/+$/, "") || "/";
+  const liveRoute = getWorkspaceRouteFromPath(livePath);
+  const routeState = liveRoute ?? pathRoute;
+  const routeRequestsNewWorkspace = Boolean(routeState?.isNew);
+  const activeWorkspaceId = routeRequestsNewWorkspace
     ? null
-    : pathSessionId ?? workspaceIdFromWindow;
+    : routeState?.workspaceId ?? workspaceIdFromWindow;
+  const requestedTestRunId = routeState?.tab === "test"
+    ? routeState.testRunId ?? null
+    : null;
+  const requestedGradeRunId = routeState?.tab === "grade"
+    ? routeState.gradeRunId ?? null
+    : null;
+  const lastWorkspaceIdRef = useRef<string | null>(null);
   const [workbenchSessionDetail, setWorkbenchSessionDetail] = useState<
     SessionDetailResponse | null
   >(null);
@@ -1074,25 +1108,51 @@ function App() {
   const workbenchSessionDetailRequestRef = useRef(0);
   const workbenchSessionRetryRef = useRef<Record<string, number>>({});
   const workbenchRefreshTimeoutRef = useRef<number | null>(null);
-  const activeSessionIdRef = useRef<string | null>(activeSessionId);
+  const activeWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
   const workspaceInitRef = useRef(false);
 
   useEffect(() => {
-    const handler = () => setPath(normalizeAppPath(window.location.pathname));
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
+    if (activeWorkspaceId) {
+      lastWorkspaceIdRef.current = activeWorkspaceId;
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    const syncPath = () => setPath(normalizeAppPath(window.location.pathname));
+    const historyObj = window.history as History & {
+      pushState: History["pushState"];
+      replaceState: History["replaceState"];
+    };
+    const originalPushState = historyObj.pushState.bind(historyObj);
+    const originalReplaceState = historyObj.replaceState.bind(historyObj);
+    historyObj.pushState = (...args) => {
+      originalPushState(...args);
+      window.dispatchEvent(new Event("locationchange"));
+    };
+    historyObj.replaceState = (...args) => {
+      originalReplaceState(...args);
+      window.dispatchEvent(new Event("locationchange"));
+    };
+    window.addEventListener("popstate", syncPath);
+    window.addEventListener("locationchange", syncPath);
+    return () => {
+      historyObj.pushState = originalPushState;
+      historyObj.replaceState = originalReplaceState;
+      window.removeEventListener("popstate", syncPath);
+      window.removeEventListener("locationchange", syncPath);
+    };
   }, []);
 
   const loadWorkbenchSessionDetail = useCallback(async (sessionId: string) => {
     const requestId = ++workbenchSessionDetailRequestRef.current;
     const shouldApply = () =>
       requestId === workbenchSessionDetailRequestRef.current &&
-      activeSessionIdRef.current === sessionId;
+      activeWorkspaceIdRef.current === sessionId;
     try {
       setWorkbenchSessionDetailLoading(true);
       setWorkbenchSessionDetailError(null);
       const res = await fetch(
-        `/api/session?sessionId=${encodeURIComponent(sessionId)}`,
+        `/api/workspaces/${encodeURIComponent(sessionId)}`,
       );
       if (!res.ok) {
         if (!shouldApply()) return;
@@ -1105,7 +1165,7 @@ function App() {
             window.setTimeout(() => {
               if (
                 workbenchSessionDetailRequestRef.current === requestId &&
-                activeSessionIdRef.current === sessionId
+                activeWorkspaceIdRef.current === sessionId
               ) {
                 loadWorkbenchSessionDetail(sessionId).catch(() => {});
               }
@@ -1116,7 +1176,10 @@ function App() {
         const text = await res.text().catch(() => "");
         throw new Error(text || res.statusText);
       }
-      const detail = await res.json().catch(() => null);
+      const detailEnvelope = await res.json().catch(() => null) as {
+        session?: SessionDetailResponse;
+      } | null;
+      const detail = detailEnvelope?.session ?? null;
       if (!shouldApply()) return;
       setWorkbenchSessionDetail(
         detail && typeof detail === "object"
@@ -1140,24 +1203,24 @@ function App() {
   }, []);
 
   const scheduleWorkbenchRefresh = useCallback(() => {
-    if (!activeSessionId) return;
+    if (!activeWorkspaceId) return;
     if (workbenchRefreshTimeoutRef.current) {
       window.clearTimeout(workbenchRefreshTimeoutRef.current);
     }
-    const sessionId = activeSessionId;
+    const sessionId = activeWorkspaceId;
     workbenchRefreshTimeoutRef.current = window.setTimeout(() => {
-      if (activeSessionIdRef.current !== sessionId) return;
+      if (activeWorkspaceIdRef.current !== sessionId) return;
       loadWorkbenchSessionDetail(sessionId).catch(() => {});
     }, 900);
-  }, [activeSessionId, loadWorkbenchSessionDetail]);
+  }, [activeWorkspaceId, loadWorkbenchSessionDetail]);
 
   useEffect(() => {
-    activeSessionIdRef.current = activeSessionId;
+    activeWorkspaceIdRef.current = activeWorkspaceId;
     if (workbenchRefreshTimeoutRef.current) {
       window.clearTimeout(workbenchRefreshTimeoutRef.current);
       workbenchRefreshTimeoutRef.current = null;
     }
-  }, [activeSessionId]);
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     return () => {
@@ -1168,39 +1231,18 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeSessionId) {
+    if (!activeWorkspaceId) {
       setWorkbenchSessionDetail(null);
       setWorkbenchSessionDetailError(null);
       setWorkbenchSessionDetailLoading(false);
       return;
     }
-    loadWorkbenchSessionDetail(activeSessionId).catch(() => {});
-  }, [activeSessionId, loadWorkbenchSessionDetail]);
+    loadWorkbenchSessionDetail(activeWorkspaceId).catch(() => {});
+  }, [activeWorkspaceId, loadWorkbenchSessionDetail]);
 
-  const applyFeedbackUpdate = useCallback((
-    messageRefId: string,
-    feedback: FeedbackEntry | null,
-  ) => {
-    setWorkbenchSessionDetail((prev) => {
-      if (!prev) return prev;
-      const existing = prev.feedback ?? [];
-      if (!feedback) {
-        if (!existing.length) return prev;
-        return {
-          ...prev,
-          feedback: existing.filter((entry) =>
-            entry.messageRefId !== messageRefId
-          ),
-        };
-      }
-      const index = existing.findIndex((entry) =>
-        entry.messageRefId === messageRefId
-      );
-      const nextFeedback = index >= 0
-        ? existing.map((entry, idx) => (idx === index ? feedback : entry))
-        : [feedback, ...existing];
-      return { ...prev, feedback: nextFeedback };
-    });
+  const handleFeedbackPersisted = useCallback((workspaceId: string) => {
+    if (!workspaceId) return;
+    if (activeWorkspaceIdRef.current !== workspaceId) return;
     scheduleWorkbenchRefresh();
   }, [scheduleWorkbenchRefresh]);
 
@@ -1253,8 +1295,7 @@ function App() {
         },
       };
     });
-    scheduleWorkbenchRefresh();
-  }, [scheduleWorkbenchRefresh]);
+  }, []);
 
   const optimisticFlagReason = useCallback((refId: string, reason: string) => {
     setWorkbenchSessionDetail((prev) => {
@@ -1277,8 +1318,7 @@ function App() {
         },
       };
     });
-    scheduleWorkbenchRefresh();
-  }, [scheduleWorkbenchRefresh]);
+  }, []);
 
   useEffect(() => {
     const loadBundleStamp = async () => {
@@ -1313,22 +1353,18 @@ function App() {
     setPath(normalizeAppPath(next));
   }, []);
   const handleReplaceTestBotSession = useCallback(
-    (sessionId: string) =>
-      replacePath(
-        `${simulatorBasePath}/${encodeURIComponent(sessionId)}/test`,
-      ),
-    [replacePath, simulatorBasePath],
+    (workspaceId: string, runId?: string) =>
+      replacePath(buildTestPath(workspaceId, runId)),
+    [replacePath],
   );
   const handleResetTestBotSession = useCallback(
-    () => replacePath(DEFAULT_TEST_PATH),
-    [replacePath],
+    () => replacePath(buildTestPath(activeWorkspaceId ?? undefined)),
+    [activeWorkspaceId, replacePath],
   );
 
   const handleWorkspaceChange = useCallback(
     (workspaceId: string) => {
-      replacePath(
-        `${SESSIONS_BASE_PATH}/${encodeURIComponent(workspaceId)}/build`,
-      );
+      replacePath(buildWorkspacePath("build", workspaceId));
     },
     [replacePath],
   );
@@ -1340,13 +1376,13 @@ function App() {
   }, [path, replacePath]);
 
   const isDocs = path === DOCS_PATH;
+  const routeTab = liveRoute?.tab ?? pathRoute?.tab;
   const isBuild = buildTabEnabled &&
-    (path === "/build" || path === DEFAULT_BUILD_PATH ||
-      /^\/sessions\/[^/]+\/build$/.test(path));
-  const isTestBot = !isDocs && /\/test$/.test(path);
+    (routeTab === "build" || path === "/build");
+  const isTestBot = !isDocs &&
+    (routeTab === "test" || /\/test$/.test(path));
   const isGrade = !isDocs &&
-    (path.startsWith("/grade") ||
-      /^\/sessions\/[^/]+\/grade/.test(path));
+    routeTab === "grade";
   const currentPage = isDocs
     ? "docs"
     : isBuild
@@ -1358,7 +1394,8 @@ function App() {
     : "debug";
 
   useEffect(() => {
-    if (activeSessionId) return;
+    if (activeWorkspaceId || lastWorkspaceIdRef.current) return;
+    if (!routeRequestsNewWorkspace) return;
     if (workspaceInitRef.current) return;
     if (
       currentPage !== "build" && currentPage !== "test" &&
@@ -1374,39 +1411,59 @@ function App() {
         };
         if (!res.ok || typeof data.workspaceId !== "string") return;
         const nextPath = currentPage === "test"
-          ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(data.workspaceId)}/test`
+          ? buildWorkspacePath("test", data.workspaceId)
           : currentPage === "grade"
           ? buildGradePath(data.workspaceId)
-          : `${SESSIONS_BASE_PATH}/${
-            encodeURIComponent(data.workspaceId)
-          }/build`;
+          : buildWorkspacePath("build", data.workspaceId);
         replacePath(nextPath);
       })
       .finally(() => {
         workspaceInitRef.current = false;
       });
-  }, [activeSessionId, currentPage, replacePath]);
-  const testBotPath = activeSessionId
-    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/test`
-    : DEFAULT_TEST_PATH;
-  const buildPath = activeSessionId
-    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/build`
-    : DEFAULT_BUILD_PATH;
-  const debugPath = activeSessionId
-    ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(activeSessionId)}/debug`
-    : DEFAULT_SESSION_PATH;
-  const gradePath = activeSessionId
-    ? buildGradePath(activeSessionId)
-    : "/grade";
+  }, [activeWorkspaceId, currentPage, replacePath, routeRequestsNewWorkspace]);
+  const resolveNavWorkspaceId = useCallback(() => {
+    const normalizedPath = (window.location.pathname || "/").replace(
+      /\/+$/,
+      "",
+    ) || "/";
+    const directMatch = normalizedPath.match(
+      /^\/workspaces\/([^/]+)\/(?:debug|build|test|grade)(?:\/[^/]+)?$/,
+    );
+    if (directMatch?.[1] && directMatch[1] !== "new") {
+      return decodeURIComponent(directMatch[1]);
+    }
+    return getWorkspaceRouteFromPath(normalizedPath)?.workspaceId ??
+      getWorkspaceIdFromPath(window.location.pathname) ??
+      activeWorkspaceId ??
+      lastWorkspaceIdRef.current;
+  }, [activeWorkspaceId]);
+  const resolveNavPath = useCallback((next: string) => {
+    if (next === "docs") return DOCS_PATH;
+    const workspaceId = resolveNavWorkspaceId();
+    if (next === "build") return buildWorkspacePath("build", workspaceId);
+    if (next === "test") {
+      return buildTestPath(workspaceId, workspaceRunIds.testRunId ?? undefined);
+    }
+    if (next === "grade") {
+      return workspaceId
+        ? buildGradePath(workspaceId, workspaceRunIds.gradeRunId ?? undefined)
+        : DEFAULT_GRADE_PATH;
+    }
+    return buildWorkspacePath("debug", workspaceId);
+  }, [
+    resolveNavWorkspaceId,
+    workspaceRunIds.gradeRunId,
+    workspaceRunIds.testRunId,
+  ]);
   const handleSelectSession = useCallback(
     (sessionId: string) => {
       const nextPath = currentPage === "test" || currentPage === "docs"
-        ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/test`
+        ? buildWorkspacePath("test", sessionId)
         : currentPage === "grade"
         ? buildGradePath(sessionId)
         : currentPage === "build"
-        ? `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/build`
-        : `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}/debug`;
+        ? buildWorkspacePath("build", sessionId)
+        : buildWorkspacePath("debug", sessionId);
       navigate(nextPath);
       setSessionsDrawerOpen(false);
     },
@@ -1456,17 +1513,24 @@ function App() {
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       await sessionsApi.deleteSession(sessionId);
-      if (sessionId === activeSessionId) {
+      if (sessionId === activeWorkspaceId) {
         window.location.assign(DEFAULT_TEST_PATH);
       }
     },
-    [activeSessionId, sessionsApi.deleteSession],
+    [activeWorkspaceId, sessionsApi.deleteSession],
   );
 
   return (
-    <BuildChatProvider
-      workspaceId={activeSessionId}
+    <WorkspaceProvider
+      workspaceId={activeWorkspaceId}
       onWorkspaceChange={handleWorkspaceChange}
+      requestedTestRunId={routeState?.tab === "test"
+        ? requestedTestRunId
+        : undefined}
+      requestedGradeRunId={routeState?.tab === "grade"
+        ? requestedGradeRunId
+        : undefined}
+      onRoutingStateChange={setWorkspaceRunIds}
     >
       <>
         <div className="app-frame">
@@ -1492,26 +1556,40 @@ function App() {
               <Tabs
                 className="top-nav-buttons"
                 activeId={currentPage}
-                onChange={(next) =>
-                  navigate(
-                    next === "docs"
-                      ? DOCS_PATH
-                      : next === "build"
-                      ? buildPath
-                      : next === "test"
-                      ? testBotPath
-                      : next === "grade"
-                      ? gradePath
-                      : debugPath,
-                  )}
+                onChange={(next) => navigate(resolveNavPath(next))}
                 tabs={[
-                  { id: "docs", label: "Docs", testId: "nav-docs" },
+                  {
+                    id: "docs",
+                    label: "Docs",
+                    testId: "nav-docs",
+                    href: resolveNavPath("docs"),
+                  },
                   ...(buildTabEnabled
-                    ? [{ id: "build", label: "Build", testId: "nav-build" }]
+                    ? [{
+                      id: "build",
+                      label: "Build",
+                      testId: "nav-build",
+                      href: resolveNavPath("build"),
+                    }]
                     : []),
-                  { id: "test", label: "Test", testId: "nav-test" },
-                  { id: "grade", label: "Grade", testId: "nav-grade" },
-                  { id: "debug", label: "Debug", testId: "nav-debug" },
+                  {
+                    id: "test",
+                    label: "Test",
+                    testId: "nav-test",
+                    href: resolveNavPath("test"),
+                  },
+                  {
+                    id: "grade",
+                    label: "Grade",
+                    testId: "nav-grade",
+                    href: resolveNavPath("grade"),
+                  },
+                  {
+                    id: "debug",
+                    label: "Debug",
+                    testId: "nav-debug",
+                    href: resolveNavPath("debug"),
+                  },
                 ]}
               />
               <div className="top-nav-center">
@@ -1528,67 +1606,73 @@ function App() {
                       "workbench-toggle",
                       workbenchDrawerOpen && "active",
                     )}
-                    onClick={() => setWorkbenchDrawerOpen(true)}
-                    aria-label="Open workbench drawer"
+                    onClick={() => setWorkbenchDrawerOpen((prev) => !prev)}
+                    aria-label={workbenchDrawerOpen
+                      ? "Close workbench drawer"
+                      : "Open workbench drawer"}
                     data-testid="nav-workbench"
                   >
                     <Icon
-                      name="flag"
+                      name="chat"
                       size={16}
-                      style={{ color: "var(--color-text)" }}
+                      style={{ color: "currentColor" }}
                     />
                   </Button>
                 </div>
               </div>
             </div>
-            <div className="page-shell">
-              {currentPage === "docs"
-                ? <DocsPage />
-                : currentPage === "build"
-                ? <BuildPage setNavActions={setNavActions} />
-                : currentPage === "debug"
-                ? (
-                  <SimulatorApp
-                    basePath={simulatorBasePath}
-                    setNavActions={setNavActions}
-                    sessionsApi={sessionsApi}
-                    onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
-                    activeSessionId={activeSessionId}
-                  />
-                )
-                : currentPage === "test"
-                ? (
-                  <TestBotPage
-                    onReplaceTestBotSession={handleReplaceTestBotSession}
-                    onResetTestBotSession={handleResetTestBotSession}
-                    activeSessionId={activeSessionId}
-                    resetToken={testBotResetToken}
-                    setNavActions={setNavActions}
-                    onFeedbackUpdate={applyFeedbackUpdate}
-                  />
-                )
-                : (
-                  <GradePage
-                    setNavActions={setNavActions}
-                    onAppPathChange={handleAppPathChange}
-                    activeSessionId={activeSessionId}
-                    onFlagsUpdate={applyFlagsUpdate}
-                    onOptimisticToggleFlag={optimisticToggleFlag}
-                    onOptimisticFlagReason={optimisticFlagReason}
-                  />
-                )}
+            <div className="app-content-frame">
+              <div className="page-shell">
+                {currentPage === "docs"
+                  ? <DocsPage />
+                  : currentPage === "build"
+                  ? <BuildPage setNavActions={setNavActions} />
+                  : currentPage === "debug"
+                  ? (
+                    <SimulatorApp
+                      basePath={simulatorBasePath}
+                      setNavActions={setNavActions}
+                      sessionsApi={sessionsApi}
+                      onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
+                      activeWorkspaceId={activeWorkspaceId}
+                    />
+                  )
+                  : currentPage === "test"
+                  ? (
+                    <TestBotPage
+                      onReplaceTestBotSession={handleReplaceTestBotSession}
+                      onResetTestBotSession={handleResetTestBotSession}
+                      activeWorkspaceId={activeWorkspaceId}
+                      requestedRunId={requestedTestRunId}
+                      resetToken={testBotResetToken}
+                      setNavActions={setNavActions}
+                      onFeedbackPersisted={handleFeedbackPersisted}
+                    />
+                  )
+                  : (
+                    <GradePage
+                      setNavActions={setNavActions}
+                      onAppPathChange={handleAppPathChange}
+                      activeWorkspaceId={activeWorkspaceId}
+                      requestedGradeRunId={requestedGradeRunId}
+                      onFlagsUpdate={applyFlagsUpdate}
+                      onOptimisticToggleFlag={optimisticToggleFlag}
+                      onOptimisticFlagReason={optimisticFlagReason}
+                    />
+                  )}
+              </div>
+              {workbenchDrawerOpen && (
+                <WorkbenchDrawer
+                  open={workbenchDrawerOpen}
+                  onClose={() => setWorkbenchDrawerOpen(false)}
+                  loading={workbenchSessionDetailLoading}
+                  error={workbenchSessionDetailError}
+                  sessionId={activeWorkspaceId}
+                  sessionDetail={workbenchSessionDetail}
+                />
+              )}
             </div>
           </div>
-          {workbenchDrawerOpen && (
-            <WorkbenchDrawer
-              open={workbenchDrawerOpen}
-              onClose={() => setWorkbenchDrawerOpen(false)}
-              loading={workbenchSessionDetailLoading}
-              error={workbenchSessionDetailError}
-              sessionId={activeSessionId}
-              sessionDetail={workbenchSessionDetail}
-            />
-          )}
         </div>
         <SessionsDrawer
           open={sessionsDrawerOpen}
@@ -1600,11 +1684,11 @@ function App() {
           onDelete={handleDeleteSession}
           onDeleteAll={handleDeleteAll}
           onClose={() => setSessionsDrawerOpen(false)}
-          activeSessionId={activeSessionId}
+          activeWorkspaceId={activeWorkspaceId}
           bundleStamp={bundleStamp}
         />
       </>
-    </BuildChatProvider>
+    </WorkspaceProvider>
   );
 }
 

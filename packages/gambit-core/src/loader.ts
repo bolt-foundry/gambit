@@ -25,6 +25,7 @@ import type {
   ActionDeckDefinition,
   CardDefinition,
   DeckDefinition,
+  ExternalToolDefinition,
   GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
@@ -174,6 +175,39 @@ function checkReserved(action: ActionDeckDefinition) {
   }
 }
 
+function normalizeExternalTools(
+  tools: DeckDefinition["tools"],
+  resolvedPath: string,
+): Array<ExternalToolDefinition> {
+  if (!tools) return [];
+  return tools.map((tool) => {
+    const name = String(tool.name ?? "").trim();
+    if (!name) {
+      throw new Error(`External tool must include a name (${resolvedPath})`);
+    }
+    if (name.startsWith(RESERVED_TOOL_PREFIX)) {
+      throw new Error(
+        `External tool name ${name} is reserved (prefix ${RESERVED_TOOL_PREFIX})`,
+      );
+    }
+    if (
+      !TOOL_NAME_PATTERN.test(name) ||
+      name.length > MAX_TOOL_NAME_LENGTH
+    ) {
+      throw new Error(
+        `External tool name ${name} must match ${TOOL_NAME_PATTERN} and be <= ${MAX_TOOL_NAME_LENGTH} characters`,
+      );
+    }
+    return {
+      name,
+      description: typeof tool.description === "string"
+        ? tool.description
+        : undefined,
+      inputSchema: tool.inputSchema,
+    };
+  });
+}
+
 async function loadCardInternal(
   cardPath: string,
   parentPath?: string,
@@ -272,6 +306,11 @@ export async function loadDeck(
       `Deck at ${resolved} did not export a valid deck definition`,
     );
   }
+  if ((deck as { mcpServers?: unknown }).mcpServers !== undefined) {
+    throw new Error(
+      `Deck-level [[mcpServers]] is unsupported in this phase (${resolved})`,
+    );
+  }
 
   const deckLabel = deck.label;
 
@@ -297,6 +336,15 @@ export async function loadDeck(
   }
 
   const actionDecks = Object.values(mergedActions);
+  const tools = normalizeExternalTools(deck.tools, resolved);
+  const actionNames = new Set(actionDecks.map((action) => action.name));
+  for (const tool of tools) {
+    if (actionNames.has(tool.name)) {
+      logger.warn(
+        `[gambit] tool ${tool.name} is shadowed by an action in ${resolved}`,
+      );
+    }
+  }
 
   const schemaAliases = normalizeDeckSchemas(deck, resolved);
   let inputSchema = schemaAliases.inputSchema;
@@ -383,6 +431,7 @@ export async function loadDeck(
       deck.graderDecks,
       resolved,
     ),
+    tools,
     contextSchema,
     responseSchema,
     inputSchema,

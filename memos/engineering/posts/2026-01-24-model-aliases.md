@@ -31,8 +31,8 @@
 
 - Code: `packages/gambit/src/project_config.ts`, `packages/gambit/src/cli.ts`,
   `packages/gambit/src/commands/check.ts`
-- Docs: `packages/gambit/scaffolds/init/gambit.toml`,
-  `packages/gambit/docs/external/examples/ollama.md`
+- Docs: `packages/gambit/docs/external/examples/ollama.md`,
+  `packages/gambit/docs/external/reference/cli.md`
 
 ## Next steps
 

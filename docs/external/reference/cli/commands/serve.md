@@ -1,8 +1,9 @@
 +++
 command = "serve"
 summary = "Run the debug UI server"
-usage = "gambit serve [<deck.(ts|md)>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap]"
+usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]"
 flags = [
+  "--artifact <bundle.tar.gz> Serve from a restored artifact bundle (mutually exclusive with <deck>)",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--port <n>              Port for serve (default: 8000)",
@@ -13,12 +14,16 @@ flags = [
   "--sourcemap             Generate external source maps (serve; default in dev)",
   "--no-sourcemap          Disable source map generation (serve)",
   "--platform <platform>   Bundle target platform: deno (default) or web (browser)",
+  "--worker-sandbox        Force worker execution on",
+  "--no-worker-sandbox     Force worker execution off",
+  "--legacy-exec           Alias for --no-worker-sandbox",
+  "--sandbox               Deprecated alias for --worker-sandbox",
+  "--no-sandbox            Deprecated alias for --no-worker-sandbox",
   "--verbose               Print trace events to console",
 ]
 +++
 
 Starts the debug UI server (default at `http://localhost:8000/`).
 
-If no deck path is provided, Gambit creates a new workspace scaffold (root
-`PROMPT.md`, `INTENT.md`, plus default scenario/grader decks) and opens the
-simulator UI in workspace onboarding mode.
+If no deck path is provided, Gambit uses `./PROMPT.md`. If `./PROMPT.md` does
+not exist, Gambit creates a minimal `PROMPT.md` and serves it.

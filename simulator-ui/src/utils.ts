@@ -1,3 +1,9 @@
+import {
+  buildWorkspacePath,
+  parseWorkspaceRoute,
+  WORKSPACE_ROUTE_BASE,
+} from "../../src/workspace_contract.ts";
+
 export type NormalizedSchema = {
   kind:
     | "string"
@@ -43,7 +49,11 @@ export type ModelMessage = {
   }>;
 };
 
-export type MessageRef = { id: string; role: string };
+export type MessageRef = {
+  id: string;
+  role: string;
+  source?: "scenario" | "manual" | "artifact";
+};
 
 export type FeedbackEntry = {
   id: string;
@@ -127,7 +137,7 @@ export type GradingFlag = {
 };
 
 export type SessionDetailResponse = {
-  sessionId: string;
+  workspaceId: string;
   messages: ModelMessage[];
   messageRefs?: MessageRef[];
   feedback?: FeedbackEntry[];
@@ -145,7 +155,7 @@ export type CalibrateResponse = {
 
 export type CalibrateStreamMessage = {
   type: "calibrateSession";
-  sessionId: string;
+  workspaceId: string;
   run: CalibrationRun;
   session: CalibrateSession;
 };
@@ -158,6 +168,8 @@ export type CalibrateRef = {
 export type TestBotRun = {
   id?: string;
   status: "idle" | "running" | "completed" | "error" | "canceled";
+  workspaceId?: string;
+  // Temporary alias while server payloads migrate fully to workspaceId.
   sessionId?: string;
   error?: string;
   initFill?: {
@@ -173,6 +185,7 @@ export type TestBotRun = {
     role: string;
     content: string;
     messageRefId?: string;
+    messageSource?: "scenario" | "manual" | "artifact";
     feedback?: FeedbackEntry;
     respondStatus?: number;
     respondCode?: string;
@@ -251,7 +264,10 @@ export type SimulatorMessage =
   | { type: "error"; message: string; runId?: string };
 
 export type ToolCallSummary = {
+  key: string;
   id: string;
+  actionCallId?: string;
+  runId?: string;
   name?: string;
   status: "pending" | "running" | "completed" | "error";
   args?: unknown;
@@ -262,18 +278,32 @@ export type ToolCallSummary = {
   depth?: number;
 };
 
+export type BuildDisplayMessage = {
+  kind: "message" | "tool" | "reasoning";
+  role?: "user" | "assistant";
+  content?: string;
+  toolCallId?: string;
+  toolSummary?: ToolCallSummary;
+  reasoningId?: string;
+  reasoningRaw?: Record<string, unknown>;
+};
+
 export const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
 
-export const SESSIONS_BASE_PATH = "/sessions";
+export const WORKSPACES_BASE_PATH = WORKSPACE_ROUTE_BASE;
 export const DOCS_PATH = "/docs";
-export const DEFAULT_SESSION_PATH = `${SESSIONS_BASE_PATH}/new/debug`;
-export const DEFAULT_TEST_PATH = `${SESSIONS_BASE_PATH}/new/test`;
-export const DEFAULT_BUILD_PATH = `${SESSIONS_BASE_PATH}/new/build`;
+export const DEFAULT_WORKSPACE_DEBUG_PATH = buildWorkspacePath("debug");
+export const DEFAULT_TEST_PATH = buildWorkspacePath("test");
+export const DEFAULT_BUILD_PATH = buildWorkspacePath("build");
+export const DEFAULT_GRADE_PATH = buildWorkspacePath("grade");
 export const GRADE_PATH_SUFFIX = "/grade";
-export const buildGradePath = (sessionId: string) =>
-  `${SESSIONS_BASE_PATH}/${encodeURIComponent(sessionId)}${GRADE_PATH_SUFFIX}`;
+export const buildGradePath = (workspaceId: string, gradeRunId?: string) =>
+  buildWorkspacePath("grade", workspaceId, { runId: gradeRunId });
+export const buildTestPath = (workspaceId?: string | null, runId?: string) =>
+  buildWorkspacePath("test", workspaceId, { runId });
 export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 export const SIMULATOR_STREAM_ID = "gambit-simulator";
+export const WORKSPACE_STREAM_ID = "gambit-workspace";
 export const GRADE_STREAM_ID = "gambit-grade";
 export const TEST_STREAM_ID = "gambit-test";
 export const BUILD_STREAM_ID = "gambit-build";
@@ -311,6 +341,12 @@ export type BuildBotStreamEndEvent = {
   ts?: number;
 };
 
+export type BuildBotTraceEvent = {
+  type: "buildBotTrace";
+  runId?: string;
+  event: TraceEvent;
+};
+
 export type BuildBotStatusEvent = {
   type: "buildBotStatus";
   run?: TestBotRun;
@@ -319,7 +355,13 @@ export type BuildBotStatusEvent = {
 export type BuildBotSocketMessage =
   | BuildBotStreamEvent
   | BuildBotStreamEndEvent
+  | BuildBotTraceEvent
   | BuildBotStatusEvent;
+
+export type WorkspaceSocketMessage =
+  | BuildBotSocketMessage
+  | TestBotSocketMessage
+  | CalibrateStreamMessage;
 
 export const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
   .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
@@ -607,41 +649,43 @@ export function normalizeBasePath(basePath: string): string {
   return basePath.replace(/\/+$/, "");
 }
 
-export function getSessionIdFromPath(
+export function getWorkspaceIdFromPath(
   pathname?: string,
-  basePath = SESSIONS_BASE_PATH,
+  basePath = WORKSPACES_BASE_PATH,
 ): string | null {
   const target = typeof pathname === "string"
     ? pathname
     : window.location.pathname;
-  const normalizedTarget = target.replace(/\/+$/, "");
-  const canonical = normalizedTarget.match(
-    /^\/sessions\/([^/]+)(?:\/(debug|grade|test|build))?$/,
-  );
-  if (canonical) {
-    const id = canonical[1];
-    if (id && id !== "new") return decodeURIComponent(id);
-    return null;
-  }
+  const normalizedTarget = target.replace(/\/+$/, "") || "/";
+  const canonical = parseWorkspaceRoute(normalizedTarget);
+  if (canonical) return canonical.workspaceId;
   const bases = [basePath, "/debug", "/simulate", ""];
   for (const base of bases) {
     if (typeof base !== "string") continue;
     const normalized = normalizeBasePath(base);
-    const prefix = `${normalized}/sessions/`.replace(/^\/\//, "/");
-    if (normalized === "" && !normalizedTarget.startsWith("/sessions/")) {
+    const prefix = `${normalized}/workspaces/`.replace(/^\/\//, "/");
+    if (normalized === "" && !normalizedTarget.startsWith("/workspaces/")) {
       continue;
     }
     if (normalized !== "" && !normalizedTarget.startsWith(prefix)) {
       continue;
     }
     const remainder = normalized === ""
-      ? normalizedTarget.slice("/sessions/".length)
+      ? normalizedTarget.slice("/workspaces/".length)
       : normalizedTarget.slice(prefix.length);
     if (remainder.length > 0 && remainder !== "new") {
       return decodeURIComponent(remainder);
     }
   }
   return null;
+}
+
+export function getWorkspaceRouteFromPath(pathname?: string) {
+  const target = typeof pathname === "string"
+    ? pathname
+    : window.location.pathname;
+  const normalizedTarget = target.replace(/\/+$/, "") || "/";
+  return parseWorkspaceRoute(normalizedTarget);
 }
 
 export function cloneValue<T>(value: T): T {
@@ -686,20 +730,16 @@ export function toRelativePath(
   return target;
 }
 
-export function getGradeSessionIdFromLocation(): string | null {
-  const pathMatch = window.location.pathname.match(
-    /^\/sessions\/([^/]+)\/grade/,
-  );
-  if (pathMatch) return decodeURIComponent(pathMatch[1]);
-  const params = new URLSearchParams(window.location.search);
-  const param = params.get("sessionId");
-  return param ? decodeURIComponent(param) : null;
+export function getGradeWorkspaceIdFromLocation(): string | null {
+  const route = getWorkspaceRouteFromPath(window.location.pathname);
+  if (!route || route.tab !== "grade") return null;
+  return route.workspaceId ?? null;
 }
 
-export function getGradeRefFromLocation(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const ref = params.get("ref");
-  return ref && ref.trim().length ? ref.trim() : null;
+export function getGradeRunIdFromLocation(): string | null {
+  const route = getWorkspaceRouteFromPath(window.location.pathname);
+  if (!route || route.tab !== "grade") return null;
+  return route.gradeRunId ?? null;
 }
 
 export function parseGradingRef(ref: string): {
@@ -873,10 +913,10 @@ export function renderMarkdown(text: string) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-  return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(
-    /\n/g,
-    "<br />",
-  );
+  return escaped
+    .replace(/`([^`]+?)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br />");
 }
 
 export function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
@@ -909,8 +949,10 @@ export function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
 
 export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
   const order: ToolCallSummary[] = [];
-  const byId = new Map<string, ToolCallSummary>();
+  const byKey = new Map<string, ToolCallSummary>();
   const depthMap = new Map<string, number>();
+  const traceCallKey = (trace: TraceEvent, actionCallId: string) =>
+    `${typeof trace.runId === "string" ? trace.runId : ""}:${actionCallId}`;
   for (const trace of traces) {
     if (!trace || typeof trace !== "object") continue;
     const type = typeof trace.type === "string" ? trace.type : "";
@@ -933,14 +975,18 @@ export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
       continue;
     }
     if (!type.startsWith("tool.") || !actionCallId) continue;
-    let summary = byId.get(actionCallId);
+    const key = traceCallKey(trace, actionCallId);
+    let summary = byKey.get(key);
     if (!summary) {
       summary = {
+        key,
         id: actionCallId,
+        actionCallId,
+        runId: typeof trace.runId === "string" ? trace.runId : undefined,
         name: typeof trace.name === "string" ? trace.name : undefined,
         status: "pending",
       };
-      byId.set(actionCallId, summary);
+      byKey.set(key, summary);
       order.push(summary);
     }
     if (typeof trace.name === "string") summary.name = trace.name;
@@ -979,12 +1025,505 @@ export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
   return order;
 }
 
+export function deriveBuildDisplayMessages(
+  messages: Array<{ role: string; content: string }> = [],
+  traces?: TraceEvent[] | null,
+): BuildDisplayMessage[] {
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const safeTraces = Array.isArray(traces) ? traces : [];
+  if (safeTraces.length === 0) {
+    return safeMessages.map((msg, idx) => ({
+      kind: "message",
+      role: msg.role === "user" ? "user" : "assistant",
+      content: msg.content,
+      reasoningId: `fallback-${idx}`,
+    }));
+  }
+
+  const entries: BuildDisplayMessage[] = [];
+  const toolSummaries = new Map<string, ToolCallSummary>();
+  const toolEntryIds = new Set<string>();
+  const toolDepthMap = new Map<string, number>();
+  const reasoningIndexById = new Map<string, number>();
+  const assistantIndexById = new Map<string, number>();
+
+  const asRecord = (value: unknown): Record<string, unknown> | null => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return null;
+  };
+  const asString = (value: unknown): string =>
+    typeof value === "string" ? value : "";
+  const scopedId = (scope: string, id: string): string =>
+    scope ? `${scope}:${id}` : id;
+  const stringifyContent = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+  const pushAssistantMessage = (content: string) => {
+    const normalized = content.trim();
+    if (!normalized) return;
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (entry?.kind !== "message") continue;
+      if (entry.role !== "assistant") continue;
+      if ((entry.content ?? "").trim() === normalized) return;
+      break;
+    }
+    entries.push({
+      kind: "message",
+      role: "assistant",
+      content: normalized,
+    });
+  };
+  const extractReasoningText = (payload: Record<string, unknown>): string => {
+    const payloadType = asString(payload.type);
+    if (payloadType === "response.reasoning.delta") {
+      return asString(payload.delta);
+    }
+    if (payloadType === "response.reasoning.done") {
+      return asString(payload.text);
+    }
+    if (payloadType === "response.reasoning_summary_text.delta") {
+      return asString(payload.delta);
+    }
+    if (payloadType === "response.reasoning_summary_text.done") {
+      return asString(payload.text);
+    }
+    if (
+      payloadType === "response.reasoning_summary_part.added" ||
+      payloadType === "response.reasoning_summary_part.done"
+    ) {
+      const part = asRecord(payload.part);
+      return part ? asString(part.text) : "";
+    }
+    return "";
+  };
+  const ensureToolSummary = (input: {
+    actionCallId: string;
+    name?: string;
+    parentActionCallId?: string;
+  }): ToolCallSummary => {
+    const { actionCallId, name, parentActionCallId } = input;
+    let summary = toolSummaries.get(actionCallId);
+    if (!summary) {
+      summary = {
+        key: actionCallId,
+        id: actionCallId,
+        name,
+        status: "pending",
+        parentActionCallId,
+      };
+      toolSummaries.set(actionCallId, summary);
+    }
+    if (name && !summary.name) summary.name = name;
+    if (parentActionCallId) summary.parentActionCallId = parentActionCallId;
+    return summary;
+  };
+  const pushToolEntry = (summary: ToolCallSummary) => {
+    if (toolEntryIds.has(summary.id)) return;
+    toolEntryIds.add(summary.id);
+    entries.push({
+      kind: "tool",
+      toolCallId: summary.id,
+      toolSummary: summary,
+    });
+  };
+  const applyToolEvent = (input: {
+    event: Record<string, unknown>;
+    type: string;
+  }) => {
+    const actionCallId = asString(input.event.actionCallId);
+    if (!actionCallId) return;
+    const name = asString(input.event.name) || undefined;
+    const parentActionCallId = asString(input.event.parentActionCallId) ||
+      undefined;
+    const summary = ensureToolSummary({
+      actionCallId,
+      name,
+      parentActionCallId,
+    });
+    if (input.type === "tool.call") {
+      summary.args = "args" in input.event ? input.event.args : undefined;
+      summary.status = "running";
+      if (parentActionCallId) {
+        const parentDepth = toolDepthMap.has(parentActionCallId)
+          ? toolDepthMap.get(parentActionCallId)!
+          : -1;
+        summary.depth = summary.depth ?? parentDepth + 1;
+        toolDepthMap.set(actionCallId, summary.depth);
+      }
+      pushToolEntry(summary);
+      return;
+    }
+    if (input.type === "tool.result") {
+      summary.result = "result" in input.event ? input.event.result : null;
+      summary.status = "completed";
+      pushToolEntry(summary);
+      return;
+    }
+    if (input.type === "tool.error") {
+      summary.error = "error" in input.event ? input.event.error : null;
+      summary.status = "error";
+      pushToolEntry(summary);
+    }
+  };
+  const upsertReasoning = (input: {
+    reasoningId: string;
+    text: string;
+    raw: Record<string, unknown>;
+    mode: "append" | "replace";
+  }) => {
+    const normalizedText = input.text.trim();
+    if (!normalizedText) return;
+    const reasoningId = input.reasoningId || "reasoning";
+    const existingIndex = reasoningIndexById.get(reasoningId);
+    if (existingIndex === undefined) {
+      entries.push({
+        kind: "reasoning",
+        reasoningId,
+        content: normalizedText,
+        reasoningRaw: input.raw,
+      });
+      reasoningIndexById.set(reasoningId, entries.length - 1);
+      return;
+    }
+    const existing = entries[existingIndex];
+    if (!existing || existing.kind !== "reasoning") return;
+    const previousText = typeof existing.content === "string"
+      ? existing.content
+      : "";
+    let nextText = previousText;
+    if (input.mode === "append") {
+      if (!previousText) {
+        nextText = normalizedText;
+      } else if (!previousText.endsWith(normalizedText)) {
+        nextText = `${previousText}${normalizedText}`;
+      }
+    } else {
+      if (previousText === normalizedText) {
+        nextText = previousText;
+      } else if (!previousText) {
+        nextText = normalizedText;
+      } else if (normalizedText.startsWith(previousText)) {
+        nextText = normalizedText;
+      } else if (previousText.startsWith(normalizedText)) {
+        nextText = previousText;
+      } else if (!previousText.includes(normalizedText)) {
+        nextText = `${previousText}\n${normalizedText}`;
+      }
+    }
+    if (nextText === previousText) return;
+    entries[existingIndex] = {
+      ...existing,
+      content: nextText,
+      reasoningRaw: input.raw,
+    };
+  };
+  const upsertAssistantMessage = (
+    input: { messageId: string; text: string },
+  ) => {
+    const text = input.text.trim();
+    if (!text) return;
+    const messageId = input.messageId || `assistant-${entries.length}`;
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (entry?.kind !== "message") continue;
+      if (entry.role !== "assistant") continue;
+      if ((entry.content ?? "").trim() === text) {
+        assistantIndexById.set(messageId, i);
+        return;
+      }
+      break;
+    }
+    const existingIndex = assistantIndexById.get(messageId);
+    if (existingIndex !== undefined) {
+      const existing = entries[existingIndex];
+      if (existing?.kind === "message" && existing.role === "assistant") {
+        entries[existingIndex] = {
+          ...existing,
+          content: text,
+        };
+      }
+      return;
+    }
+    entries.push({
+      kind: "message",
+      role: "assistant",
+      content: text,
+    });
+    assistantIndexById.set(messageId, entries.length - 1);
+  };
+  const extractAssistantTextFromItem = (
+    item: Record<string, unknown>,
+  ): string => {
+    const itemType = asString(item.type);
+    if (itemType === "agent_message") return asString(item.text);
+    if (itemType !== "message") return "";
+    if (asString(item.role) !== "assistant") return "";
+    const content = item.content;
+    if (!Array.isArray(content)) return "";
+    const textParts = content.map((part) => {
+      const partRecord = asRecord(part);
+      if (!partRecord) return "";
+      return typeof partRecord.text === "string" ? partRecord.text : "";
+    }).filter((part) => part.length > 0);
+    return textParts.join("");
+  };
+
+  for (const trace of safeTraces) {
+    if (!trace || typeof trace !== "object") continue;
+    const record = trace as Record<string, unknown>;
+    const type = asString(record.type);
+    if (type === "message.user") {
+      const message = (record as { message?: unknown }).message;
+      const msgRecord = asRecord(message);
+      entries.push({
+        kind: "message",
+        role: "user",
+        content: stringifyContent(msgRecord?.content),
+      });
+      continue;
+    }
+    if (type === "model.result") {
+      const message = (record as { message?: unknown }).message;
+      const msgRecord = asRecord(message);
+      pushAssistantMessage(stringifyContent(msgRecord?.content));
+      continue;
+    }
+    if (
+      type === "tool.call" || type === "tool.result" || type === "tool.error"
+    ) {
+      applyToolEvent({ event: record, type });
+      continue;
+    }
+    if (type !== "model.stream.event") continue;
+    const event = (record as { event?: unknown }).event;
+    const payloadRecord = asRecord(event);
+    const payload = payloadRecord?.type === "codex.event"
+      ? asRecord(payloadRecord.payload)
+      : payloadRecord;
+    if (!payload) continue;
+    const payloadType = asString(payload.type);
+    if (
+      payloadType === "tool.call" || payloadType === "tool.result" ||
+      payloadType === "tool.error"
+    ) {
+      applyToolEvent({ event: payload, type: payloadType });
+      continue;
+    }
+    if (payloadType.startsWith("response.reasoning")) {
+      const actionScope = asString(record.actionCallId) ||
+        asString(record.runId);
+      const baseReasoningId = asString(payload.item_id) || payloadType;
+      upsertReasoning({
+        reasoningId: scopedId(actionScope, baseReasoningId),
+        text: extractReasoningText(payload),
+        raw: payload,
+        mode: payloadType.endsWith(".delta") ? "append" : "replace",
+      });
+      continue;
+    }
+    const item = asRecord(payload.item);
+    if (!item) continue;
+    const itemType = asString(item.type);
+    if (
+      itemType === "agent_message" ||
+      (itemType === "message" && payloadType === "response.output_item.done")
+    ) {
+      const text = extractAssistantTextFromItem(item);
+      if (!text) continue;
+      const outputIndex = typeof payload.output_index === "number"
+        ? String(payload.output_index)
+        : "";
+      const actionScope = asString(record.actionCallId) ||
+        asString(record.runId);
+      const baseMessageId = asString(item.id) || asString(payload.item_id) ||
+        (outputIndex ? `output-${outputIndex}` : "");
+      upsertAssistantMessage({
+        messageId: scopedId(actionScope, baseMessageId),
+        text,
+      });
+      continue;
+    }
+    if (itemType !== "reasoning") continue;
+    let text = "";
+    const summary = item.summary;
+    if (Array.isArray(summary)) {
+      text = summary.map((part) => {
+        const partRecord = asRecord(part);
+        return partRecord && typeof partRecord.text === "string"
+          ? partRecord.text
+          : "";
+      }).join("");
+    } else if (typeof item.text === "string") {
+      text = item.text;
+    }
+    const actionScope = asString(record.actionCallId) || asString(record.runId);
+    const baseReasoningId = asString(item.id) || "reasoning";
+    upsertReasoning({
+      reasoningId: scopedId(actionScope, baseReasoningId),
+      text,
+      raw: item,
+      mode: "replace",
+    });
+  }
+
+  return entries;
+}
+
+export function deriveReasoningByAssistant(
+  traces?: TraceEvent[] | null,
+): Map<number, ReasoningDetail[]> {
+  const buckets = new Map<number, ReasoningDetail[]>();
+  if (!Array.isArray(traces) || traces.length === 0) return buckets;
+  const pending: ReasoningDetail[] = [];
+  const pendingById = new Map<string, ReasoningDetail>();
+  let assistantIndex = -1;
+
+  const asRecord = (value: unknown): Record<string, unknown> | null => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return null;
+  };
+  const asString = (value: unknown): string =>
+    typeof value === "string" ? value : "";
+  const extractPayload = (value: unknown): Record<string, unknown> | null => {
+    const record = asRecord(value);
+    if (!record) return null;
+    if (record.type === "codex.event") {
+      return asRecord(record.payload);
+    }
+    return record;
+  };
+  const appendDetail = (input: {
+    id?: string;
+    text: string;
+    event: Record<string, unknown>;
+    trace: TraceEvent;
+  }) => {
+    const chunk = input.text.trim();
+    if (!chunk) return;
+    const actionCallId = asString(
+      (input.trace as { actionCallId?: unknown }).actionCallId,
+    ) || undefined;
+    const model = asString((input.trace as { model?: unknown }).model) ||
+      undefined;
+    const key = input.id && input.id.trim().length > 0
+      ? input.id
+      : `${input.trace.runId ?? ""}:${actionCallId ?? ""}:${pending.length}`;
+    let detail = pendingById.get(key);
+    if (!detail) {
+      detail = {
+        text: chunk,
+        event: input.event,
+        model,
+        actionCallId,
+      };
+      pendingById.set(key, detail);
+      pending.push(detail);
+      return;
+    }
+    if (!detail.text.endsWith(chunk)) {
+      detail.text += chunk;
+    }
+    detail.event = input.event;
+    if (!detail.model && model) detail.model = model;
+    if (!detail.actionCallId && actionCallId) {
+      detail.actionCallId = actionCallId;
+    }
+  };
+
+  for (const trace of traces) {
+    if (!trace || typeof trace !== "object") continue;
+    if (trace.type === "model.result") {
+      const message = (trace as { message?: unknown }).message as
+        | ModelMessage
+        | undefined;
+      if (message?.role === "assistant") {
+        assistantIndex += 1;
+        if (pending.length > 0) {
+          buckets.set(assistantIndex, [...pending]);
+          pending.length = 0;
+          pendingById.clear();
+        }
+      }
+      continue;
+    }
+    if (trace.type !== "model.stream.event") continue;
+    const payload = extractPayload((trace as { event?: unknown }).event);
+    if (!payload) continue;
+    const payloadType = asString(payload.type);
+    if (payloadType.startsWith("response.reasoning")) {
+      let text = "";
+      if (payloadType === "response.reasoning.delta") {
+        text = asString(payload.delta);
+      } else if (payloadType === "response.reasoning.done") {
+        text = asString(payload.text);
+      } else if (payloadType === "response.reasoning_summary_text.delta") {
+        text = asString(payload.delta);
+      } else if (payloadType === "response.reasoning_summary_text.done") {
+        text = asString(payload.text);
+      } else if (
+        payloadType === "response.reasoning_summary_part.added" ||
+        payloadType === "response.reasoning_summary_part.done"
+      ) {
+        const part = asRecord(payload.part);
+        text = part ? asString(part.text) : "";
+      }
+      appendDetail({
+        id: asString(payload.item_id) || undefined,
+        text,
+        event: payload,
+        trace,
+      });
+      continue;
+    }
+    const item = asRecord(payload.item);
+    if (!item) continue;
+    if (asString(item.type) !== "reasoning") continue;
+    const summary = item.summary;
+    let text = "";
+    if (Array.isArray(summary)) {
+      text = summary.map((part) => {
+        const partRecord = asRecord(part);
+        return partRecord ? asString(partRecord.text) : "";
+      }).join("");
+    } else if (typeof summary === "string") {
+      text = summary;
+    } else if (typeof item.text === "string") {
+      text = item.text;
+    }
+    appendDetail({
+      id: asString(item.id) || undefined,
+      text,
+      event: item,
+      trace,
+    });
+  }
+
+  return buckets;
+}
+
 export type RespondInfo = {
   status?: number;
   code?: string;
   message?: string;
   meta?: Record<string, unknown>;
   payload?: unknown;
+};
+
+export type ReasoningDetail = {
+  text: string;
+  event: unknown;
+  model?: string;
+  actionCallId?: string;
 };
 
 const RESPOND_TOOL_NAME = "gambit_respond";
@@ -1089,7 +1628,10 @@ export function buildConversationEntries(
       });
       continue;
     }
-    if (msg.role !== "assistant" && msg.role !== "user") continue;
+    if (
+      msg.role !== "assistant" && msg.role !== "user" &&
+      msg.role !== "system"
+    ) continue;
     const content = stringifyMessageContent(msg.content).trim();
     if (!content) continue;
     entries.push({
@@ -1124,6 +1666,12 @@ export function normalizeAppPath(input: string): string {
     }
     return DEFAULT_TEST_PATH;
   }
+  if (trimmed === "/grade") {
+    if (window.location.pathname !== DEFAULT_GRADE_PATH) {
+      window.history.replaceState({}, "", DEFAULT_GRADE_PATH);
+    }
+    return DEFAULT_GRADE_PATH;
+  }
   if (trimmed === "/build") {
     if (window.location.pathname !== DEFAULT_BUILD_PATH) {
       window.history.replaceState({}, "", DEFAULT_BUILD_PATH);
@@ -1132,38 +1680,40 @@ export function normalizeAppPath(input: string): string {
   }
   if (
     trimmed === "/debug" || trimmed === "/simulate" ||
-    trimmed === SESSIONS_BASE_PATH
+    trimmed === WORKSPACES_BASE_PATH
   ) {
-    if (window.location.pathname !== DEFAULT_SESSION_PATH) {
-      window.history.replaceState({}, "", DEFAULT_SESSION_PATH);
+    if (window.location.pathname !== DEFAULT_WORKSPACE_DEBUG_PATH) {
+      window.history.replaceState({}, "", DEFAULT_WORKSPACE_DEBUG_PATH);
     }
-    return DEFAULT_SESSION_PATH;
+    return DEFAULT_WORKSPACE_DEBUG_PATH;
   }
-  if (/^\/sessions\/[^/]+\/(debug|test|grade|build)$/.test(trimmed)) {
+  if (
+    /^\/workspaces\/[^/]+\/(debug|build)$/.test(trimmed) ||
+    /^\/workspaces\/[^/]+\/(test|grade)(?:\/[^/]+)?$/.test(trimmed)
+  ) {
     return trimmed;
   }
-  if (/^\/sessions\/[^/]+\/grade/.test(trimmed)) {
-    return trimmed;
-  }
-  if (trimmed.startsWith("/debug/sessions/")) {
-    const raw = trimmed.slice("/debug/sessions/".length);
+  if (trimmed.startsWith("/debug/workspaces/")) {
+    const raw = trimmed.slice("/debug/workspaces/".length);
     const decoded = decodeURIComponent(raw);
-    const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
+    const next = `${WORKSPACES_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
     window.history.replaceState({}, "", next);
     return next;
   }
   if (
-    trimmed.startsWith("/sessions/") && !trimmed.includes("/debug") &&
+    trimmed.startsWith("/workspaces/") && !trimmed.includes("/debug") &&
     !trimmed.includes("/test") && !trimmed.includes("/grade") &&
-    !trimmed.includes("/build") && trimmed !== DEFAULT_SESSION_PATH
+    !trimmed.includes("/build") && trimmed !== DEFAULT_WORKSPACE_DEBUG_PATH
   ) {
-    const remainder = trimmed.slice("/sessions/".length);
+    const remainder = trimmed.slice("/workspaces/".length);
     if (remainder && remainder !== "new") {
       const decoded = decodeURIComponent(remainder);
-      const next = `${SESSIONS_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
+      const next = `${WORKSPACES_BASE_PATH}/${
+        encodeURIComponent(decoded)
+      }/debug`;
       window.history.replaceState({}, "", next);
       return next;
     }
   }
-  return trimmed || DEFAULT_SESSION_PATH;
+  return trimmed || DEFAULT_WORKSPACE_DEBUG_PATH;
 }

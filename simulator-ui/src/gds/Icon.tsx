@@ -1,6 +1,7 @@
 import { ChevronDownIcon } from "./icons/ChevronDown.tsx";
 import { CircleInfoIcon } from "./icons/CircleInfo.tsx";
 import { CircleSolidChevronDownIcon } from "./icons/CircleSolidChevronDown.tsx";
+import { ChatIcon } from "./icons/Chat.tsx";
 import { CloseIcon } from "./icons/Close.tsx";
 import { CopiedIcon } from "./icons/Copied.tsx";
 import { CopyIcon } from "./icons/Copy.tsx";
@@ -11,6 +12,7 @@ import { ReviewIcon } from "./icons/Review.tsx";
 
 const ICONS = {
   chevronDown: ChevronDownIcon,
+  chat: ChatIcon,
   close: CloseIcon,
   flag: FlagIcon,
   hamburgerMenu: HamburgerMenuIcon,

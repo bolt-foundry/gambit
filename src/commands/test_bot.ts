@@ -1,7 +1,9 @@
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
 import { loadState, saveState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider, TraceEvent } from "@bolt-foundry/gambit-core";
+import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { loadDeck } from "@bolt-foundry/gambit-core";
+import * as path from "@std/path";
 import type { ZodTypeAny } from "zod";
 import {
   defaultTestBotStatePath,
@@ -47,6 +49,37 @@ type TestBotInitFill = {
 function randomId(prefix: string): string {
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   return `${prefix}-${suffix}`;
+}
+
+function deriveScenarioDeckId(deckPath: string): string {
+  return path.basename(deckPath).replace(/\.(deck\.)?(md|ts)$/i, "");
+}
+
+function applyUserMessageRefSource(
+  previousState: import("@bolt-foundry/gambit-core").SavedState | undefined,
+  nextState: import("@bolt-foundry/gambit-core").SavedState,
+  source: "scenario" | "manual",
+): import("@bolt-foundry/gambit-core").SavedState {
+  if (
+    !Array.isArray(nextState.messages) ||
+    !Array.isArray(nextState.messageRefs)
+  ) {
+    return nextState;
+  }
+  const startIndex = Math.max(0, previousState?.messages?.length ?? 0);
+  const nextRefs = [...nextState.messageRefs];
+  let changed = false;
+  for (let idx = startIndex; idx < nextState.messages.length; idx++) {
+    const msg = nextState.messages[idx];
+    if (!msg || msg.role !== "user") continue;
+    const ref = nextRefs[idx];
+    if (!ref || typeof ref.id !== "string") continue;
+    if (ref.source === source) continue;
+    nextRefs[idx] = { ...ref, source };
+    changed = true;
+  }
+  if (!changed) return nextState;
+  return { ...nextState, messageRefs: nextRefs };
 }
 
 function resolveDefaultValue(raw: unknown): unknown {
@@ -330,7 +363,7 @@ function buildInitFillPrompt(args: {
     schemaHints,
   };
   return [
-    "You are filling missing required init fields for a Gambit Test Bot run.",
+    "You are filling missing required init fields for a Gambit scenario run.",
     "Return ONLY valid JSON that includes values for the missing fields.",
     "Do not include any fields that are not listed as missing.",
     "If the only missing path is '(root)', return the full init JSON value.",
@@ -409,6 +442,11 @@ export async function runDeckWithFallback(args: {
     event: import("@bolt-foundry/gambit-core").TraceEvent,
   ) => void;
   responsesMode?: boolean;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  workerSandbox?: boolean;
 }): Promise<unknown> {
   try {
     return await runDeck({
@@ -426,6 +464,11 @@ export async function runDeckWithFallback(args: {
       onStreamText: args.onStreamText,
       trace: args.trace,
       responsesMode: args.responsesMode,
+      workspacePermissions: args.workspacePermissions,
+      workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+      sessionPermissions: args.sessionPermissions,
+      sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
+      workerSandbox: args.workerSandbox,
     });
   } catch (error) {
     if (args.input === undefined && shouldRetryWithStringInput(error)) {
@@ -444,6 +487,11 @@ export async function runDeckWithFallback(args: {
         onStreamText: args.onStreamText,
         trace: args.trace,
         responsesMode: args.responsesMode,
+        workspacePermissions: args.workspacePermissions,
+        workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
+        sessionPermissions: args.sessionPermissions,
+        sessionPermissionsBaseDir: args.sessionPermissionsBaseDir,
+        workerSandbox: args.workerSandbox,
       });
     }
     throw error;
@@ -465,6 +513,11 @@ export async function runTestBotLoop(opts: {
   verbose?: boolean;
   statePath?: string;
   responsesMode?: boolean;
+  workspacePermissions?: PermissionDeclarationInput;
+  workspacePermissionsBaseDir?: string;
+  sessionPermissions?: PermissionDeclarationInput;
+  sessionPermissionsBaseDir?: string;
+  workerSandbox?: boolean;
 }): Promise<string> {
   let rootState:
     | import("@bolt-foundry/gambit-core").SavedState
@@ -483,6 +536,27 @@ export async function runTestBotLoop(opts: {
     capturedTraces.push(event);
     opts.trace?.(event);
   };
+  const scenarioDeckId = deriveScenarioDeckId(opts.botDeckPath);
+  const enrichScenarioState = (
+    previousState: import("@bolt-foundry/gambit-core").SavedState | undefined,
+    state: import("@bolt-foundry/gambit-core").SavedState,
+  ): import("@bolt-foundry/gambit-core").SavedState => {
+    const withScenarioRefs = applyUserMessageRefSource(
+      previousState,
+      state,
+      "scenario",
+    );
+    const runId = typeof withScenarioRefs.runId === "string"
+      ? withScenarioRefs.runId
+      : undefined;
+    const meta = {
+      ...(withScenarioRefs.meta ?? {}),
+      ...(runId ? { scenarioRunId: runId } : {}),
+      scenarioConfigPath: opts.botDeckPath,
+      selectedScenarioDeckId: scenarioDeckId,
+    };
+    return { ...withScenarioRefs, meta };
+  };
   const saveStateToDisk = (
     state: import("@bolt-foundry/gambit-core").SavedState,
   ) => {
@@ -495,10 +569,11 @@ export async function runTestBotLoop(opts: {
 
   const existingState = loadState(statePath);
   if (existingState) {
-    rootState = existingState;
+    rootState = enrichScenarioState(undefined, existingState);
     if (Array.isArray(existingState.traces)) {
       capturedTraces.push(...existingState.traces);
     }
+    saveStateToDisk(rootState);
   }
 
   let initFillMeta: TestBotInitFill | undefined;
@@ -506,11 +581,12 @@ export async function runTestBotLoop(opts: {
   const updateRootState = (
     state: import("@bolt-foundry/gambit-core").SavedState,
   ) => {
+    const scenarioState = enrichScenarioState(rootState, state);
     const enriched = enrichStateMeta(
       {
-        ...state,
+        ...scenarioState,
         meta: {
-          ...(state.meta ?? {}),
+          ...(scenarioState.meta ?? {}),
           ...(initFillMeta ? { testBotInitFill: initFillMeta } : {}),
         },
       },
@@ -556,6 +632,11 @@ export async function runTestBotLoop(opts: {
             botState = state;
           },
           responsesMode: opts.responsesMode,
+          workspacePermissions: opts.workspacePermissions,
+          workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+          sessionPermissions: opts.sessionPermissions,
+          sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+          workerSandbox: opts.workerSandbox,
         });
         const parsed = parseInitFillOutput(fillOutput);
         if (parsed.error) {
@@ -612,10 +693,10 @@ export async function runTestBotLoop(opts: {
           provided: parsed.data,
         };
         logger.log(
-          `[test-bot] init fill requested: ${missing.join(", ")}`,
+          `[scenario] init fill requested: ${missing.join(", ")}`,
         );
         logger.log(
-          `[test-bot] init fill applied: ${
+          `[scenario] init fill applied: ${
             initFillMeta.applied !== undefined
               ? JSON.stringify(initFillMeta.applied)
               : "none"
@@ -630,12 +711,14 @@ export async function runTestBotLoop(opts: {
           args: {
             missing,
           },
+          toolKind: "internal",
         });
         traceWrapper({
           type: "tool.result",
           runId: randomId("testbot"),
           actionCallId,
           name: "gambit_test_bot_init_fill",
+          toolKind: "internal",
           result: {
             applied: initFillMeta.applied,
             provided: initFillMeta.provided,
@@ -644,7 +727,7 @@ export async function runTestBotLoop(opts: {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error(`[test-bot] init fill failed: ${message}`);
+      logger.error(`[scenario] init fill failed: ${message}`);
       throw err;
     }
   }
@@ -664,6 +747,11 @@ export async function runTestBotLoop(opts: {
       state: rootState,
       onStateUpdate: updateRootState,
       responsesMode: opts.responsesMode,
+      workspacePermissions: opts.workspacePermissions,
+      workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+      sessionPermissions: opts.sessionPermissions,
+      sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+      workerSandbox: opts.workerSandbox,
     });
     if (isGambitEndSignal(initialResult)) {
       sessionEnded = true;
@@ -691,6 +779,11 @@ export async function runTestBotLoop(opts: {
         botState = state;
       },
       responsesMode: opts.responsesMode,
+      workspacePermissions: opts.workspacePermissions,
+      workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+      sessionPermissions: opts.sessionPermissions,
+      sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+      workerSandbox: opts.workerSandbox,
     });
     if (isGambitEndSignal(botResult)) {
       sessionEnded = true;
@@ -715,6 +808,11 @@ export async function runTestBotLoop(opts: {
       state: rootState,
       onStateUpdate: updateRootState,
       responsesMode: opts.responsesMode,
+      workspacePermissions: opts.workspacePermissions,
+      workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
+      sessionPermissions: opts.sessionPermissions,
+      sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
+      workerSandbox: opts.workerSandbox,
     });
     if (isGambitEndSignal(rootResult)) {
       sessionEnded = true;

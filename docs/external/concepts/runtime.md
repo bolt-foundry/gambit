@@ -31,7 +31,7 @@ safe/observable.
 - `gambit_end`: enable with `![end](gambit://cards/end.card.md)` in Markdown (or
   `allowEnd: true` in TypeScript decks). Calling it returns a sentinel
   `{ __gambitEnd: true, payload?, status?, message?, code?, meta? }` so
-  CLI/test-bot loops stop reinjecting the closing assistant turn.
+  CLI/scenario loops stop reinjecting the closing assistant turn.
 
 ## State and turn order
 

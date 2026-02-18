@@ -1,3 +1,5 @@
 import { z } from "zod";
 
-export default z.string();
+const plainChatOutputSchema: z.ZodType<string> = z.string();
+
+export default plainChatOutputSchema;

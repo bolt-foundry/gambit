@@ -20,10 +20,10 @@ criteria so you can see what passes and fails.
 An action deck is a callable tool that performs a task or fetches data and
 returns structured output.
 
-## What is a test deck?
+## What is a scenario deck?
 
-A test deck simulates a user or scenario so you can run repeatable tests against
-a deck.
+A scenario deck simulates a user or scenario so you can run repeatable tests
+against a deck.
 
 ## What is a card?
 
@@ -40,8 +40,8 @@ Use the Gambit CLI to run a deck from the command line.
 
 ## What modules ship in Gambit?
 
-- Deck editor for building root/action/test decks.
+- Deck editor for building root/action/scenario decks.
 - Debug UI for running conversations and inspecting traces.
-- Test bot panel for scripted personas and graders.
+- Scenario panel for scripted personas and graders.
 - Coverage dashboard for reviewing grader outcomes.
 - Bundle/export tooling to package decks for deployment.

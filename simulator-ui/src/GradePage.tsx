@@ -21,16 +21,13 @@ import {
   extractTurnContext,
   formatTimestampShort,
   getDurableStreamOffset,
-  getGradeRefFromLocation,
-  getGradeSessionIdFromLocation,
+  getGradeWorkspaceIdFromLocation,
   getScoreClass,
   GRADE_STREAM_ID,
   isTurnsResult,
-  parseGradingRef,
   setDurableStreamOffset,
 } from "./utils.ts";
 import type {
-  CalibrateRef,
   CalibrateResponse,
   CalibrateSession,
   CalibrateStreamMessage,
@@ -42,19 +39,21 @@ import type {
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
+import { useWorkspaceGrade, useWorkspaceRouting } from "./WorkspaceContext.tsx";
 
 function GradePage(
   {
     setNavActions,
     onAppPathChange,
-    activeSessionId,
+    activeWorkspaceId,
     onFlagsUpdate,
     onOptimisticToggleFlag,
     onOptimisticFlagReason,
+    requestedGradeRunId,
   }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
-    activeSessionId?: string | null;
+    activeWorkspaceId?: string | null;
     onFlagsUpdate?: (flags: GradingFlag[]) => void;
     onOptimisticToggleFlag?: (item: {
       refId: string;
@@ -62,189 +61,97 @@ function GradePage(
       turnIndex?: number;
     }) => void;
     onOptimisticFlagReason?: (refId: string, reason: string) => void;
+    requestedGradeRunId?: string | null;
   },
 ) {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [graders, setGraders] = useState<GraderDeckMeta[]>([]);
-  const [sessions, setSessions] = useState<CalibrateSession[]>([]);
+  const workspaceGrade = useWorkspaceGrade();
+  const {
+    loading,
+    error,
+    running,
+    graders,
+    sessions,
+    sessionDetail,
+    loadData,
+    loadSessionDetail,
+    runGrader: runGrade,
+    toggleFlag: toggleGradeFlag,
+    updateFlagReason: updateGradeFlagReason,
+  } = workspaceGrade;
+  const workspaceRouting = useWorkspaceRouting();
+  const initialCalibrateSessionRef = useRef<string | null>(
+    getGradeWorkspaceIdFromLocation(),
+  );
+  const [routeGradeRunId, setRouteGradeRunId] = useState<string | null>(
+    requestedGradeRunId ?? null,
+  );
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
-    null,
+    initialCalibrateSessionRef.current ?? activeWorkspaceId ?? null,
   );
   const [selectedGraderId, setSelectedGraderId] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [sessionDetail, setSessionDetail] = useState<
-    SessionDetailResponse | null
-  >(null);
-  const initialCalibrateSessionRef = useRef<string | null>(
-    getGradeSessionIdFromLocation(),
-  );
-  const initialCalibrateRef = useRef<CalibrateRef>(
-    (() => {
-      const ref = getGradeRefFromLocation();
-      return ref ? parseGradingRef(ref) : {};
-    })(),
-  );
+  useEffect(() => {
+    setSelectedSessionId((prev) => {
+      if (activeWorkspaceId) return activeWorkspaceId;
+      const requested = initialCalibrateSessionRef.current;
+      if (requested && sessions.some((session) => session.id === requested)) {
+        initialCalibrateSessionRef.current = null;
+        return requested;
+      }
+      if (prev && sessions.some((session) => session.id === prev)) return prev;
+      return sessions[0]?.id ?? null;
+    });
+  }, [activeWorkspaceId, sessions]);
+  useEffect(() => {
+    setSelectedGraderId((prev) => {
+      if (prev && graders.some((grader) => grader.id === prev)) return prev;
+      return graders[0]?.id ?? null;
+    });
+  }, [graders]);
 
   const updateCalibratePath = useCallback((
     sessionId: string | null,
-    opts?: { ref?: string | null },
+    opts?: { gradeRunId?: string | null },
   ) => {
-    const targetPath = sessionId ? buildGradePath(sessionId) : "/grade";
+    const targetPath = sessionId
+      ? buildGradePath(sessionId, opts?.gradeRunId ?? undefined)
+      : "/grade";
     if (window.location.pathname === targetPath) return;
-    const url = new URL(window.location.href);
-    url.pathname = targetPath;
-    if (!sessionId) {
-      url.searchParams.delete("sessionId");
-    }
-    if (opts?.ref) {
-      url.searchParams.set("ref", opts.ref);
-    } else {
-      url.searchParams.delete("ref");
-    }
-    window.history.replaceState({}, "", url.toString());
+    window.history.replaceState({}, "", targetPath);
     onAppPathChange?.(targetPath);
   }, [onAppPathChange]);
 
   const loadCalibrateData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams();
-      if (activeSessionId) params.set("sessionId", activeSessionId);
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const res = await fetch(`/api/calibrate${query}`);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json() as CalibrateResponse;
-      const nextGraders = Array.isArray(data.graderDecks)
-        ? data.graderDecks
-        : [];
-      const nextSessions = Array.isArray(data.sessions) ? data.sessions : [];
-      setGraders(nextGraders);
-      setSessions(nextSessions);
-      setSelectedSessionId((prev) => {
-        const requested = initialCalibrateSessionRef.current;
-        if (
-          requested && nextSessions.some((session) => session.id === requested)
-        ) {
-          initialCalibrateSessionRef.current = null;
-          return requested;
-        }
-        if (prev && nextSessions.some((session) => session.id === prev)) {
-          return prev;
-        }
-        return nextSessions[0]?.id ?? null;
-      });
-      setSelectedGraderId((prev) => {
-        if (prev && nextGraders.some((grader) => grader.id === prev)) {
-          return prev;
-        }
-        return nextGraders[0]?.id ?? null;
-      });
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load calibration data",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSessionId]);
+    await loadData({
+      workspaceId: activeWorkspaceId,
+      gradeRunId: requestedGradeRunId ?? null,
+    });
+  }, [activeWorkspaceId, loadData, requestedGradeRunId]);
 
   useEffect(() => {
     loadCalibrateData();
   }, [loadCalibrateData]);
 
   useEffect(() => {
-    if (!activeSessionId) return;
-    if (activeSessionId === selectedSessionId) return;
-    setSelectedSessionId(activeSessionId);
-  }, [activeSessionId, selectedSessionId]);
+    if (!activeWorkspaceId) return;
+    if (activeWorkspaceId === selectedSessionId) return;
+    setSelectedSessionId(activeWorkspaceId);
+  }, [activeWorkspaceId, selectedSessionId]);
 
   useEffect(() => {
-    const streamId = GRADE_STREAM_ID;
-    const streamUrl = buildDurableStreamUrl(
-      streamId,
-      getDurableStreamOffset(streamId),
-    );
-    const source = new EventSource(streamUrl);
-
-    source.onmessage = (event) => {
-      let envelope: { offset?: unknown; data?: unknown } | null = null;
-      try {
-        envelope = JSON.parse(event.data) as {
-          offset?: unknown;
-          data?: unknown;
-        };
-      } catch {
-        return;
-      }
-      if (
-        envelope &&
-        typeof envelope.offset === "number" &&
-        Number.isFinite(envelope.offset)
-      ) {
-        setDurableStreamOffset(streamId, envelope.offset + 1);
-      }
-      const msg = envelope?.data as CalibrateStreamMessage | undefined;
-      if (!msg || msg.type !== "calibrateSession") return;
-      setSessions((prev) => {
-        const next = [...prev];
-        const index = next.findIndex((sess) => sess.id === msg.session.id);
-        if (index >= 0) {
-          next[index] = msg.session;
-          return next;
-        }
-        return [msg.session, ...next];
-      });
-    };
-
-    return () => {
-      source.close();
-    };
-  }, []);
+    if (!selectedSessionId) return;
+    if (routeGradeRunId) return;
+    updateCalibratePath(selectedSessionId);
+  }, [routeGradeRunId, selectedSessionId, updateCalibratePath]);
 
   useEffect(() => {
-    if (selectedSessionId) {
-      updateCalibratePath(selectedSessionId);
-    } else {
-      updateCalibratePath(null);
-    }
-  }, [selectedSessionId, updateCalibratePath]);
+    setRouteGradeRunId(requestedGradeRunId ?? null);
+  }, [requestedGradeRunId]);
 
   useEffect(() => {
-    if (!selectedSessionId) {
-      setSessionDetail(null);
-      return;
-    }
-    let active = true;
-    const loadSessionDetail = async () => {
-      try {
-        setSessionDetail(null);
-        const res = await fetch(
-          `/api/session?sessionId=${encodeURIComponent(selectedSessionId)}`,
-        );
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || res.statusText);
-        }
-        const data = await res.json() as SessionDetailResponse;
-        if (!active) return;
-        setSessionDetail(data);
-      } catch (err) {
-        if (!active) return;
-        setSessionDetail(null);
-        console.error(
-          err instanceof Error ? err.message : "Failed to load session details",
-        );
-      } finally {
-        if (!active) return;
-      }
-    };
-    loadSessionDetail();
-    return () => {
-      active = false;
-    };
-  }, [onFlagsUpdate, onOptimisticToggleFlag, selectedSessionId]);
+    loadSessionDetail(selectedSessionId).catch((err) => {
+      console.error(err);
+    });
+  }, [loadSessionDetail, selectedSessionId]);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -382,49 +289,30 @@ function GradePage(
     return new Set(gradingFlags.map((flag) => flag.refId));
   }, [gradingFlags]);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
-  const prevRunIdsRef = useRef<string[]>([]);
   const [expandedResults, setExpandedResults] = useState<
     Record<string, boolean>
   >({});
-  const [highlightedResult, setHighlightedResult] = useState<string | null>(
-    null,
-  );
   const [flagReasonDrafts, setFlagReasonDrafts] = useState<
     Record<string, string>
   >({});
   const flagReasonTimeoutsRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    const ref = initialCalibrateRef.current;
-    if (!ref.runId) return;
-    const match = runItems.find((item) =>
-      item.runId === ref.runId &&
-      (ref.turnIndex === undefined || item.turnIndex === ref.turnIndex)
-    );
-    if (!match) return;
-    setExpandedResults((prev) => ({ ...prev, [match.key]: true }));
-    setHighlightedResult(match.key);
-    setExpandedRunId(ref.runId);
-  }, [runItems]);
-  useEffect(() => {
-    const latestRunId = runSections[0]?.run.id ?? null;
-    const nextRunIds = runSections.map((section) => section.run.id);
-    const prevRunIds = prevRunIdsRef.current;
-    const hasNewLatest = latestRunId
-      ? !prevRunIds.includes(latestRunId)
-      : false;
-
-    if (!latestRunId) {
+    if (!routeGradeRunId) {
       setExpandedRunId(null);
-    } else if (
-      hasNewLatest ||
-      (expandedRunId && !nextRunIds.includes(expandedRunId)) ||
-      (!expandedRunId && prevRunIds.length === 0)
-    ) {
-      setExpandedRunId(latestRunId);
+      workspaceRouting.setGradeRunId(null);
+      return;
     }
-
-    prevRunIdsRef.current = nextRunIds;
-  }, [expandedRunId, runSections]);
+    setExpandedRunId(routeGradeRunId);
+    workspaceRouting.setGradeRunId(routeGradeRunId);
+  }, [routeGradeRunId, workspaceRouting]);
+  const routeRunNotFound = useMemo(
+    () =>
+      Boolean(
+        routeGradeRunId &&
+          !runSections.some((section) => section.run.id === routeGradeRunId),
+      ),
+    [routeGradeRunId, runSections],
+  );
 
   useEffect(() => {
     return () => {
@@ -442,34 +330,15 @@ function GradePage(
     if (!selectedSessionId) return;
     onOptimisticToggleFlag?.(item);
     try {
-      const res = await fetch("/api/calibrate/flag", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: selectedSessionId,
-          refId: item.refId,
-          runId: item.runId,
-          turnIndex: item.turnIndex,
-        }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || res.statusText);
-      }
-      const data = await res.json() as {
+      const data = await toggleGradeFlag({
+        workspaceId: selectedSessionId,
+        refId: item.refId,
+        runId: item.runId,
+        turnIndex: item.turnIndex,
+      }) as {
         flags?: GradingFlag[];
       };
       if (!data.flags) return;
-      setSessionDetail((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          meta: {
-            ...(prev.meta ?? {}),
-            gradingFlags: data.flags,
-          },
-        };
-      });
       onFlagsUpdate?.(data.flags);
       setFlagReasonDrafts((prev) => {
         const next = { ...prev };
@@ -494,46 +363,37 @@ function GradePage(
         return next;
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to flag grader");
+      console.error(err);
     }
-  }, [selectedSessionId]);
+  }, [
+    onFlagsUpdate,
+    onOptimisticToggleFlag,
+    selectedSessionId,
+    toggleGradeFlag,
+  ]);
 
   const updateFlagReason = useCallback(
     async (refId: string, reason: string) => {
       if (!selectedSessionId) return;
       onOptimisticFlagReason?.(refId, reason);
       try {
-        const res = await fetch("/api/calibrate/flag/reason", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sessionId: selectedSessionId,
-            refId,
-            reason,
-          }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || res.statusText);
-        }
-        const data = await res.json() as { flags?: GradingFlag[] };
+        const data = await updateGradeFlagReason({
+          workspaceId: selectedSessionId,
+          refId,
+          reason,
+        }) as { flags?: GradingFlag[] };
         if (!data.flags) return;
-        setSessionDetail((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            meta: {
-              ...(prev.meta ?? {}),
-              gradingFlags: data.flags,
-            },
-          };
-        });
         onFlagsUpdate?.(data.flags);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save reason");
+        console.error(err);
       }
     },
-    [onFlagsUpdate, onOptimisticFlagReason, selectedSessionId],
+    [
+      onFlagsUpdate,
+      onOptimisticFlagReason,
+      selectedSessionId,
+      updateGradeFlagReason,
+    ],
   );
 
   const scheduleFlagReasonSave = useCallback((
@@ -553,40 +413,30 @@ function GradePage(
   const runGrader = useCallback(async () => {
     if (!selectedSessionId || !selectedGraderId) return;
     try {
-      setRunning(true);
-      const res = await fetch("/api/calibrate/run", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sessionId: selectedSessionId,
-          graderId: selectedGraderId,
-        }),
+      const data = await runGrade({
+        workspaceId: selectedSessionId,
+        graderId: selectedGraderId,
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || res.statusText);
+      const runs = Array.isArray(data.session?.gradingRuns)
+        ? data.session!.gradingRuns
+        : [];
+      const latestRun = runs.length > 0 ? runs[runs.length - 1] : null;
+      if (latestRun?.id) {
+        setExpandedRunId(latestRun.id);
+        setRouteGradeRunId(latestRun.id);
+        workspaceRouting.setGradeRunId(latestRun.id);
+        updateCalibratePath(selectedSessionId, { gradeRunId: latestRun.id });
       }
-      const data = await res.json() as {
-        session?: CalibrateSession;
-      };
-      if (data.session) {
-        setSessions((prev) => {
-          const index = prev.findIndex((sess) => sess.id === data.session!.id);
-          if (index >= 0) {
-            const next = [...prev];
-            next[index] = data.session!;
-            return next;
-          }
-          return [data.session!, ...prev];
-        });
-      }
-      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run grader");
-    } finally {
-      setRunning(false);
+      console.error(err);
     }
-  }, [selectedSessionId, selectedGraderId]);
+  }, [
+    runGrade,
+    selectedGraderId,
+    selectedSessionId,
+    updateCalibratePath,
+    workspaceRouting,
+  ]);
 
   const canRun = Boolean(selectedSessionId && selectedGraderId && !running);
 
@@ -676,6 +526,14 @@ function GradePage(
               {runItems.length === 0 && (
                 <div className="placeholder">
                   No grader runs for this session yet.
+                </div>
+              )}
+              {routeRunNotFound && selectedSessionId && (
+                <div className="placeholder">
+                  Grade run not found for this workspace.{" "}
+                  <a href={buildGradePath(selectedSessionId)}>
+                    Back to grade runs
+                  </a>
                 </div>
               )}
               {runSections.map((section) => {
@@ -811,15 +669,31 @@ function GradePage(
                       aria-expanded={isExpanded}
                       aria-controls={`calibrate-run-body-${section.run.id}`}
                       onClick={() =>
-                        setExpandedRunId((prev) =>
-                          prev === section.run.id ? null : section.run.id
-                        )}
+                        setExpandedRunId((prev) => {
+                          const next = prev === section.run.id
+                            ? null
+                            : section.run.id;
+                          updateCalibratePath(selectedSessionId, {
+                            gradeRunId: next,
+                          });
+                          setRouteGradeRunId(next);
+                          workspaceRouting.setGradeRunId(next);
+                          return next;
+                        })}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
-                          setExpandedRunId((prev) =>
-                            prev === section.run.id ? null : section.run.id
-                          );
+                          setExpandedRunId((prev) => {
+                            const next = prev === section.run.id
+                              ? null
+                              : section.run.id;
+                            updateCalibratePath(selectedSessionId, {
+                              gradeRunId: next,
+                            });
+                            setRouteGradeRunId(next);
+                            workspaceRouting.setGradeRunId(next);
+                            return next;
+                          });
                         }
                       }}
                     >
@@ -877,11 +751,7 @@ function GradePage(
                           return (
                             <div
                               key={item.key}
-                              className={`calibrate-run-section${
-                                highlightedResult === item.key
-                                  ? " trace-row-highlight"
-                                  : ""
-                              }`}
+                              className="calibrate-run-section"
                             >
                               <div className="calibrate-result-header">
                                 <div className="calibrate-result-main">

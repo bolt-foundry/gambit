@@ -7,7 +7,11 @@ Status: RFC (pre-1.0) Owner: Engineering (incl. Gambit-core engineering)
 - Define the 1.0 deck folder contract (required files, meanings, and
   boundaries).
 - Define the canonical `PROMPT.md` TOML frontmatter keys.
-- Make decks composable and fractal: actions/scenarios/graders are decks.
+- Make decks composable and fractal: scenarios/graders are decks, and actions
+  are deck-first with optional direct compute targets.
+- Define a first-class external tool surface (`[[tools]]`) and a reserved future
+  deck MCP declaration surface (`[[mcpServers]]`) that is unsupported in the
+  current runtime phase.
 
 ## Non-goals
 
@@ -19,12 +23,20 @@ Status: RFC (pre-1.0) Owner: Engineering (incl. Gambit-core engineering)
 
 - Deck: A runnable unit represented as a folder (identified by its `PROMPT.md`).
 - Entrypoint: `PROMPT.md` inside a deck folder.
-- Intent/Policy: Non-programmatic guidance used by humans and Gambit Bot to
-  build, grade, calibrate, and update decks.
+- Intent/Policy: Non-programmatic guidance used by humans and Gambit Build
+  Assistant to build, grade, calibrate, and update decks.
 - Root deck: The deck invoked directly to start a run (top of the deck tree).
-- Action deck: A deck invoked as a tool/action by another deck.
+- Action deck: A deck-based action target invoked as a tool/action by another
+  deck.
+- Action target: The executable target of an action. In v1.0 this is either a
+  referenced deck via `[[actions]].path` or a direct compute module via
+  `[[actions]].execute`.
 - Scenario deck: A deck used for synthetic/scripted runs (replaces “test”).
 - Grader deck: A deck used to evaluate runs.
+- MCP server declaration: A named connection declaration under `[[mcpServers]]`
+  reserved for future deck-managed MCP tool wiring.
+- Tool declaration: A model-callable external tool declaration under `[[tools]]`
+  that Gambit routes through runtime hook handling.
 - Snippet: A reusable embed unit (what we previously called card embeds).
 - Stdlib deck: A built-in deck resolved by Gambit from its stdlib deck bundle.
 
@@ -33,17 +45,19 @@ Status: RFC (pre-1.0) Owner: Engineering (incl. Gambit-core engineering)
 Deck roles are determined by invocation:
 
 - **Root deck**: started directly by the user/runner.
-- **Action decks**: referenced via `[[actions]]`.
+- **Action targets**: declared via `[[actions]]`.
 - **Scenario decks**: referenced via `[[scenarios]]`.
 - **Grader decks**: referenced via `[[graders]]`.
 
 Schema requirements:
 
 - Root decks MAY omit `contextSchema` and `responseSchema`.
-- Action/scenario/grader decks MUST declare `contextSchema` and `responseSchema`
-  (these schemas define the IO contract visible to the parent deck).
-  - For action and grader decks, include `gambit://snippets/respond.md` so the
-    deck returns structured output via `gambit_respond`.
+- Action targets and scenario/grader decks MUST declare `contextSchema` and
+  `responseSchema` (these schemas define the IO contract visible to the parent
+  deck).
+  - For action targets that resolve to decks, and for grader decks, include
+    `gambit://snippets/respond.md` so the deck returns structured output via
+    `gambit_respond`.
   - For scenario decks that need model-filled init inputs, include
     `gambit://snippets/init.md` so the model populates any missing required
     context fields before the run.
@@ -68,6 +82,24 @@ Schema requirements:
       (for example by extending the built-in schemas).
   - Built-in schemas are listed below under "Schemas (built-in Gambit
     namespace)" and are the canonical compat surface for 1.0.
+
+Tool surface requirements:
+
+- `[[actions]]` declares executable action targets.
+- `[[tools]]` declares model-callable external tool contracts Gambit does not
+  execute directly.
+- External tool calls MUST dispatch through a runtime tool hook (`onTool`);
+  `onTool` is a runtime API contract, not a `PROMPT.md` frontmatter key.
+- The model-facing tool namespace is shared across `[[actions]]` and
+  `[[tools]]`.
+  - Collision rule: action names shadow tool names.
+  - Shadowed tools MUST emit a load-time warning.
+- `[[tools]].inputSchema` is optional but recommended. When present, it defines
+  the local input validation contract before dispatching to `onTool`.
+- If `[[tools]]` is omitted, only `[[actions]]` are exposed as model-callable
+  tools.
+- Deck-level `[[mcpServers]]` declarations are currently unsupported and MUST
+  fail fast at parse/load time.
 
 ## Snippets (built-in Gambit namespace)
 
@@ -134,7 +166,7 @@ Built-in schemas (v1.0):
 | `gambit://schemas/graders/contexts/turn_tools.zod.ts`         | Per-turn grader context including assistant `tool_calls`.           |
 | `gambit://schemas/graders/contexts/conversation_tools.zod.ts` | Conversation-level grader context including assistant `tool_calls`. |
 | `gambit://schemas/graders/contexts/conversation.zod.ts`       | Schema for full-conversation grader context.                        |
-| `gambit://schemas/scenarios/plain_chat_output.zod.ts`         | Canonical string output for plain-chat scenario/test decks.         |
+| `gambit://schemas/scenarios/plain_chat_output.zod.ts`         | Canonical string output for plain-chat scenario/scenario decks.     |
 
 ## Stdlib decks (built-in Gambit namespace)
 
@@ -171,7 +203,8 @@ Notes (recommended behavior):
   `policy/templates/INTENT.md`.
 - `INTENT.md` explains **what** the deck should accomplish and why: goals,
   non-goals, constraints, tradeoffs, and escalation conditions. It is the source
-  of truth for human alignment and for Gambit Bot decisions about what to build.
+  of truth for human alignment and for Gambit Build Assistant decisions about
+  what to build.
 - `policy/*.md` explains **what must not happen** or what must always hold:
   guardrails, invariants, and lightweight acceptance tests. It is non-
   programmatic and keeps the bot and humans aligned on safe behavior.
@@ -197,7 +230,8 @@ structure.
 
 ### Fractality
 
-- Action/scenario/grader decks follow the same folder contract.
+- Action decks referenced via `[[actions]].path`, plus all scenario/grader
+  decks, follow the same folder contract.
 - Any deck MAY contain its own actions/scenarios/graders.
 
 ## Entrypoint contract (`PROMPT.md`)
@@ -209,65 +243,64 @@ structure.
 
 ### Execution semantics
 
-- If `execute` is set in frontmatter, Gambit MUST run the code path (compute)
-  instead of invoking the model with the `PROMPT.md` body.
-- When `execute` is set, the `PROMPT.md` body is internal-only context and MUST
-  NOT be shown to the model.
-- The code path referenced by `execute` MAY declare `contextSchema` and
-  `responseSchema` (Zod). These schemas are part of the deck’s IO contract and
-  are visible to parent decks (for example, as action tool definitions).
-- If `PROMPT.md` frontmatter declares `contextSchema` and/or `responseSchema`
-  and the `execute` code path also declares schemas, they MUST match. Mismatches
-  are warnings pre-1.0 and errors in 1.0+.
+- In v1.0, top-level `execute` on `PROMPT.md` is removed from the user-authored
+  deck contract and MUST be rejected.
+- `PROMPT.md` entrypoints are prompt-driven: the deck body is model-visible and
+  `[modelParams]` applies when present.
+- Compute-oriented behavior for tool-like steps is modeled through
+  `[[actions]].execute` (see action execution contract below), not a root-level
+  `execute` key.
 
 ### Execution contract (v1.0)
 
-The 1.0 execution contract locks how model-driven and code-driven decks behave,
-so bot and simulator surfaces can rely on stable semantics.
+The 1.0 execution contract locks how prompt-driven decks and action targets
+behave, so bot and simulator surfaces can rely on stable semantics.
 
 **Execution modes**
 
-- **Prompt-only deck**: `execute` is absent. Gambit executes by invoking the
-  model using `PROMPT.md` as the canonical prompt body (after snippet
-  interpolation), with `[modelParams]` applied when provided.
-- **Execute deck**: `execute` is present. Gambit executes by running the module
-  defined at `execute`; it does **not** invoke the model using `PROMPT.md`.
+- **Prompt deck**: Gambit invokes the model using `PROMPT.md` as the canonical
+  prompt body (after snippet interpolation), with `[modelParams]` applied when
+  provided.
+- **Action target via path**: `[[actions]].path` references a deck
+  `.../PROMPT.md`; runtime behavior is delegated to that action deck.
+- **Action target via execute**: `[[actions]].execute` references a compute
+  module; runtime executes code directly for that action invocation.
 
-**Mutual exclusivity**
+**Action target consistency**
 
-- `execute` and `[modelParams]` are mutually exclusive. If both are present,
-  this is a warning pre-1.0 and an error in 1.0+.
-
-**Schema consistency**
-
-- If `execute` declares schemas and `PROMPT.md` declares schemas, they MUST
-  match. “Match” is strict and **deep**:
-  - If the schema is an object schema, it must have the exact same field set at
-    every level, with the same required/optional status and types (no extra
-    fields on either side).
-  - If the schema is not an object schema, it must have the same top-level type
-    (for example, both string schemas). Mismatches are warnings pre-1.0 and
-    errors in 1.0+.
-- For action/scenario/grader decks, `contextSchema` and `responseSchema` are
-  required regardless of execution mode.
-
-**What `PROMPT.md` does in execute mode**
-
-- The body is **internal-only** and is not shown to the model.
-- The body may include notes for humans or for Gambit Bot, but it does not alter
-  runtime behavior directly.
+- Every action declaration MUST provide exactly one executable target:
+  - `path` **or** `execute` (mutually exclusive).
+- `name` and `description` remain required for all actions.
+- Action IO contract (`contextSchema` and `responseSchema`) is always required
+  at runtime:
+  - `path` actions obtain schemas from the referenced action deck.
+  - `execute` actions may declare schemas inline on `[[actions]]`, in the
+    execute module, or both.
+  - If schemas are declared in both places, they MUST match deeply:
+    - object schemas must have the same recursive fields/types/requiredness.
+    - non-object schemas must have the same top-level type.
+- For scenario/grader decks, `contextSchema` and `responseSchema` remain
+  required regardless of execution style.
 
 **Tool exposure**
 
-- For action decks, the resolved `contextSchema` + `responseSchema` define the
-  tool signature exposed to parent decks, regardless of execution mode.
+- For deck-backed actions and execute-backed actions, the resolved
+  `contextSchema` + `responseSchema` define the tool signature exposed to parent
+  decks.
+- `[[actions]]` are always model-callable.
+- `[[tools]]` add external model-callable tool declarations.
+- Effective model-facing tools are `[[actions]]` plus non-shadowed `[[tools]]`.
+  - On name collision, `[[actions]]` shadow `[[tools]]`.
+  - Shadowed `[[tools]]` remain invalid for model dispatch and MUST emit a
+    load-time warning.
 
 **Runtime return**
 
-- Execute decks MUST return data that conforms to `responseSchema`.
-- If the deck includes the respond snippet (for example,
-  `gambit://snippets/respond.md`), callers SHOULD assume the deck returns a
-  `gambit_respond`-compatible envelope.
+- Action targets MUST return data that conforms to the resolved
+  `responseSchema`.
+- If the underlying action path includes the respond snippet (for example,
+  `gambit://snippets/respond.md`) or returns an explicit envelope, callers
+  SHOULD assume `gambit_respond`-compatible envelope semantics.
 
 **Action result envelope**
 
@@ -281,35 +314,46 @@ so bot and simulator surfaces can rely on stable semantics.
 - `payload` is the deck output validated against the action deck’s
   `responseSchema`. If the action deck returns a bare value, it becomes
   `payload`.
-- If the action deck returns an envelope (for example via `gambit_respond`), its
-  `status`, `message`, `code`, and `meta` are preserved.
+- If the action target returns an envelope (for example via `gambit_respond`),
+  its `status`, `message`, `code`, and `meta` are preserved.
 
-### Execute module interface
+**External tool result envelope (`onTool`)**
 
-The `execute` path points to a TypeScript module that default-exports a Gambit
-compute deck definition (same pattern as current TypeScript action decks).
+- `onTool` receives external tool calls and returns either:
+  - call input includes `name`, `args`, and stable run/action metadata (`runId`,
+    `actionCallId`, optional `parentActionCallId`, `deckPath`),
+  - envelope form: `{ payload, status?, message?, code?, meta? }`, or
+  - bare payload (runtime wraps it as `payload`).
+- If `onTool` is missing for an invoked external tool, runtime MUST fail the
+  tool call with an explicit unsupported external-tool error.
+- If `onTool` throws, runtime MUST return an error envelope for that tool call
+  (status >= 400) and continue trace emission.
+
+### Action Execute Module Interface
+
+`[[actions]].execute` points to a TypeScript module that default-exports a
+Gambit compute deck definition.
 
 Minimum expectations:
 
 - The module MUST `export default` a Gambit deck definition (i.e., created via
   `defineDeck({ ... })`).
-- The deck MUST provide a compute entrypoint function: `run(ctx)`.
+- The deck MUST provide a compute entrypoint function: `run(ctx)` (canonical).
 - The compute entrypoint MAY be sync or async and receives `ctx.input` (the
   validated input) plus helpers like `ctx.log(...)` and `ctx.spawnAndWait(...)`.
-
-Note: In v1.0 we standardize on `run(ctx)` (not `execute(ctx)`) to avoid
-confusion with the `execute = "..."` frontmatter key.
 
 ### Canonical keys (v1.0)
 
 Top-level keys:
 
 - `label` (string, optional)
+- `startMode` (`"assistant" | "user"`, optional)
 - `contextSchema` (string path, optional for root; required for
   action/scenario/grader decks)
 - `responseSchema` (string path, optional for root; required for
   action/scenario/grader decks)
-- `execute` (string path, optional)
+- `respond` (boolean, optional)
+- `allowEnd` (boolean, optional)
 
 Tables:
 
@@ -317,7 +361,10 @@ Tables:
   - `model` (string or array of strings; if array, it is an ordered fallback
     list)
   - Supported keys in v1.0: `temperature`, `top_p`, `frequency_penalty`,
-    `presence_penalty`, `max_tokens`.
+    `presence_penalty`, `max_tokens`, `reasoning`.
+  - `reasoning` (object, optional)
+    - `effort`: `none | low | medium | high | xhigh`
+    - `summary`: `concise | detailed | auto`
   - `additionalParams` (object, optional) is reserved for provider-specific
     extensions. Keys outside the supported list MUST live under
     `additionalParams` to be passed through. Providers MAY ignore or warn on
@@ -325,21 +372,36 @@ Tables:
     - Values in `additionalParams` MUST be JSON-serializable.
     - If a key is present both as a supported top-level field and inside
       `additionalParams`, the supported top-level field wins.
+- `[guardrails]` (optional)
+  - `maxDepth` (number)
+  - `maxPasses` (number)
+  - `timeoutMs` (number)
+- `[permissions]` (optional)
+  - `read`, `write`, `net`, `env` support boolean or string arrays.
+  - `[permissions.run]` supports `commands` and `paths`.
+- `[handlers.onBusy]`, `[handlers.onIdle]`, `[handlers.onError]` (optional)
+  - `onBusy`/`onIdle` support `delayMs`, `repeatMs`, `label`, `path`.
+  - `onError` supports `label`, `path`.
 
 Arrays (canonical in v1.0):
 
 - `[[actions]]` (optional)
   - `name` (string, required)
-  - `path` (string, required; points directly to the referenced deck’s
-    `PROMPT.md`)
   - `description` (string, required; tells the model when/why to call the
     action)
+  - exactly one of:
+    - `path` (string; points directly to the referenced deck’s `PROMPT.md`)
+    - `execute` (string; points to a compute module)
+  - `contextSchema` (string, optional; primarily for `execute` actions)
+  - `responseSchema` (string, optional; primarily for `execute` actions)
+  - `permissions` (optional)
   - `label` (string, optional)
   - `id` (string, optional)
 
 - `[[scenarios]]` (optional)
   - `path` (string, required; points directly to the referenced deck’s
     `PROMPT.md`)
+  - `permissions` (optional)
   - `label` (string, optional)
   - `description` (string, optional)
   - `id` (string, optional)
@@ -347,14 +409,33 @@ Arrays (canonical in v1.0):
 - `[[graders]]` (optional)
   - `path` (string, required; points directly to the referenced deck’s
     `PROMPT.md`)
+  - `permissions` (optional)
   - `label` (string, optional)
   - `description` (string, optional)
   - `id` (string, optional)
 
+- `[[tools]]` (optional)
+  - `name` (string, required; unique across effective model-facing tool names
+    after action-shadowing)
+  - `inputSchema` (string, optional; local pre-dispatch validation schema)
+  - `description` (string, optional; model-facing description)
+  - `label` (string, optional)
+  - `id` (string, optional)
+
+Reserved (future, not currently executable):
+
+- `[[mcpServers]]` (reserved)
+  - Declarations are parsed as reserved syntax only.
+  - Any deck containing `[[mcpServers]]` MUST fail fast as unsupported in the
+    current runtime phase.
+
 ### Path resolution
 
-- `path` MUST point directly to a `PROMPT.md` file.
-- Deck folder paths are non-canonical in v1.0.
+- `[[actions]].path`, `[[scenarios]].path`, and `[[graders]].path` MUST point
+  directly to a `PROMPT.md` file.
+- Deck folder paths are non-canonical in v1.0 for `path` fields.
+- `[[actions]].execute` is resolved relative to the referencing `PROMPT.md`.
+- `[[tools]].inputSchema` is resolved relative to the referencing `PROMPT.md`.
 - Relative file paths are resolved relative to the referencing deck’s
   `PROMPT.md`.
 - Stdlib deck paths use `gambit://decks/.../PROMPT.md`.
@@ -382,8 +463,11 @@ sync, so in practice the enforcement boundary is the same.
 - In versions `>= 1.0.0`, deprecated keys/URIs MUST be treated as errors.
 
 - Legacy keys (`actionDecks`, `testDecks`, `graderDecks`) are deprecated.
-- In v1.0, the canonical arrays are `[[actions]]`, `[[scenarios]]`, and
-  `[[graders]]`.
+- Top-level `execute` in `PROMPT.md` is removed in v1.0 for user-authored decks.
+- In v1.0, the canonical arrays are `[[actions]]`, `[[scenarios]]`,
+  `[[graders]]`, and `[[tools]]`.
+- `[[mcpServers]]` is reserved in v1.0 and MUST error as unsupported in the
+  current runtime phase.
 - Legacy built-in card/snippet URIs (`gambit://cards/*.card.md`) and legacy
   markers (`gambit://init`, `gambit://respond`, `gambit://end`) are deprecated;
   use `gambit://snippets/*.md`.

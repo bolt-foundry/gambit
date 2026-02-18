@@ -62,10 +62,22 @@ export function resolveProjectRoot(startDir: string): string | undefined {
 
 export function defaultSessionRoot(deckPath: string): string {
   const resolvedDeckPath = path.resolve(deckPath);
+  const marker =
+    `${path.SEPARATOR}.gambit${path.SEPARATOR}workspaces${path.SEPARATOR}`;
+  const markerIndex = resolvedDeckPath.lastIndexOf(marker);
+  if (markerIndex >= 0) {
+    const suffix = resolvedDeckPath.slice(markerIndex + marker.length);
+    const markerSegments = suffix.split(path.SEPARATOR).filter(Boolean);
+    if (markerSegments.length >= 2 && markerSegments[1] === "deck") {
+      return path.resolve(
+        resolvedDeckPath.slice(0, markerIndex + marker.length),
+      );
+    }
+  }
   const deckDir = path.dirname(resolvedDeckPath);
   const projectRoot = findProjectRoot(deckDir);
   const baseDir = projectRoot ?? deckDir;
-  return path.join(baseDir, ".gambit", "sessions");
+  return path.join(baseDir, ".gambit", "workspaces");
 }
 
 export function defaultTestBotStatePath(deckPath: string): string {

@@ -20,25 +20,25 @@ export OPENROUTER_API_KEY="your-key-here"
 From this folder:
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli serve ./decks/root.deck.md
+deno run -A jsr:@bolt-foundry/gambit/cli serve ./decks/PROMPT.md
 ```
 
 ## Run in the CLI
 
 ```bash
-deno run -A jsr:@bolt-foundry/gambit/cli run ./decks/root.deck.md \
+deno run -A jsr:@bolt-foundry/gambit/cli run ./decks/PROMPT.md \
   --context "$(cat ./sample_input.json)" \
   --message '"Hi, this is Nina. I need to move my physical."' --stream
 ```
 
-## Run a test bot (UI)
+## Run a scenario (UI)
 
 1. Open the simulator UI and go to the "Test" tab.
 2. Pick a persona from the list (for example, "New patient intake").
-3. Click "Run test bot".
+3. Click "Run scenario".
 
 ## Notes
 
 - Root decks live in `decks/` and action decks live in `actions/`.
 - Test personas are listed in `cards/test_decks.card.md`.
-- The test bot hangup card is `tests/cards/test_bot_hangup.card.md`.
+- The scenario hangup card is `tests/cards/test_bot_hangup.card.md`.

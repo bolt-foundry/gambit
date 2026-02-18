@@ -125,3 +125,39 @@ Deno.test("google chat returns tool calls", async () => {
   assertEquals(result.toolCalls[0].name, "lookup");
   assertEquals(result.toolCalls[0].args, { query: "hi" });
 });
+
+Deno.test("google responses forwards abort signal to client", async () => {
+  let seenSignal: AbortSignal | undefined;
+  const client = {
+    chat: {
+      completions: {
+        create: (
+          _params: Record<string, unknown>,
+          options?: { signal?: AbortSignal },
+        ) => {
+          seenSignal = options?.signal;
+          return Promise.resolve(buildChatCompletionFixture());
+        },
+      },
+    },
+  } as OpenAIClient;
+  const provider = createGoogleProvider({
+    apiKey: "test",
+    client,
+  });
+  const controller = new AbortController();
+
+  await provider.responses?.({
+    request: {
+      model: "google/gemini-1.5-flash",
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+    },
+    signal: controller.signal,
+  });
+
+  assertEquals(seenSignal, controller.signal);
+});

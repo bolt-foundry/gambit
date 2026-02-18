@@ -21,9 +21,9 @@ import type {
   FeedbackEntry,
   ModelMessage,
   NormalizedSchema,
+  ReasoningDetail,
   RespondInfo,
   SchemaResponse,
-  ToolCallSummary,
   TraceEvent,
 } from "./utils.ts";
 
@@ -32,9 +32,10 @@ export type ConversationMessage = {
   message: ModelMessage;
   feedback?: FeedbackEntry;
   respond?: RespondInfo;
+  reasoning?: ReasoningDetail;
 };
 
-export function useHttpSchema(opts?: { sessionId?: string | null }) {
+export function useHttpSchema(opts?: { workspaceId?: string | null }) {
   const [schemaResponse, setSchemaResponse] = useState<SchemaResponse | null>(
     null,
   );
@@ -46,7 +47,7 @@ export function useHttpSchema(opts?: { sessionId?: string | null }) {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (opts?.sessionId) params.set("sessionId", opts.sessionId);
+      if (opts?.workspaceId) params.set("workspaceId", opts.workspaceId);
       const query = params.toString() ? `?${params.toString()}` : "";
       const res = await fetch(`/schema${query}`);
       if (!res.ok) throw new Error(res.statusText);
@@ -57,7 +58,7 @@ export function useHttpSchema(opts?: { sessionId?: string | null }) {
     } finally {
       setLoading(false);
     }
-  }, [opts?.sessionId]);
+  }, [opts?.workspaceId]);
 
   useEffect(() => {
     refresh();
@@ -125,8 +126,15 @@ export function CopyBadge(props: {
 export function ConversationView(props: {
   messages: ConversationMessage[];
   header?: React.ReactNode;
-  onScore: (messageRefId: string, score: number | null) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
+  onScore: (
+    messageRefId: string,
+    score: number | null,
+  ) => void | Promise<void>;
+  onReasonChange: (
+    messageRefId: string,
+    score: number,
+    reason: string,
+  ) => void | Promise<void>;
   emptyState?: React.ReactNode;
 }) {
   const { messages, header, onScore, onReasonChange, emptyState } = props;
@@ -165,16 +173,29 @@ export function ConversationView(props: {
 
 export function MessageBubble(props: {
   entry: ConversationMessage;
-  onScore: (messageRefId: string, score: number | null) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
+  onScore: (
+    messageRefId: string,
+    score: number | null,
+  ) => void | Promise<void>;
+  onReasonChange: (
+    messageRefId: string,
+    score: number,
+    reason: string,
+  ) => void | Promise<void>;
 }) {
   const { entry, onScore, onReasonChange } = props;
+  const hasReasoning = Boolean(entry.reasoning);
   const role = entry.message.role;
   const isRespond = Boolean(entry.respond);
   const isTool = role === "tool" && !isRespond;
   const className = classNames(
     "bubble",
-    role === "user" ? "bubble-user" : "bubble-assistant",
+    role === "user"
+      ? "bubble-user"
+      : role === "system"
+      ? "bubble-system"
+      : "bubble-assistant",
+    hasReasoning && "bubble-reasoning",
   );
   const messageRefId = entry.id;
   const content = entry.message.content ?? "";
@@ -182,6 +203,9 @@ export function MessageBubble(props: {
     <div className="chat-row">
       <div className={className}>
         <div className="bubble-role">{role}</div>
+        {hasReasoning && entry.reasoning && (
+          <ReasoningBubble detail={entry.reasoning} />
+        )}
         {isRespond && (
           <div className="respond-summary">
             <div className="respond-meta">
@@ -217,23 +241,23 @@ export function MessageBubble(props: {
             )}
           </div>
         )}
-        {!isRespond && content && !isTool && (
+        {!hasReasoning && !isRespond && content && !isTool && (
           <div
             className="bubble-text"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
           />
         )}
-        {!isRespond && content && isTool && (
+        {!hasReasoning && !isRespond && content && isTool && (
           <pre className="bubble-json">
             {formatJson(content)}
           </pre>
         )}
-        {!content && entry.message.tool_calls && (
+        {!hasReasoning && !content && entry.message.tool_calls && (
           <pre className="bubble-json">
             {formatJson(entry.message.tool_calls)}
           </pre>
         )}
-        {messageRefId && role !== "user" && (
+        {messageRefId && role === "assistant" && !hasReasoning && (
           <FeedbackControls
             messageRefId={messageRefId}
             feedback={entry.feedback}
@@ -246,29 +270,62 @@ export function MessageBubble(props: {
   );
 }
 
+export function ReasoningBubble(props: { detail: ReasoningDetail }) {
+  const { detail } = props;
+  const meta: string[] = [];
+  if (detail.model) meta.push(detail.model);
+  if (detail.actionCallId) meta.push(`call ${detail.actionCallId}`);
+  return (
+    <div className="reasoning-bubble">
+      <div className="reasoning-header">
+        <Badge variant="ghost">Reasoning</Badge>
+        {meta.length > 0 && (
+          <span className="reasoning-meta">{meta.join(" · ")}</span>
+        )}
+      </div>
+      <div className="reasoning-text">{detail.text}</div>
+      <details className="reasoning-details">
+        <summary>Details</summary>
+        <pre className="bubble-json">
+          {formatJson(detail.event)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 export function FeedbackControls(props: {
   messageRefId: string;
   feedback?: FeedbackEntry;
-  onScore: (messageRefId: string, score: number | null) => void;
-  onReasonChange: (messageRefId: string, score: number, reason: string) => void;
+  onScore: (
+    messageRefId: string,
+    score: number | null,
+  ) => void | Promise<void>;
+  onReasonChange: (
+    messageRefId: string,
+    score: number,
+    reason: string,
+  ) => void | Promise<void>;
 }) {
   const { messageRefId, feedback, onScore, onReasonChange } = props;
   const [reason, setReason] = useState(feedback?.reason ?? "");
   const [opened, setOpened] = useState(false);
   const [localScore, setLocalScore] = useState<number | null>(null);
   const [status, setStatus] = useState<
-    "idle" | "unsaved" | "saving" | "saved"
+    "idle" | "unsaved" | "saving" | "saved" | "error"
   >("idle");
-  const lastSentRef = useRef<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const requestSeqRef = useRef(0);
 
   useEffect(() => {
     setReason(feedback?.reason ?? "");
-    if (feedback?.reason !== undefined) {
+    if (typeof feedback?.score === "number" || feedback?.reason !== undefined) {
       setStatus("saved");
     } else {
       setStatus("idle");
     }
-  }, [feedback?.reason]);
+    setErrorMessage(null);
+  }, [feedback?.reason, feedback?.score]);
 
   useEffect(() => {
     if (typeof feedback?.score === "number") {
@@ -281,23 +338,51 @@ export function FeedbackControls(props: {
     ? feedback.score
     : localScore;
 
+  const persistScore = useCallback(async (score: number | null) => {
+    const requestSeq = ++requestSeqRef.current;
+    setStatus("saving");
+    setErrorMessage(null);
+    try {
+      await Promise.resolve(onScore(messageRefId, score));
+      if (requestSeqRef.current !== requestSeq) return;
+      setStatus(score === null ? "idle" : "saved");
+    } catch (err) {
+      if (requestSeqRef.current !== requestSeq) return;
+      setStatus("error");
+      setErrorMessage(
+        err instanceof Error ? err.message : "Failed to save feedback",
+      );
+    }
+  }, [messageRefId, onScore]);
+
+  const persistReason = useCallback(
+    async (score: number, nextReason: string) => {
+      const requestSeq = ++requestSeqRef.current;
+      setStatus("saving");
+      setErrorMessage(null);
+      try {
+        await Promise.resolve(onReasonChange(messageRefId, score, nextReason));
+        if (requestSeqRef.current !== requestSeq) return;
+        setStatus("saved");
+      } catch (err) {
+        if (requestSeqRef.current !== requestSeq) return;
+        setStatus("error");
+        setErrorMessage(
+          err instanceof Error ? err.message : "Failed to save feedback reason",
+        );
+      }
+    },
+    [messageRefId, onReasonChange],
+  );
+
   useEffect(() => {
     if (typeof effectiveScore !== "number") return;
     if (status !== "unsaved") return;
     const handle = window.setTimeout(() => {
-      setStatus("saving");
-      lastSentRef.current = reason;
-      onReasonChange(messageRefId, effectiveScore, reason);
+      persistReason(effectiveScore, reason);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [effectiveScore, status, reason, onReasonChange, messageRefId]);
-
-  useEffect(() => {
-    if (status !== "saving") return;
-    if (feedback?.reason === reason && lastSentRef.current === reason) {
-      setStatus("saved");
-    }
-  }, [status, feedback?.reason, reason]);
+  }, [effectiveScore, persistReason, reason, status]);
 
   const showReason = opened ||
     typeof effectiveScore === "number" ||
@@ -319,13 +404,12 @@ export function FeedbackControls(props: {
                 setLocalScore(null);
                 setOpened(false);
                 setReason("");
-                setStatus("idle");
-                onScore(messageRefId, null);
+                persistScore(null);
                 return;
               }
               setOpened(true);
               setLocalScore(value);
-              onScore(messageRefId, value);
+              persistScore(value);
             }}
           >
             {value}
@@ -341,13 +425,12 @@ export function FeedbackControls(props: {
             onChange={(e) => {
               setReason(e.target.value);
               setStatus("unsaved");
+              setErrorMessage(null);
             }}
             onBlur={() => {
               if (typeof effectiveScore !== "number") return;
               if (status !== "unsaved") return;
-              setStatus("saving");
-              lastSentRef.current = reason;
-              onReasonChange(messageRefId, effectiveScore, reason);
+              persistReason(effectiveScore, reason);
             }}
           />
           <div
@@ -355,12 +438,34 @@ export function FeedbackControls(props: {
               "feedback-status",
               status === "saving" && "saving",
               status === "unsaved" && "unsaved",
+              status === "error" && "error",
             )}
           >
             {status === "saving" && "Saving…"}
             {status === "saved" && "Saved"}
             {status === "unsaved" && "Unsaved changes…"}
+            {status === "error" && (
+              <>
+                Save failed{" "}
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => {
+                    if (typeof effectiveScore === "number") {
+                      persistReason(effectiveScore, reason);
+                      return;
+                    }
+                    persistScore(null);
+                  }}
+                >
+                  Retry
+                </button>
+              </>
+            )}
           </div>
+          {status === "error" && errorMessage && (
+            <div className="error">{errorMessage}</div>
+          )}
         </>
       )}
     </div>
@@ -371,6 +476,118 @@ export function TraceList(props: { traces: TraceEvent[] }) {
   const { traces } = props;
   const ordered = traces;
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const codexHighlights = useMemo(() => {
+    const asRecord = (value: unknown): Record<string, unknown> | null => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        return value as Record<string, unknown>;
+      }
+      return null;
+    };
+    const asString = (value: unknown): string =>
+      typeof value === "string" ? value : "";
+    const asOptionalString = (value: unknown): string | undefined => {
+      const text = asString(value).trim();
+      return text.length > 0 ? text : undefined;
+    };
+    const extractPayload = (value: unknown): Record<string, unknown> | null => {
+      const record = asRecord(value);
+      if (!record) return null;
+      if (record.type === "codex.event") {
+        return asRecord(record.payload);
+      }
+      return record;
+    };
+    const summaries: Array<{
+      id?: string;
+      text: string;
+      raw: Record<string, unknown>;
+    }> = [];
+    const toolItems: Array<{
+      id?: string;
+      name?: string;
+      status?: string;
+      args?: unknown;
+      result?: unknown;
+      error?: unknown;
+      raw: Record<string, unknown>;
+    }> = [];
+    for (const trace of ordered) {
+      if (!trace || typeof trace !== "object") continue;
+      if (trace.type !== "model.stream.event") continue;
+      const event = (trace as { event?: unknown }).event;
+      const payload = extractPayload(event);
+      if (!payload) continue;
+      const payloadType = asString(payload.type);
+      if (payloadType.startsWith("response.reasoning")) {
+        let text = "";
+        if (payloadType === "response.reasoning.delta") {
+          text = asString(payload.delta);
+        } else if (payloadType === "response.reasoning.done") {
+          text = asString(payload.text);
+        } else if (
+          payloadType === "response.reasoning_summary_text.delta"
+        ) {
+          text = asString(payload.delta);
+        } else if (
+          payloadType === "response.reasoning_summary_text.done"
+        ) {
+          text = asString(payload.text);
+        } else if (
+          payloadType === "response.reasoning_summary_part.added" ||
+          payloadType === "response.reasoning_summary_part.done"
+        ) {
+          const part = asRecord(payload.part);
+          text = part ? asString(part.text) : "";
+        }
+        if (text.trim()) {
+          summaries.push({
+            id: asOptionalString(payload.item_id),
+            text: text.trim(),
+            raw: payload,
+          });
+        }
+        continue;
+      }
+      const item = asRecord(payload.item);
+      if (!item) continue;
+      const itemType = asString(item.type);
+      if (!itemType) continue;
+      if (itemType === "reasoning") {
+        let text = "";
+        const summary = item.summary;
+        if (Array.isArray(summary)) {
+          text = summary.map((part) => {
+            const partRecord = asRecord(part);
+            return partRecord && typeof partRecord.text === "string"
+              ? partRecord.text
+              : "";
+          }).join("");
+        } else if (typeof summary === "string") {
+          text = summary;
+        } else if (typeof item.text === "string") {
+          text = item.text;
+        }
+        if (text.trim()) {
+          summaries.push({
+            id: asOptionalString(item.id),
+            text: text.trim(),
+            raw: item,
+          });
+        }
+      } else if (itemType === "function_call" || itemType === "mcp_tool_call") {
+        toolItems.push({
+          id: asOptionalString(item.id),
+          name: asOptionalString(item.name) ?? asOptionalString(item.tool),
+          status: asOptionalString(item.status),
+          args: item.arguments,
+          result: item.result,
+          error: item.error,
+          raw: item,
+        });
+      }
+    }
+    return { summaries, toolItems };
+  }, [ordered]);
   const entries = useMemo(() => {
     const depthMap = new Map<string, number>();
     return ordered.map((trace) => {
@@ -415,6 +632,61 @@ export function TraceList(props: { traces: TraceEvent[] }) {
   return (
     <div className="trace-panel" ref={panelRef}>
       <h3>Traces & Tools</h3>
+      {(codexHighlights.summaries.length > 0 ||
+        codexHighlights.toolItems.length > 0) && (
+        <div className="trace-codex-highlights">
+          {codexHighlights.summaries.length > 0 && (
+            <details open>
+              <summary>
+                Codex reasoning summaries ({codexHighlights.summaries.length})
+              </summary>
+              <div className="trace-list">
+                {codexHighlights.summaries.map((entry, idx) => (
+                  <div key={`codex-summary-${entry.id ?? idx}`}>
+                    <div className="trace-text">{entry.text}</div>
+                    <pre className="trace-json">{formatJson(entry.raw)}</pre>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+          {codexHighlights.toolItems.length > 0 && (
+            <details>
+              <summary>
+                Codex tool calls ({codexHighlights.toolItems.length})
+              </summary>
+              <div className="trace-list">
+                {codexHighlights.toolItems.map((entry, idx) => (
+                  <div key={`codex-tool-${entry.id ?? idx}`}>
+                    <div className="trace-text">
+                      {entry.name ?? "tool call"}
+                      {entry.status ? ` · ${entry.status}` : ""}
+                    </div>
+                    {(entry.args !== undefined ||
+                      entry.result !== undefined ||
+                      entry.error !== undefined) && (
+                      <pre className="trace-json">
+                        {formatJson({
+                          args: entry.args,
+                          result: entry.result,
+                          error: entry.error,
+                        })}
+                      </pre>
+                    )}
+                    {(entry.args === undefined &&
+                      entry.result === undefined &&
+                      entry.error === undefined) && (
+                      <pre className="trace-json">
+                        {formatJson(entry.raw)}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
       <div className="trace-list">
         {entries.map(({ trace, depth }, idx) => {
           const isUser = trace.type === "message.user";
@@ -444,90 +716,6 @@ export function TraceList(props: { traces: TraceEvent[] }) {
         })}
         {traces.length === 0 && (
           <div className="trace-empty">No trace events yet.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function ToolCallField(props: {
-  label: string;
-  value: unknown;
-  isError?: boolean;
-}) {
-  const { label, value, isError } = props;
-  const text = formatJson(value);
-  return (
-    <div className="tool-call-field">
-      <div className="tool-call-field-label">{label}</div>
-      <pre
-        className={classNames(
-          "trace-json",
-          isError && "tool-call-error",
-        )}
-      >
-        {text}
-      </pre>
-    </div>
-  );
-}
-
-export function ToolCallBubble(props: { call: ToolCallSummary }) {
-  const { call } = props;
-  const [open, setOpen] = useState(false);
-  const statusLabel = call.status === "completed"
-    ? "Completed"
-    : call.status === "error"
-    ? "Error"
-    : call.status === "running"
-    ? "Running"
-    : "Pending";
-  const indentStyle = call.depth && call.depth > 0
-    ? { marginLeft: call.depth * 12 }
-    : undefined;
-  return (
-    <div className="imessage-row tool-call-row" style={indentStyle}>
-      <div className="imessage-bubble tool-call-bubble">
-        <button
-          type="button"
-          className="tool-call-collapse"
-          onClick={() => setOpen((prev) => !prev)}
-        >
-          <div className="tool-call-header">
-            <div className="tool-call-title" title={call.id}>
-              Tool call: <strong>{call.name ?? call.id}</strong>
-            </div>
-            <Badge status={call.status}>{statusLabel}</Badge>
-            {call.handledError && (
-              <div className="tool-call-handled">Error handled</div>
-            )}
-          </div>
-          <div className="tool-call-expand">
-            {open ? "Hide details" : "Show details"}
-          </div>
-        </button>
-        {open && (
-          <div className="tool-call-detail">
-            {call.args !== undefined && (
-              <ToolCallField label="Arguments" value={call.args} />
-            )}
-            {call.result !== undefined && (
-              <ToolCallField label="Result" value={call.result} />
-            )}
-            {call.error !== undefined && (
-              <ToolCallField label="Error" value={call.error} isError />
-            )}
-            {call.handledError && (
-              <>
-                <div className="tool-call-divider" />
-                <ToolCallField
-                  label="Handled error"
-                  value={call.handledError}
-                  isError
-                />
-              </>
-            )}
-          </div>
         )}
       </div>
     </div>

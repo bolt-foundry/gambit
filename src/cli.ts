@@ -9,16 +9,7 @@ import * as path from "@std/path";
 import { load as loadDotenv } from "@std/dotenv";
 import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
-import {
-  createOllamaProvider,
-  ensureOllamaModel,
-  fetchOllamaTags,
-  OLLAMA_PREFIX,
-} from "./providers/ollama.ts";
-import { createOpenRouterProvider } from "./providers/openrouter.ts";
-import { createGoogleProvider } from "./providers/google.ts";
-import { createProviderRouter } from "./providers/router.ts";
-import { createProviderMatchers } from "./model_matchers.ts";
+import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { handleCheckCommand } from "./commands/check.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { handleServeCommand } from "./commands/serve.ts";
@@ -26,7 +17,6 @@ import { runTestBotLoop } from "./commands/test_bot.ts";
 import { runGraderAgainstState } from "./commands/grade.ts";
 import { exportBundle } from "./commands/export.ts";
 import { handleDemoCommand } from "./commands/demo.ts";
-import { handleInitCommand } from "./commands/init.ts";
 import { parseBotInput, parseContext, parseMessage } from "./cli_utils.ts";
 import {
   isHelpCommand,
@@ -37,43 +27,47 @@ import {
   printUsage,
 } from "./cli_args.ts";
 import {
-  createModelAliasResolver,
   loadProjectConfig,
+  resolveWorkerSandboxSetting,
   resolveWorkspacePermissions,
 } from "./project_config.ts";
 import { resolveProjectRoot } from "./cli_utils.ts";
+import { createDefaultedRuntime } from "./default_runtime.ts";
 
 const logger = console;
-const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const BOT_ROOT_ENV = "GAMBIT_BOT_ROOT";
 
-type ModelCandidate = {
-  model: string;
-  params?: Record<string, unknown>;
-  alias?: string;
-};
+function printInitRemovedGuidance() {
+  logger.error(
+    "The `gambit init` command has been removed and is no longer supported.",
+  );
+  logger.error("Use `gambit serve <deck>` as the onboarding path.");
+}
 
-type ProviderAvailability = {
-  available: boolean;
-  reason?: string;
-};
-
-type ProviderCapability = {
-  name: string;
-  matches: (model: string) => boolean;
-  isAvailable: (model: string, opts: { allowPull: boolean }) => Promise<
-    ProviderAvailability
-  >;
-};
-
-function mergeParams(
-  aliasParams?: Record<string, unknown>,
-  baseParams?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  if (aliasParams && baseParams) {
-    return { ...aliasParams, ...baseParams };
+function resolveSessionPermissionsFromArgs(args: {
+  allowAll?: boolean;
+  allowRead?: true | Array<string>;
+  allowWrite?: true | Array<string>;
+  allowRun?: true | Array<string>;
+  allowNet?: true | Array<string>;
+  allowEnv?: true | Array<string>;
+}): PermissionDeclarationInput | undefined {
+  if (args.allowAll) {
+    return {
+      read: true,
+      write: true,
+      run: true,
+      net: true,
+      env: true,
+    };
   }
-  return baseParams ?? aliasParams;
+  const out: PermissionDeclarationInput = {};
+  if (args.allowRead !== undefined) out.read = args.allowRead;
+  if (args.allowWrite !== undefined) out.write = args.allowWrite;
+  if (args.allowRun !== undefined) out.run = args.allowRun;
+  if (args.allowNet !== undefined) out.net = args.allowNet;
+  if (args.allowEnv !== undefined) out.env = args.allowEnv;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 async function readVersionFromConfig(
@@ -172,7 +166,20 @@ async function loadGambitEnv() {
 async function main() {
   try {
     await loadGambitEnv();
+    const rawCommand = Deno.args[0];
+    if (rawCommand === "init") {
+      printInitRemovedGuidance();
+      Deno.exit(1);
+    }
+
     const args = parseCliArgs(Deno.args);
+    if (args.verbose) {
+      try {
+        Deno.env.set("GAMBIT_VERBOSE", "1");
+      } catch {
+        // ignore env set failures
+      }
+    }
     if (args.version) {
       logger.log(await resolveCliVersion());
       return;
@@ -195,6 +202,10 @@ async function main() {
         Deno.exit(0);
       }
       if (!isKnownCommand(helpTarget)) {
+        if (helpTarget === "init") {
+          printInitRemovedGuidance();
+          Deno.exit(1);
+        }
         logger.error(`Unknown command "${helpTarget}".`);
         logger.error(`Run "gambit help" to see available commands.`);
         Deno.exit(1);
@@ -223,6 +234,10 @@ async function main() {
         return;
       }
       if (!isKnownCommand(args.deckPath)) {
+        if (args.deckPath === "init") {
+          printInitRemovedGuidance();
+          Deno.exit(1);
+        }
         logger.error(`Unknown command "${args.deckPath}".`);
         logger.error(`Run "gambit help" to see available commands.`);
         Deno.exit(1);
@@ -238,11 +253,6 @@ async function main() {
 
     if (args.cmd === "demo") {
       await handleDemoCommand();
-      return;
-    }
-
-    if (args.cmd === "init") {
-      await handleInitCommand(args.deckPath);
       return;
     }
 
@@ -272,103 +282,30 @@ async function main() {
       );
       Deno.exit(1);
     }
-    const modelAliasResolver = createModelAliasResolver(
-      projectConfig?.config,
-    );
     const workspacePermissions = resolveWorkspacePermissions(
       projectConfig?.config,
     );
-    const warnedMissingAliases = new Set<string>();
-    const expandModelCandidates = (
-      model: string | Array<string> | undefined,
-      params?: Record<string, unknown>,
-    ): {
-      candidates: Array<ModelCandidate>;
-      allowPull: boolean;
-    } => {
-      if (!model) return { candidates: [], allowPull: false };
-      const baseParams = params;
-      const entries = Array.isArray(model) ? model : [model];
-      const allowPull = !Array.isArray(model);
-      const candidates: Array<ModelCandidate> = [];
-      for (const entry of entries) {
-        if (typeof entry !== "string" || !entry.trim()) continue;
-        const resolution = modelAliasResolver(entry);
-        if (
-          resolution.missingAlias &&
-          !warnedMissingAliases.has(entry)
-        ) {
-          logger.warn(
-            `[gambit] Model alias "${entry}" is not defined in gambit.toml; using literal value.`,
-          );
-          warnedMissingAliases.add(entry);
-        }
-        if (resolution.applied) {
-          const resolvedModel = resolution.model;
-          const mergedParams = mergeParams(resolution.params, baseParams);
-          if (Array.isArray(resolvedModel)) {
-            for (const candidate of resolvedModel) {
-              if (!candidate.trim()) continue;
-              candidates.push({
-                model: candidate,
-                params: mergedParams,
-                alias: resolution.alias,
-              });
-            }
-          } else if (resolvedModel) {
-            candidates.push({
-              model: resolvedModel,
-              params: mergedParams,
-              alias: resolution.alias,
-            });
-          }
-        } else {
-          candidates.push({
-            model: entry,
-            params: baseParams,
-          });
-        }
-      }
-      const allowPullForSingle = allowPull && candidates.length <= 1;
-      return { candidates, allowPull: allowPullForSingle };
-    };
+    const sessionPermissions = resolveSessionPermissionsFromArgs(args);
+    const sessionPermissionsBaseDir = Deno.cwd();
+    const workerSandboxFromConfig = resolveWorkerSandboxSetting(
+      projectConfig?.config,
+    );
+    const workerSandbox = args.workerSandbox ?? workerSandboxFromConfig ?? true;
+    const runtime = await createDefaultedRuntime({
+      configHint,
+      projectConfig,
+      responsesMode: args.responses ? true : undefined,
+      logger,
+    });
+    const modelAliasResolver = runtime.modelAliasResolver;
+    const fallbackProvider = runtime.configuredFallbackProvider;
+    const provider = runtime.modelProvider;
+    const responsesMode = runtime.responsesMode;
 
     const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
     const googleApiKey = (Deno.env.get("GOOGLE_API_KEY") ??
       Deno.env.get("GEMINI_API_KEY"))?.trim();
-    const openRouterBaseURL = Deno.env.get("OPENROUTER_BASE_URL") ??
-      DEFAULT_OPENROUTER_BASE_URL;
     const ollamaBaseURL = Deno.env.get("OLLAMA_BASE_URL") ?? undefined;
-    const googleBaseURL = Deno.env.get("GOOGLE_BASE_URL") ??
-      Deno.env.get("GEMINI_BASE_URL") ??
-      undefined;
-
-    const fallbackProviderRaw = projectConfig?.config?.providers?.fallback;
-    let fallbackProvider:
-      | "openrouter"
-      | "ollama"
-      | "google"
-      | null
-      | undefined = undefined;
-    if (typeof fallbackProviderRaw === "string") {
-      const normalized = fallbackProviderRaw.trim().toLowerCase();
-      if (normalized === "none") {
-        fallbackProvider = null;
-      } else if (
-        normalized === "openrouter" || normalized === "ollama" ||
-        normalized === "google"
-      ) {
-        fallbackProvider = normalized as "openrouter" | "ollama" | "google";
-      } else if (normalized.length > 0) {
-        logger.warn(
-          `[gambit] Unknown providers.fallback "${fallbackProviderRaw}" in gambit.toml; using default fallback.`,
-        );
-      }
-    }
-
-    const effectiveFallbackProvider = fallbackProvider === undefined
-      ? "openrouter"
-      : fallbackProvider;
 
     if (args.cmd === "grade") {
       const graderPath = args.graderPath ?? deckPath;
@@ -426,232 +363,6 @@ async function main() {
       return;
     }
 
-    const chatFallback = Deno.env.get("GAMBIT_CHAT_FALLBACK") === "1";
-    const responsesMode = args.responses ||
-      (!chatFallback && Deno.env.get("GAMBIT_RESPONSES_MODE") !== "0");
-    const openRouterProvider = openRouterApiKey
-      ? createOpenRouterProvider({
-        apiKey: openRouterApiKey,
-        baseURL: openRouterBaseURL ?? undefined,
-        enableResponses: (args.responses || !chatFallback) &&
-          Deno.env.get("GAMBIT_OPENROUTER_RESPONSES") !== "0",
-      })
-      : null;
-    const ollamaProvider = createOllamaProvider({
-      apiKey: Deno.env.get("OLLAMA_API_KEY")?.trim() || undefined,
-      baseURL: ollamaBaseURL,
-    });
-    const googleProvider = googleApiKey
-      ? createGoogleProvider({
-        apiKey: googleApiKey,
-        baseURL: googleBaseURL,
-      })
-      : null;
-
-    const providerRouter = createProviderRouter({
-      providers: {
-        openrouter: openRouterProvider,
-        ollama: ollamaProvider,
-        google: googleProvider,
-      },
-      defaultProvider: fallbackProvider,
-      fallbackToDefaultOnMissing: ["google"],
-    });
-
-    const ollamaPrefix = OLLAMA_PREFIX;
-    const providerMatchers = createProviderMatchers(effectiveFallbackProvider);
-    const ollamaTagsCache: { promise: Promise<Set<string>> | null } = {
-      promise: null,
-    };
-    const getOllamaTags = async (): Promise<Set<string>> => {
-      if (!ollamaTagsCache.promise) {
-        ollamaTagsCache.promise = fetchOllamaTags(ollamaBaseURL);
-      }
-      return await ollamaTagsCache.promise;
-    };
-    const providerCapabilities: Array<ProviderCapability> = [
-      {
-        name: "ollama",
-        matches: providerMatchers.matchesOllama,
-        isAvailable: async (model, opts) => {
-          const trimmed = model.slice(ollamaPrefix.length);
-          if (!trimmed) {
-            return { available: false, reason: "missing Ollama model name" };
-          }
-          if (opts.allowPull) {
-            try {
-              await ensureOllamaModel(trimmed, ollamaBaseURL);
-              return { available: true };
-            } catch (err) {
-              return {
-                available: false,
-                reason: err instanceof Error ? err.message : String(err),
-              };
-            }
-          }
-          try {
-            const tags = await getOllamaTags();
-            if (tags.has(trimmed)) {
-              return { available: true };
-            }
-            return {
-              available: false,
-              reason: `Ollama model "${trimmed}" not installed`,
-            };
-          } catch (err) {
-            return {
-              available: false,
-              reason: err instanceof Error ? err.message : String(err),
-            };
-          }
-        },
-      },
-      {
-        name: "google",
-        matches: providerMatchers.matchesGoogle,
-        isAvailable: (_model, _opts) =>
-          Promise.resolve(
-            googleApiKey
-              ? { available: true }
-              : (effectiveFallbackProvider === "openrouter" && openRouterApiKey)
-              ? { available: true }
-              : {
-                available: false,
-                reason: "GOOGLE_API_KEY or GEMINI_API_KEY is not set",
-              },
-          ),
-      },
-      {
-        name: "openrouter",
-        matches: providerMatchers.matchesOpenRouter,
-        isAvailable: (_model, _opts) =>
-          Promise.resolve(
-            openRouterApiKey ? { available: true } : {
-              available: false,
-              reason: "OPENROUTER_API_KEY is not set",
-            },
-          ),
-      },
-    ];
-    const resolveModelSelection = async (
-      model: string | Array<string>,
-      params?: Record<string, unknown>,
-      deckPath?: string,
-    ): Promise<{ model: string; params?: Record<string, unknown> }> => {
-      const { candidates, allowPull } = expandModelCandidates(model, params);
-      if (candidates.length === 0) {
-        throw new Error(
-          deckPath
-            ? `No model configured for deck ${deckPath}`
-            : "No model configured.",
-        );
-      }
-      const failures: Array<string> = [];
-      for (const candidate of candidates) {
-        const provider = providerCapabilities.find((cap) =>
-          cap.matches(candidate.model)
-        );
-        const availability = provider
-          ? await provider.isAvailable(candidate.model, { allowPull })
-          : {
-            available: false,
-            reason: "no provider registered for model",
-          };
-        if (availability.available) {
-          return {
-            model: candidate.model,
-            params: candidate.params,
-          };
-        }
-        const label = provider ? provider.name : "unknown";
-        const reason = availability.reason ? `: ${availability.reason}` : "";
-        failures.push(`${candidate.model} (${label}${reason})`);
-      }
-      const suffix = failures.length ? ` Tried: ${failures.join(", ")}.` : "";
-      throw new Error(
-        deckPath
-          ? `No available model found for deck ${deckPath}.${suffix}`
-          : `No available model found.${suffix}`,
-      );
-    };
-    const shouldResolveModel = (
-      model: string | Array<string>,
-    ): boolean => {
-      if (Array.isArray(model)) return true;
-      const resolution = modelAliasResolver(model);
-      return Boolean(resolution.applied || resolution.missingAlias);
-    };
-    const provider: import("@bolt-foundry/gambit-core").ModelProvider = {
-      resolveModel: async (input) =>
-        await resolveModelSelection(
-          input.model,
-          input.params,
-          input.deckPath,
-        ),
-      responses: async (input: {
-        request: import("@bolt-foundry/gambit-core").CreateResponseRequest;
-        state?: import("@bolt-foundry/gambit-core").SavedState;
-        onStreamEvent?: (
-          event: import("@bolt-foundry/gambit-core").ResponseEvent,
-        ) => void;
-      }) => {
-        const applied = shouldResolveModel(input.request.model)
-          ? await resolveModelSelection(
-            input.request.model,
-            input.request.params,
-          )
-          : { model: input.request.model, params: input.request.params };
-        const request = {
-          ...input.request,
-          model: applied.model ?? input.request.model,
-          params: applied.params,
-        };
-        if (!request.model) {
-          throw new Error("Model is required.");
-        }
-        const selection = providerRouter.resolve({ model: request.model });
-        const responses = selection.provider.responses;
-        if (!responses) {
-          throw new Error(
-            `${selection.providerKey} provider does not support responses.`,
-          );
-        }
-        return await responses({
-          ...input,
-          request: {
-            ...request,
-            model: selection.model,
-          },
-        });
-      },
-      chat: async (input: {
-        model: string;
-        messages: Array<import("@bolt-foundry/gambit-core").ModelMessage>;
-        tools?: Array<import("@bolt-foundry/gambit-core").ToolDefinition>;
-        stream?: boolean;
-        state?: import("@bolt-foundry/gambit-core").SavedState;
-        onStreamText?: (chunk: string) => void;
-        params?: Record<string, unknown>;
-      }) => {
-        const applied = shouldResolveModel(input.model)
-          ? await resolveModelSelection(input.model, input.params)
-          : { model: input.model, params: input.params };
-        const request = {
-          ...input,
-          model: applied.model ?? input.model,
-          params: applied.params,
-        };
-        if (!request.model) {
-          throw new Error("Model is required.");
-        }
-        const selection = providerRouter.resolve({ model: request.model });
-        return await selection.provider.chat({
-          ...request,
-          model: selection.model,
-        });
-      },
-    };
-
     const tracerFns: Array<
       (
         event: import("@bolt-foundry/gambit-core").TraceEvent,
@@ -698,6 +409,11 @@ async function main() {
           const suffix = action ? ` (${action})` : "";
           return `file: ${pathValue}${suffix}`;
         },
+        workspacePermissions,
+        workspacePermissionsBaseDir: projectConfig?.root,
+        sessionPermissions,
+        sessionPermissionsBaseDir,
+        workerSandbox,
       });
       return;
     }
@@ -716,13 +432,25 @@ async function main() {
           : undefined,
         contextProvided: args.contextProvided,
         initialMessage: parseMessage(args.message),
+        workspacePermissions,
+        workspacePermissionsBaseDir: projectConfig?.root,
+        sessionPermissions,
+        sessionPermissionsBaseDir,
+        workerSandbox,
       });
       return;
     }
 
     if (args.cmd === "serve") {
+      if (args.deckPath && args.artifactPath) {
+        logger.error(
+          "serve accepts either a deck path or --artifact, not both.",
+        );
+        Deno.exit(1);
+      }
       await handleServeCommand({
         deckPath: deckPath || undefined,
+        artifactPath: args.artifactPath,
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,
@@ -735,17 +463,18 @@ async function main() {
         sourcemap: args.sourcemap,
         platform: args.platform,
         responsesMode,
+        workerSandbox,
       });
       return;
     }
 
-    if (args.cmd === "test-bot") {
+    if (args.cmd === "scenario") {
       if (!deckPath) {
-        logger.error("test-bot requires a root deck path.");
+        logger.error("scenario requires a root deck path.");
         Deno.exit(1);
       }
       if (!args.testDeckPath) {
-        logger.error("test-bot requires --test-deck <persona deck path>.");
+        logger.error("scenario requires --test-deck <persona deck path>.");
         Deno.exit(1);
       }
       const maxTurns = args.maxTurns ?? 12;
@@ -764,8 +493,13 @@ async function main() {
         verbose: args.verbose,
         statePath: args.statePath,
         responsesMode,
+        workspacePermissions,
+        workspacePermissionsBaseDir: projectConfig?.root,
+        sessionPermissions,
+        sessionPermissionsBaseDir,
+        workerSandbox,
       });
-      logger.log(`Test bot session saved to ${statePath}`);
+      logger.log(`Scenario session saved to ${statePath}`);
       if (args.gradePaths && args.gradePaths.length > 0) {
         for (const graderPath of args.gradePaths) {
           await runGraderAgainstState({
@@ -776,6 +510,7 @@ async function main() {
             modelProvider: provider,
             trace: tracer,
             responsesMode,
+            workerSandbox,
           });
         }
       }
@@ -800,6 +535,7 @@ async function main() {
         modelProvider: provider,
         trace: tracer,
         responsesMode,
+        workerSandbox,
       });
       return;
     }
@@ -818,6 +554,9 @@ async function main() {
       responsesMode,
       workspacePermissions,
       workspacePermissionsBaseDir: projectConfig?.root,
+      sessionPermissions,
+      sessionPermissionsBaseDir,
+      workerSandbox,
     });
   } catch (err) {
     logger.error(err instanceof Error ? err.message : String(err));

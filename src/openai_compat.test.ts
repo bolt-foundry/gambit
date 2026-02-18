@@ -10,6 +10,18 @@ function modImportPath() {
   return path.toFileUrl(modPath).href;
 }
 
+function coreModImportPath() {
+  const here = path.dirname(path.fromFileUrl(import.meta.url));
+  const modPath = path.resolve(
+    here,
+    "..",
+    "packages",
+    "gambit-core",
+    "mod.ts",
+  );
+  return path.toFileUrl(modPath).href;
+}
+
 async function writeTempDeck(dir: string, filename: string, contents: string) {
   const target = path.join(dir, filename);
   await Deno.writeTextFile(target, contents);
@@ -328,4 +340,94 @@ Deno.test("chatCompletionsWithDeck rejects tool name collisions", async () => {
     Error,
     "collision",
   );
+});
+
+Deno.test("chatCompletionsWithDeck action calls inherit root permission denials", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = coreModImportPath();
+  const deniedPath = path.join(dir, "blocked.txt");
+
+  const childPath = await writeTempDeck(
+    dir,
+    "child-write.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      run: async () => {
+        await Deno.writeTextFile(${JSON.stringify(deniedPath)}, "blocked");
+        return "ok";
+      }
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    export default defineDeck({
+      label: "parent",
+      modelParams: { model: "ignored" },
+      actionDecks: [{ name: "child", path: "${childPath}" }],
+    });
+    `,
+  );
+
+  let pass = 0;
+  let toolPayload = "";
+  const provider: ModelProvider = {
+    chat(input) {
+      pass++;
+      if (pass === 1) {
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [{
+              id: "call-1",
+              type: "function",
+              function: { name: "child", arguments: "{}" },
+            }],
+          },
+          finishReason: "tool_calls",
+          toolCalls: [{ id: "call-1", name: "child", args: {} }],
+        });
+      }
+      toolPayload = String(
+        input.messages.find((message) =>
+          message.role === "tool" && message.name === "child"
+        )?.content ?? "",
+      );
+      return Promise.resolve({
+        message: { role: "assistant", content: "done" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const response = await chatCompletionsWithDeck({
+    deckPath: parentPath,
+    request: {
+      model: "test-model",
+      messages: [{ role: "user", content: "go" }],
+    },
+    modelProvider: provider,
+    workerSandbox: true,
+    workspacePermissions: {
+      read: true,
+      write: false,
+      run: false,
+      net: false,
+      env: false,
+    },
+    workspacePermissionsBaseDir: dir,
+  });
+
+  assertEquals(response.choices[0].message.content, "done");
+  assert(toolPayload.includes('"error"'));
+  assert(toolPayload.includes("allow-write"));
 });

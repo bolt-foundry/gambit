@@ -1,8 +1,9 @@
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import * as path from "@std/path";
 import {
   createModelAliasResolver,
   loadProjectConfig,
+  resolveWorkerSandboxSetting,
   resolveWorkspacePermissions,
 } from "./project_config.ts";
 
@@ -103,4 +104,32 @@ Deno.test("resolveWorkspacePermissions returns workspace ceiling", () => {
     read: ["./decks"],
     run: { commands: ["deno"] },
   });
+});
+
+Deno.test("resolveWorkerSandboxSetting reads worker_sandbox config", () => {
+  const mode = resolveWorkerSandboxSetting({
+    execution: { worker_sandbox: false },
+  });
+  assertEquals(mode, false);
+});
+
+Deno.test("resolveWorkerSandboxSetting reads legacy_exec config", () => {
+  const mode = resolveWorkerSandboxSetting({
+    execution: { legacy_exec: true },
+  });
+  assertEquals(mode, false);
+});
+
+Deno.test("resolveWorkerSandboxSetting rejects conflicting config", () => {
+  assertThrows(
+    () =>
+      resolveWorkerSandboxSetting({
+        execution: {
+          worker_sandbox: true,
+          legacy_exec: true,
+        },
+      }),
+    Error,
+    "conflicting",
+  );
 });

@@ -2,7 +2,7 @@
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
   "name": "@bolt-foundry/gambit",
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
-  "version": "0.8.3",
+  "version": "0.8.5-rc.1",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -25,7 +25,7 @@
     "bundle:sim:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --sourcemap=external",
     "bundle:sim:web": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser",
     "bundle:sim:web:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser --sourcemap=external",
-    "serve:bot": "mkdir -p /tmp/gambit-bot-root && GAMBIT_BOT_ROOT=/tmp/gambit-bot-root deno run -A src/cli.ts serve src/decks/gambit-bot/PROMPT.md --bundle --port 8000",
+    "serve:bot": "mkdir -p /tmp/gambit-bot-root && GAMBIT_SIMULATOR_BUILD_BOT_ROOT=/tmp/gambit-bot-root GAMBIT_BOT_ROOT=/tmp/gambit-bot-root deno run -A src/cli.ts serve src/decks/gambit-bot/PROMPT.md --bundle --port 8000",
     "serve:bot:sandbox": "deno run -A scripts/serve_bot_sandbox.ts",
     "build_npm": "deno run -A scripts/build_npm.ts"
   },
@@ -55,7 +55,18 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "react"
+    "jsxImportSource": "npm:react",
+    "jsxImportSourceTypes": "npm:@types/react@^19",
+    "skipLibCheck": true,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "webworker.importscripts",
+      "webworker.iterable",
+      "deno.ns",
+      "deno.unstable"
+    ]
   },
   "imports": {
     "@deno/dnt": "jsr:@deno/dnt@^0.42.3", // dev
@@ -66,6 +77,8 @@
     "@std/cli": "jsr:@std/cli@^1.0.7",
     "@std/dotenv": "jsr:@std/dotenv@^0.225.5",
     "@std/assert": "jsr:@std/assert@^1.0.6",
+    "@std/streams": "jsr:@std/streams@^1.0.10",
+    "@std/testing": "jsr:@std/testing@^1.0.17",
     "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
     "@std/tar": "jsr:@std/tar@^0.1.9",
     "@std/toml": "jsr:@std/toml@^1.0.9",
@@ -75,6 +88,7 @@
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
     "@openai/openai": "npm:openai@^4.78.1",
     "react": "npm:react@^19.2.0",
+    "react/jsx-runtime": "npm:react@^19.2.0/jsx-runtime",
     "react-dom": "npm:react-dom@^19.2.0"
   },
   "publish": {
