@@ -114,6 +114,13 @@ jobs:
             const coreDir = corePath.includes("/")
               ? corePath.slice(0, corePath.lastIndexOf("/"))
               : ".";
+            const gambitDir = gambitPath.includes("/")
+              ? gambitPath.slice(0, gambitPath.lastIndexOf("/"))
+              : ".";
+            const localPath = (dir, rel = "") => {
+              const base = dir === "." ? "." : `./${dir}`;
+              return rel ? `${base}/${rel}` : `${base}/`;
+            };
             const localImports = {};
             for (const [key, value] of Object.entries(exportsMap)) {
               if (typeof value !== "string") continue;
@@ -122,9 +129,14 @@ jobs:
                 : key;
               const spec = `@bolt-foundry/gambit-core${suffix}`;
               const rel = value.startsWith("./") ? value.slice(2) : value;
-              localImports[spec] = `./${coreDir}/${rel}`;
+              localImports[spec] = localPath(coreDir, rel);
             }
-            gambit.imports = { ...(gambit.imports ?? {}), ...localImports };
+            gambit.imports = {
+              ...(gambit.imports ?? {}),
+              ...localImports,
+              "jsr:@bolt-foundry/gambit": localPath(gambitDir, "mod.ts"),
+              "jsr:@bolt-foundry/gambit/": localPath(gambitDir),
+            };
             await Deno.writeTextFile(
               "deno.ci.json",
               JSON.stringify(gambit, null, 2) + "\n",
