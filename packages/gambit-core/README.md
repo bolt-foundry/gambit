@@ -169,16 +169,19 @@ Pass `guardrails`, `initialUserMessage`, `modelOverride`, and
 
 ### Worker sandbox behavior in `runDeck`
 
-`gambit-core` keeps worker sandboxing opt-in:
+`gambit-core` keeps worker sandboxing opt-in and host-scoped:
 
-- `runDeck` enables worker sandboxing only when `workerSandbox: true` is passed.
-- You can also opt in via `GAMBIT_DECK_WORKER_SANDBOX=1` (or `true` / `yes`).
-- If neither is set, `runDeck` executes without worker sandboxing by default.
-
-Why this is opt-in: `@bolt-foundry/gambit-core` is intended to run in multiple
-hosts (Node, Bun, Deno). Worker sandboxing relies on Deno-specific worker
-permission controls, so host apps must opt in when they run in an environment
-that supports it.
+- `runDeck` enables worker sandboxing only when `workerSandbox: true` is passed
+  (or when `GAMBIT_DECK_WORKER_SANDBOX=1|true|yes` is set in Deno).
+- In Deno hosts, worker sandboxing keeps the current worker permission
+  enforcement model.
+- In npm/Node/Bun hosts, requesting `workerSandbox: true` throws
+  `WorkerSandboxUnsupportedHostError`
+  (`code: "worker_sandbox_unsupported_host"`).
+- `workerSandbox: true` with `signal` also throws
+  (`code: "worker_sandbox_signal_unsupported"`), because abort signaling is not
+  bridged into worker runtimes yet.
+- If sandboxing is not requested, `runDeck` executes in-process.
 
 ## Loading Markdown decks and cards
 

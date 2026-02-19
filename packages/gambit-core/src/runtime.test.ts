@@ -3912,6 +3912,52 @@ Deno.test("orchestration worker preserves serial LLM trace ordering and correlat
   );
 });
 
+Deno.test("runDeck rejects workerSandbox requests in unsupported hosts", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "unsupported-worker-host.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    export default defineDeck({
+      run: () => "ok",
+    });
+    `,
+  );
+
+  const originalWorker = globalThis.Worker;
+  Object.defineProperty(globalThis, "Worker", {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
+  try {
+    const err = await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: {},
+          modelProvider: dummyProvider,
+          isRoot: true,
+          workerSandbox: true,
+        }),
+      Error,
+      "workerSandbox is unsupported in this host",
+    );
+    assertEquals(
+      (err as { code?: unknown }).code,
+      "worker_sandbox_unsupported_host",
+    );
+  } finally {
+    Object.defineProperty(globalThis, "Worker", {
+      value: originalWorker,
+      configurable: true,
+      writable: true,
+    });
+  }
+});
+
 Deno.test("orchestration worker enforces parent permission ceiling for LLM child actions", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -4566,6 +4612,57 @@ Deno.test("LLM built-in tools are gated by effective permissions", async () => {
   assertEquals(toolNames.includes("exec"), false);
 });
 
+Deno.test("LLM built-in tools include exec when run permissions are granted", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "tool-gating-run.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  let toolNames: Array<string> = [];
+  const provider: ModelProvider = {
+    chat(input) {
+      toolNames = (input.tools ?? []).map((tool) => tool.function.name);
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+    workspacePermissions: {
+      read: false,
+      write: false,
+      run: { commands: ["echo"] },
+      net: false,
+      env: false,
+    },
+    workspacePermissionsBaseDir: dir,
+  });
+
+  assertEquals(result, "ok");
+  assert(toolNames.includes("exec"));
+  assertEquals(toolNames.includes("read_file"), false);
+  assertEquals(toolNames.includes("list_dir"), false);
+  assertEquals(toolNames.includes("grep_files"), false);
+  assertEquals(toolNames.includes("apply_patch"), false);
+});
+
 Deno.test(
   "LLM file tools enforce directory-scoped read permissions",
   async () => {
@@ -5021,6 +5118,99 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "LLM built-in exec returns unsupported host response when command API is unavailable",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const deckPath = await writeTempDeck(
+      dir,
+      "exec-unsupported-host.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    let pass = 0;
+    let toolPayload = "";
+    const provider: ModelProvider = {
+      chat(input) {
+        pass++;
+        if (pass === 1) {
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls",
+            toolCalls: [{
+              id: "tool-exec",
+              name: "exec",
+              args: { command: "echo", args: ["hello"] },
+            }],
+          });
+        }
+        toolPayload = String(
+          input.messages.find((message) =>
+            message.role === "tool" && message.name === "exec"
+          )?.content ?? "",
+        );
+        return Promise.resolve({
+          message: { role: "assistant", content: "done" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const denoNs = Deno as unknown as { Command?: unknown };
+    const originalCommand = denoNs.Command;
+    Object.defineProperty(denoNs, "Command", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const result = await runDeck({
+        path: deckPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+        workspacePermissions: {
+          read: false,
+          write: false,
+          run: { commands: ["echo"] },
+          net: false,
+          env: false,
+        },
+        workspacePermissionsBaseDir: dir,
+      });
+      assertEquals(result, "done");
+    } finally {
+      Object.defineProperty(denoNs, "Command", {
+        value: originalCommand,
+        configurable: true,
+        writable: true,
+      });
+    }
+
+    const parsed = JSON.parse(toolPayload) as {
+      status?: number;
+      code?: string;
+      message?: string;
+    };
+    assertEquals(parsed.status, 501);
+    assertEquals(parsed.code, "exec_unsupported_host");
+    assert(
+      typeof parsed.message === "string" &&
+        parsed.message.includes("unsupported"),
+      "expected unsupported host message",
+    );
+  },
+);
+
 Deno.test("LLM built-in apply_patch returns stable permission denial", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -5194,6 +5384,40 @@ Deno.test(
     assertEquals(await Deno.readTextFile(nestedTarget), "");
   },
 );
+
+Deno.test("runDeck rejects workerSandbox requests when signal is provided", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "worker-sandbox-signal.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    export default defineDeck({
+      run: () => "ok",
+    });
+    `,
+  );
+
+  const controller = new AbortController();
+  const err = await assertRejects(
+    () =>
+      runDeck({
+        path: deckPath,
+        input: {},
+        modelProvider: dummyProvider,
+        isRoot: true,
+        workerSandbox: true,
+        signal: controller.signal,
+      }),
+    Error,
+    "workerSandbox is unsupported when `signal` is provided",
+  );
+  assertEquals(
+    (err as { code?: unknown }).code,
+    "worker_sandbox_signal_unsupported",
+  );
+});
 
 Deno.test("runDeck abort signal cancels in-flight model call and fires onCancel once", async () => {
   const dir = await Deno.makeTempDir();

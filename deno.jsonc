@@ -2,7 +2,7 @@
   "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
   "name": "@bolt-foundry/gambit",
   "description": "Agent harness framework for building, running, and verifying LLM workflows in Markdown and code.",
-  "version": "0.8.5-rc.2",
+  "version": "0.8.5-rc.3",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -27,7 +27,8 @@
     "bundle:sim:web:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser --sourcemap=external",
     "serve:bot": "mkdir -p /tmp/gambit-bot-root && GAMBIT_SIMULATOR_BUILD_BOT_ROOT=/tmp/gambit-bot-root GAMBIT_BOT_ROOT=/tmp/gambit-bot-root deno run -A src/cli.ts serve src/decks/gambit-bot/PROMPT.md --bundle --port 8000",
     "serve:bot:sandbox": "deno run -A scripts/serve_bot_sandbox.ts",
-    "build_npm": "deno run -A scripts/build_npm.ts"
+    "build_npm": "deno run -A scripts/build_npm.ts",
+    "ci:gambit-core:npm-compat": "deno task --cwd packages/gambit-core build_npm"
   },
   "lint": {
     "include": [
