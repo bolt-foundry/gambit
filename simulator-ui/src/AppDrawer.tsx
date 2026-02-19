@@ -5,14 +5,14 @@ import { GambitLogo } from "./GambitLogo.tsx";
 import { classNames, formatTimestamp, gambitVersion } from "./utils.ts";
 import type { SessionMeta } from "./utils.ts";
 
-export default function SessionsDrawer(props: {
+export default function AppDrawer(props: {
   open: boolean;
-  sessions: SessionMeta[];
+  workspaces: SessionMeta[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
-  onSelect: (sessionId: string) => void;
-  onDelete: (sessionId: string) => void;
+  onSelect: (workspaceId: string) => void;
+  onDelete: (workspaceId: string) => void;
   onDeleteAll: () => void;
   onClose: () => void;
   activeWorkspaceId?: string | null;
@@ -20,7 +20,7 @@ export default function SessionsDrawer(props: {
 }) {
   const {
     open,
-    sessions,
+    workspaces,
     loading,
     error,
     onRefresh,
@@ -55,7 +55,7 @@ export default function SessionsDrawer(props: {
         </header>
         <section className="sessions-drawer-section">
           <div className="flex-row items-center gap-8">
-            <h3 className="flex-1">Sessions</h3>
+            <h3 className="flex-1">Workspaces</h3>
             <div className="sessions-drawer-actions">
               <Button variant="secondary" size="small" onClick={onRefresh}>
                 Refresh
@@ -64,45 +64,45 @@ export default function SessionsDrawer(props: {
                 variant="danger"
                 size="small"
                 onClick={onDeleteAll}
-                disabled={loading || sessions.length === 0}
+                disabled={loading || workspaces.length === 0}
               >
                 Delete all
               </Button>
             </div>
           </div>
           <div className="sessions-drawer-body">
-            {loading && <p>Loading sessions…</p>}
+            {loading && <p>Loading workspaces…</p>}
             {error && <p className="error">{error}</p>}
             <ul className="sessions-list">
-              {sessions.map((session) => {
-                const isActive = activeWorkspaceId === session.id;
+              {workspaces.map((workspace) => {
+                const isActive = activeWorkspaceId === workspace.id;
                 return (
-                  <li key={session.id}>
+                  <li key={workspace.id}>
                     <button
                       type="button"
                       className={classNames(
                         "session-select-button",
                         isActive && "active",
                       )}
-                      onClick={() => onSelect(session.id)}
+                      onClick={() => onSelect(workspace.id)}
                     >
                       <strong>
-                        {session.testBotName ??
-                          session.deckSlug ??
-                          session.deck ??
-                          "session"}
+                        {workspace.testBotName ??
+                          workspace.deckSlug ??
+                          workspace.deck ??
+                          "workspace"}
                       </strong>
-                      <span>{formatTimestamp(session.createdAt)}</span>
-                      <code>{session.id}</code>
+                      <span>{formatTimestamp(workspace.createdAt)}</span>
+                      <code>{workspace.id}</code>
                     </button>
                     <Button
                       variant="ghost-danger"
                       className="session-delete-button"
                       onClick={() => {
-                        onDelete(session.id);
+                        onDelete(workspace.id);
                       }}
-                      aria-label="Delete session"
-                      title="Delete session"
+                      aria-label="Delete workspace"
+                      title="Delete workspace"
                     >
                       <Icon name="trash" size={14} />
                     </Button>
@@ -110,7 +110,9 @@ export default function SessionsDrawer(props: {
                 );
               })}
             </ul>
-            {sessions.length === 0 && !loading && <p>No saved sessions yet.</p>}
+            {workspaces.length === 0 && !loading && (
+              <p>No saved workspaces yet.</p>
+            )}
           </div>
         </section>
         <div className="sessions-drawer-footer">
@@ -125,7 +127,7 @@ export default function SessionsDrawer(props: {
         type="button"
         className="sessions-drawer-backdrop"
         onClick={onClose}
-        aria-label="Close sessions drawer"
+        aria-label="Close workspace drawer"
       />
     </div>
   );

@@ -1,3 +1,8 @@
+import {
+  WORKSPACE_API_BASE,
+  WORKSPACES_API_BASE,
+} from "./workspace_contract.ts";
+
 type HandleUiRoutesDeps = {
   url: URL;
   req: Request;
@@ -197,14 +202,14 @@ export const handleUiRoutes = async (
     }
   }
 
-  if (url.pathname === workspaceRouteBase) {
-    const sessions = listSessions();
-    return new Response(JSON.stringify({ sessions }), {
+  if (url.pathname === WORKSPACES_API_BASE) {
+    const workspaces = listSessions();
+    return new Response(JSON.stringify({ workspaces }), {
       headers: { "content-type": "application/json; charset=utf-8" },
     });
   }
 
-  if (url.pathname === "/api/workspace/new") {
+  if (url.pathname === `${WORKSPACE_API_BASE}/new`) {
     if (req.method !== "POST") {
       return new Response("Method not allowed", { status: 405 });
     }

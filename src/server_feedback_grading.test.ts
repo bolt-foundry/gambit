@@ -146,7 +146,7 @@ Deno.test("session feedback rejects non-response message refs", async () => {
     .find((entry) => entry.role === "user" && entry.refId)?.refId;
   assert(userRef, "expected user ref");
 
-  const res = await fetch(`http://127.0.0.1:${port}/api/session/feedback`, {
+  const res = await fetch(`http://127.0.0.1:${port}/api/workspace/feedback`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -245,7 +245,7 @@ Deno.test("session feedback accepts persisted run message refs when runId is pro
   });
   const port = (server.addr as Deno.NetAddr).port;
 
-  const res = await fetch(`http://127.0.0.1:${port}/api/session/feedback`, {
+  const res = await fetch(`http://127.0.0.1:${port}/api/workspace/feedback`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -341,7 +341,7 @@ Deno.test("session feedback accepts scenario user refs and rejects manual/artifa
   const port = (server.addr as Deno.NetAddr).port;
 
   const scenarioRes = await fetch(
-    `http://127.0.0.1:${port}/api/session/feedback`,
+    `http://127.0.0.1:${port}/api/workspace/feedback`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -361,7 +361,7 @@ Deno.test("session feedback accepts scenario user refs and rejects manual/artifa
   assertEquals(scenarioBody.feedback?.score, -2);
 
   const manualRes = await fetch(
-    `http://127.0.0.1:${port}/api/session/feedback`,
+    `http://127.0.0.1:${port}/api/workspace/feedback`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -381,7 +381,7 @@ Deno.test("session feedback accepts scenario user refs and rejects manual/artifa
   );
 
   const artifactRes = await fetch(
-    `http://127.0.0.1:${port}/api/session/feedback`,
+    `http://127.0.0.1:${port}/api/workspace/feedback`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },

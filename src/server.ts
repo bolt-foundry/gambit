@@ -37,8 +37,10 @@ import { handleUiRoutes } from "./server_ui_routes.ts";
 import {
   resolveWorkspaceIdFromRecord,
   resolveWorkspaceIdFromSearchParams,
+  WORKSPACE_API_BASE,
   WORKSPACE_ROUTE_BASE,
   WORKSPACE_STATE_SCHEMA_VERSION,
+  WORKSPACES_API_BASE,
   workspaceSchemaError,
 } from "./workspace_contract.ts";
 import {
@@ -3563,7 +3565,7 @@ export function startWebSocketSimulator(opts: {
       }
 
       const workspaceTestRunGetMatch = url.pathname.match(
-        /^\/api\/workspaces\/([^/]+)\/test\/([^/]+)$/,
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/test/([^/]+)$`),
       );
       if (workspaceTestRunGetMatch) {
         if (req.method !== "GET") {
@@ -3574,7 +3576,7 @@ export function startWebSocketSimulator(opts: {
           workspaceTestRunGetMatch[2],
         );
         await logWorkspaceBotRoot(
-          "/api/workspaces/:id/test/:runId",
+          `${WORKSPACES_API_BASE}/:id/test/:runId`,
           workspaceId,
         );
         await activateWorkspaceDeck(workspaceId);
@@ -3597,7 +3599,7 @@ export function startWebSocketSimulator(opts: {
       }
 
       const workspaceGradeRunGetMatch = url.pathname.match(
-        /^\/api\/workspaces\/([^/]+)\/grade\/([^/]+)$/,
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/grade/([^/]+)$`),
       );
       if (workspaceGradeRunGetMatch) {
         if (req.method !== "GET") {
@@ -3608,7 +3610,7 @@ export function startWebSocketSimulator(opts: {
           workspaceGradeRunGetMatch[2],
         );
         await logWorkspaceBotRoot(
-          "/api/workspaces/:id/grade/:runId",
+          `${WORKSPACES_API_BASE}/:id/grade/:runId`,
           workspaceId,
         );
         await activateWorkspaceDeck(workspaceId);
@@ -3631,14 +3633,14 @@ export function startWebSocketSimulator(opts: {
       }
 
       const workspaceGetMatch = url.pathname.match(
-        /^\/api\/workspaces\/([^/]+)$/,
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)$`),
       );
       if (workspaceGetMatch) {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
         }
         const workspaceId = decodeURIComponent(workspaceGetMatch[1]);
-        await logWorkspaceBotRoot("/api/workspaces/:id", workspaceId);
+        await logWorkspaceBotRoot(`${WORKSPACES_API_BASE}/:id`, workspaceId);
         await activateWorkspaceDeck(workspaceId);
         const payload = await buildWorkspaceReadModel(workspaceId, {
           requestedTestDeckPath: url.searchParams.get("deckPath"),
@@ -5952,7 +5954,7 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      if (url.pathname === "/api/session/notes") {
+      if (url.pathname === `${WORKSPACE_API_BASE}/notes`) {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
@@ -5999,7 +6001,7 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      if (url.pathname === "/api/session/feedback") {
+      if (url.pathname === `${WORKSPACE_API_BASE}/feedback`) {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }
@@ -6147,7 +6149,7 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      if (url.pathname === "/api/session/delete") {
+      if (url.pathname === `${WORKSPACE_API_BASE}/delete`) {
         if (req.method !== "POST") {
           return new Response("Method not allowed", { status: 405 });
         }

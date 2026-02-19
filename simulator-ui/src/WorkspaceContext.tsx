@@ -8,6 +8,10 @@ import React, {
   useState,
 } from "react";
 import {
+  WORKSPACE_API_BASE,
+  WORKSPACES_API_BASE,
+} from "../../src/workspace_contract.ts";
+import {
   buildDurableStreamUrl,
   type CalibrateResponse,
   type CalibrateSession,
@@ -429,14 +433,16 @@ export function WorkspaceProvider(
     if (opts?.deckPath) params.set("deckPath", opts.deckPath);
     const query = params.toString() ? `?${params.toString()}` : "";
     const endpoint = opts?.testRunId
-      ? `/api/workspaces/${encodeURIComponent(targetWorkspaceId)}/test/${
+      ? `${WORKSPACES_API_BASE}/${encodeURIComponent(targetWorkspaceId)}/test/${
         encodeURIComponent(opts.testRunId)
       }${query}`
       : opts?.gradeRunId
-      ? `/api/workspaces/${encodeURIComponent(targetWorkspaceId)}/grade/${
-        encodeURIComponent(opts.gradeRunId)
-      }${query}`
-      : `/api/workspaces/${encodeURIComponent(targetWorkspaceId)}${query}`;
+      ? `${WORKSPACES_API_BASE}/${
+        encodeURIComponent(targetWorkspaceId)
+      }/grade/${encodeURIComponent(opts.gradeRunId)}${query}`
+      : `${WORKSPACES_API_BASE}/${
+        encodeURIComponent(targetWorkspaceId)
+      }${query}`;
     const res = await fetch(
       endpoint,
     );
@@ -776,7 +782,7 @@ export function WorkspaceProvider(
     if (workspaceId) return workspaceId;
     if (buildRunIdRef.current) return buildRunIdRef.current;
     try {
-      const res = await fetch("/api/workspace/new", {
+      const res = await fetch(`${WORKSPACE_API_BASE}/new`, {
         method: "POST",
       });
       const data = await res.json().catch(() => ({})) as {
@@ -799,9 +805,10 @@ export function WorkspaceProvider(
   }, [onWorkspaceChange, workspaceId]);
 
   const resetBuildChat = useCallback(async () => {
-    const res = await fetch("/api/workspace/new", { method: "POST" }).catch(
-      () => null,
-    );
+    const res = await fetch(`${WORKSPACE_API_BASE}/new`, { method: "POST" })
+      .catch(
+        () => null,
+      );
     const data = res
       ? await res.json().catch(() => ({})) as { workspaceId?: string }
       : {};
@@ -1208,7 +1215,7 @@ export function WorkspaceProvider(
       reason?: string;
     },
   ) => {
-    const res = await fetch("/api/session/feedback", {
+    const res = await fetch(`${WORKSPACE_API_BASE}/feedback`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),

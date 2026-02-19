@@ -222,7 +222,7 @@ Deno.test("session delete requires explicit workspaceId when active workspace ex
   const port = (server.addr as Deno.NetAddr).port;
 
   const missingWorkspaceRes = await fetch(
-    `http://127.0.0.1:${port}/api/session/delete`,
+    `http://127.0.0.1:${port}/api/workspace/delete`,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -236,11 +236,14 @@ Deno.test("session delete requires explicit workspaceId when active workspace ex
   assertEquals(missingWorkspaceBody.error, "Missing workspaceId");
   assertEquals(await Deno.stat(activeWorkspaceDir).then(() => true), true);
 
-  const deleteRes = await fetch(`http://127.0.0.1:${port}/api/session/delete`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workspaceId: activeWorkspaceId }),
-  });
+  const deleteRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/delete`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId: activeWorkspaceId }),
+    },
+  );
   assertEquals(deleteRes.status, 200);
   const deleteBody = await deleteRes.json() as {
     workspaceId?: string;

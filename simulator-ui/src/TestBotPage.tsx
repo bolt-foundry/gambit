@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { WORKSPACES_API_BASE } from "../../src/workspace_contract.ts";
 import {
   botFilename,
   cloneValue,
@@ -275,7 +276,7 @@ export default function TestBotPage(props: {
     };
     try {
       const res = await fetch(
-        `/api/workspaces/${encodeURIComponent(activeWorkspaceId)}`,
+        `${WORKSPACES_API_BASE}/${encodeURIComponent(activeWorkspaceId)}`,
       );
       if (!res.ok) return;
       const body = await res.json().catch(() => ({})) as {

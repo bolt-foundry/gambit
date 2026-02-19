@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { WORKSPACES_API_BASE } from "../../src/workspace_contract.ts";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -223,13 +224,13 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     setChatHistoryLoading(true);
     setChatHistoryError(null);
     try {
-      const res = await fetch("/workspaces");
+      const res = await fetch(WORKSPACES_API_BASE);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json() as {
-        sessions?: Array<{ id?: string; createdAt?: string }>;
+        workspaces?: Array<{ id?: string; createdAt?: string }>;
       };
-      const runs = Array.isArray(data.sessions)
-        ? data.sessions.filter((entry) => typeof entry?.id === "string").map(
+      const runs = Array.isArray(data.workspaces)
+        ? data.workspaces.filter((entry) => typeof entry?.id === "string").map(
           (entry) => ({
             id: entry.id as string,
             updatedAt: entry.createdAt,
