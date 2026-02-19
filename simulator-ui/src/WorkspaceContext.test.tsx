@@ -788,7 +788,7 @@ Deno.test("WorkspaceContext feedback save lifecycle updates run messages", async
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(JSON.stringify(createSnapshot()), { status: 200 });
     }
-    if (url.endsWith("/api/session/feedback")) {
+    if (url.endsWith("/api/workspace/feedback")) {
       feedbackRequests.push(parsedBody);
       if (requestMode === "error") {
         return new Response("write failed", { status: 500 });

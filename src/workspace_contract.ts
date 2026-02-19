@@ -1,6 +1,8 @@
 export const WORKSPACE_STATE_SCHEMA_VERSION = "workspace-state.v1";
 
 export const WORKSPACE_ROUTE_BASE = "/workspaces";
+export const WORKSPACE_API_BASE = "/api/workspace";
+export const WORKSPACES_API_BASE = "/api/workspaces";
 
 export type WorkspaceRouteTab = "debug" | "build" | "test" | "grade";
 
@@ -154,6 +156,6 @@ export const workspaceSchemaError = (
   return [
     `Unsupported workspace state schema for "${workspaceId}" (found ${shown}).`,
     `Expected "${WORKSPACE_STATE_SCHEMA_VERSION}".`,
-    "Recreate this workspace with /api/workspace/new.",
+    `Recreate this workspace with ${WORKSPACE_API_BASE}/new.`,
   ].join(" ");
 };

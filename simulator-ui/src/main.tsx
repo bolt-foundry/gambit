@@ -10,7 +10,7 @@ import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
 import Button from "./gds/Button.tsx";
 import WorkbenchDrawer from "./WorkbenchDrawer.tsx";
-import SessionsDrawer from "./SessionsDrawer.tsx";
+import AppDrawer from "./AppDrawer.tsx";
 import { WorkspaceProvider } from "./WorkspaceContext.tsx";
 import {
   buildConversationEntries,
@@ -45,7 +45,11 @@ import {
   workspaceIdFromWindow,
   WORKSPACES_BASE_PATH,
 } from "./utils.ts";
-import { buildWorkspacePath } from "../../src/workspace_contract.ts";
+import {
+  buildWorkspacePath,
+  WORKSPACE_API_BASE,
+  WORKSPACES_API_BASE,
+} from "../../src/workspace_contract.ts";
 import type {
   GradingFlag,
   SavedState,
@@ -325,8 +329,8 @@ function useSimulator() {
   };
 }
 
-function useSessions() {
-  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+function useWorkspaces() {
+  const [workspaces, setWorkspaces] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const byNewest = useCallback((items: SessionMeta[]) => {
@@ -343,33 +347,33 @@ function useSessions() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/workspaces");
+      const res = await fetch(WORKSPACES_API_BASE);
       if (!res.ok) throw new Error(res.statusText);
-      const body = await res.json() as { sessions?: SessionMeta[] };
-      setSessions(byNewest(body.sessions ?? []));
+      const body = await res.json() as { workspaces?: SessionMeta[] };
+      setWorkspaces(byNewest(body.workspaces ?? []));
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to load sessions",
+        err instanceof Error ? err.message : "Failed to load workspaces",
       );
     } finally {
       setLoading(false);
     }
   }, [byNewest]);
 
-  const deleteSession = useCallback(async (sessionId: string) => {
+  const deleteWorkspace = useCallback(async (workspaceId: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/session/delete", {
+      const res = await fetch(`${WORKSPACE_API_BASE}/delete`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId: sessionId }),
+        body: JSON.stringify({ workspaceId }),
       });
       if (!res.ok) throw new Error(res.statusText);
       await refresh();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to delete session",
+        err instanceof Error ? err.message : "Failed to delete workspace",
       );
     } finally {
       setLoading(false);
@@ -380,36 +384,36 @@ function useSessions() {
     setLoading(true);
     setError(null);
     try {
-      let targetSessions = scope;
-      if (!targetSessions) {
-        const res = await fetch("/workspaces");
+      let targetWorkspaces = scope;
+      if (!targetWorkspaces) {
+        const res = await fetch(WORKSPACES_API_BASE);
         if (!res.ok) throw new Error(res.statusText);
-        const body = await res.json() as { sessions?: SessionMeta[] };
-        targetSessions = body.sessions ?? [];
+        const body = await res.json() as { workspaces?: SessionMeta[] };
+        targetWorkspaces = body.workspaces ?? [];
       }
       await Promise.allSettled(
-        (targetSessions ?? []).map((session) =>
-          fetch("/api/session/delete", {
+        (targetWorkspaces ?? []).map((workspace) =>
+          fetch(`${WORKSPACE_API_BASE}/delete`, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ workspaceId: session.id }),
+            body: JSON.stringify({ workspaceId: workspace.id }),
           })
         ),
       );
       await refresh();
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to delete sessions",
+        err instanceof Error ? err.message : "Failed to delete workspaces",
       );
     } finally {
       setLoading(false);
     }
   }, [refresh]);
 
-  return { sessions, loading, error, refresh, deleteSession, deleteAll };
+  return { workspaces, loading, error, refresh, deleteWorkspace, deleteAll };
 }
 
-type SessionsApi = ReturnType<typeof useSessions>;
+type WorkspacesApi = ReturnType<typeof useWorkspaces>;
 
 function RecentSessionsEmptyState(props: {
   sessions: SessionMeta[];
@@ -462,13 +466,13 @@ function SimulatorApp(
   {
     basePath,
     setNavActions,
-    sessionsApi,
+    workspacesApi,
     onOpenSessionsDrawer,
     activeWorkspaceId,
   }: {
     basePath: string;
     setNavActions?: (actions: React.ReactNode | null) => void;
-    sessionsApi: SessionsApi;
+    workspacesApi: WorkspacesApi;
     onOpenSessionsDrawer: () => void;
     activeWorkspaceId?: string | null;
   },
@@ -476,11 +480,11 @@ function SimulatorApp(
   const simulator = useSimulator();
   const httpSchema = useHttpSchema();
   const {
-    sessions,
-    loading: sessionsLoading,
-    error: sessionsError,
+    workspaces,
+    loading: workspacesLoading,
+    error: workspacesError,
     refresh,
-  } = sessionsApi;
+  } = workspacesApi;
   const { resetLocal } = simulator;
   const normalizedBase = normalizeBasePath(basePath || WORKSPACES_BASE_PATH);
   const rootPath = normalizedBase === "" ? "/" : normalizedBase;
@@ -841,7 +845,7 @@ function SimulatorApp(
   ]);
 
   const deckSessions = useMemo(() => {
-    return sessions.filter((session) => {
+    return workspaces.filter((session) => {
       if (!session) return false;
       if (typeof session.deck === "string") {
         const normalizedSessionDeck = normalizeFsPath(session.deck);
@@ -856,13 +860,13 @@ function SimulatorApp(
       }
       return false;
     });
-  }, [sessions, deckDisplayPath, normalizedDeckPath, repoRootPath]);
+  }, [workspaces, deckDisplayPath, normalizedDeckPath, repoRootPath]);
 
   const recentSessionsEmpty = (
     <RecentSessionsEmptyState
       sessions={deckSessions}
-      loading={sessionsLoading}
-      error={sessionsError}
+      loading={workspacesLoading}
+      error={workspacesError}
       onSelect={(id) => navigateToSession(id)}
       onOpenAll={onOpenSessionsDrawer}
     />
@@ -1081,7 +1085,7 @@ function App() {
     testRunId: null,
     gradeRunId: null,
   });
-  const sessionsApi = useSessions();
+  const workspacesApi = useWorkspaces();
   const [testBotResetToken, setTestBotResetToken] = useState(0);
   const pathRoute = getWorkspaceRouteFromPath(path);
   const livePath = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -1152,7 +1156,7 @@ function App() {
       setWorkbenchSessionDetailLoading(true);
       setWorkbenchSessionDetailError(null);
       const res = await fetch(
-        `/api/workspaces/${encodeURIComponent(sessionId)}`,
+        `${WORKSPACES_API_BASE}/${encodeURIComponent(sessionId)}`,
       );
       if (!res.ok) {
         if (!shouldApply()) return;
@@ -1404,7 +1408,7 @@ function App() {
       return;
     }
     workspaceInitRef.current = true;
-    fetch("/api/workspace/new", { method: "POST" })
+    fetch(`${WORKSPACE_API_BASE}/new`, { method: "POST" })
       .then(async (res) => {
         const data = await res.json().catch(() => ({})) as {
           workspaceId?: string;
@@ -1472,15 +1476,15 @@ function App() {
 
   useEffect(() => {
     if (sessionsDrawerOpen) {
-      sessionsApi.refresh();
+      workspacesApi.refresh();
     }
-  }, [sessionsApi.refresh, sessionsDrawerOpen]);
+  }, [workspacesApi.refresh, sessionsDrawerOpen]);
 
   const deckSessions = useMemo(() => {
     if (workspaceIdFromWindow) {
-      return sessionsApi.sessions;
+      return workspacesApi.workspaces;
     }
-    return sessionsApi.sessions.filter((session) => {
+    return workspacesApi.workspaces.filter((session) => {
       if (!session) return false;
       if (typeof session.deck === "string") {
         const normalizedSessionDeck = normalizeFsPath(session.deck);
@@ -1496,7 +1500,7 @@ function App() {
       return false;
     });
   }, [
-    sessionsApi.sessions,
+    workspacesApi.workspaces,
     deckDisplayPath,
     normalizedDeckPath,
     repoRootPath,
@@ -1504,20 +1508,20 @@ function App() {
   ]);
 
   const handleDeleteAll = useCallback(async () => {
-    await sessionsApi.deleteAll(deckSessions);
+    await workspacesApi.deleteAll(deckSessions);
     setTestBotResetToken((prev) => prev + 1);
     setSessionsDrawerOpen(false);
     window.location.assign(DEFAULT_TEST_PATH);
-  }, [deckSessions, sessionsApi.deleteAll]);
+  }, [deckSessions, workspacesApi.deleteAll]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
-      await sessionsApi.deleteSession(sessionId);
+      await workspacesApi.deleteWorkspace(sessionId);
       if (sessionId === activeWorkspaceId) {
         window.location.assign(DEFAULT_TEST_PATH);
       }
     },
-    [activeWorkspaceId, sessionsApi.deleteSession],
+    [activeWorkspaceId, workspacesApi.deleteWorkspace],
   );
 
   return (
@@ -1632,7 +1636,7 @@ function App() {
                     <SimulatorApp
                       basePath={simulatorBasePath}
                       setNavActions={setNavActions}
-                      sessionsApi={sessionsApi}
+                      workspacesApi={workspacesApi}
                       onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
                       activeWorkspaceId={activeWorkspaceId}
                     />
@@ -1674,12 +1678,12 @@ function App() {
             </div>
           </div>
         </div>
-        <SessionsDrawer
+        <AppDrawer
           open={sessionsDrawerOpen}
-          sessions={deckSessions}
-          loading={sessionsApi.loading}
-          error={sessionsApi.error}
-          onRefresh={sessionsApi.refresh}
+          workspaces={deckSessions}
+          loading={workspacesApi.loading}
+          error={workspacesApi.error}
+          onRefresh={workspacesApi.refresh}
           onSelect={handleSelectSession}
           onDelete={handleDeleteSession}
           onDeleteAll={handleDeleteAll}
