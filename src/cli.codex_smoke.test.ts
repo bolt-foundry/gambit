@@ -259,40 +259,57 @@ Deno.test({
   permissions: { read: true, write: true, run: true, env: true },
 }, async () => {
   // Use workspace-backed temp dir to avoid /tmp mounts with noexec in CI.
-  const dir = await Deno.makeTempDir({ dir: Deno.cwd() });
-  const mock = await writeMockCodexBin(dir);
+  // Place it under ignored tmp/ and always clean up artifacts.
+  const rootTmpDir = path.join(Deno.cwd(), "tmp");
+  await Deno.mkdir(rootTmpDir, { recursive: true });
+  const dir = await Deno.makeTempDir({ dir: rootTmpDir });
 
-  const defaultDeck = await writeDeck(dir, "codex-cli/default", "high");
-  const defaultRun = await runDeck({
-    deckPath: defaultDeck,
-    codexBinPath: mock.binPath,
-    argsLogPath: mock.argsLogPath,
-    cwd: dir,
-  });
-  assertEquals(
-    defaultRun.code,
-    0,
-    formatCommandDiagnostics("run codex-cli/default", defaultRun),
-  );
-  assertEquals(defaultRun.argsLog.includes("\n-m\n"), false);
-  assertEquals(defaultRun.argsLog.includes('model_verbosity="high"'), true);
+  try {
+    const mock = await writeMockCodexBin(dir);
 
-  const passthroughDeck = await writeDeck(
-    dir,
-    "codex-cli/gpt-5.2-codex",
-    "high",
-  );
-  const passthroughRun = await runDeck({
-    deckPath: passthroughDeck,
-    codexBinPath: mock.binPath,
-    argsLogPath: mock.argsLogPath,
-    cwd: dir,
-  });
-  assertEquals(
-    passthroughRun.code,
-    0,
-    formatCommandDiagnostics("run codex-cli/gpt-5.2-codex", passthroughRun),
-  );
-  assertEquals(passthroughRun.argsLog.includes("\n-m\ngpt-5.2-codex\n"), true);
-  assertEquals(passthroughRun.argsLog.includes('model_verbosity="high"'), true);
+    const defaultDeck = await writeDeck(dir, "codex-cli/default", "high");
+    const defaultRun = await runDeck({
+      deckPath: defaultDeck,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      cwd: dir,
+    });
+    assertEquals(
+      defaultRun.code,
+      0,
+      formatCommandDiagnostics("run codex-cli/default", defaultRun),
+    );
+    assertEquals(defaultRun.argsLog.includes("\n-m\n"), false);
+    assertEquals(defaultRun.argsLog.includes('model_verbosity="high"'), true);
+
+    const passthroughDeck = await writeDeck(
+      dir,
+      "codex-cli/gpt-5.2-codex",
+      "high",
+    );
+    const passthroughRun = await runDeck({
+      deckPath: passthroughDeck,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      cwd: dir,
+    });
+    assertEquals(
+      passthroughRun.code,
+      0,
+      formatCommandDiagnostics("run codex-cli/gpt-5.2-codex", passthroughRun),
+    );
+    assertEquals(
+      passthroughRun.argsLog.includes("\n-m\ngpt-5.2-codex\n"),
+      true,
+    );
+    assertEquals(
+      passthroughRun.argsLog.includes('model_verbosity="high"'),
+      true,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true }).catch((err) => {
+      if (err instanceof Deno.errors.NotFound) return;
+      throw err;
+    });
+  }
 });
