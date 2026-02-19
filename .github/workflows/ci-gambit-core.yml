@@ -5,11 +5,13 @@ on:
     branches: ["main", "master"]
     paths:
       - packages/gambit-core/**
+      - deno.jsonc
       - .github/workflows/ci-gambit-core.yml
   pull_request:
     branches: ["*"]
     paths:
       - packages/gambit-core/**
+      - deno.jsonc
       - .github/workflows/ci-gambit-core.yml
 
 jobs:
@@ -51,3 +53,7 @@ jobs:
         run: deno test --allow-all --unstable-worker-options
         shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}
         working-directory: packages/gambit-core
+
+      - name: npm compatibility build
+        run: deno task ci:gambit-core:npm-compat
+        shell: nix develop ${{ github.workspace }} --command bash -euo pipefail {0}

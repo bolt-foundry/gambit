@@ -17,6 +17,17 @@ import {
   intersectPermissions,
   resolveEffectivePermissions,
 } from "./permissions.ts";
+import {
+  ExecToolUnsupportedHostError,
+  executeBuiltinCommand,
+} from "./runtime_exec_host.ts";
+import {
+  createWorkerSandboxBridge,
+  isWorkerSandboxHostSupported,
+  type WorkerBridgeEvent,
+  type WorkerSandboxPermissionSet,
+  WorkerSandboxUnsupportedHostError,
+} from "./runtime_worker_host.ts";
 import { assertZodSchema, toJsonSchema, validateWithSchema } from "./schema.ts";
 import type {
   CreateResponseRequest,
@@ -119,6 +130,8 @@ export type RunOptions = {
 const WORKER_SANDBOX_ENV = "GAMBIT_DECK_WORKER_SANDBOX";
 const WORKER_TIMEOUT_MESSAGE = "Timeout exceeded";
 const RUN_CANCELED_MESSAGE = "Run canceled";
+const WORKER_SANDBOX_SIGNAL_UNSUPPORTED_MESSAGE =
+  "workerSandbox is unsupported when `signal` is provided.";
 const INSPECT_WORKER_TIMEOUT_MS = 1_500;
 const INSPECT_WORKER_TIMEOUT_MESSAGE = "Deck inspection timed out";
 const BUILTIN_TOOL_READ_FILE = "read_file";
@@ -165,6 +178,15 @@ export class RunCanceledError extends Error {
   constructor(message = RUN_CANCELED_MESSAGE) {
     super(message);
     this.name = "RunCanceledError";
+  }
+}
+
+class WorkerSandboxSignalUnsupportedError extends Error {
+  code = "worker_sandbox_signal_unsupported";
+
+  constructor(message = WORKER_SANDBOX_SIGNAL_UNSUPPORTED_MESSAGE) {
+    super(message);
+    this.name = "WorkerSandboxSignalUnsupportedError";
   }
 }
 
@@ -459,10 +481,15 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   }
   const runId = opts.runId ?? opts.state?.runId ?? randomId("run");
   enforceTrustedSchemaImportMapPolicy(opts.path);
-  // AbortSignal is not bridged into worker runtimes yet, so preserve
-  // cancellation semantics by keeping signal-bound runs in-process.
-  const workerSandbox = (opts.workerSandbox ?? shouldUseWorkerSandbox()) &&
-    !opts.signal;
+  const workerSandboxRequested = opts.workerSandbox ??
+    shouldUseWorkerSandbox();
+  if (workerSandboxRequested && !isWorkerSandboxHostSupported()) {
+    throw new WorkerSandboxUnsupportedHostError();
+  }
+  if (workerSandboxRequested && opts.signal) {
+    throw new WorkerSandboxSignalUnsupportedError();
+  }
+  const workerSandbox = workerSandboxRequested;
   const isRoot = Boolean(inferredRoot);
   const shouldEmitRun = opts.depth === undefined || opts.depth === 0;
   let canceled = false;
@@ -1863,7 +1890,7 @@ function constrainBootstrapReads(
 function buildWorkerPermissions(
   permissions: NormalizedPermissionSet,
   deckPath: string,
-): WorkerOptions["deno"] {
+): WorkerSandboxPermissionSet {
   const workerDirs = WORKER_ENTRY_PATHS.map((entry) => path.dirname(entry));
   const bootstrapReads = constrainBootstrapReads(
     permissions,
@@ -1897,7 +1924,7 @@ function buildWorkerPermissions(
 
 function buildDeckInspectWorkerPermissions(
   deckPath: string,
-): WorkerOptions["deno"] {
+): WorkerSandboxPermissionSet {
   const deckDir = path.dirname(deckPath);
   const workerDirs = WORKER_ENTRY_PATHS.map((entry) => path.dirname(entry));
   const inspectSeedPermissions: NormalizedPermissionSet = {
@@ -1936,12 +1963,9 @@ async function inspectDeckInWorker(
     ensureNotExpired(runDeadlineMs);
   }
   const bridgeSession = randomId("bridge");
-  const worker = new Worker(
+  const worker = createWorkerSandboxBridge(
     new URL("./runtime_worker.ts", import.meta.url).href,
-    {
-      type: "module",
-      deno: buildDeckInspectWorkerPermissions(deckPath),
-    },
+    buildDeckInspectWorkerPermissions(deckPath),
   );
   let settled = false;
   const clearAndTerminate = () => {
@@ -1987,16 +2011,23 @@ async function inspectDeckInWorker(
       clearAndTerminate();
     }, timeoutMs) as unknown as number;
 
-    worker.addEventListener("error", (event) => {
-      event.preventDefault();
-      finishReject(event.error ?? new Error(event.message));
+    worker.addEventListener("error", (event: WorkerBridgeEvent) => {
+      event.preventDefault?.();
+      finishReject(
+        event.error ??
+          new Error(
+            typeof event.message === "string"
+              ? event.message
+              : "Worker execution failed",
+          ),
+      );
     });
 
     worker.addEventListener("messageerror", () => {
       finishReject(new Error("Worker bridge message serialization failed"));
     });
 
-    worker.addEventListener("message", (event: MessageEvent) => {
+    worker.addEventListener("message", (event: WorkerBridgeEvent) => {
       const msg = event.data as Record<string, unknown>;
       const receivedSession = typeof msg.bridgeSession === "string"
         ? msg.bridgeSession
@@ -2190,12 +2221,9 @@ async function runLlmDeckInWorker(
   throwIfCanceled(ctx.signal);
   const bridgeSession = randomId("bridge");
   const completionNonce = randomId("done");
-  const worker = new Worker(
+  const worker = createWorkerSandboxBridge(
     new URL("./runtime_orchestration_worker.ts", import.meta.url).href,
-    {
-      type: "module",
-      deno: buildWorkerPermissions(ctx.permissions, ctx.deckPath),
-    },
+    buildWorkerPermissions(ctx.permissions, ctx.deckPath),
   );
 
   let settled = false;
@@ -2231,16 +2259,23 @@ async function runLlmDeckInWorker(
       clearAndTerminate();
     }, remainingMs) as unknown as number;
 
-    worker.addEventListener("error", (event) => {
-      event.preventDefault();
-      finishReject(event.error ?? new Error(event.message));
+    worker.addEventListener("error", (event: WorkerBridgeEvent) => {
+      event.preventDefault?.();
+      finishReject(
+        event.error ??
+          new Error(
+            typeof event.message === "string"
+              ? event.message
+              : "Worker execution failed",
+          ),
+      );
     });
 
     worker.addEventListener("messageerror", () => {
       finishReject(new Error("Worker bridge message serialization failed"));
     });
 
-    worker.addEventListener("message", (event: MessageEvent) => {
+    worker.addEventListener("message", (event: WorkerBridgeEvent) => {
       const msg = event.data as OrchestrationWorkerMessageToParent;
       if (!msg || typeof msg !== "object") return;
       if (msg.bridgeSession !== bridgeSession) {
@@ -2467,12 +2502,9 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
   const actionCallId = randomId("action");
   const bridgeSession = randomId("bridge");
   const completionNonce = randomId("done");
-  const worker = new Worker(
+  const worker = createWorkerSandboxBridge(
     new URL("./runtime_worker.ts", import.meta.url).href,
-    {
-      type: "module",
-      deno: buildWorkerPermissions(ctx.permissions, ctx.deckPath),
-    },
+    buildWorkerPermissions(ctx.permissions, ctx.deckPath),
   );
 
   let settled = false;
@@ -2509,16 +2541,23 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
       clearAndTerminate();
     }, remainingMs) as unknown as number;
 
-    worker.addEventListener("error", (event) => {
-      event.preventDefault();
-      finishReject(event.error ?? new Error(event.message));
+    worker.addEventListener("error", (event: WorkerBridgeEvent) => {
+      event.preventDefault?.();
+      finishReject(
+        event.error ??
+          new Error(
+            typeof event.message === "string"
+              ? event.message
+              : "Worker execution failed",
+          ),
+      );
     });
 
     worker.addEventListener("messageerror", () => {
       finishReject(new Error("Worker bridge message serialization failed"));
     });
 
-    worker.addEventListener("message", (event: MessageEvent) => {
+    worker.addEventListener("message", (event: WorkerBridgeEvent) => {
       const msg = event.data as Record<string, unknown>;
       const receivedBridgeSession = typeof msg.bridgeSession === "string"
         ? msg.bridgeSession
@@ -3992,13 +4031,12 @@ async function handleToolCall(
       }
       const timeoutId = setTimeout(() => controller.abort(), remainingMs);
       try {
-        const output = await new Deno.Command(command, {
+        const output = await executeBuiltinCommand({
+          command,
           args,
           cwd,
-          stdout: "piped",
-          stderr: "piped",
           signal: controller.signal,
-        }).output();
+        });
         const stdout = new TextDecoder().decode(output.stdout).slice(0, 65536);
         const stderr = new TextDecoder().decode(output.stderr).slice(0, 65536);
         return {
@@ -4016,6 +4054,15 @@ async function handleToolCall(
           }),
         };
       } catch (err) {
+        if (err instanceof ExecToolUnsupportedHostError) {
+          return {
+            toolContent: baseComplete({
+              status: 501,
+              code: err.code,
+              message: err.message,
+            }),
+          };
+        }
         return {
           toolContent: baseComplete({
             status: 500,
@@ -4863,11 +4910,6 @@ function sanitizeMessage(msg: ModelMessage): ModelMessage {
   return { ...msg, tool_calls: toolCalls };
 }
 
-function toStringArray(value: unknown): Array<string> {
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is string => typeof entry === "string");
-}
-
 function resolveToolPath(baseDir: string, rawPath: unknown): string {
   if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
     throw new Error("path is required");
@@ -4893,13 +4935,20 @@ function parseToolLimit(value: unknown, fallback: number, max: number): number {
   return Math.min(max, Math.max(1, Number(value)));
 }
 
+function toStringArray(value: unknown): Array<string> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
 function hasAnyScope(scope: { all: boolean; values: Set<string> }): boolean {
   return scope.all || scope.values.size > 0;
 }
 
-function hasAnyRunScope(
-  scope: { all: boolean; paths: Set<string>; commands: Set<string> },
-): boolean {
+function hasAnyRunScope(scope: {
+  all: boolean;
+  paths: Set<string>;
+  commands: Set<string>;
+}): boolean {
   return scope.all || scope.paths.size > 0 || scope.commands.size > 0;
 }
 

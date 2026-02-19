@@ -1,6 +1,6 @@
 +++
 [release]
-since = "5e286d3a940d6d0ce122883c804d3fd593deea5f"
+since = "23ccdd7fdda8909a1395dff3eb2bbbaae8cba692"
 +++
 
 # Changelog
@@ -8,6 +8,15 @@ since = "5e286d3a940d6d0ce122883c804d3fd593deea5f"
 ## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.3
+
+- fix(gambit-release): support nested core path and cut 0.8.5-rc.2
+- refactor(gambit-core): remove built-in exec tool from runtime
+- fix(gambit-core): partition worker sandbox by runtime host
+- test(gambit-core): add unsupported worker sandbox coverage
+- docs(gambit-core): document worker sandbox host contract
+- ci(gambit-core): gate npm compatibility in core CI
 
 ## v0.8.5-rc.2
 
