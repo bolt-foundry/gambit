@@ -9,6 +9,12 @@ since = "23ccdd7fdda8909a1395dff3eb2bbbaae8cba692"
 
 - TBD
 
+## v0.8.5-rc.4
+
+- chore(infra): run `deno task build_npm` for gambit during `bft precommit`
+- fix(gambit): ignore dnt TS2345 diagnostics from vendored `@std/fs` and
+  `@std/toml` npm-compat sources
+
 ## v0.8.5-rc.3
 
 - fix(gambit-release): support nested core path and cut 0.8.5-rc.2

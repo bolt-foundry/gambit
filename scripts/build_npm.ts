@@ -244,7 +244,18 @@ try {
       noImplicitAny: false,
       skipLibCheck: true,
     },
-    filterDiagnostic: (diagnostic) => diagnostic.code !== 2339,
+    filterDiagnostic: (diagnostic) => {
+      if (diagnostic.code === 2339) return false;
+      if (diagnostic.code !== 2345) return true;
+      const fileName = diagnostic.file?.fileName?.replaceAll("\\", "/") ?? "";
+      if (
+        fileName.includes("/src/deps/jsr.io/@std/fs/") ||
+        fileName.includes("/src/deps/jsr.io/@std/toml/")
+      ) {
+        return false;
+      }
+      return true;
+    },
     package: {
       name: pkg.name,
       version: pkg.version,
