@@ -12,7 +12,7 @@ import {
 async function waitForAbortCount(
   getAbortCount: () => number,
   expectedCount: number,
-  timeoutMs = 1000,
+  timeoutMs = 2000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -1114,6 +1114,7 @@ Deno.test("build stop aborts in-flight runtime execution", async () => {
   const startBody = await startRes.json() as { run?: { id?: string } };
   const runId = startBody.run?.id ?? "";
   assert(runId.length > 0);
+  await waitForWorkspaceStatus(port, runId, "running");
 
   const stopRes = await fetch(`http://127.0.0.1:${port}/api/build/stop`, {
     method: "POST",

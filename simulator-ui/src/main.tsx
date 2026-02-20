@@ -67,6 +67,7 @@ import {
 import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
 import BuildPage from "./BuildPage.tsx";
+import type { WorkbenchScenarioErrorChip } from "./Chat.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -1078,6 +1079,9 @@ function App() {
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true);
+  const [workbenchScenarioErrorChip, setWorkbenchScenarioErrorChip] = useState<
+    WorkbenchScenarioErrorChip | null
+  >(null);
   const [workspaceRunIds, setWorkspaceRunIds] = useState<{
     testRunId: string | null;
     gradeRunId: string | null;
@@ -1120,6 +1124,20 @@ function App() {
       lastWorkspaceIdRef.current = activeWorkspaceId;
     }
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!workbenchScenarioErrorChip) return;
+    if (!activeWorkspaceId) {
+      setWorkbenchScenarioErrorChip(null);
+      return;
+    }
+    if (
+      workbenchScenarioErrorChip.workspaceId &&
+      workbenchScenarioErrorChip.workspaceId !== activeWorkspaceId
+    ) {
+      setWorkbenchScenarioErrorChip(null);
+    }
+  }, [activeWorkspaceId, workbenchScenarioErrorChip]);
 
   useEffect(() => {
     const syncPath = () => setPath(normalizeAppPath(window.location.pathname));
@@ -1523,6 +1541,21 @@ function App() {
     },
     [activeWorkspaceId, workspacesApi.deleteWorkspace],
   );
+  const handleAddScenarioErrorToWorkbench = useCallback((
+    payload: { workspaceId?: string; runId?: string; error: string },
+  ) => {
+    const resolvedWorkspaceId = payload.workspaceId ?? activeWorkspaceId ??
+      undefined;
+    setWorkbenchScenarioErrorChip({
+      source: "scenario_run_error",
+      workspaceId: resolvedWorkspaceId,
+      runId: payload.runId,
+      error: payload.error,
+      capturedAt: new Date().toISOString(),
+      enabled: true,
+    });
+    setWorkbenchDrawerOpen(true);
+  }, [activeWorkspaceId]);
 
   return (
     <WorkspaceProvider
@@ -1651,6 +1684,7 @@ function App() {
                       resetToken={testBotResetToken}
                       setNavActions={setNavActions}
                       onFeedbackPersisted={handleFeedbackPersisted}
+                      onAddScenarioErrorToWorkbench={handleAddScenarioErrorToWorkbench}
                     />
                   )
                   : (
@@ -1673,6 +1707,8 @@ function App() {
                   error={workbenchSessionDetailError}
                   sessionId={activeWorkspaceId}
                   sessionDetail={workbenchSessionDetail}
+                  scenarioErrorChip={workbenchScenarioErrorChip}
+                  onScenarioErrorChipChange={setWorkbenchScenarioErrorChip}
                 />
               )}
             </div>

@@ -32,6 +32,7 @@ import List from "./gds/List.tsx";
 import ListItem from "./gds/ListItem.tsx";
 import Listbox from "./gds/Listbox.tsx";
 import ScrollingText from "./gds/ScrollingText.tsx";
+import Callout from "./gds/Callout.tsx";
 import { useWorkspaceTest } from "./WorkspaceContext.tsx";
 import TestBotChatPanel from "./TestBotChatPanel.tsx";
 
@@ -82,6 +83,9 @@ export default function TestBotPage(props: {
   resetToken?: number;
   setNavActions?: (actions: React.ReactNode | null) => void;
   onFeedbackPersisted?: (workspaceId: string) => void;
+  onAddScenarioErrorToWorkbench?: (
+    payload: { workspaceId?: string; runId?: string; error: string },
+  ) => void;
 }) {
   const {
     onReplaceTestBotSession,
@@ -91,6 +95,7 @@ export default function TestBotPage(props: {
     resetToken,
     setNavActions,
     onFeedbackPersisted,
+    onAddScenarioErrorToWorkbench,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
@@ -992,15 +997,13 @@ export default function TestBotPage(props: {
               />
             )}
             {testDecks.length === 0 && (
-              <div className="placeholder">
+              <Callout>
                 No scenarios found in the workspace root deck. Add{" "}
                 <code>[[scenarios]]</code> to <code>PROMPT.md</code>{" "}
                 (prefer the Build tab) to enable Test runs.
-              </div>
+              </Callout>
             )}
-            {botDescription && (
-              <div className="placeholder">{botDescription}</div>
-            )}
+            {botDescription && <Callout>{botDescription}</Callout>}
             <strong>Scenario deck input</strong>
             <div style={{ flex: 1 }}>
               {botInputSchemaError && (
@@ -1037,9 +1040,9 @@ export default function TestBotPage(props: {
                 </div>
               )}
               {!botInputSchema && (
-                <div className="placeholder">
+                <Callout>
                   No scenario input schema configured.
-                </div>
+                </Callout>
               )}
             </div>
           </Panel>
@@ -1125,9 +1128,9 @@ export default function TestBotPage(props: {
                   </>
                 )}
                 {!deckInputSchema && !deckSchema.loading && (
-                  <div className="placeholder">
+                  <Callout>
                     No input schema found for this deck.
-                  </div>
+                  </Callout>
                 )}
               </>
             )}
@@ -1141,9 +1144,9 @@ export default function TestBotPage(props: {
                 )}
                 {!deckSchema.loading && !deckSchemaError &&
                   deckTools.length === 0 && (
-                  <div className="placeholder">
+                  <Callout>
                     No tools declared for this deck.
-                  </div>
+                  </Callout>
                 )}
                 {deckTools.length > 0 && (
                   <List>
@@ -1209,9 +1212,9 @@ export default function TestBotPage(props: {
                       </List>
                     )
                     : (
-                      <div className="placeholder">
+                      <Callout>
                         No schema available for this deck.
-                      </div>
+                      </Callout>
                     )
                 )}
               </div>
@@ -1250,6 +1253,7 @@ export default function TestBotPage(props: {
           handleStartAssistant={handleStartAssistant}
           onScore={handleTestBotScore}
           onReasonChange={handleTestBotReason}
+          onAddScenarioErrorToWorkbench={onAddScenarioErrorToWorkbench}
         />
       </PageGrid>
     </PageShell>

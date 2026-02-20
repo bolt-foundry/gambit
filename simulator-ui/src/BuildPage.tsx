@@ -10,6 +10,7 @@ import PageShell from "./gds/PageShell.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import Panel from "./gds/Panel.tsx";
 import Listbox, { type ListboxOption } from "./gds/Listbox.tsx";
+import Callout from "./gds/Callout.tsx";
 import { useWorkspaceBuild } from "./WorkspaceContext.tsx";
 
 type BuildFileEntry = {
@@ -335,11 +336,11 @@ export default function BuildPage(props: {
           style={{ minHeight: 0 }}
         >
           {workspaceOnboardingEnabled && (
-            <div className="placeholder emphasis">
+            <Callout variant="emphasis">
               Workspace scaffold created. Use the Build chat to refine
               <code>PROMPT.md</code>,{" "}
               <code>INTENT.md</code>, and the default scenario/grader decks.
-            </div>
+            </Callout>
           )}
           {fileListError && <div className="error">{fileListError}</div>}
           <div className="build-files-preview">
@@ -367,28 +368,28 @@ export default function BuildPage(props: {
             </div>
             <div className="build-files-preview-body">
               {!selectedPath && (
-                <div className="placeholder">
+                <Callout>
                   Select a file to preview its contents.
-                </div>
+                </Callout>
               )}
               {selectedPath && filePreview.status === "loading" && (
-                <div className="placeholder">Loading preview…</div>
+                <Callout>Loading preview…</Callout>
               )}
               {selectedPath && filePreview.status === "too-large" && (
-                <div className="placeholder">
+                <Callout>
                   File is too large to preview
                   {filePreview.size
                     ? ` (${formatBytes(filePreview.size)}).`
                     : "."}
-                </div>
+                </Callout>
               )}
               {selectedPath && filePreview.status === "binary" && (
-                <div className="placeholder">
+                <Callout>
                   Cannot preview binary data
                   {filePreview.size
                     ? ` (${formatBytes(filePreview.size)}).`
                     : "."}
-                </div>
+                </Callout>
               )}
               {selectedPath && filePreview.status === "error" && (
                 <div className="error">{filePreview.message}</div>

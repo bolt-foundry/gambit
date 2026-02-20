@@ -1313,10 +1313,108 @@ code:not(pre *) {
   flex-direction: column;
   gap: 8px;
 }
+.callout {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--color-surface-subtle);
+  border: none;
+  border-radius: calc(8px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
+  padding: 6px 10px;
+}
+.callout--emphasis {
+  background: var(--color-primary-alpha-15);
+  color: var(--color-primary);
+}
+.callout--danger {
+  background: var(--color-danger-soft);
+  color: var(--color-text);
+  border-radius: calc(10px * var(--corner-radius-scale, 1));
+  padding: 10px 12px;
+}
+.callout-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.callout-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.callout-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.callout-message {
+  font-size: 12px;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.callout--danger .callout-title {
+  color: var(--color-danger);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.callout-actions {
+  flex: 0 0 auto;
+}
 .composer-inputs {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+.workbench-composer-chip-row {
+  display: flex;
+  align-items: center;
+}
+.workbench-composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: calc(999px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
+  background: var(--color-surface-muted);
+  padding: 4px 8px;
+  max-width: 100%;
+}
+.workbench-error-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+}
+.workbench-composer-chip-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.workbench-composer-chip-toggle input {
+  margin: 0;
+}
+.workbench-composer-chip-remove {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+.workbench-composer-chip-remove:hover {
+  color: var(--color-text);
 }
 .message-input {
   width: 100%;
@@ -1426,6 +1524,12 @@ code:not(pre *) {
 .error {
   color: var(--color-danger);
   font-size: 13px;
+}
+.workbench-transcript-chip-row {
+  margin-bottom: 6px;
+}
+.workbench-error-chip-transcript {
+  font-size: 10px;
 }
 .session-meta {
   font-size: 12px;
@@ -2710,18 +2814,5 @@ code:not(pre *) {
 .patch-meta {
   font-size: 12px;
   color: var(--color-text-muted);
-}
-.placeholder {
-  color: var(--color-text-muted);
-  font-size: 14px;
-  line-height: 1.5;
-  background: var(--color-surface-subtle);
-  border-radius: calc(8px * var(--corner-radius-scale, 1));
-  corner-shape: squircle;
-  padding: 6px 10px;
-}
-.placeholder.emphasis {
-  background: var(--color-primary-alpha-15);
-  color: var(--color-primary);
 }
 `;

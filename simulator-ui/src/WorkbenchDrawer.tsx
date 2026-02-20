@@ -4,6 +4,7 @@ import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
 import ScrollingText from "./gds/ScrollingText.tsx";
+import Callout from "./gds/Callout.tsx";
 import Chat from "./Chat.tsx";
 import Accordion from "./gds/Accordion.tsx";
 import { useBuildChat } from "./BuildChatContext.tsx";
@@ -22,6 +23,7 @@ import type {
   GradingFlag,
   SessionDetailResponse,
 } from "./utils.ts";
+import type { WorkbenchScenarioErrorChip } from "./Chat.tsx";
 
 type WorkbenchDrawerFeedbackItem = {
   entry: FeedbackEntry;
@@ -52,6 +54,8 @@ type WorkbenchDrawerProps = {
   gradingFlags?: GradingFlag[];
   runLabelById?: Map<string, string>;
   runItemByRefId?: Map<string, WorkbenchDrawerRunItem>;
+  scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
+  onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
 };
 
 export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
@@ -69,6 +73,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     gradingFlags,
     runLabelById = new Map(),
     runItemByRefId = new Map(),
+    scenarioErrorChip,
+    onScenarioErrorChipChange,
   } = props;
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<
@@ -348,9 +354,9 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                   <div className="workbench-chat-overlay">
                     <div className="workbench-chat-history">
                       {chatHistoryLoading && (
-                        <div className="placeholder">
+                        <Callout>
                           Loading chat history…
-                        </div>
+                        </Callout>
                       )}
                       {chatHistoryError && (
                         <div className="error">{chatHistoryError}</div>
@@ -358,9 +364,9 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                       {!chatHistoryLoading &&
                         !chatHistoryError &&
                         chatHistory.length === 0 && (
-                        <div className="placeholder">
+                        <Callout>
                           No previous chats yet.
-                        </div>
+                        </Callout>
                       )}
                       {!chatHistoryLoading &&
                         !chatHistoryError &&
@@ -394,7 +400,10 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                         chatHistoryOpen ? " is-history" : ""
                       }`}
                     >
-                      <Chat />
+                      <Chat
+                        scenarioErrorChip={scenarioErrorChip}
+                        onScenarioErrorChipChange={onScenarioErrorChipChange}
+                      />
                     </div>
                   </div>
                 </div>
@@ -421,17 +430,15 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                     </p>
                   </>
                 )}
-                {loading && (
-                  <div className="placeholder">Loading ratings and flags…</div>
-                )}
+                {loading && <Callout>Loading ratings and flags…</Callout>}
                 {error && <div className="error">{error}</div>}
                 {!loading &&
                   !error &&
                   resolvedFeedbackItems.length === 0 &&
                   resolvedGradingFlags.length === 0 && (
-                  <div className="placeholder">
+                  <Callout>
                     No ratings or flags yet.
-                  </div>
+                  </Callout>
                 )}
                 {resolvedFeedbackItems.length > 0 && (
                   <div className="workbench-summary-list">

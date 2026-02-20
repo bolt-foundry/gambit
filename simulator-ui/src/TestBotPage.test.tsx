@@ -763,11 +763,133 @@ Deno.test("TestBotPage New chat clears current run without rehydrating latest wo
       String(node.children.join("")).includes("latest workspace run")
     );
     assertEquals(latestRunText.length, 0);
-    const placeholder = renderer.root.findAll((node: ReactTestInstance) =>
-      node.props.className === "placeholder" &&
+    const emptyState = renderer.root.findAll((node: ReactTestInstance) =>
       String(node.children.join("")).includes("No messages yet.")
     );
-    assert(placeholder.length > 0);
+    assert(emptyState.length > 0);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer.unmount();
+      });
+    }
+    globalThis.fetch = originalFetch;
+    globalThis.EventSource = originalEventSource;
+  }
+});
+
+Deno.test("TestBotPage exposes scenario error callout action for workbench chat", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  let addPayload:
+    | { workspaceId?: string; runId?: string; error: string }
+    | null = null;
+
+  try {
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch =
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const pathname = new URL(url, "http://localhost").pathname;
+        if (pathname === "/api/workspaces/ws-1") {
+          return new Response(JSON.stringify(createSnapshot()), {
+            status: 200,
+          });
+        }
+        if (pathname === "/api/test") {
+          return new Response(
+            JSON.stringify({
+              selectedDeckId: "deck-1",
+              testDecks: [{
+                id: "deck-1",
+                label: "Scenario 1",
+                path: "/tmp/scenario-1.md",
+              }],
+              inputSchema: {
+                kind: "object",
+                optional: false,
+                fields: {
+                  foo: { kind: "string", optional: false },
+                },
+              },
+              defaults: { input: { foo: "preset" } },
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/schema") {
+          return new Response(
+            JSON.stringify({
+              schema: {
+                kind: "object",
+                optional: false,
+                fields: {
+                  contextId: { kind: "string", optional: false },
+                },
+              },
+              defaults: { contextId: "ctx-default" },
+              startMode: "assistant",
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/api/test/run") {
+          const body = typeof init?.body === "string" && init.body.length > 0
+            ? JSON.parse(init.body) as Record<string, unknown>
+            : {};
+          assertEquals(body.workspaceId, "ws-1");
+          return new Response(
+            JSON.stringify({
+              error: "Scenario exploded while validating tool output",
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch;
+
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <WorkspaceProvider workspaceId="ws-1">
+          <TestBotPage
+            activeWorkspaceId="ws-1"
+            onReplaceTestBotSession={() => {}}
+            onResetTestBotSession={() => {}}
+            onAddScenarioErrorToWorkbench={(payload) => {
+              addPayload = payload;
+            }}
+          />
+        </WorkspaceProvider>,
+      );
+    });
+
+    assert(renderer);
+    await flushEffects();
+    await flushEffects();
+
+    await act(async () => {
+      findByTestId(renderer.root, "testbot-run").props.onClick();
+    });
+    await flushEffects();
+
+    const callout = findByTestId(renderer.root, "testbot-error-callout");
+    assert(callout);
+    const addButton = findByTestId(renderer.root, "testbot-add-error-to-chat");
+    await act(async () => {
+      addButton.props.onClick();
+    });
+
+    const payload = addPayload as
+      | { workspaceId?: string; runId?: string; error: string }
+      | null;
+    assert(payload !== null);
+    assertEquals(
+      payload.error,
+      "Scenario exploded while validating tool output",
+    );
+    assertEquals(payload.workspaceId, "ws-1");
+    assertEquals(payload.runId, undefined);
   } finally {
     if (renderer) {
       await act(async () => {

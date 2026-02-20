@@ -40,6 +40,7 @@ import type {
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Panel from "./gds/Panel.tsx";
+import Callout from "./gds/Callout.tsx";
 import { useWorkspaceGrade, useWorkspaceRouting } from "./WorkspaceContext.tsx";
 
 type ScenarioRunSummary = {
@@ -720,17 +721,17 @@ function GradePage(
             </Button>
           </div>
           {sessions.length === 0 && (
-            <div className="placeholder">
+            <Callout>
               No sessions found. Run the Test view to capture a session before
               calibrating.
-            </div>
+            </Callout>
           )}
           {graders.length === 0 && (
-            <div className="placeholder">
+            <Callout>
               No graders found in the workspace root deck. Add{" "}
               <code>[[graders]]</code> to <code>PROMPT.md</code>{" "}
               (prefer the Build tab) to enable grading.
-            </div>
+            </Callout>
           )}
           {sessions.length > 0 && graders.length > 0 && (
             <>
@@ -747,9 +748,9 @@ function GradePage(
                 placeholder="Select grader"
               />
               {selectedGrader?.description && (
-                <div className="placeholder">
+                <Callout>
                   {selectedGrader.description}
-                </div>
+                </Callout>
               )}
             </>
           )}
@@ -774,19 +775,19 @@ function GradePage(
                 </div>
               </div>
               {runItems.length === 0 && (
-                <div className="placeholder">
+                <Callout>
                   {selectedTestRunId
                     ? "No grader runs for this selected test run yet."
                     : "No grader runs for this session yet."}
-                </div>
+                </Callout>
               )}
               {routeRunNotFound && selectedSessionId && (
-                <div className="placeholder">
+                <Callout>
                   Grade run not found for this workspace.{" "}
                   <a href={buildGradePath(selectedSessionId)}>
                     Back to grade runs
                   </a>
-                </div>
+                </Callout>
               )}
               {runSections.map((section) => {
                 const isExpanded = expandedRunId === section.run.id;

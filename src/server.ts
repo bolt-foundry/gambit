@@ -4218,6 +4218,8 @@ export function startWebSocketSimulator(opts: {
         let botInput: unknown = undefined;
         let initialUserMessage: string | undefined = undefined;
         let botDeckSelection: AvailableTestDeck | undefined;
+        let requestedBotDeckPath: string | undefined;
+        let hasExplicitBotDeckPath = false;
         let inheritBotInput = false;
         let userProvidedDeckInput = false;
         let initFillRequestMissing: Array<string> | undefined = undefined;
@@ -4229,7 +4231,7 @@ export function startWebSocketSimulator(opts: {
             context?: unknown;
             botInput?: unknown;
             initialUserMessage?: unknown;
-            botDeckPath?: string;
+            botDeckPath?: unknown;
             inheritBotInput?: unknown;
             initFill?: { missing?: unknown };
             workspaceId?: string;
@@ -4258,20 +4260,9 @@ export function startWebSocketSimulator(opts: {
             ) as Array<string>;
           }
           sessionId = getWorkspaceIdFromBody(body);
+          hasExplicitBotDeckPath = "botDeckPath" in body;
           if (typeof body.botDeckPath === "string") {
-            const resolved = resolveTestDeck(body.botDeckPath);
-            if (!resolved) {
-              return new Response(
-                JSON.stringify({ error: "Unknown scenario deck selection" }),
-                {
-                  status: 400,
-                  headers: { "content-type": "application/json" },
-                },
-              );
-            }
-            botDeckSelection = resolved;
-          } else if (!body.botDeckPath && availableTestDecks.length > 0) {
-            botDeckSelection = availableTestDecks[0];
+            requestedBotDeckPath = body.botDeckPath;
           }
           if (
             typeof body.initialUserMessage === "string" &&
@@ -4285,6 +4276,33 @@ export function startWebSocketSimulator(opts: {
         if (sessionId) {
           await logWorkspaceBotRoot("/api/test/run", sessionId);
           await activateWorkspaceDeck(sessionId);
+        }
+        await deckLoadPromise.catch(() => null);
+        if (hasExplicitBotDeckPath) {
+          if (
+            !requestedBotDeckPath || requestedBotDeckPath.trim().length === 0
+          ) {
+            return new Response(
+              JSON.stringify({ error: "Unknown scenario deck selection" }),
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          const resolved = resolveTestDeck(requestedBotDeckPath);
+          if (!resolved) {
+            return new Response(
+              JSON.stringify({ error: "Unknown scenario deck selection" }),
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          botDeckSelection = resolved;
+        } else if (availableTestDecks.length > 0) {
+          botDeckSelection = availableTestDecks[0];
         }
         if (deckInput === undefined) {
           try {
@@ -4610,11 +4628,22 @@ export function startWebSocketSimulator(opts: {
         }
         // 2) Resolve which scenario deck to use and derive initial input.
         await deckLoadPromise.catch(() => null);
+        const hasExplicitDeckPath = "botDeckPath" in payload;
         const requestedDeck = typeof payload.botDeckPath === "string"
           ? payload.botDeckPath
           : undefined;
+        if (hasExplicitDeckPath) {
+          if (!requestedDeck || requestedDeck.trim().length === 0) {
+            return new Response(
+              JSON.stringify({ error: "Unknown scenario deck selection" }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
         const selection = (() => {
-          if (requestedDeck) return resolveTestDeck(requestedDeck);
+          if (requestedDeck !== undefined) {
+            return resolveTestDeck(requestedDeck);
+          }
           const metaPath =
             typeof savedState?.meta?.testBotConfigPath === "string"
               ? savedState.meta.testBotConfigPath
