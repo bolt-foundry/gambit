@@ -736,8 +736,8 @@ export default function TestBotPage(props: {
   ]);
 
   const handleTestBotScore = useCallback(
-    async (messageRefId: string, score: number | null) => {
-      await saveTestBotFeedback(messageRefId, score);
+    async (messageRefId: string, score: number | null, reason?: string) => {
+      await saveTestBotFeedback(messageRefId, score, reason);
     },
     [saveTestBotFeedback],
   );

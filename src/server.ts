@@ -1951,6 +1951,23 @@ export function startWebSocketSimulator(opts: {
         }
       }
     }
+    const feedbackByRef = new Map(
+      (state.feedback ?? []).map((entry) => [entry.messageRefId, entry]),
+    );
+    if (Array.isArray(testRun.messages) && testRun.messages.length > 0) {
+      testRun.messages = testRun.messages.map((message) => {
+        const refId = typeof message.messageRefId === "string"
+          ? message.messageRefId
+          : undefined;
+        if (!refId) return message;
+        const feedback = feedbackByRef.get(refId);
+        if (!feedback && !message.feedback) return message;
+        if (!feedback) {
+          return { ...message, feedback: undefined };
+        }
+        return { ...message, feedback };
+      });
+    }
 
     await deckLoadPromise.catch(() => null);
     const requestedDeck = opts?.requestedTestDeckPath ?? null;
@@ -5788,6 +5805,8 @@ export function startWebSocketSimulator(opts: {
             const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
             const reason = typeof body.reason === "string"
               ? body.reason
+              : idx >= 0
+              ? existing[idx].reason
               : undefined;
             const runId = requestedRunId ??
               (typeof state.runId === "string" ? state.runId : "run");
@@ -6129,6 +6148,8 @@ export function startWebSocketSimulator(opts: {
             const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
             const reason = typeof body.reason === "string"
               ? body.reason
+              : idx >= 0
+              ? existing[idx].reason
               : undefined;
             const runId = requestedRunId ??
               (typeof state.runId === "string" ? state.runId : "session");

@@ -54,6 +54,7 @@ type Props = {
   onScore: (
     messageRefId: string,
     score: number | null,
+    reason?: string,
   ) => void | Promise<void>;
   onReasonChange: (
     messageRefId: string,

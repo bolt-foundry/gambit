@@ -1373,6 +1373,8 @@ code:not(pre *) {
 .workbench-composer-chip-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .workbench-composer-chip {
   display: inline-flex;
@@ -1385,18 +1387,64 @@ code:not(pre *) {
   padding: 4px 8px;
   max-width: 100%;
 }
-.workbench-error-chip {
+.workbench-context-chip {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  border: 1px solid var(--color-danger);
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
+  justify-content: center;
+  min-width: 34px;
+  min-height: 20px;
+  border-radius: calc(999px * var(--corner-radius-scale, 1));
+  corner-shape: squircle;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 2px 8px;
+}
+.workbench-context-chip--error {
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.workbench-context-chip--rating {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  color: var(--color-text);
+}
+.workbench-context-chip--rating.calibrate-score--positive {
+  background: var(--color-success-strong);
+  border-color: var(--color-success-strong);
+  color: var(--color-surface);
+}
+.workbench-context-chip--rating.calibrate-score--negative {
+  background: var(--color-danger-strong);
+  border-color: var(--color-danger-strong);
+  color: var(--color-surface);
+}
+.workbench-context-chip--rating.calibrate-score--neutral {
+  background: var(--color-text-subtle);
+  border-color: var(--color-text-subtle);
+  color: var(--color-surface);
+}
+.workbench-context-chip--flag {
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+}
+.workbench-context-chip--flag.calibrate-score--positive {
+  background: var(--color-success-strong);
+  border-color: var(--color-success-strong);
+  color: var(--color-surface);
+}
+.workbench-context-chip--flag.calibrate-score--negative {
+  background: var(--color-danger-strong);
+  border-color: var(--color-danger-strong);
+  color: var(--color-surface);
+}
+.workbench-context-chip--flag.calibrate-score--neutral {
+  background: var(--color-text-subtle);
+  border-color: var(--color-text-subtle);
+  color: var(--color-surface);
 }
 .workbench-composer-chip-toggle {
   display: inline-flex;
@@ -1526,10 +1574,21 @@ code:not(pre *) {
   font-size: 13px;
 }
 .workbench-transcript-chip-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 6px;
+}
+.workbench-context-chip--transcript {
+  font-size: 10px;
 }
 .workbench-error-chip-transcript {
   font-size: 10px;
+}
+.workbench-summary-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 .session-meta {
   font-size: 12px;
