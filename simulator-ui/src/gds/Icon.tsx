@@ -9,6 +9,7 @@ import { FlagIcon } from "./icons/Flag.tsx";
 import { HamburgerMenuIcon } from "./icons/HamburgerMenu.tsx";
 import { TrashIcon } from "./icons/Trash.tsx";
 import { ReviewIcon } from "./icons/Review.tsx";
+import { TimesIcon } from "./icons/Times.tsx";
 
 const ICONS = {
   chevronDown: ChevronDownIcon,
@@ -22,6 +23,7 @@ const ICONS = {
   circleInfo: CircleInfoIcon,
   review: ReviewIcon,
   trash: TrashIcon,
+  times: TimesIcon,
 };
 
 export type IconName = keyof typeof ICONS;
