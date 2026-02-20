@@ -6,6 +6,7 @@ import {
 } from "./utils.ts";
 import Button from "./gds/Button.tsx";
 import Callout from "./gds/Callout.tsx";
+import Icon from "./gds/Icon.tsx";
 import {
   ActivityTranscriptRows,
   bucketBuildChatDisplay,
@@ -445,6 +446,9 @@ export function ChatView(props: {
                   <input
                     type="checkbox"
                     checked={scenarioErrorChip.enabled}
+                    aria-label={scenarioErrorChip.enabled
+                      ? "Error context on"
+                      : "Error context off"}
                     onChange={(event) =>
                       onScenarioErrorChipChange?.({
                         ...scenarioErrorChip,
@@ -452,15 +456,15 @@ export function ChatView(props: {
                       })}
                     data-testid="workbench-error-chip-toggle"
                   />
-                  <span>{scenarioErrorChip.enabled ? "On" : "Off"}</span>
                 </label>
                 <button
                   type="button"
                   className="link-button workbench-composer-chip-remove"
                   onClick={() => onScenarioErrorChipChange?.(null)}
+                  aria-label="Remove error context"
                   data-testid="workbench-error-chip-remove"
                 >
-                  Remove
+                  <Icon name="times" size={8} />
                 </button>
               </div>
             </div>

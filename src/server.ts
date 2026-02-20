@@ -1388,20 +1388,56 @@ export function startWebSocketSimulator(opts: {
     return lower === "prompt.md" || lower.endsWith(".deck.md");
   };
 
+  type BuildDeckLabelCacheEntry = {
+    frontmatterRaw: string | null;
+    label: string | undefined;
+  };
+
+  const buildDeckLabelCache = new Map<string, BuildDeckLabelCacheEntry>();
+
   const readBuildDeckLabel = async (
     fullPath: string,
   ): Promise<string | undefined> => {
     try {
       const text = await Deno.readTextFile(fullPath);
       const lines = text.split(/\r?\n/);
-      if (lines[0] !== "+++") return undefined;
+      if (lines[0] !== "+++") {
+        const cached = buildDeckLabelCache.get(fullPath);
+        if (cached?.frontmatterRaw === null) return cached.label;
+        buildDeckLabelCache.set(fullPath, {
+          frontmatterRaw: null,
+          label: undefined,
+        });
+        return undefined;
+      }
       const endIndex = lines.indexOf("+++", 1);
-      if (endIndex === -1) return undefined;
+      if (endIndex === -1) {
+        const cached = buildDeckLabelCache.get(fullPath);
+        if (cached?.frontmatterRaw === null) return cached.label;
+        buildDeckLabelCache.set(fullPath, {
+          frontmatterRaw: null,
+          label: undefined,
+        });
+        return undefined;
+      }
       const frontmatter = lines.slice(1, endIndex).join("\n");
+      const cached = buildDeckLabelCache.get(fullPath);
+      if (cached?.frontmatterRaw === frontmatter) {
+        return cached.label;
+      }
       const parsed = parseToml(frontmatter) as Record<string, unknown>;
       const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
-      return label.length > 0 ? label : undefined;
+      const resolvedLabel = label.length > 0 ? label : undefined;
+      buildDeckLabelCache.set(fullPath, {
+        frontmatterRaw: frontmatter,
+        label: resolvedLabel,
+      });
+      return resolvedLabel;
     } catch {
+      buildDeckLabelCache.set(fullPath, {
+        frontmatterRaw: null,
+        label: undefined,
+      });
       return undefined;
     }
   };

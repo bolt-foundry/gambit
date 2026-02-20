@@ -1409,12 +1409,12 @@ code:not(pre *) {
   margin: 0;
 }
 .workbench-composer-chip-remove {
-  font-size: 12px;
+  display: flex;
   color: var(--color-text-muted);
   text-decoration: none;
 }
 .workbench-composer-chip-remove:hover {
-  color: var(--color-text);
+  color: var(--color-danger);
 }
 .message-input {
   width: 100%;

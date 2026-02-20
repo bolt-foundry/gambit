@@ -254,6 +254,111 @@ Body
   await server.finished;
 });
 
+Deno.test("build files API refreshes deck labels when content changes with same size and mtime", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "build-files-label-cache.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const workspaceRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    { method: "POST" },
+  );
+  assertEquals(workspaceRes.ok, true);
+  const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+  const workspaceId = workspaceBody.workspaceId ?? "";
+  assert(workspaceId.length > 0, "missing workspaceId");
+
+  const firstFilesRes = await fetch(
+    `http://127.0.0.1:${port}/api/build/files?workspaceId=${
+      encodeURIComponent(workspaceId)
+    }`,
+  );
+  assertEquals(firstFilesRes.ok, true);
+  const firstFilesBody = await firstFilesRes.json() as { root?: string };
+  const root = firstFilesBody.root ?? "";
+  assert(root.length > 0, "missing bot root");
+
+  const scenarioDir = path.join(root, "scenarios", "scenario_a");
+  await Deno.mkdir(scenarioDir, { recursive: true });
+  const promptPath = path.join(scenarioDir, "PROMPT.md");
+  const fixedTime = new Date("2025-01-01T00:00:00.000Z");
+
+  const makePrompt = (label: string) =>
+    `+++
+label = "${label}"
++++
+
+Body
+`;
+
+  await Deno.writeTextFile(promptPath, makePrompt("Alpha"));
+  await Deno.utime(promptPath, fixedTime, fixedTime);
+
+  const warmCacheRes = await fetch(
+    `http://127.0.0.1:${port}/api/build/files?workspaceId=${
+      encodeURIComponent(workspaceId)
+    }`,
+  );
+  assertEquals(warmCacheRes.ok, true);
+  const warmCacheBody = await warmCacheRes.json() as {
+    entries?: Array<{ path?: string; label?: string }>;
+  };
+  const warmPrompt = (warmCacheBody.entries ?? []).find((entry) =>
+    entry.path === "scenarios/scenario_a/PROMPT.md"
+  );
+  assertEquals(warmPrompt?.label, "Alpha");
+
+  // Same byte length label replacement + identical mtime to reproduce stale-cache risk.
+  await Deno.writeTextFile(promptPath, makePrompt("Bravo"));
+  await Deno.utime(promptPath, fixedTime, fixedTime);
+
+  const refreshedRes = await fetch(
+    `http://127.0.0.1:${port}/api/build/files?workspaceId=${
+      encodeURIComponent(workspaceId)
+    }`,
+  );
+  assertEquals(refreshedRes.ok, true);
+  const refreshedBody = await refreshedRes.json() as {
+    entries?: Array<{ path?: string; label?: string }>;
+  };
+  const refreshedPrompt = (refreshedBody.entries ?? []).find((entry) =>
+    entry.path === "scenarios/scenario_a/PROMPT.md"
+  );
+  assertEquals(refreshedPrompt?.label, "Bravo");
+
+  await server.shutdown();
+  await server.finished;
+});
+
 Deno.test("simulator exposes schema and defaults", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
