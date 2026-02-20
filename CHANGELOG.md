@@ -1,6 +1,6 @@
 +++
 [release]
-since = "d2341a7cbb279485fac823b7a277465f5cee4dda"
+since = "1c07354c42544c7fd6e1042ebb4606445fe35b6c"
 +++
 
 # Changelog
@@ -8,6 +8,23 @@ since = "d2341a7cbb279485fac823b7a277465f5cee4dda"
 ## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.9
+
+- TBD
+
+## v0.8.5-rc.8
+
+- chore(gambit): cut 0.8.5-rc.7
+- Switch ci-gambit-core to run nix develop via step commands with a profile
+  instead of custom shell overrides. This avoids both workflow-parse failures
+  and literal path resolution failures.
+
+## v0.8.5-rc.7
+
+- chore(gambit): cut 0.8.5-rc.6
+- fix(gambit-ci): stop using github.workspace in shell field
+- fix(gambit): include `src/decks` assets in compiled CLI binaries
 
 ## v0.8.5-rc.6
 

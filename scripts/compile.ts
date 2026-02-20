@@ -55,6 +55,7 @@ const includePaths = [
   ...docIncludes,
   coreCards,
   coreSchemas,
+  "src/decks",
   "scaffolds",
   "simulator-ui/dist",
 ];
