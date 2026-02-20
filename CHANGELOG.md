@@ -1,6 +1,6 @@
 +++
 [release]
-since = "0fdcdf8641dccac78e6f3b0fc5916ce7acbd6de9"
+since = "d2341a7cbb279485fac823b7a277465f5cee4dda"
 +++
 
 # Changelog
@@ -8,6 +8,18 @@ since = "0fdcdf8641dccac78e6f3b0fc5916ce7acbd6de9"
 ## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.6
+
+- chore(gambit): cut 0.8.5-rc.5 and pin React to 19.2.4
+- chore(repo): pin jsx-runtime imports to react 19.2.4
+- refactor(gambit): Fix left drawer
+- feat(gambit-simulator-ui): send scenario run errors to workbench chat
+- refactor(gambit-simulator-ui): replace placeholders with reusable callout
+- fix(gambit): validate explicit deck path and stabilize stop test
+- feat(simulator-ui): use icon remove action for error context chip
+- fix(gambit): invalidate build deck label cache on frontmatter changes
+- feat(gambit): add workbench composer chip and chat flow updates
 
 ## v0.8.5-rc.5
 
