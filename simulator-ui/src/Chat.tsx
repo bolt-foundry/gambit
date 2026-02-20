@@ -5,6 +5,7 @@ import {
   renderMarkdown,
 } from "./utils.ts";
 import Button from "./gds/Button.tsx";
+import Callout from "./gds/Callout.tsx";
 import {
   ActivityTranscriptRows,
   bucketBuildChatDisplay,
@@ -13,6 +14,108 @@ import { useBuildChat } from "./BuildChatContext.tsx";
 
 export { bucketBuildChatDisplay };
 
+export type WorkbenchScenarioErrorContext = {
+  source: "scenario_run_error";
+  workspaceId?: string;
+  runId?: string;
+  capturedAt: string;
+  error: string;
+};
+
+export type WorkbenchScenarioErrorChip = WorkbenchScenarioErrorContext & {
+  enabled: boolean;
+};
+
+const ERROR_CONTEXT_START_MARKER = "[gambit:error-context/v1]";
+const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
+
+export function encodeWorkbenchMessageWithErrorContext(
+  message: string,
+  context: WorkbenchScenarioErrorContext,
+): string {
+  const body = message.trim();
+  return `${ERROR_CONTEXT_START_MARKER}\n${
+    JSON.stringify(context)
+  }\n${ERROR_CONTEXT_END_MARKER}${body ? `\n${body}` : ""}`;
+}
+
+export function decodeWorkbenchMessageWithErrorContext(content: string): {
+  context: WorkbenchScenarioErrorContext;
+  body: string;
+} | null {
+  if (typeof content !== "string") return null;
+  if (!content.startsWith(`${ERROR_CONTEXT_START_MARKER}\n`)) return null;
+  const endMarkerIndex = content.indexOf(`\n${ERROR_CONTEXT_END_MARKER}`);
+  if (endMarkerIndex < 0) return null;
+  const jsonStart = ERROR_CONTEXT_START_MARKER.length + 1;
+  const jsonRaw = content.slice(jsonStart, endMarkerIndex).trim();
+  if (!jsonRaw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonRaw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.source !== "scenario_run_error") return null;
+  if (typeof record.error !== "string" || record.error.trim().length === 0) {
+    return null;
+  }
+  if (
+    typeof record.capturedAt !== "string" ||
+    record.capturedAt.trim().length === 0
+  ) {
+    return null;
+  }
+  const markerEndIndex = endMarkerIndex +
+    `\n${ERROR_CONTEXT_END_MARKER}`.length;
+  const remainder = content.slice(markerEndIndex);
+  const body = remainder.startsWith("\n") ? remainder.slice(1) : remainder;
+  return {
+    context: {
+      source: "scenario_run_error",
+      workspaceId: typeof record.workspaceId === "string"
+        ? record.workspaceId
+        : undefined,
+      runId: typeof record.runId === "string" ? record.runId : undefined,
+      capturedAt: record.capturedAt,
+      error: record.error,
+    },
+    body,
+  };
+}
+
+function UserMessageContent(props: { content: string }) {
+  const { content } = props;
+  const decoded = decodeWorkbenchMessageWithErrorContext(content);
+  const body = decoded ? decoded.body : content;
+  const showBody = body.trim().length > 0;
+  return (
+    <>
+      {decoded && (
+        <div className="workbench-transcript-chip-row">
+          <span
+            className="workbench-error-chip workbench-error-chip-transcript"
+            title={decoded.context.error}
+            data-testid="workbench-transcript-error-chip"
+          >
+            Error
+          </span>
+        </div>
+      )}
+      {showBody && (
+        <div
+          className="bubble-text"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }}
+        />
+      )}
+    </>
+  );
+}
+
 export function BuildChatRows(props: { display: BuildDisplayMessage[] }) {
   const { display } = props;
   return (
@@ -20,6 +123,7 @@ export function BuildChatRows(props: { display: BuildDisplayMessage[] }) {
       display={display}
       renderMessage={(entry, messageOrdinal) => {
         const role = entry.role ?? "assistant";
+        const content = entry.content ?? "";
         return (
           <div
             className={classNames(
@@ -35,12 +139,12 @@ export function BuildChatRows(props: { display: BuildDisplayMessage[] }) {
               )}
               title={role}
             >
-              <div
-                className="bubble-text"
-                dangerouslySetInnerHTML={{
-                  __html: renderMarkdown(entry.content ?? ""),
-                }}
-              />
+              {role === "user" ? <UserMessageContent content={content} /> : (
+                <div
+                  className="bubble-text"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                />
+              )}
             </div>
           </div>
         );
@@ -158,7 +262,12 @@ function BuildChatActivityIndicator(
   );
 }
 
-export function ChatView(props: { state: BuildChatViewState }) {
+export function ChatView(props: {
+  state: BuildChatViewState;
+  scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
+  onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
+}) {
+  const { scenarioErrorChip, onScenarioErrorChipChange } = props;
   const {
     run,
     chatDraft,
@@ -212,28 +321,59 @@ export function ChatView(props: { state: BuildChatViewState }) {
 
   const canStartAssistant = run.status !== "running" && !chatSending &&
     run.messages.length === 0;
+  const hasEnabledScenarioErrorChip = Boolean(
+    scenarioErrorChip && scenarioErrorChip.enabled,
+  );
+  const canSubmitMessage = !chatSending &&
+    run.status !== "running" &&
+    (chatDraft.trim().length > 0 || hasEnabledScenarioErrorChip);
+  const showStartButton = canStartAssistant && chatDraft.trim().length === 0 &&
+    !hasEnabledScenarioErrorChip;
 
   const handleSendChat = useCallback(async () => {
     const message = chatDraft.trim();
-    if (!message) return;
-    setOptimisticUser({ id: crypto.randomUUID(), text: message });
+    const activeContext = scenarioErrorChip?.enabled
+      ? {
+        source: "scenario_run_error" as const,
+        workspaceId: scenarioErrorChip.workspaceId,
+        runId: scenarioErrorChip.runId,
+        capturedAt: scenarioErrorChip.capturedAt,
+        error: scenarioErrorChip.error,
+      }
+      : null;
+    if (!message && !activeContext) return;
+    const outboundMessage = activeContext
+      ? encodeWorkbenchMessageWithErrorContext(message, activeContext)
+      : message;
+    setOptimisticUser({ id: crypto.randomUUID(), text: outboundMessage });
     setChatDraft("");
     try {
-      await sendMessage(message);
+      await sendMessage(outboundMessage);
     } catch (err) {
       setChatError(err instanceof Error ? err.message : String(err));
     } finally {
       setOptimisticUser(null);
     }
-  }, [chatDraft, sendMessage, setChatDraft, setChatError, setOptimisticUser]);
+  }, [
+    chatDraft,
+    scenarioErrorChip?.capturedAt,
+    scenarioErrorChip?.enabled,
+    scenarioErrorChip?.error,
+    scenarioErrorChip?.runId,
+    scenarioErrorChip?.workspaceId,
+    sendMessage,
+    setChatDraft,
+    setChatError,
+    setOptimisticUser,
+  ]);
 
   const handleStartAssistant = useCallback(async () => {
-    if (chatDraft.trim().length > 0) {
+    if (chatDraft.trim().length > 0 || hasEnabledScenarioErrorChip) {
       await handleSendChat();
       return;
     }
     await sendMessage("");
-  }, [chatDraft, handleSendChat, sendMessage]);
+  }, [chatDraft, handleSendChat, hasEnabledScenarioErrorChip, sendMessage]);
 
   const handleStopChat = useCallback(async () => {
     try {
@@ -247,15 +387,15 @@ export function ChatView(props: { state: BuildChatViewState }) {
     <div className="test-bot-sidebar flex-column gap-8 flex-1 build-chat-panel">
       <div className="test-bot-thread">
         <div className="imessage-thread" ref={transcriptRef}>
-          <div className="placeholder">
+          <Callout>
             Use this chat to update deck files via Gambit Bot. Tool calls show
             file writes and why they happened.
-          </div>
+          </Callout>
           {(run.displayMessages?.length ?? 0) === 0 &&
             !optimisticUser &&
             !(streamingAssistant?.runId === run.id &&
               streamingAssistant.text.length > 0) &&
-            <div className="placeholder">No messages yet.</div>}
+            <Callout>No messages yet.</Callout>}
           <BuildChatRows display={display} />
           {optimisticUser && (
             <div
@@ -263,12 +403,7 @@ export function ChatView(props: { state: BuildChatViewState }) {
               className="imessage-row right"
             >
               <div className="imessage-bubble right" title="user">
-                <div
-                  className="bubble-text"
-                  dangerouslySetInnerHTML={{
-                    __html: renderMarkdown(optimisticUser.text),
-                  }}
-                />
+                <UserMessageContent content={optimisticUser.text} />
               </div>
             </div>
           )}
@@ -296,17 +431,51 @@ export function ChatView(props: { state: BuildChatViewState }) {
           <div className="build-chat-activity-sticky">
             <BuildChatActivityIndicator state={activityState} />
           </div>
-          {canStartAssistant && (
-            <div className="placeholder emphasis">
-              Start the assistant to begin editing.
+          {scenarioErrorChip && (
+            <div className="workbench-composer-chip-row">
+              <div className="workbench-composer-chip">
+                <span
+                  className="workbench-error-chip"
+                  title={scenarioErrorChip.error}
+                  data-testid="workbench-error-chip"
+                >
+                  Error
+                </span>
+                <label className="workbench-composer-chip-toggle">
+                  <input
+                    type="checkbox"
+                    checked={scenarioErrorChip.enabled}
+                    onChange={(event) =>
+                      onScenarioErrorChipChange?.({
+                        ...scenarioErrorChip,
+                        enabled: event.target.checked,
+                      })}
+                    data-testid="workbench-error-chip-toggle"
+                  />
+                  <span>{scenarioErrorChip.enabled ? "On" : "Off"}</span>
+                </label>
+                <button
+                  type="button"
+                  className="link-button workbench-composer-chip-remove"
+                  onClick={() => onScenarioErrorChipChange?.(null)}
+                  data-testid="workbench-error-chip-remove"
+                >
+                  Remove
+                </button>
+              </div>
             </div>
+          )}
+          {showStartButton && (
+            <Callout variant="emphasis">
+              Start the assistant to begin editing.
+            </Callout>
           )}
           <div className="flex-row gap-4 mb-2">
             <textarea
               ref={composerInputRef}
               className="message-input flex-1"
               rows={1}
-              placeholder={canStartAssistant
+              placeholder={showStartButton
                 ? "Start the assistant to begin..."
                 : "Message Gambit Bot..."}
               value={chatDraft}
@@ -316,7 +485,7 @@ export function ChatView(props: { state: BuildChatViewState }) {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (!chatSending && run.status !== "running") {
+                  if (canSubmitMessage) {
                     handleSendChat();
                   }
                 }
@@ -334,12 +503,12 @@ export function ChatView(props: { state: BuildChatViewState }) {
                     Stop
                   </Button>
                 )
-                : canStartAssistant
+                : showStartButton
                 ? (
                   <Button
                     variant="primary"
                     onClick={handleStartAssistant}
-                    disabled={!canStartAssistant}
+                    disabled={!showStartButton}
                     data-testid="build-start"
                   >
                     Start
@@ -349,7 +518,7 @@ export function ChatView(props: { state: BuildChatViewState }) {
                   <Button
                     variant="primary"
                     onClick={handleSendChat}
-                    disabled={chatSending || chatDraft.trim().length === 0}
+                    disabled={!canSubmitMessage}
                     data-testid="build-send"
                   >
                     Send
@@ -367,6 +536,16 @@ export function ChatView(props: { state: BuildChatViewState }) {
   );
 }
 
-export default function Chat() {
-  return <ChatView state={useBuildChat()} />;
+export default function Chat(props: {
+  scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
+  onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
+}) {
+  const { scenarioErrorChip, onScenarioErrorChipChange } = props;
+  return (
+    <ChatView
+      state={useBuildChat()}
+      scenarioErrorChip={scenarioErrorChip}
+      onScenarioErrorChipChange={onScenarioErrorChipChange}
+    />
+  );
 }

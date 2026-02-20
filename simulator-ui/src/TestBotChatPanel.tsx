@@ -15,6 +15,7 @@ import { ActivityTranscriptRows } from "./ActivityTranscriptRows.tsx";
 import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
+import Callout from "./gds/Callout.tsx";
 
 type Props = {
   run: TestBotRun;
@@ -59,6 +60,9 @@ type Props = {
     score: number,
     reason: string,
   ) => void | Promise<void>;
+  onAddScenarioErrorToWorkbench?: (
+    payload: { workspaceId?: string; runId?: string; error: string },
+  ) => void;
 };
 
 export default function TestBotChatPanel(props: Props) {
@@ -93,6 +97,7 @@ export default function TestBotChatPanel(props: Props) {
     handleStartAssistant,
     onScore,
     onReasonChange,
+    onAddScenarioErrorToWorkbench,
   } = props;
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const lastRunMessageCountRef = useRef(0);
@@ -314,12 +319,36 @@ export default function TestBotChatPanel(props: Props) {
         </div>
       </div>
       {requestedRunNotFound && activeWorkspaceId && (
-        <div className="placeholder">
+        <Callout>
           Test run not found for this workspace.{" "}
           <a href={buildTestPath(activeWorkspaceId)}>Back to test runs</a>
-        </div>
+        </Callout>
       )}
-      {run.error && <div className="error">{run.error}</div>}
+      {run.status === "error" && run.error && (
+        <Callout
+          variant="danger"
+          title="Scenario run failed"
+          actions={
+            <Button
+              variant="secondary"
+              size="small"
+              onClick={() =>
+                onAddScenarioErrorToWorkbench?.({
+                  workspaceId: runWorkspaceId ?? activeWorkspaceId ?? undefined,
+                  runId: run.id,
+                  error: run.error!,
+                })}
+              disabled={!onAddScenarioErrorToWorkbench}
+              data-testid="testbot-add-error-to-chat"
+            >
+              Add to chat
+            </Button>
+          }
+          data-testid="testbot-error-callout"
+        >
+          {run.error}
+        </Callout>
+      )}
       {(run.initFill ?? lastInitFill) && (
         <div className="patch-card">
           <div className="patch-summary">Init fill</div>
@@ -361,20 +390,18 @@ export default function TestBotChatPanel(props: Props) {
         </div>
       )}
       {canStart && missingDeckInit.length > 0 && (
-        <div className="placeholder">
+        <Callout>
           Missing required init fields will be requested from the persona:{" "}
           {missingDeckInit.slice(0, 6).join(", ")}
           {missingDeckInit.length > 6 ? "…" : ""}
-        </div>
+        </Callout>
       )}
       <div className="test-bot-thread">
         <div
           className="imessage-thread"
           ref={transcriptRef}
         >
-          {run.messages.length === 0 && (
-            <div className="placeholder">No messages yet.</div>
-          )}
+          {run.messages.length === 0 && <Callout>No messages yet.</Callout>}
           <ActivityTranscriptRows
             key={`test-activity-${run.id ?? "unknown"}`}
             display={testChatDisplay}
@@ -493,9 +520,9 @@ export default function TestBotChatPanel(props: Props) {
           <div className="composer-inputs">
             {isUserStart && run.messages.length === 0 &&
               !streamingAssistant?.text && !streamingUser?.text && (
-              <div className="placeholder emphasis">
+              <Callout variant="emphasis">
                 This deck expects a user message to kick things off.
-              </div>
+              </Callout>
             )}
             <div className="flex-row gap-4 mb-2">
               <textarea
@@ -538,10 +565,10 @@ export default function TestBotChatPanel(props: Props) {
               <strong className="test-bot-thread-title">
                 Choose how to start
               </strong>
-              <div className="placeholder test-bot-thread-subtitle">
+              <Callout className="test-bot-thread-subtitle">
                 Pick the flow you want: manual conversation or a full scenario
                 run.
-              </div>
+              </Callout>
               <div className="test-bot-thread-sections">
                 <div className="test-bot-thread-section">
                   <div className="test-bot-thread-section-title">

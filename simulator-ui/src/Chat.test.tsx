@@ -59,7 +59,9 @@ const {
   BuildChatRows,
   ChatView,
   bucketBuildChatDisplay,
+  decodeWorkbenchMessageWithErrorContext,
   deriveBuildChatActivityState,
+  encodeWorkbenchMessageWithErrorContext,
   formatElapsedDuration,
 } = await import("./Chat.tsx");
 const { WorkspaceProvider } = await import("./WorkspaceContext.tsx");
@@ -67,6 +69,8 @@ const { globalStyles } = await import("./styles.ts");
 type BuildDisplayMessage = import("./utils.ts").BuildDisplayMessage;
 type WorkspaceSocketMessage = import("./utils.ts").WorkspaceSocketMessage;
 type BuildChatViewState = import("./Chat.tsx").BuildChatViewState;
+type WorkbenchScenarioErrorChip =
+  import("./Chat.tsx").WorkbenchScenarioErrorChip;
 
 type ToolCallSummary = import("./utils.ts").ToolCallSummary;
 
@@ -160,6 +164,34 @@ function makeChatState(
     run: mergedRun,
   };
 }
+
+Deno.test("Workbench error context envelope encodes and decodes with optional body", () => {
+  const context = {
+    source: "scenario_run_error" as const,
+    workspaceId: "ws-1",
+    runId: "run-1",
+    capturedAt: "2026-02-19T00:00:00.000Z",
+    error: "Scenario run failed",
+  };
+  const encodedWithBody = encodeWorkbenchMessageWithErrorContext(
+    "Please fix this",
+    context,
+  );
+  const decodedWithBody = decodeWorkbenchMessageWithErrorContext(
+    encodedWithBody,
+  );
+  assert(decodedWithBody);
+  assertEquals(decodedWithBody.context, context);
+  assertEquals(decodedWithBody.body, "Please fix this");
+
+  const encodedChipOnly = encodeWorkbenchMessageWithErrorContext("", context);
+  const decodedChipOnly = decodeWorkbenchMessageWithErrorContext(
+    encodedChipOnly,
+  );
+  assert(decodedChipOnly);
+  assertEquals(decodedChipOnly.context, context);
+  assertEquals(decodedChipOnly.body, "");
+});
 
 Deno.test("bucketBuildChatDisplay collapses adjacent non-message rows into one activity block", () => {
   const display: BuildDisplayMessage[] = [
@@ -760,6 +792,176 @@ Deno.test("reduced-motion fallback disables shimmer while status and timer remai
     );
     assertEquals(label.length, 1);
     assertEquals(timer.length, 1);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+  }
+});
+
+Deno.test("BuildChatRows renders Error chip for encoded user messages", async () => {
+  const context = {
+    source: "scenario_run_error" as const,
+    workspaceId: "ws-1",
+    runId: "run-1",
+    capturedAt: "2026-02-19T00:00:00.000Z",
+    error: "Scenario failed",
+  };
+  const display: BuildDisplayMessage[] = [
+    {
+      kind: "message",
+      role: "user",
+      content: encodeWorkbenchMessageWithErrorContext("", context),
+    },
+    {
+      kind: "message",
+      role: "user",
+      content: encodeWorkbenchMessageWithErrorContext(
+        "Please debug this",
+        context,
+      ),
+    },
+  ];
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(<BuildChatRows display={display} />);
+    });
+    assert(renderer);
+
+    const chips = renderer.root.findAll((node: ReactTestInstance) =>
+      node.props["data-testid"] === "workbench-transcript-error-chip"
+    );
+    assertEquals(chips.length, 2);
+
+    const bubbleTexts = renderer.root.findAll((node: ReactTestInstance) =>
+      node.props.className === "bubble-text" &&
+      typeof node.props.dangerouslySetInnerHTML?.__html === "string"
+    );
+    assertEquals(bubbleTexts.length, 1);
+    assert(
+      String(bubbleTexts[0].props.dangerouslySetInnerHTML.__html).includes(
+        "Please debug this",
+      ),
+    );
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+  }
+});
+
+Deno.test("ChatView chip toggle controls whether outbound messages include error context", async () => {
+  let sentMessage = "";
+  const baseState = makeChatState({
+    chatDraft: "Fix the scenario bot",
+    sendMessage: async (message: string) => {
+      sentMessage = message;
+    },
+  });
+  const initialChip: WorkbenchScenarioErrorChip = {
+    source: "scenario_run_error",
+    workspaceId: "ws-1",
+    runId: "run-1",
+    capturedAt: "2026-02-19T00:00:00.000Z",
+    error: "Scenario failed",
+    enabled: true,
+  };
+
+  function Harness() {
+    const [chip, setChip] = React.useState<WorkbenchScenarioErrorChip | null>(
+      initialChip,
+    );
+    return (
+      <ChatView
+        state={baseState}
+        scenarioErrorChip={chip}
+        onScenarioErrorChipChange={setChip}
+      />
+    );
+  }
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />);
+    });
+    assert(renderer);
+
+    const chipNodes = renderer.root.findAll((node: ReactTestInstance) =>
+      node.props["data-testid"] === "workbench-error-chip"
+    );
+    assertEquals(chipNodes.length, 1);
+
+    const toggle = renderer.root.find((node: ReactTestInstance) =>
+      node.props["data-testid"] === "workbench-error-chip-toggle"
+    );
+    await act(async () => {
+      toggle.props.onChange({ target: { checked: false } });
+    });
+
+    const sendButton = renderer.root.find((node: ReactTestInstance) =>
+      node.props["data-testid"] === "build-send"
+    );
+    await act(async () => {
+      await sendButton.props.onClick();
+    });
+    assertEquals(sentMessage, "Fix the scenario bot");
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+  }
+});
+
+Deno.test("ChatView sends chip-only message when Error chip is on and draft is empty", async () => {
+  let sentMessage = "";
+  const baseState = makeChatState({
+    chatDraft: "",
+    sendMessage: async (message: string) => {
+      sentMessage = message;
+    },
+  });
+  const chip: WorkbenchScenarioErrorChip = {
+    source: "scenario_run_error",
+    workspaceId: "ws-1",
+    runId: "run-1",
+    capturedAt: "2026-02-19T00:00:00.000Z",
+    error: "Scenario failed",
+    enabled: true,
+  };
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <ChatView state={baseState} scenarioErrorChip={chip} />,
+      );
+    });
+    assert(renderer);
+
+    const startButtons = renderer.root.findAll((node: ReactTestInstance) =>
+      node.props["data-testid"] === "build-start"
+    );
+    assertEquals(startButtons.length, 0);
+    const sendButton = renderer.root.find((node: ReactTestInstance) =>
+      node.props["data-testid"] === "build-send"
+    );
+    await act(async () => {
+      await sendButton.props.onClick();
+    });
+
+    const decoded = decodeWorkbenchMessageWithErrorContext(sentMessage);
+    assert(decoded);
+    assertEquals(decoded.context.error, "Scenario failed");
+    assertEquals(decoded.body, "");
   } finally {
     if (renderer) {
       await act(async () => {
