@@ -129,6 +129,7 @@ export function ConversationView(props: {
   onScore: (
     messageRefId: string,
     score: number | null,
+    reason?: string,
   ) => void | Promise<void>;
   onReasonChange: (
     messageRefId: string,
@@ -176,6 +177,7 @@ export function MessageBubble(props: {
   onScore: (
     messageRefId: string,
     score: number | null,
+    reason?: string,
   ) => void | Promise<void>;
   onReasonChange: (
     messageRefId: string,
@@ -300,6 +302,7 @@ export function FeedbackControls(props: {
   onScore: (
     messageRefId: string,
     score: number | null,
+    reason?: string,
   ) => void | Promise<void>;
   onReasonChange: (
     messageRefId: string,
@@ -343,7 +346,8 @@ export function FeedbackControls(props: {
     setStatus("saving");
     setErrorMessage(null);
     try {
-      await Promise.resolve(onScore(messageRefId, score));
+      const nextReason = score === null ? undefined : reason;
+      await Promise.resolve(onScore(messageRefId, score, nextReason));
       if (requestSeqRef.current !== requestSeq) return;
       setStatus(score === null ? "idle" : "saved");
     } catch (err) {
@@ -353,7 +357,7 @@ export function FeedbackControls(props: {
         err instanceof Error ? err.message : "Failed to save feedback",
       );
     }
-  }, [messageRefId, onScore]);
+  }, [messageRefId, onScore, reason]);
 
   const persistReason = useCallback(
     async (score: number, nextReason: string) => {

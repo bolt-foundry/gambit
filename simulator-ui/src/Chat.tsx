@@ -7,6 +7,7 @@ import {
 import Button from "./gds/Button.tsx";
 import Callout from "./gds/Callout.tsx";
 import Icon from "./gds/Icon.tsx";
+import WorkbenchComposerChip from "./gds/WorkbenchComposerChip.tsx";
 import {
   ActivityTranscriptRows,
   bucketBuildChatDisplay,
@@ -23,24 +24,124 @@ export type WorkbenchScenarioErrorContext = {
   error: string;
 };
 
+export type WorkbenchRatingContext = {
+  source: "message_rating";
+  workspaceId?: string;
+  runId?: string;
+  capturedAt: string;
+  messageRefId: string;
+  statePath?: string;
+  statePointer?: string;
+  score: number;
+  reason?: string;
+};
+
+export type WorkbenchFlagContext = {
+  source: "grading_flag";
+  workspaceId?: string;
+  runId?: string;
+  capturedAt: string;
+  flagId?: string;
+  refId: string;
+  score?: number;
+  message: string;
+};
+
+export type WorkbenchMessageContext =
+  | WorkbenchScenarioErrorContext
+  | WorkbenchRatingContext
+  | WorkbenchFlagContext;
+
 export type WorkbenchScenarioErrorChip = WorkbenchScenarioErrorContext & {
+  enabled: boolean;
+};
+
+export type WorkbenchComposerChip = WorkbenchMessageContext & {
+  chipId: string;
   enabled: boolean;
 };
 
 const ERROR_CONTEXT_START_MARKER = "[gambit:error-context/v1]";
 const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
+const WORKBENCH_CONTEXT_START_MARKER = "[gambit:workbench-context/v2]";
+const WORKBENCH_CONTEXT_END_MARKER = "[/gambit:workbench-context/v2]";
 
-export function encodeWorkbenchMessageWithErrorContext(
-  message: string,
-  context: WorkbenchScenarioErrorContext,
-): string {
-  const body = message.trim();
-  return `${ERROR_CONTEXT_START_MARKER}\n${
-    JSON.stringify(context)
-  }\n${ERROR_CONTEXT_END_MARKER}${body ? `\n${body}` : ""}`;
+function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.capturedAt !== "string" ||
+    record.capturedAt.trim().length === 0
+  ) {
+    return null;
+  }
+  const workspaceId = typeof record.workspaceId === "string"
+    ? record.workspaceId
+    : undefined;
+  const runId = typeof record.runId === "string" ? record.runId : undefined;
+
+  if (record.source === "scenario_run_error") {
+    if (typeof record.error !== "string" || record.error.trim().length === 0) {
+      return null;
+    }
+    return {
+      source: "scenario_run_error",
+      workspaceId,
+      runId,
+      capturedAt: record.capturedAt,
+      error: record.error,
+    };
+  }
+  if (record.source === "message_rating") {
+    if (
+      typeof record.score !== "number" || !Number.isFinite(record.score) ||
+      typeof record.messageRefId !== "string" ||
+      record.messageRefId.trim().length === 0
+    ) {
+      return null;
+    }
+    return {
+      source: "message_rating",
+      workspaceId,
+      runId,
+      capturedAt: record.capturedAt,
+      messageRefId: record.messageRefId,
+      statePath: typeof record.statePath === "string"
+        ? record.statePath
+        : undefined,
+      statePointer: typeof record.statePointer === "string"
+        ? record.statePointer
+        : undefined,
+      score: record.score,
+      reason: typeof record.reason === "string" ? record.reason : undefined,
+    };
+  }
+  if (record.source === "grading_flag") {
+    if (
+      typeof record.refId !== "string" || record.refId.trim().length === 0 ||
+      typeof record.message !== "string" || record.message.trim().length === 0
+    ) {
+      return null;
+    }
+    return {
+      source: "grading_flag",
+      workspaceId,
+      runId,
+      capturedAt: record.capturedAt,
+      flagId: typeof record.flagId === "string" ? record.flagId : undefined,
+      refId: record.refId,
+      score: typeof record.score === "number" && Number.isFinite(record.score)
+        ? record.score
+        : undefined,
+      message: record.message,
+    };
+  }
+  return null;
 }
 
-export function decodeWorkbenchMessageWithErrorContext(content: string): {
+function decodeLegacyWorkbenchErrorContext(content: string): {
   context: WorkbenchScenarioErrorContext;
   body: string;
 } | null {
@@ -57,18 +158,8 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return null;
-  }
-  const record = parsed as Record<string, unknown>;
-  if (record.source !== "scenario_run_error") return null;
-  if (typeof record.error !== "string" || record.error.trim().length === 0) {
-    return null;
-  }
-  if (
-    typeof record.capturedAt !== "string" ||
-    record.capturedAt.trim().length === 0
-  ) {
+  const context = parseWorkbenchContext(parsed);
+  if (!context || context.source !== "scenario_run_error") {
     return null;
   }
   const markerEndIndex = endMarkerIndex +
@@ -76,35 +167,103 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
   const remainder = content.slice(markerEndIndex);
   const body = remainder.startsWith("\n") ? remainder.slice(1) : remainder;
   return {
-    context: {
-      source: "scenario_run_error",
-      workspaceId: typeof record.workspaceId === "string"
-        ? record.workspaceId
-        : undefined,
-      runId: typeof record.runId === "string" ? record.runId : undefined,
-      capturedAt: record.capturedAt,
-      error: record.error,
-    },
+    context,
+    body,
+  };
+}
+
+export function encodeWorkbenchMessageWithErrorContext(
+  message: string,
+  context: WorkbenchScenarioErrorContext,
+): string {
+  return `${ERROR_CONTEXT_START_MARKER}\n${
+    JSON.stringify(context)
+  }\n${ERROR_CONTEXT_END_MARKER}${message.trim() ? `\n${message.trim()}` : ""}`;
+}
+
+export function encodeWorkbenchMessageWithContext(
+  message: string,
+  contexts: WorkbenchMessageContext[],
+): string {
+  const body = message.trim();
+  const encodedContexts = contexts.filter((context) =>
+    parseWorkbenchContext(context)
+  );
+  if (encodedContexts.length === 0) return body;
+  return `${WORKBENCH_CONTEXT_START_MARKER}\n${
+    JSON.stringify(encodedContexts)
+  }\n${WORKBENCH_CONTEXT_END_MARKER}${body ? `\n${body}` : ""}`;
+}
+
+export function decodeWorkbenchMessageWithErrorContext(content: string): {
+  context: WorkbenchScenarioErrorContext;
+  body: string;
+} | null {
+  const decoded = decodeWorkbenchMessageWithContext(content);
+  if (decoded) {
+    const errorContext = decoded.contexts.find((context) =>
+      context.source === "scenario_run_error"
+    );
+    if (!errorContext) return null;
+    return { context: errorContext, body: decoded.body };
+  }
+  return decodeLegacyWorkbenchErrorContext(content);
+}
+
+export function decodeWorkbenchMessageWithContext(content: string): {
+  contexts: WorkbenchMessageContext[];
+  body: string;
+} | null {
+  if (typeof content !== "string") return null;
+  if (!content.startsWith(`${WORKBENCH_CONTEXT_START_MARKER}\n`)) {
+    const legacyDecoded = decodeLegacyWorkbenchErrorContext(content);
+    if (!legacyDecoded) return null;
+    return { contexts: [legacyDecoded.context], body: legacyDecoded.body };
+  }
+  const endMarkerIndex = content.indexOf(`\n${WORKBENCH_CONTEXT_END_MARKER}`);
+  if (endMarkerIndex < 0) return null;
+  const jsonStart = WORKBENCH_CONTEXT_START_MARKER.length + 1;
+  const jsonRaw = content.slice(jsonStart, endMarkerIndex).trim();
+  if (!jsonRaw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonRaw);
+  } catch {
+    return null;
+  }
+  const records = Array.isArray(parsed) ? parsed : [parsed];
+  const contexts = records.map((record) => parseWorkbenchContext(record))
+    .filter((context): context is WorkbenchMessageContext => Boolean(context));
+  if (contexts.length === 0) return null;
+  const markerEndIndex = endMarkerIndex +
+    `\n${WORKBENCH_CONTEXT_END_MARKER}`.length;
+  const remainder = content.slice(markerEndIndex);
+  const body = remainder.startsWith("\n") ? remainder.slice(1) : remainder;
+  return {
+    contexts,
     body,
   };
 }
 
 function UserMessageContent(props: { content: string }) {
   const { content } = props;
-  const decoded = decodeWorkbenchMessageWithErrorContext(content);
+  const decoded = decodeWorkbenchMessageWithContext(content);
   const body = decoded ? decoded.body : content;
   const showBody = body.trim().length > 0;
   return (
     <>
       {decoded && (
         <div className="workbench-transcript-chip-row">
-          <span
-            className="workbench-error-chip workbench-error-chip-transcript"
-            title={decoded.context.error}
-            data-testid="workbench-transcript-error-chip"
-          >
-            Error
-          </span>
+          {decoded.contexts.map((context, index) => (
+            <WorkbenchComposerChip
+              key={`${context.source}-${index}`}
+              className="workbench-context-chip--transcript"
+              context={context}
+              testId={context.source === "scenario_run_error"
+                ? "workbench-transcript-error-chip"
+                : undefined}
+            />
+          ))}
         </div>
       )}
       {showBody && (
@@ -265,10 +424,17 @@ function BuildChatActivityIndicator(
 
 export function ChatView(props: {
   state: BuildChatViewState;
+  composerChips?: WorkbenchComposerChip[];
+  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
   scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
   onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
 }) {
-  const { scenarioErrorChip, onScenarioErrorChipChange } = props;
+  const {
+    composerChips,
+    onComposerChipsChange,
+    scenarioErrorChip,
+    onScenarioErrorChipChange,
+  } = props;
   const {
     run,
     chatDraft,
@@ -322,34 +488,96 @@ export function ChatView(props: {
 
   const canStartAssistant = run.status !== "running" && !chatSending &&
     run.messages.length === 0;
-  const hasEnabledScenarioErrorChip = Boolean(
-    scenarioErrorChip && scenarioErrorChip.enabled,
+  const resolvedComposerChips = composerChips ??
+    (scenarioErrorChip
+      ? [{
+        ...scenarioErrorChip,
+        chipId: "scenario_run_error",
+      }]
+      : []);
+  const updateComposerChips = useCallback((next: WorkbenchComposerChip[]) => {
+    if (onComposerChipsChange) {
+      onComposerChipsChange(next);
+      return;
+    }
+    if (!onScenarioErrorChipChange) return;
+    const errorChip = next.find((chip) => chip.source === "scenario_run_error");
+    if (!errorChip) {
+      onScenarioErrorChipChange(null);
+      return;
+    }
+    onScenarioErrorChipChange({
+      source: "scenario_run_error",
+      workspaceId: errorChip.workspaceId,
+      runId: errorChip.runId,
+      capturedAt: errorChip.capturedAt,
+      error: errorChip.error,
+      enabled: errorChip.enabled,
+    });
+  }, [onComposerChipsChange, onScenarioErrorChipChange]);
+  const hasEnabledComposerChip = resolvedComposerChips.some((chip) =>
+    chip.enabled
   );
   const canSubmitMessage = !chatSending &&
     run.status !== "running" &&
-    (chatDraft.trim().length > 0 || hasEnabledScenarioErrorChip);
+    (chatDraft.trim().length > 0 || hasEnabledComposerChip);
   const showStartButton = canStartAssistant && chatDraft.trim().length === 0 &&
-    !hasEnabledScenarioErrorChip;
+    !hasEnabledComposerChip;
 
   const handleSendChat = useCallback(async () => {
     const message = chatDraft.trim();
-    const activeContext = scenarioErrorChip?.enabled
-      ? {
-        source: "scenario_run_error" as const,
-        workspaceId: scenarioErrorChip.workspaceId,
-        runId: scenarioErrorChip.runId,
-        capturedAt: scenarioErrorChip.capturedAt,
-        error: scenarioErrorChip.error,
-      }
-      : null;
-    if (!message && !activeContext) return;
-    const outboundMessage = activeContext
-      ? encodeWorkbenchMessageWithErrorContext(message, activeContext)
+    const activeChips = resolvedComposerChips.filter((chip) => chip.enabled);
+    const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
+    const activeContexts = activeChips
+      .map((chip) => {
+        if (chip.source === "scenario_run_error") {
+          return {
+            source: "scenario_run_error" as const,
+            workspaceId: chip.workspaceId,
+            runId: chip.runId,
+            capturedAt: chip.capturedAt,
+            error: chip.error,
+          };
+        }
+        if (chip.source === "message_rating") {
+          return {
+            source: "message_rating" as const,
+            workspaceId: chip.workspaceId,
+            runId: chip.runId,
+            capturedAt: chip.capturedAt,
+            messageRefId: chip.messageRefId,
+            statePath: chip.statePath,
+            statePointer: chip.statePointer,
+            score: chip.score,
+            reason: chip.reason,
+          };
+        }
+        return {
+          source: "grading_flag" as const,
+          workspaceId: chip.workspaceId,
+          runId: chip.runId,
+          capturedAt: chip.capturedAt,
+          flagId: chip.flagId,
+          refId: chip.refId,
+          score: chip.score,
+          message: chip.message,
+        };
+      });
+    if (!message && activeContexts.length === 0) return;
+    const outboundMessage = activeContexts.length > 0
+      ? encodeWorkbenchMessageWithContext(message, activeContexts)
       : message;
     setOptimisticUser({ id: crypto.randomUUID(), text: outboundMessage });
     setChatDraft("");
     try {
       await sendMessage(outboundMessage);
+      if (activeChipIds.size > 0) {
+        updateComposerChips(
+          resolvedComposerChips.map((chip) =>
+            activeChipIds.has(chip.chipId) ? { ...chip, enabled: false } : chip
+          ),
+        );
+      }
     } catch (err) {
       setChatError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -357,24 +585,21 @@ export function ChatView(props: {
     }
   }, [
     chatDraft,
-    scenarioErrorChip?.capturedAt,
-    scenarioErrorChip?.enabled,
-    scenarioErrorChip?.error,
-    scenarioErrorChip?.runId,
-    scenarioErrorChip?.workspaceId,
+    resolvedComposerChips,
     sendMessage,
     setChatDraft,
     setChatError,
     setOptimisticUser,
+    updateComposerChips,
   ]);
 
   const handleStartAssistant = useCallback(async () => {
-    if (chatDraft.trim().length > 0 || hasEnabledScenarioErrorChip) {
+    if (chatDraft.trim().length > 0 || hasEnabledComposerChip) {
       await handleSendChat();
       return;
     }
     await sendMessage("");
-  }, [chatDraft, handleSendChat, hasEnabledScenarioErrorChip, sendMessage]);
+  }, [chatDraft, handleSendChat, hasEnabledComposerChip, sendMessage]);
 
   const handleStopChat = useCallback(async () => {
     try {
@@ -432,41 +657,29 @@ export function ChatView(props: {
           <div className="build-chat-activity-sticky">
             <BuildChatActivityIndicator state={activityState} />
           </div>
-          {scenarioErrorChip && (
+          {resolvedComposerChips.length > 0 && (
             <div className="workbench-composer-chip-row">
-              <div className="workbench-composer-chip">
-                <span
-                  className="workbench-error-chip"
-                  title={scenarioErrorChip.error}
-                  data-testid="workbench-error-chip"
-                >
-                  Error
-                </span>
-                <label className="workbench-composer-chip-toggle">
-                  <input
-                    type="checkbox"
-                    checked={scenarioErrorChip.enabled}
-                    aria-label={scenarioErrorChip.enabled
-                      ? "Error context on"
-                      : "Error context off"}
-                    onChange={(event) =>
-                      onScenarioErrorChipChange?.({
-                        ...scenarioErrorChip,
-                        enabled: event.target.checked,
-                      })}
-                    data-testid="workbench-error-chip-toggle"
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="link-button workbench-composer-chip-remove"
-                  onClick={() => onScenarioErrorChipChange?.(null)}
-                  aria-label="Remove error context"
-                  data-testid="workbench-error-chip-remove"
-                >
-                  <Icon name="times" size={8} />
-                </button>
-              </div>
+              {resolvedComposerChips.map((chip) => (
+                <WorkbenchComposerChip
+                  key={chip.chipId}
+                  context={chip}
+                  enabled={chip.enabled}
+                  onEnabledChange={(enabled) =>
+                    updateComposerChips(
+                      resolvedComposerChips.map((entry) =>
+                        entry.chipId === chip.chipId
+                          ? { ...entry, enabled }
+                          : entry
+                      ),
+                    )}
+                  onRemove={() =>
+                    updateComposerChips(
+                      resolvedComposerChips.filter((entry) =>
+                        entry.chipId !== chip.chipId
+                      ),
+                    )}
+                />
+              ))}
             </div>
           )}
           {showStartButton && (
@@ -541,13 +754,22 @@ export function ChatView(props: {
 }
 
 export default function Chat(props: {
+  composerChips?: WorkbenchComposerChip[];
+  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
   scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
   onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
 }) {
-  const { scenarioErrorChip, onScenarioErrorChipChange } = props;
+  const {
+    composerChips,
+    onComposerChipsChange,
+    scenarioErrorChip,
+    onScenarioErrorChipChange,
+  } = props;
   return (
     <ChatView
       state={useBuildChat()}
+      composerChips={composerChips}
+      onComposerChipsChange={onComposerChipsChange}
       scenarioErrorChip={scenarioErrorChip}
       onScenarioErrorChipChange={onScenarioErrorChipChange}
     />

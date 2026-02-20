@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { WORKSPACES_API_BASE } from "../../src/workspace_contract.ts";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
@@ -13,6 +19,7 @@ import ListItem from "./gds/ListItem.tsx";
 import {
   chatAccordionEnabled,
   extractGradingFlags,
+  extractScoreAndReason,
   extractTurnContext,
   formatSnippet,
   formatTimestampShort,
@@ -23,7 +30,7 @@ import type {
   GradingFlag,
   SessionDetailResponse,
 } from "./utils.ts";
-import type { WorkbenchScenarioErrorChip } from "./Chat.tsx";
+import type { WorkbenchComposerChip } from "./Chat.tsx";
 
 type WorkbenchDrawerFeedbackItem = {
   entry: FeedbackEntry;
@@ -34,6 +41,7 @@ type WorkbenchDrawerFeedbackItem = {
 type WorkbenchDrawerRunItem = {
   turnNumber?: number;
   input?: unknown;
+  result?: unknown;
 };
 
 type WorkbenchDrawerProps = {
@@ -54,8 +62,8 @@ type WorkbenchDrawerProps = {
   gradingFlags?: GradingFlag[];
   runLabelById?: Map<string, string>;
   runItemByRefId?: Map<string, WorkbenchDrawerRunItem>;
-  scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
-  onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
+  composerChips?: WorkbenchComposerChip[];
+  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
 };
 
 export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
@@ -73,8 +81,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     gradingFlags,
     runLabelById = new Map(),
     runItemByRefId = new Map(),
-    scenarioErrorChip,
-    onScenarioErrorChipChange,
+    composerChips = [],
+    onComposerChipsChange,
   } = props;
   const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<
@@ -87,6 +95,9 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
   const [chatHistoryLoading, setChatHistoryLoading] = useState(false);
   const [chatHistoryError, setChatHistoryError] = useState<string | null>(null);
   const [copiedStatePath, setCopiedStatePath] = useState(false);
+  const initializedChipTrackingRef = useRef(false);
+  const seenRatingChipIdsRef = useRef(new Set<string>());
+  const seenFlagChipIdsRef = useRef(new Set<string>());
   const resolvedStatePath = useMemo(() => {
     if (statePath) return statePath;
     const meta = sessionDetail?.meta;
@@ -215,16 +226,207 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
           map.set(`gradingRun:${record.id}#turn:${index}`, {
             turnNumber: index + 1,
             input: turn.input,
+            result: (turn as { result?: unknown }).result,
           });
         });
       } else {
         map.set(`gradingRun:${record.id}`, {
           input: record.input,
+          result: record.result,
         });
       }
     });
     return map;
   }, [runItemByRefId, sessionDetail]);
+  const mergeComposerChip = useCallback(
+    (base: WorkbenchComposerChip[], chip: WorkbenchComposerChip) => {
+      const next = [...base];
+      const existingIndex = next.findIndex((entry) =>
+        entry.chipId === chip.chipId
+      );
+      if (existingIndex >= 0) {
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...chip,
+          enabled: true,
+        };
+        return next;
+      }
+      next.push(chip);
+      return next;
+    },
+    [],
+  );
+  const addComposerChip = useCallback((chip: WorkbenchComposerChip) => {
+    if (!onComposerChipsChange) return;
+    onComposerChipsChange(mergeComposerChip(composerChips, chip));
+  }, [composerChips, mergeComposerChip, onComposerChipsChange]);
+  const removeComposerChip = useCallback((chipId: string) => {
+    if (!onComposerChipsChange) return;
+    onComposerChipsChange(
+      composerChips.filter((chip) => chip.chipId !== chipId),
+    );
+  }, [composerChips, onComposerChipsChange]);
+  const composerChipIds = useMemo(
+    () => new Set(composerChips.map((chip) => chip.chipId)),
+    [composerChips],
+  );
+
+  const buildRatingChip = useCallback(
+    (entry: FeedbackEntry): WorkbenchComposerChip => {
+      const capturedAt = entry.createdAt ?? new Date().toISOString();
+      return {
+        chipId: `rating:${entry.messageRefId}:${entry.id}`,
+        source: "message_rating",
+        workspaceId: sessionId ?? undefined,
+        runId: entry.runId,
+        capturedAt,
+        messageRefId: entry.messageRefId,
+        statePath: resolvedStatePath ?? undefined,
+        statePointer: `messageRef:${entry.messageRefId}`,
+        score: entry.score,
+        reason: entry.reason,
+        enabled: true,
+      };
+    },
+    [resolvedStatePath, sessionId],
+  );
+
+  const resolveFlagMessage = useCallback((flag: GradingFlag): string => {
+    if (flag.reason?.trim()) return flag.reason;
+    const flaggedItem = resolvedRunItemByRefId.get(flag.refId);
+    const gradedAssistant =
+      extractTurnContext(flaggedItem?.input).gradedAssistant;
+    if (gradedAssistant?.trim()) return formatSnippet(gradedAssistant);
+    return "Flagged by grader";
+  }, [resolvedRunItemByRefId]);
+
+  const buildFlagChip = useCallback(
+    (flag: GradingFlag): WorkbenchComposerChip => {
+      const capturedAt = flag.createdAt ?? new Date().toISOString();
+      return {
+        // Use refId so optimistic and persisted updates collapse to one chip.
+        chipId: `flag:${flag.refId}`,
+        source: "grading_flag",
+        workspaceId: sessionId ?? undefined,
+        runId: flag.runId,
+        capturedAt,
+        flagId: flag.id,
+        refId: flag.refId,
+        score:
+          extractScoreAndReason(resolvedRunItemByRefId.get(flag.refId)?.result)
+            .score,
+        message: resolveFlagMessage(flag),
+        enabled: true,
+      };
+    },
+    [resolveFlagMessage, resolvedRunItemByRefId, sessionId],
+  );
+
+  useEffect(() => {
+    initializedChipTrackingRef.current = false;
+    seenRatingChipIdsRef.current.clear();
+    seenFlagChipIdsRef.current.clear();
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (loading) return;
+    const currentRatingChipIds = new Set(
+      resolvedFeedbackItems.map(({ entry }) =>
+        `rating:${entry.messageRefId}:${entry.id}`
+      ),
+    );
+    const currentFlagChipIds = new Set(
+      resolvedGradingFlags.map((flag) => `flag:${flag.refId}`),
+    );
+    if (!initializedChipTrackingRef.current) {
+      seenRatingChipIdsRef.current = currentRatingChipIds;
+      seenFlagChipIdsRef.current = currentFlagChipIds;
+      initializedChipTrackingRef.current = true;
+      return;
+    }
+    const newRatingEntries = resolvedFeedbackItems.filter(({ entry }) =>
+      !seenRatingChipIdsRef.current.has(
+        `rating:${entry.messageRefId}:${entry.id}`,
+      )
+    );
+    const newFlagEntries = resolvedGradingFlags.filter((flag) =>
+      !seenFlagChipIdsRef.current.has(`flag:${flag.refId}`)
+    );
+    if (
+      (newRatingEntries.length > 0 || newFlagEntries.length > 0) &&
+      onComposerChipsChange
+    ) {
+      let nextChips = [...composerChips];
+      newRatingEntries.forEach(({ entry }) => {
+        nextChips = mergeComposerChip(nextChips, buildRatingChip(entry));
+      });
+      newFlagEntries.forEach((flag) => {
+        nextChips = mergeComposerChip(nextChips, buildFlagChip(flag));
+      });
+      onComposerChipsChange(nextChips);
+    }
+
+    if (onComposerChipsChange) {
+      const ratingByChipId = new Map<string, WorkbenchComposerChip>(
+        resolvedFeedbackItems.map(({ entry }) =>
+          [
+            `rating:${entry.messageRefId}:${entry.id}`,
+            buildRatingChip(entry),
+          ] as const
+        ),
+      );
+      const flagByChipId = new Map<string, WorkbenchComposerChip>(
+        resolvedGradingFlags.map((flag) =>
+          [
+            `flag:${flag.refId}`,
+            buildFlagChip(flag),
+          ] as const
+        ),
+      );
+      let didChange = false;
+      const syncedChips = composerChips.filter((chip) => {
+        if (chip.source === "message_rating") {
+          const stillExists = ratingByChipId.has(chip.chipId);
+          if (!stillExists) didChange = true;
+          return stillExists;
+        }
+        if (chip.source === "grading_flag") {
+          const stillExists = flagByChipId.has(chip.chipId);
+          if (!stillExists) didChange = true;
+          return stillExists;
+        }
+        return true;
+      }).map((chip) => {
+        const latest = chip.source === "message_rating"
+          ? ratingByChipId.get(chip.chipId)
+          : chip.source === "grading_flag"
+          ? flagByChipId.get(chip.chipId)
+          : undefined;
+        if (!latest) return chip;
+        const next = { ...chip, ...latest, enabled: chip.enabled };
+        const changed = JSON.stringify(next) !== JSON.stringify(chip);
+        if (changed) didChange = true;
+        return next;
+      });
+      if (didChange) {
+        onComposerChipsChange(syncedChips);
+      }
+    }
+
+    seenRatingChipIdsRef.current = currentRatingChipIds;
+    seenFlagChipIdsRef.current = currentFlagChipIds;
+  }, [
+    buildFlagChip,
+    buildRatingChip,
+    composerChips,
+    loading,
+    mergeComposerChip,
+    onComposerChipsChange,
+    resolvedFeedbackItems,
+    resolvedGradingFlags,
+  ]);
+
   const loadChatHistory = useCallback(async () => {
     if (!chatAccordionEnabled) return;
     setChatHistoryLoading(true);
@@ -401,8 +603,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                       }`}
                     >
                       <Chat
-                        scenarioErrorChip={scenarioErrorChip}
-                        onScenarioErrorChipChange={onScenarioErrorChipChange}
+                        composerChips={composerChips}
+                        onComposerChipsChange={onComposerChipsChange}
                       />
                     </div>
                   </div>
@@ -443,6 +645,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                 {resolvedFeedbackItems.length > 0 && (
                   <div className="workbench-summary-list">
                     {resolvedFeedbackItems.map(({ entry, message, role }) => {
+                      const ratingChip = buildRatingChip(entry);
+                      const inChat = composerChipIds.has(ratingChip.chipId);
                       const roleLabel = role === "assistant"
                         ? "Assistant message"
                         : "Scenario message";
@@ -484,6 +688,19 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                               className="workbench-summary-meta"
                             />
                           )}
+                          <div className="workbench-summary-actions">
+                            <Button
+                              variant="secondary"
+                              size="small"
+                              onClick={() =>
+                                inChat
+                                  ? removeComposerChip(ratingChip.chipId)
+                                  : addComposerChip(ratingChip)}
+                              disabled={!onComposerChipsChange}
+                            >
+                              {inChat ? "Remove from chat" : "Add to chat"}
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}
@@ -492,6 +709,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                 {resolvedGradingFlags.length > 0 && (
                   <div className="workbench-summary-list">
                     {resolvedGradingFlags.map((flag) => {
+                      const flagChip = buildFlagChip(flag);
+                      const inChat = composerChipIds.has(flagChip.chipId);
                       const runLabel = flag.runId
                         ? resolvedRunLabelById.get(flag.runId)
                         : undefined;
@@ -544,6 +763,19 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                               className="workbench-summary-meta"
                             />
                           )}
+                          <div className="workbench-summary-actions">
+                            <Button
+                              variant="secondary"
+                              size="small"
+                              onClick={() =>
+                                inChat
+                                  ? removeComposerChip(flagChip.chipId)
+                                  : addComposerChip(flagChip)}
+                              disabled={!onComposerChipsChange}
+                            >
+                              {inChat ? "Remove from chat" : "Add to chat"}
+                            </Button>
+                          </div>
                         </div>
                       );
                     })}

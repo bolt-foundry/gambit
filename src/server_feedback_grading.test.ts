@@ -167,6 +167,115 @@ Deno.test("session feedback rejects non-response message refs", async () => {
   await server.finished;
 });
 
+Deno.test("session feedback preserves existing reason when score changes without reason", async () => {
+  const dir = await Deno.makeTempDir();
+  const sessionsDir = path.join(dir, "sessions");
+  const modHref = modImportPath();
+
+  const deckPath = path.join(dir, "feedback-preserve-reason.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+    sessionDir: sessionsDir,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const first = await runSimulator(port, {
+    input: "hello",
+    message: "hello",
+    stream: false,
+  });
+  const workspaceId = first.workspaceId!;
+  const state = JSON.parse(
+    await Deno.readTextFile(path.join(sessionsDir, workspaceId, "state.json")),
+  ) as {
+    messages?: Array<{ role?: string }>;
+    messageRefs?: Array<{ id?: string }>;
+  };
+  const assistantRef = (state.messages ?? [])
+    .map((message, index) => ({
+      role: message.role,
+      refId: state.messageRefs?.[index]?.id,
+    }))
+    .find((entry) => entry.role === "assistant" && entry.refId)?.refId;
+  assert(assistantRef, "expected assistant ref");
+
+  const saveWithReasonRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/feedback`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        messageRefId: assistantRef,
+        score: 3,
+        reason: "great response",
+      }),
+    },
+  );
+  assertEquals(saveWithReasonRes.ok, true);
+  await saveWithReasonRes.json();
+
+  const saveScoreOnlyRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/feedback`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        messageRefId: assistantRef,
+        score: -2,
+      }),
+    },
+  );
+  assertEquals(saveScoreOnlyRes.ok, true);
+  const saveScoreOnlyBody = await saveScoreOnlyRes.json() as {
+    feedback?: { score?: number; reason?: string };
+  };
+  assertEquals(saveScoreOnlyBody.feedback?.score, -2);
+  assertEquals(saveScoreOnlyBody.feedback?.reason, "great response");
+
+  const nextState = JSON.parse(
+    await Deno.readTextFile(path.join(sessionsDir, workspaceId, "state.json")),
+  ) as {
+    feedback?: Array<
+      { messageRefId?: string; score?: number; reason?: string }
+    >;
+  };
+  const saved = (nextState.feedback ?? []).find((entry) =>
+    entry.messageRefId === assistantRef
+  );
+  assert(saved, "feedback should be persisted");
+  assertEquals(saved?.score, -2);
+  assertEquals(saved?.reason, "great response");
+
+  await server.shutdown();
+  await server.finished;
+});
+
 Deno.test("session feedback accepts persisted run message refs when runId is provided", async () => {
   const dir = await Deno.makeTempDir();
   const sessionsDir = path.join(dir, "sessions");
@@ -274,6 +383,31 @@ Deno.test("session feedback accepts persisted run message refs when runId is pro
   );
   assert(saved);
   assertEquals(saved.runId, "testbot-older-run");
+
+  const readModelRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspaces/${
+      encodeURIComponent(workspaceId)
+    }/test/${encodeURIComponent("testbot-older-run")}`,
+  );
+  assertEquals(readModelRes.status, 200);
+  const readModelBody = await readModelRes.json() as {
+    test?: {
+      run?: {
+        messages?: Array<
+          {
+            messageRefId?: string;
+            feedback?: { score?: number; reason?: string };
+          }
+        >;
+      };
+    };
+  };
+  const runMessage = (readModelBody.test?.run?.messages ?? []).find((entry) =>
+    entry.messageRefId === "msg-from-older-run"
+  );
+  assert(runMessage);
+  assertEquals(runMessage.feedback?.score, -3);
+  assertEquals(runMessage.feedback?.reason, "old run message");
 
   await server.shutdown();
   await server.finished;

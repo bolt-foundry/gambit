@@ -67,7 +67,7 @@ import {
 import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
 import BuildPage from "./BuildPage.tsx";
-import type { WorkbenchScenarioErrorChip } from "./Chat.tsx";
+import type { WorkbenchComposerChip } from "./Chat.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Icon from "./gds/Icon.tsx";
@@ -793,8 +793,8 @@ function SimulatorApp(
   ]);
 
   const handleScore = useCallback(
-    (refId: string, score: number | null) => {
-      simulator.sendFeedback(refId, score);
+    (refId: string, score: number | null, reason?: string) => {
+      simulator.sendFeedback(refId, score, reason);
     },
     [simulator],
   );
@@ -1079,9 +1079,9 @@ function App() {
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true);
-  const [workbenchScenarioErrorChip, setWorkbenchScenarioErrorChip] = useState<
-    WorkbenchScenarioErrorChip | null
-  >(null);
+  const [workbenchComposerChips, setWorkbenchComposerChips] = useState<
+    WorkbenchComposerChip[]
+  >([]);
   const [workspaceRunIds, setWorkspaceRunIds] = useState<{
     testRunId: string | null;
     gradeRunId: string | null;
@@ -1126,18 +1126,16 @@ function App() {
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    if (!workbenchScenarioErrorChip) return;
     if (!activeWorkspaceId) {
-      setWorkbenchScenarioErrorChip(null);
+      setWorkbenchComposerChips([]);
       return;
     }
-    if (
-      workbenchScenarioErrorChip.workspaceId &&
-      workbenchScenarioErrorChip.workspaceId !== activeWorkspaceId
-    ) {
-      setWorkbenchScenarioErrorChip(null);
-    }
-  }, [activeWorkspaceId, workbenchScenarioErrorChip]);
+    setWorkbenchComposerChips((prev) =>
+      prev.filter((chip) =>
+        !chip.workspaceId || chip.workspaceId === activeWorkspaceId
+      )
+    );
+  }, [activeWorkspaceId]);
 
   useEffect(() => {
     const syncPath = () => setPath(normalizeAppPath(window.location.pathname));
@@ -1546,13 +1544,32 @@ function App() {
   ) => {
     const resolvedWorkspaceId = payload.workspaceId ?? activeWorkspaceId ??
       undefined;
-    setWorkbenchScenarioErrorChip({
+    const nextChip: WorkbenchComposerChip = {
+      chipId: `error:${resolvedWorkspaceId ?? ""}:${
+        payload.runId ?? ""
+      }:${payload.error}`,
       source: "scenario_run_error",
       workspaceId: resolvedWorkspaceId,
       runId: payload.runId,
       error: payload.error,
       capturedAt: new Date().toISOString(),
       enabled: true,
+    };
+    setWorkbenchComposerChips((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((chip) =>
+        chip.chipId === nextChip.chipId
+      );
+      if (existingIndex >= 0) {
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...nextChip,
+          enabled: true,
+        };
+        return next;
+      }
+      next.push(nextChip);
+      return next;
     });
     setWorkbenchDrawerOpen(true);
   }, [activeWorkspaceId]);
@@ -1707,8 +1724,8 @@ function App() {
                   error={workbenchSessionDetailError}
                   sessionId={activeWorkspaceId}
                   sessionDetail={workbenchSessionDetail}
-                  scenarioErrorChip={workbenchScenarioErrorChip}
-                  onScenarioErrorChipChange={setWorkbenchScenarioErrorChip}
+                  composerChips={workbenchComposerChips}
+                  onComposerChipsChange={setWorkbenchComposerChips}
                 />
               )}
             </div>
