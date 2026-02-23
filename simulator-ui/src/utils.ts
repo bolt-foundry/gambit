@@ -234,6 +234,7 @@ export type TestDeckMeta = {
   label: string;
   description?: string;
   path: string;
+  maxTurns?: number;
 };
 
 export type TestBotConfigResponse = {

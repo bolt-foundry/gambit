@@ -5,6 +5,7 @@ export type AvailableTestDeck = {
   label: string;
   description?: string;
   path: string;
+  maxTurns?: number;
 };
 
 export type AvailableGraderDeck = {
