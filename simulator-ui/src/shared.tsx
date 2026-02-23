@@ -211,7 +211,7 @@ export function MessageBubble(props: {
         {isRespond && (
           <div className="respond-summary">
             <div className="respond-meta">
-              <Badge>gambit_respond</Badge>
+              <Badge>legacy respond envelope</Badge>
               {typeof entry.respond?.status === "number" && (
                 <Badge variant="ghost">
                   status {entry.respond.status}

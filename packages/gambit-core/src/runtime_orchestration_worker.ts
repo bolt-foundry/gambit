@@ -11,6 +11,11 @@ import type {
   TraceEvent,
 } from "./types.ts";
 
+type IntermediateOutputErrorContext = {
+  actionName?: string;
+  parentDeckPath?: string;
+};
+
 type WireScope = true | false | Array<string>;
 type WireRunScope = true | false | {
   paths: Array<string>;
@@ -45,6 +50,8 @@ type RunStartMessage = {
     state?: SavedState;
     responsesMode?: boolean;
     allowRootStringInput?: boolean;
+    intermediateOutputAllow?: boolean;
+    intermediateOutputErrorContext?: IntermediateOutputErrorContext;
     runDeadlineMs: number;
   };
   permissionCeiling: WirePermissionSet;
@@ -140,6 +147,8 @@ type PendingRequest = {
   onStreamText?: (chunk: string) => void;
   onStreamEvent?: (event: ResponseEvent) => void;
   onTraceEvent?: (event: ProviderTraceEvent) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 };
 
 const pending = new Map<string, PendingRequest>();
@@ -158,6 +167,20 @@ function postBridgeMessage(message: Record<string, unknown>) {
 function randomId(prefix: string) {
   const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 24);
   return `${prefix}-${suffix}`;
+}
+
+function cancelError() {
+  return new DOMException("Run canceled", "AbortError");
+}
+
+function clearPendingRequest(requestId: string): PendingRequest | undefined {
+  const req = pending.get(requestId);
+  if (!req) return undefined;
+  pending.delete(requestId);
+  if (req.signal && req.onAbort) {
+    req.signal.removeEventListener("abort", req.onAbort);
+  }
+  return req;
 }
 
 function wireScopeToNormalized(
@@ -221,10 +244,24 @@ const requestModelProvider: ModelProvider = {
       onStreamText,
       onStreamEvent: _onStreamEvent,
       onTraceEvent,
+      signal,
       ...wireInput
     } = input;
     return new Promise<Awaited<ReturnType<ModelProvider["chat"]>>>(
       (resolve, reject) => {
+        const onAbort = () => {
+          const pendingReq = clearPendingRequest(requestId);
+          if (!pendingReq) return;
+          pendingReq.reject(cancelError());
+          postBridgeMessage({
+            type: "model.request.cancel",
+            requestId,
+          });
+        };
+        if (signal?.aborted) {
+          reject(cancelError());
+          return;
+        }
         pending.set(requestId, {
           kind: "chat",
           resolve: (value) =>
@@ -232,7 +269,10 @@ const requestModelProvider: ModelProvider = {
           reject: (error) => reject(error),
           onStreamText,
           onTraceEvent,
+          signal,
+          onAbort,
         });
+        if (signal) signal.addEventListener("abort", onAbort, { once: true });
         postBridgeMessage({
           type: "model.chat.request",
           requestId,
@@ -243,15 +283,31 @@ const requestModelProvider: ModelProvider = {
   },
   responses(input) {
     const requestId = randomId("model-responses");
-    const { onStreamEvent, onTraceEvent, ...wireInput } = input;
+    const { onStreamEvent, onTraceEvent, signal, ...wireInput } = input;
     return new Promise<CreateResponseResponse>((resolve, reject) => {
+      const onAbort = () => {
+        const pendingReq = clearPendingRequest(requestId);
+        if (!pendingReq) return;
+        pendingReq.reject(cancelError());
+        postBridgeMessage({
+          type: "model.request.cancel",
+          requestId,
+        });
+      };
+      if (signal?.aborted) {
+        reject(cancelError());
+        return;
+      }
       pending.set(requestId, {
         kind: "responses",
         resolve: (value) => resolve(value as CreateResponseResponse),
         reject: (error) => reject(error),
         onStreamEvent,
         onTraceEvent,
+        signal,
+        onAbort,
       });
+      if (signal) signal.addEventListener("abort", onAbort, { once: true });
       postBridgeMessage({
         type: "model.responses.request",
         requestId,
@@ -308,6 +364,8 @@ async function runOrchestration(msg: RunStartMessage): Promise<unknown> {
     },
     allowRootStringInput: msg.options.allowRootStringInput,
     responsesMode: msg.options.responsesMode,
+    intermediateOutputAllow: msg.options.intermediateOutputAllow,
+    intermediateOutputErrorContext: msg.options.intermediateOutputErrorContext,
     parentPermissions: fromWirePermissionSet(msg.permissionCeiling),
     runDeadlineMs: msg.options.runDeadlineMs,
     // Keep sandboxing enabled for nested runs so child compute decks are
@@ -380,25 +438,22 @@ self.addEventListener("message", (event: MessageEvent<ParentMessage>) => {
   }
 
   if (data.type === "model.chat.result") {
-    const req = pending.get(data.requestId);
+    const req = clearPendingRequest(data.requestId);
     if (!req || req.kind !== "chat") return;
-    pending.delete(data.requestId);
     req.resolve(data.result);
     return;
   }
 
   if (data.type === "model.responses.result") {
-    const req = pending.get(data.requestId);
+    const req = clearPendingRequest(data.requestId);
     if (!req || req.kind !== "responses") return;
-    pending.delete(data.requestId);
     req.resolve(data.result);
     return;
   }
 
   if (data.type === "model.resolveModel.result") {
-    const req = pending.get(data.requestId);
+    const req = clearPendingRequest(data.requestId);
     if (!req || req.kind !== "resolveModel") return;
-    pending.delete(data.requestId);
     req.resolve(data.result);
     return;
   }
@@ -407,9 +462,8 @@ self.addEventListener("message", (event: MessageEvent<ParentMessage>) => {
     data.type === "model.chat.error" || data.type === "model.responses.error" ||
     data.type === "model.resolveModel.error"
   ) {
-    const req = pending.get(data.requestId);
+    const req = clearPendingRequest(data.requestId);
     if (!req) return;
-    pending.delete(data.requestId);
     req.reject(new Error(data.error.message));
     return;
   }

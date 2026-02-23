@@ -198,13 +198,6 @@ async function ensureGambitPolicyInBotRoot(root: string) {
   await ensureDir(path.dirname(dest));
   await copy(GAMBIT_BOT_POLICY_DIR, dest, { overwrite: false });
 }
-let availableTestDecks: Array<AvailableTestDeck> = [];
-const testDeckByPath = new Map<string, AvailableTestDeck>();
-const testDeckById = new Map<string, AvailableTestDeck>();
-let availableGraderDecks: Array<AvailableGraderDeck> = [];
-const graderDeckByPath = new Map<string, AvailableGraderDeck>();
-const graderDeckById = new Map<string, AvailableGraderDeck>();
-
 async function describeDeckInputSchemaFromPath(
   deckPath: string,
 ): Promise<SchemaDescription> {
@@ -789,6 +782,22 @@ function normalizeInputItems(input: unknown): Array<ResponseItem> {
       });
       continue;
     }
+    if (type.includes(":")) {
+      const data = Object.hasOwn(item, "data")
+        ? asJsonValue(item.data)
+        : Object.entries(item)
+          .filter(([key]) => key !== "type" && key !== "id")
+          .reduce((acc, [key, value]) => {
+            acc[key] = asJsonValue(value);
+            return acc;
+          }, {} as Record<string, JSONValue>);
+      items.push({
+        type: type as `${string}:${string}`,
+        id: typeof item.id === "string" ? item.id : undefined,
+        data,
+      } as unknown as ResponseItem);
+      continue;
+    }
     throw new Error(`Unsupported input item type: ${type || "(missing type)"}`);
   }
   return items;
@@ -980,12 +989,20 @@ function toStrictResponseItem(
       status: "completed",
     };
   }
+  if (item.type === "reasoning") {
+    return {
+      type: "reasoning",
+      id: item.id ?? `rs_${index + 1}`,
+      content: (item.content ?? []).map((part) => toStrictContentPart(part)),
+      summary: item.summary.map((part) => toStrictContentPart(part)),
+      encrypted_content: item.encrypted_content ?? null,
+    };
+  }
   return {
-    type: "reasoning",
-    id: item.id ?? `rs_${index + 1}`,
-    content: (item.content ?? []).map((part) => toStrictContentPart(part)),
-    summary: item.summary.map((part) => toStrictContentPart(part)),
-    encrypted_content: item.encrypted_content ?? null,
+    type: item.type,
+    id: item.id ?? `ext_${index + 1}`,
+    data: item.data,
+    status: "completed",
   };
 }
 
@@ -1130,6 +1147,12 @@ export function startWebSocketSimulator(opts: {
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = resolveDeckPath(opts.deckPath);
   const buildBotRootCache = new Map<string, string>();
+  let availableTestDecks: Array<AvailableTestDeck> = [];
+  const testDeckByPath = new Map<string, AvailableTestDeck>();
+  const testDeckById = new Map<string, AvailableTestDeck>();
+  let availableGraderDecks: Array<AvailableGraderDeck> = [];
+  const graderDeckByPath = new Map<string, AvailableGraderDeck>();
+  const graderDeckById = new Map<string, AvailableGraderDeck>();
   const activeWorkspaceId = opts.workspace?.id ?? null;
   const activeWorkspaceOnboarding = Boolean(opts.workspace?.onboarding);
   const workspaceScaffoldEnabled = Boolean(opts.workspace?.scaffoldEnabled);
@@ -2877,7 +2900,10 @@ export function startWebSocketSimulator(opts: {
             allowRootStringInput: true,
             initialUserMessage: initialUserMessage || undefined,
             responsesMode: opts.responsesMode,
-            workerSandbox: opts.workerSandbox,
+            workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+              workerSandbox: opts.workerSandbox,
+              signal: controller.signal,
+            }),
             signal: controller.signal,
             onStateUpdate: (state) => {
               const nextStateWithSource = applyUserMessageRefSource(
@@ -2953,7 +2979,10 @@ export function startWebSocketSimulator(opts: {
             allowRootStringInput: true,
             initialUserMessage: userMessage,
             responsesMode: opts.responsesMode,
-            workerSandbox: opts.workerSandbox,
+            workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+              workerSandbox: opts.workerSandbox,
+              signal: controller.signal,
+            }),
             signal: controller.signal,
             onStateUpdate: (state) => {
               const nextStateWithSource = applyUserMessageRefSource(
@@ -4859,6 +4888,10 @@ export function startWebSocketSimulator(opts: {
                 stream: shouldStream,
                 state: savedState,
                 responsesMode: opts.responsesMode,
+                workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+                  workerSandbox: opts.workerSandbox,
+                  signal: controller.signal,
+                }),
                 signal: controller.signal,
                 initialUserMessage,
                 onStateUpdate: (state) => {
@@ -5346,6 +5379,10 @@ export function startWebSocketSimulator(opts: {
                 stream: shouldStream,
                 state: entry.state ?? undefined,
                 responsesMode: opts.responsesMode,
+                workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+                  workerSandbox: opts.workerSandbox,
+                  signal: controller.signal,
+                }),
                 signal: controller.signal,
                 initialUserMessage,
                 onStateUpdate: (state) => {
@@ -6546,6 +6583,17 @@ function shouldRetryWithStringInput(error: unknown): boolean {
   return false;
 }
 
+function resolveWorkerSandboxForSignalAwareRun(args: {
+  workerSandbox?: boolean;
+  signal?: AbortSignal;
+}): boolean | undefined {
+  // gambit-core currently rejects worker sandbox runs when an AbortSignal is
+  // supplied. Simulator flows require signals for stop/reset cancellation, so
+  // force in-process execution for those runs.
+  if (args.signal) return false;
+  return args.workerSandbox;
+}
+
 async function runDeckWithFallback(args: {
   path: string;
   input?: unknown;
@@ -6562,6 +6610,10 @@ async function runDeckWithFallback(args: {
   signal?: AbortSignal;
   onCancel?: () => unknown | Promise<unknown>;
 }): Promise<unknown> {
+  const workerSandbox = resolveWorkerSandboxForSignalAwareRun({
+    workerSandbox: args.workerSandbox,
+    signal: args.signal,
+  });
   try {
     return await runDeck({
       path: args.path,
@@ -6575,7 +6627,7 @@ async function runDeckWithFallback(args: {
       stream: args.stream,
       onStreamText: args.onStreamText,
       responsesMode: args.responsesMode,
-      workerSandbox: args.workerSandbox,
+      workerSandbox,
       signal: args.signal,
       onCancel: args.onCancel,
     });
@@ -6593,7 +6645,7 @@ async function runDeckWithFallback(args: {
         stream: args.stream,
         onStreamText: args.onStreamText,
         responsesMode: args.responsesMode,
-        workerSandbox: args.workerSandbox,
+        workerSandbox,
         signal: args.signal,
         onCancel: args.onCancel,
       });

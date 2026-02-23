@@ -24,6 +24,7 @@ import type {
   GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
+  ResponseItemExtensionDefinition,
   TestDeckDefinition,
 } from "./types.ts";
 import type { ZodTypeAny } from "zod";
@@ -142,7 +143,7 @@ type DeckRef = {
 function normalizeDeckRefs<T extends DeckRef>(
   refs: unknown,
   basePath: string,
-  opts?: { requirePrompt?: boolean; requireDescription?: boolean },
+  opts?: { requireDescription?: boolean },
 ): Array<T> {
   if (!Array.isArray(refs)) return [];
   return refs
@@ -152,11 +153,6 @@ function normalizeDeckRefs<T extends DeckRef>(
       const p = String(rec.path ?? "").trim();
       if (!p) {
         throw new Error("Deck reference must include a path");
-      }
-      if (opts?.requirePrompt && !p.endsWith("PROMPT.md")) {
-        throw new Error(
-          `Deck reference must point to PROMPT.md (${basePath})`,
-        );
       }
       const normalized: Record<string, unknown> = { ...rec };
       normalized.path = p.startsWith("gambit://")
@@ -201,10 +197,76 @@ function mergeDeckRefs<T extends DeckRef>(
   return Array.from(merged.values());
 }
 
+function normalizeActionIntermediateOutputPolicy(
+  raw: unknown,
+  basePath: string,
+): NonNullable<ActionDeckDefinition["intermediateOutput"]> {
+  const invalid = () => {
+    throw new Error(
+      `[gambit] Invalid intermediateOutput policy for action deck (${basePath}). Expected { emit: "allow" | "deny" }.`,
+    );
+  };
+  if (raw === undefined || raw === null) {
+    return { emit: "deny" };
+  }
+  if (typeof raw === "boolean") {
+    return { emit: raw ? "allow" : "deny" };
+  }
+  if (typeof raw === "string") {
+    const emit = raw.trim().toLowerCase();
+    if (emit === "allow" || emit === "deny") return { emit };
+    invalid();
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid();
+  const emitRaw = (raw as { emit?: unknown }).emit;
+  if (emitRaw === undefined || emitRaw === null) {
+    return { emit: "deny" };
+  }
+  if (typeof emitRaw === "string") {
+    const emit = emitRaw.trim().toLowerCase();
+    if (emit === "allow" || emit === "deny") return { emit };
+  }
+  invalid();
+  return { emit: "deny" };
+}
+
+function normalizeActionAsyncStartPolicy(
+  raw: unknown,
+  basePath: string,
+): NonNullable<ActionDeckDefinition["asyncStart"]> {
+  const invalid = () => {
+    throw new Error(
+      `[gambit] Invalid asyncStart policy for action deck (${basePath}). Expected { mode: "allow" | "deny" }.`,
+    );
+  };
+  if (raw === undefined || raw === null) {
+    return { mode: "deny" };
+  }
+  if (typeof raw === "boolean") {
+    return { mode: raw ? "allow" : "deny" };
+  }
+  if (typeof raw === "string") {
+    const mode = raw.trim().toLowerCase();
+    if (mode === "allow" || mode === "deny") return { mode };
+    invalid();
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid();
+  const modeRaw = (raw as { mode?: unknown }).mode;
+  if (modeRaw === undefined || modeRaw === null) {
+    return { mode: "deny" };
+  }
+  if (typeof modeRaw === "string") {
+    const mode = modeRaw.trim().toLowerCase();
+    if (mode === "allow" || mode === "deny") return { mode };
+  }
+  invalid();
+  return { mode: "deny" };
+}
+
 async function normalizeActionDecks(
   entries: unknown,
   basePath: string,
-  opts?: { requirePrompt?: boolean; requireDescription?: boolean },
+  opts?: { requireDescription?: boolean },
 ): Promise<Array<ActionDeckDefinition>> {
   if (!Array.isArray(entries)) return [];
   const out: Array<ActionDeckDefinition> = [];
@@ -236,12 +298,6 @@ async function normalizeActionDecks(
         `Action deck must include exactly one of path or execute (${basePath})`,
       );
     }
-    if (hasPath && opts?.requirePrompt && !rawPath.endsWith("PROMPT.md")) {
-      throw new Error(
-        `Deck reference must point to PROMPT.md (${basePath})`,
-      );
-    }
-
     const actionContextSchema = await maybeLoadSchema(
       rec.contextSchema,
       basePath,
@@ -269,6 +325,14 @@ async function normalizeActionDecks(
       execute: hasExecute ? normalizedPath : undefined,
       contextSchema: actionContextSchema,
       responseSchema: actionResponseSchema,
+      intermediateOutput: normalizeActionIntermediateOutputPolicy(
+        rec.intermediateOutput,
+        basePath,
+      ),
+      asyncStart: normalizeActionAsyncStartPolicy(
+        rec.asyncStart,
+        basePath,
+      ),
     };
     if (rec.permissions !== undefined) {
       const parsed = normalizePermissionDeclaration(
@@ -314,6 +378,62 @@ async function normalizeExternalTools(
         ? rec.description
         : undefined,
       inputSchema,
+    });
+  }
+  return out;
+}
+
+const CORE_RESPONSE_ITEM_TYPES = new Set([
+  "message",
+  "function_call",
+  "function_call_output",
+  "reasoning",
+]);
+
+async function normalizeResponseItemExtensions(
+  refs: unknown,
+  basePath: string,
+): Promise<Array<ResponseItemExtensionDefinition>> {
+  if (!Array.isArray(refs)) return [];
+  const out: Array<ResponseItemExtensionDefinition> = [];
+  const seen = new Set<string>();
+  for (const entry of refs) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const rec = entry as Record<string, unknown>;
+    const type = String(rec.type ?? "").trim();
+    if (!type) {
+      throw new Error(
+        `Response item extension must include a type (${basePath})`,
+      );
+    }
+    if (!type.includes(":")) {
+      throw new Error(
+        `Response item extension type "${type}" must be namespaced (<namespace>:<type>) (${basePath})`,
+      );
+    }
+    if (CORE_RESPONSE_ITEM_TYPES.has(type)) {
+      throw new Error(
+        `Response item extension type "${type}" conflicts with core OpenResponses item types (${basePath})`,
+      );
+    }
+    if (seen.has(type)) {
+      throw new Error(
+        `Duplicate response item extension type "${type}" (${basePath})`,
+      );
+    }
+    seen.add(type);
+    const dataSchema = await maybeLoadSchema(rec.dataSchema, basePath);
+    if (!dataSchema) {
+      throw new Error(
+        `Response item extension "${type}" must include dataSchema (${basePath})`,
+      );
+    }
+    out.push({
+      type: type as `${string}:${string}`,
+      dataSchema,
+      description: typeof rec.description === "string"
+        ? rec.description
+        : undefined,
     });
   }
   return out;
@@ -504,7 +624,6 @@ export async function loadMarkdownDeck(
   }).actionDecks;
   const canonicalActions = (deckMeta as { actions?: unknown }).actions;
   const actionDecks = await normalizeActionDecks(canonicalActions, resolved, {
-    requirePrompt: true,
     requireDescription: true,
   });
   const legacyActionDecks = await normalizeActionDecks(
@@ -529,12 +648,10 @@ export async function loadMarkdownDeck(
   const scenarioDecks = normalizeDeckRefs<TestDeckDefinition>(
     (deckMeta as { scenarios?: unknown }).scenarios,
     resolved,
-    { requirePrompt: true },
   );
   const graderDecks = normalizeDeckRefs<GraderDeckDefinition>(
     (deckMeta as { graders?: unknown }).graders,
     resolved,
-    { requirePrompt: true },
   );
   const allActionDecks = [...actionDecks, ...legacyActionDecks];
   allActionDecks.forEach((a) => {
@@ -664,6 +781,10 @@ export async function loadMarkdownDeck(
     (deckMeta as { tools?: unknown }).tools,
     resolved,
   );
+  const responseItemExtensions = await normalizeResponseItemExtensions(
+    (deckMeta as { responseItemExtensions?: unknown }).responseItemExtensions,
+    resolved,
+  );
   const actionNameSet = new Set(mergedActionDecks.map((action) => action.name));
   for (const tool of tools) {
     if (actionNameSet.has(tool.name)) {
@@ -697,6 +818,7 @@ export async function loadMarkdownDeck(
     actionDecks: mergedActionDecks,
     actions: mergedActionDecks,
     tools,
+    responseItemExtensions,
     testDecks: mergeDeckRefs(
       scenarioDecks,
       rootTestDecks,

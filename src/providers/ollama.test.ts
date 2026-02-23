@@ -125,3 +125,64 @@ Deno.test("ollama responses forwards abort signal to client", async () => {
 
   assertEquals(seenSignal, controller.signal);
 });
+
+Deno.test("ollama responses preserves extension payloads", async () => {
+  let received: Record<string, unknown> | null = null;
+  const client = {
+    responses: {
+      create: (params: Record<string, unknown>) => {
+        received = params;
+        return Promise.resolve({
+          ...buildResponseFixture(),
+          output: [{
+            type: "gambit:followups",
+            id: "ext_1",
+            data: { type: "inner", id: "inner", label: "next" },
+          }, {
+            type: "gambit:score",
+            id: "ext_2",
+            data: 0.42,
+          }],
+        } as unknown as OpenAI.Responses.Response);
+      },
+    },
+  } as OpenAIClient;
+
+  const provider = createOllamaProvider({
+    client,
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "ollama/llama3.2",
+      input: [{
+        type: "gambit:score",
+        id: "in_1",
+        data: 1,
+      }, {
+        type: "gambit:followups",
+        id: "in_2",
+        data: { type: "inner", id: "inner", label: "step-2" },
+      }],
+    },
+  });
+
+  assertEquals(received?.["input"], [{
+    type: "gambit:score",
+    id: "in_1",
+    data: 1,
+  }, {
+    type: "gambit:followups",
+    id: "in_2",
+    data: { type: "inner", id: "inner", label: "step-2" },
+  }]);
+  assertEquals(result?.output, [{
+    type: "gambit:followups",
+    id: "ext_1",
+    data: { type: "inner", id: "inner", label: "next" },
+  }, {
+    type: "gambit:score",
+    id: "ext_2",
+    data: 0.42,
+  }]);
+});

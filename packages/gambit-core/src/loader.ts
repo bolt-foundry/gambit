@@ -29,6 +29,7 @@ import type {
   GraderDeckDefinition,
   LoadedCard,
   LoadedDeck,
+  ResponseItemExtensionDefinition,
   TestDeckDefinition,
 } from "./types.ts";
 
@@ -111,6 +112,72 @@ function toFileUrl(p: string): string {
   return path.toFileUrl(abs).href;
 }
 
+function normalizeActionIntermediateOutputPolicy(
+  raw: unknown,
+  context: string,
+): NonNullable<ActionDeckDefinition["intermediateOutput"]> {
+  const invalid = () => {
+    throw new Error(
+      `[gambit] Invalid intermediateOutput policy for ${context}. Expected { emit: "allow" | "deny" }.`,
+    );
+  };
+  if (raw === undefined || raw === null) {
+    return { emit: "deny" };
+  }
+  if (typeof raw === "boolean") {
+    return { emit: raw ? "allow" : "deny" };
+  }
+  if (typeof raw === "string") {
+    const emit = raw.trim().toLowerCase();
+    if (emit === "allow" || emit === "deny") return { emit };
+    invalid();
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid();
+  const emitRaw = (raw as { emit?: unknown }).emit;
+  if (emitRaw === undefined || emitRaw === null) {
+    return { emit: "deny" };
+  }
+  if (typeof emitRaw === "string") {
+    const emit = emitRaw.trim().toLowerCase();
+    if (emit === "allow" || emit === "deny") return { emit };
+  }
+  invalid();
+  return { emit: "deny" };
+}
+
+function normalizeActionAsyncStartPolicy(
+  raw: unknown,
+  context: string,
+): NonNullable<ActionDeckDefinition["asyncStart"]> {
+  const invalid = () => {
+    throw new Error(
+      `[gambit] Invalid asyncStart policy for ${context}. Expected { mode: "allow" | "deny" }.`,
+    );
+  };
+  if (raw === undefined || raw === null) {
+    return { mode: "deny" };
+  }
+  if (typeof raw === "boolean") {
+    return { mode: raw ? "allow" : "deny" };
+  }
+  if (typeof raw === "string") {
+    const mode = raw.trim().toLowerCase();
+    if (mode === "allow" || mode === "deny") return { mode };
+    invalid();
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) invalid();
+  const modeRaw = (raw as { mode?: unknown }).mode;
+  if (modeRaw === undefined || modeRaw === null) {
+    return { mode: "deny" };
+  }
+  if (typeof modeRaw === "string") {
+    const mode = modeRaw.trim().toLowerCase();
+    if (mode === "allow" || mode === "deny") return { mode };
+  }
+  invalid();
+  return { mode: "deny" };
+}
+
 function normalizeActionDecks(
   actions:
     | DeckDefinition["actionDecks"]
@@ -125,6 +192,14 @@ function normalizeActionDecks(
     path: a.path.startsWith("gambit://") || !basePath
       ? a.path
       : path.resolve(path.dirname(basePath), a.path),
+    intermediateOutput: normalizeActionIntermediateOutputPolicy(
+      (a as { intermediateOutput?: unknown }).intermediateOutput,
+      `action "${a.name}"`,
+    ),
+    asyncStart: normalizeActionAsyncStartPolicy(
+      (a as { asyncStart?: unknown }).asyncStart,
+      `action "${a.name}"`,
+    ),
     permissions: normalizePermissionDeclaration(
       a.permissions,
       basePath ? path.dirname(basePath) : Deno.cwd(),
@@ -204,6 +279,57 @@ function normalizeExternalTools(
         ? tool.description
         : undefined,
       inputSchema: tool.inputSchema,
+    };
+  });
+}
+
+const CORE_RESPONSE_ITEM_TYPES = new Set([
+  "message",
+  "function_call",
+  "function_call_output",
+  "reasoning",
+]);
+
+function normalizeResponseItemExtensions(
+  extensions: DeckDefinition["responseItemExtensions"],
+  resolvedPath: string,
+): Array<ResponseItemExtensionDefinition> {
+  if (!extensions) return [];
+  const seen = new Set<string>();
+  return extensions.map((entry) => {
+    const type = String(entry.type ?? "").trim();
+    if (!type) {
+      throw new Error(
+        `Response item extension in ${resolvedPath} must include a type`,
+      );
+    }
+    if (!type.includes(":")) {
+      throw new Error(
+        `Response item extension type "${type}" in ${resolvedPath} must be namespaced (expected "<namespace>:<type>")`,
+      );
+    }
+    if (CORE_RESPONSE_ITEM_TYPES.has(type)) {
+      throw new Error(
+        `Response item extension type "${type}" in ${resolvedPath} conflicts with core OpenResponses item types`,
+      );
+    }
+    if (seen.has(type)) {
+      throw new Error(
+        `Duplicate response item extension type "${type}" in ${resolvedPath}`,
+      );
+    }
+    seen.add(type);
+    if (!entry.dataSchema) {
+      throw new Error(
+        `Response item extension "${type}" in ${resolvedPath} must include dataSchema`,
+      );
+    }
+    return {
+      type: type as `${string}:${string}`,
+      dataSchema: entry.dataSchema,
+      description: typeof entry.description === "string"
+        ? entry.description
+        : undefined,
     };
   });
 }
@@ -337,6 +463,10 @@ export async function loadDeck(
 
   const actionDecks = Object.values(mergedActions);
   const tools = normalizeExternalTools(deck.tools, resolved);
+  const responseItemExtensions = normalizeResponseItemExtensions(
+    deck.responseItemExtensions,
+    resolved,
+  );
   const actionNames = new Set(actionDecks.map((action) => action.name));
   for (const tool of tools) {
     if (actionNames.has(tool.name)) {
@@ -432,6 +562,7 @@ export async function loadDeck(
       resolved,
     ),
     tools,
+    responseItemExtensions,
     contextSchema,
     responseSchema,
     inputSchema,

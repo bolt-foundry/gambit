@@ -2,7 +2,6 @@ import * as path from "@std/path";
 import {
   DEFAULT_GUARDRAILS,
   DEFAULT_STATUS_DELAY_MS,
-  GAMBIT_TOOL_COMPLETE,
   GAMBIT_TOOL_CONTEXT,
   GAMBIT_TOOL_END,
   GAMBIT_TOOL_INIT,
@@ -40,6 +39,7 @@ import type {
   ModelProvider,
   ResponseEvent,
   ResponseItem,
+  ResponseTextConfig,
   ResponseToolDefinition,
   ToolCallResult,
   ToolDefinition,
@@ -84,6 +84,132 @@ type IdleController = {
   stop: () => void;
 };
 
+export type IntermediateOutputErrorContext = {
+  actionName?: string;
+  parentDeckPath?: string;
+};
+
+export type IntermediateOutputEmission = {
+  responseId: string;
+  actionCallId: string;
+  parentActionCallId?: string;
+  deckPath: string;
+  outputIndex: number;
+  item: ResponseItem;
+};
+
+type AsyncActionJobState = "running" | "completed" | "failed" | "canceled";
+
+type AsyncActionJobTerminalResult = {
+  state: Exclude<AsyncActionJobState, "running">;
+  status?: number;
+  payload?: unknown;
+  message?: string;
+  code?: string;
+  meta?: Record<string, unknown>;
+};
+
+type AsyncActionJobEvent =
+  | {
+    cursor: number;
+    type: "intermediate_output";
+    emission: IntermediateOutputEmission;
+  }
+  | {
+    cursor: number;
+    type: "terminal";
+    terminal: AsyncActionJobTerminalResult;
+  };
+
+type PersistedAsyncActionJob = {
+  jobId: string;
+  actionName: string;
+  actionPath: string;
+  state: AsyncActionJobState;
+  cursorBase: number;
+  nextCursor: number;
+  expectedCursor: number;
+  events: Array<AsyncActionJobEvent>;
+  terminal?: AsyncActionJobTerminalResult;
+};
+
+type PersistedAsyncActionJobs = {
+  version: number;
+  jobs: Array<PersistedAsyncActionJob>;
+};
+
+type AsyncActionJobHandle = {
+  jobId: string;
+  actionName: string;
+  state: "running";
+  cursor: {
+    min: number;
+    next: number;
+  };
+};
+
+type AsyncActionJobConsumePayload = {
+  jobId: string;
+  actionName: string;
+  state: AsyncActionJobState;
+  cursor: {
+    requested: number;
+    min: number;
+    next: number;
+    expected: number;
+  };
+  events: Array<AsyncActionJobEvent>;
+  terminal?: AsyncActionJobTerminalResult;
+};
+
+type AsyncActionJobConsumeResult =
+  | { ok: true; payload: AsyncActionJobConsumePayload }
+  | {
+    ok: false;
+    status: number;
+    code: string;
+    message: string;
+    payload?: Record<string, unknown>;
+  };
+
+type AsyncActionJobController = {
+  hasConfiguredAsyncActions: boolean;
+  hasLiveJobs: () => boolean;
+  startJob: (input: { actionName: string; actionPath: string }) => {
+    handle: AsyncActionJobHandle;
+    appendIntermediateOutput: (emission: IntermediateOutputEmission) => void;
+    complete: (terminalResult: {
+      status?: number;
+      payload?: unknown;
+      message?: string;
+      code?: string;
+      meta?: Record<string, unknown>;
+    }) => void;
+    fail: (terminalResult: {
+      state: "failed" | "canceled";
+      status?: number;
+      payload?: unknown;
+      message?: string;
+      code?: string;
+      meta?: Record<string, unknown>;
+    }) => void;
+    bindLiveRun: (
+      runPromise: Promise<unknown>,
+      controller: AbortController,
+    ) => void;
+  };
+  consume: (input: {
+    jobId: string;
+    cursor: number;
+    limit: number;
+    waitMs: number;
+    runDeadlineMs: number;
+    signal?: AbortSignal;
+  }) => Promise<AsyncActionJobConsumeResult>;
+  snapshot: () => PersistedAsyncActionJobs | undefined;
+  cancelLiveJobs: (opts: { message: string; code: string }) => void;
+};
+
 export type RunOptions = {
   path: string;
   input: unknown;
@@ -116,6 +242,9 @@ export type RunOptions = {
   workerSandbox?: boolean;
   inOrchestrationWorker?: boolean;
   signal?: AbortSignal;
+  intermediateOutputAllow?: boolean;
+  onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+  intermediateOutputErrorContext?: IntermediateOutputErrorContext;
   onCancel?: () => unknown | Promise<unknown>;
   onTool?: (input: {
     name: string;
@@ -132,6 +261,7 @@ const WORKER_TIMEOUT_MESSAGE = "Timeout exceeded";
 const RUN_CANCELED_MESSAGE = "Run canceled";
 const WORKER_SANDBOX_SIGNAL_UNSUPPORTED_MESSAGE =
   "workerSandbox is unsupported when `signal` is provided.";
+const INTERMEDIATE_OUTPUT_DISALLOWED_CODE = "intermediate_output_disallowed";
 const INSPECT_WORKER_TIMEOUT_MS = 1_500;
 const INSPECT_WORKER_TIMEOUT_MESSAGE = "Deck inspection timed out";
 const BUILTIN_TOOL_READ_FILE = "read_file";
@@ -139,12 +269,21 @@ const BUILTIN_TOOL_LIST_DIR = "list_dir";
 const BUILTIN_TOOL_GREP_FILES = "grep_files";
 const BUILTIN_TOOL_APPLY_PATCH = "apply_patch";
 const BUILTIN_TOOL_EXEC = "exec";
+const BUILTIN_TOOL_EMIT_OUTPUT_ITEM = "gambit_emit_output_item";
+const BUILTIN_TOOL_CONSUME_ASYNC_ACTION = "gambit_consume_async_action";
+const ASYNC_ACTION_JOBS_META_KEY = "gambit_async_action_jobs_v1";
+const ASYNC_ACTION_JOBS_META_VERSION = 1;
+const ASYNC_ACTION_JOB_INTERRUPTED_CODE = "async_action_interrupted";
+const ASYNC_ACTION_JOB_MAX_WAIT_MS = 5000;
+const ASYNC_ACTION_JOB_MAX_EVENTS = 512;
 const BUILTIN_TOOL_NAMES = new Set<string>([
   BUILTIN_TOOL_READ_FILE,
   BUILTIN_TOOL_LIST_DIR,
   BUILTIN_TOOL_GREP_FILES,
   BUILTIN_TOOL_APPLY_PATCH,
   BUILTIN_TOOL_EXEC,
+  BUILTIN_TOOL_EMIT_OUTPUT_ITEM,
+  BUILTIN_TOOL_CONSUME_ASYNC_ACTION,
 ]);
 const TRUSTED_SCHEMA_IMPORT_PREFIXES = [
   "@bolt-foundry/gambit-core/schemas",
@@ -341,6 +480,24 @@ function ensureRunActive(deadlineMs: number, signal?: AbortSignal) {
   ensureNotExpired(deadlineMs);
 }
 
+function mergeAbortSignals(
+  signalA?: AbortSignal,
+  signalB?: AbortSignal,
+): AbortSignal | undefined {
+  if (!signalA) return signalB;
+  if (!signalB) return signalA;
+  if (signalA.aborted || signalB.aborted) {
+    const controller = new AbortController();
+    controller.abort();
+    return controller.signal;
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signalA.addEventListener("abort", abort, { once: true });
+  signalB.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
 function isTrustedSchemaImportKey(key: string): boolean {
   const normalized = key.trim();
   if (!normalized) return false;
@@ -486,7 +643,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   if (workerSandboxRequested && !isWorkerSandboxHostSupported()) {
     throw new WorkerSandboxUnsupportedHostError();
   }
-  if (workerSandboxRequested && opts.signal) {
+  if (workerSandboxRequested && opts.signal && inferredRoot) {
     throw new WorkerSandboxSignalUnsupportedError();
   }
   const workerSandbox = workerSandboxRequested;
@@ -594,6 +751,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
           responsesMode: opts.responsesMode,
           permissions: permissions.effective,
           permissionsTrace: permissions.trace,
+          intermediateOutputAllow: opts.intermediateOutputAllow,
+          onIntermediateOutputItem: opts.onIntermediateOutputItem,
+          intermediateOutputErrorContext: opts.intermediateOutputErrorContext,
           workspacePermissions: opts.workspacePermissions,
           workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
           sessionPermissions: opts.sessionPermissions,
@@ -626,6 +786,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
           responsesMode: opts.responsesMode,
           permissions: permissions.effective,
           permissionsTrace: permissions.trace,
+          intermediateOutputAllow: opts.intermediateOutputAllow,
+          onIntermediateOutputItem: opts.onIntermediateOutputItem,
+          intermediateOutputErrorContext: opts.intermediateOutputErrorContext,
           workspacePermissions: opts.workspacePermissions,
           workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
           sessionPermissions: opts.sessionPermissions,
@@ -675,6 +838,12 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       opts.runDeadlineMs,
     );
     ensureRunActive(runDeadlineMs, opts.signal);
+    const hasModelParams = Boolean(
+      deck.modelParams?.model || deck.modelParams?.temperature !== undefined,
+    );
+    if (hasModelParams) {
+      assertLegacySyntheticResponseToolsRemoved(deck);
+    }
 
     ensureSchemaPresence(deck, isRoot);
 
@@ -695,9 +864,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       !opts.inOrchestrationWorker &&
       isRoot &&
       !opts.onTool &&
-      Boolean(
-        deck.modelParams?.model || deck.modelParams?.temperature !== undefined,
-      );
+      hasModelParams;
     if (useOrchestrationWorker) {
       return await runLlmDeckInWorker({
         deckPath: deck.path,
@@ -719,6 +886,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         responsesMode: opts.responsesMode,
         permissions: permissions.effective,
         permissionsTrace: permissions.trace,
+        intermediateOutputAllow: opts.intermediateOutputAllow,
+        onIntermediateOutputItem: opts.onIntermediateOutputItem,
+        intermediateOutputErrorContext: opts.intermediateOutputErrorContext,
         workspacePermissions: opts.workspacePermissions,
         workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
         sessionPermissions: opts.sessionPermissions,
@@ -742,9 +912,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       });
     }
 
-    if (
-      deck.modelParams?.model || deck.modelParams?.temperature !== undefined
-    ) {
+    if (hasModelParams) {
       return await runLlmDeck({
         deck,
         guardrails: effectiveGuardrails,
@@ -765,6 +933,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         responsesMode: opts.responsesMode,
         permissions: permissions.effective,
         permissionsTrace: permissions.trace,
+        intermediateOutputAllow: opts.intermediateOutputAllow,
+        onIntermediateOutputItem: opts.onIntermediateOutputItem,
+        intermediateOutputErrorContext: opts.intermediateOutputErrorContext,
         workspacePermissions: opts.workspacePermissions,
         workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
         sessionPermissions: opts.sessionPermissions,
@@ -801,6 +972,9 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       responsesMode: opts.responsesMode,
       permissions: permissions.effective,
       permissionsTrace: permissions.trace,
+      intermediateOutputAllow: opts.intermediateOutputAllow,
+      onIntermediateOutputItem: opts.onIntermediateOutputItem,
+      intermediateOutputErrorContext: opts.intermediateOutputErrorContext,
       workspacePermissions: opts.workspacePermissions,
       workspacePermissionsBaseDir: opts.workspacePermissionsBaseDir,
       sessionPermissions: opts.sessionPermissions,
@@ -890,11 +1064,101 @@ function resolveResponseSchema(deck: LoadedDeck) {
   return deck.responseSchema ?? deck.outputSchema;
 }
 
+function toResponseTextConfig(
+  deck: LoadedDeck,
+): ResponseTextConfig | undefined {
+  const responseSchema = resolveResponseSchema(deck);
+  if (!responseSchema) return undefined;
+  const schema = toJsonSchema(responseSchema as never);
+  if (!isStructuredResponseSchema(schema)) return undefined;
+  return {
+    format: {
+      type: "json_schema",
+      name: responseSchemaName(deck),
+      schema,
+      strict: true,
+    },
+  };
+}
+
+function isStructuredResponseSchema(
+  schema: Record<string, JSONValue>,
+): boolean {
+  const type = schema.type;
+  if (typeof type === "string") {
+    return type !== "string";
+  }
+  if (Array.isArray(type)) {
+    return !type.every((entry) => entry === "string");
+  }
+  const properties = schema.properties;
+  if (
+    properties && typeof properties === "object" && !Array.isArray(properties)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function responseSchemaName(deck: LoadedDeck): string {
+  const raw = deck.label ??
+    path.basename(deck.path, path.extname(deck.path)) ??
+    "gambit_response";
+  const normalized = raw.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(
+    /^_+|_+$/g,
+    "",
+  ).slice(0, 64);
+  return normalized || "gambit_response";
+}
+
+const REMOVED_LEGACY_RESPONSE_TOOL_NAMES = new Set<string>([
+  GAMBIT_TOOL_RESPOND,
+  GAMBIT_TOOL_END,
+]);
+
+const LEGACY_RESPONSE_TOOL_MIGRATION_GUIDANCE = [
+  `Legacy synthetic response tools (${
+    Array.from(REMOVED_LEGACY_RESPONSE_TOOL_NAMES).join(", ")
+  }) are removed.`,
+  "Remove `respond`/`allowEnd` from deck metadata and remove any `gambit://respond`, `gambit://end`, `gambit://snippets/respond.md`, or `gambit://snippets/end.md` embeds.",
+  "Return normal assistant output that matches `responseSchema` instead of synthetic completion tools.",
+].join(" ");
+
+function legacyResponseToolMigrationError(details: string): Error {
+  return new Error(
+    `[gambit] ${details} ${LEGACY_RESPONSE_TOOL_MIGRATION_GUIDANCE}`,
+  );
+}
+
+function syntheticContextToolInvocationError(deckPath: string): Error {
+  return new Error(
+    `[gambit] Model emitted synthetic context tool for deck ${deckPath}. gambit_context is injected automatically when context input is provided. Do not call gambit_context or gambit_init from the model.`,
+  );
+}
+
+function assertLegacySyntheticResponseToolsRemoved(deck: LoadedDeck): void {
+  if (!deck.respond && !deck.allowEnd) return;
+  const enabled: Array<string> = [];
+  if (deck.respond) enabled.push("respond");
+  if (deck.allowEnd) enabled.push("allowEnd");
+  throw legacyResponseToolMigrationError(
+    `Deck ${deck.path} enables removed synthetic response controls (${
+      enabled.join(", ")
+    }).`,
+  );
+}
+
 function isContextToolName(name: string): boolean {
   return name === GAMBIT_TOOL_CONTEXT || name === GAMBIT_TOOL_INIT;
 }
 
 function ensureSchemaPresence(deck: LoadedDeck, isRoot: boolean) {
+  for (const extension of deck.responseItemExtensions ?? []) {
+    assertZodSchema(
+      extension.dataSchema,
+      `responseItemExtensions["${extension.type}"].dataSchema`,
+    );
+  }
   if (!isRoot) {
     const contextSchema = resolveContextSchema(deck);
     const responseSchema = resolveResponseSchema(deck);
@@ -1085,6 +1349,174 @@ function responseItemsFromMessages(
   return items;
 }
 
+const CORE_RESPONSE_ITEM_TYPES = new Set([
+  "message",
+  "function_call",
+  "function_call_output",
+  "reasoning",
+]);
+
+function isCoreResponseItemType(type: string): boolean {
+  return CORE_RESPONSE_ITEM_TYPES.has(type);
+}
+
+function isResponseExtensionItem(
+  item: ResponseItem,
+): item is Extract<ResponseItem, { type: `${string}:${string}` }> {
+  return item.type.includes(":");
+}
+
+function canonicalizeJsonValue(value: unknown): JSONValue {
+  if (value === null) return null;
+  if (typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => canonicalizeJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const sortedKeys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+    const out: Record<string, JSONValue> = {};
+    for (const key of sortedKeys) {
+      const next = record[key];
+      if (next === undefined) continue;
+      out[key] = canonicalizeJsonValue(next);
+    }
+    return out;
+  }
+  return String(value);
+}
+
+type ResponseItemEmissionValidator = (
+  item: ResponseItem,
+  source: string,
+) => ResponseItem;
+
+function createResponseItemEmissionValidator(
+  deck: LoadedDeck,
+): ResponseItemEmissionValidator {
+  const schemaByType = new Map<string, unknown>();
+  for (const extension of deck.responseItemExtensions ?? []) {
+    schemaByType.set(extension.type, extension.dataSchema);
+  }
+  return (item, source) => {
+    const type = item.type;
+    if (isCoreResponseItemType(type)) return item;
+    if (!type.includes(":")) {
+      throw new Error(
+        `[gambit] Deck ${deck.path} emitted undeclared non-namespaced response extension item type "${type}" (${source}).`,
+      );
+    }
+    const schema = schemaByType.get(type);
+    if (!schema) {
+      throw new Error(
+        `[gambit] Deck ${deck.path} emitted undeclared response extension item type "${type}" (${source}). Declare responseItemExtensions with dataSchema.`,
+      );
+    }
+    const asRecord = item as Record<string, unknown>;
+    if (!Object.hasOwn(asRecord, "data")) {
+      throw new Error(
+        `[gambit] Deck ${deck.path} emitted extension item "${type}" without data payload (${source}).`,
+      );
+    }
+    const data = validateWithSchema(schema as never, asRecord.data);
+    return {
+      type: type as `${string}:${string}`,
+      id: typeof asRecord.id === "string" ? asRecord.id : undefined,
+      data: canonicalizeJsonValue(data),
+    };
+  };
+}
+
+function validateResponseOutputItems(
+  items: Array<ResponseItem>,
+  validateItem: ResponseItemEmissionValidator,
+  source: string,
+): Array<ResponseItem> {
+  return items.map((item, index) => validateItem(item, `${source}[${index}]`));
+}
+
+function validateResponseEventItems(
+  event: ResponseEvent,
+  validateItem: ResponseItemEmissionValidator,
+): ResponseEvent {
+  if (
+    event.type === "response.output_item.added" ||
+    event.type === "response.output_item.done"
+  ) {
+    return {
+      ...event,
+      item: validateItem(
+        event.item,
+        `${event.type}[${event.output_index}]`,
+      ),
+    };
+  }
+  if (
+    event.type === "response.completed" || event.type === "response.created"
+  ) {
+    return {
+      ...event,
+      response: {
+        ...event.response,
+        output: validateResponseOutputItems(
+          event.response.output ?? [],
+          validateItem,
+          `${event.type}.response.output`,
+        ),
+      },
+    };
+  }
+  return event;
+}
+
+function isSupplementalResponseItem(item: ResponseItem): boolean {
+  return item.type === "reasoning" || !isCoreResponseItemType(item.type);
+}
+
+function supplementalResponseItemSignature(item: ResponseItem): string {
+  if (item.type === "reasoning") {
+    const content = (item.content ?? []).map((part) =>
+      `${part.type}:${part.text}`
+    ).join("|");
+    const summary = item.summary.map((part) => `${part.type}:${part.text}`)
+      .join("|");
+    return [
+      "reasoning",
+      item.id ?? "",
+      content,
+      summary,
+      item.encrypted_content ?? "",
+    ].join(":");
+  }
+  if (isResponseExtensionItem(item)) {
+    return [
+      item.type,
+      item.id ?? "",
+      JSON.stringify(item.data),
+    ].join(":");
+  }
+  return "";
+}
+
+function mergeSupplementalResponseItems(
+  prior: Array<ResponseItem>,
+  latest: Array<ResponseItem>,
+): Array<ResponseItem> {
+  const out: Array<ResponseItem> = [];
+  const seen = new Set<string>();
+  for (const item of [...prior, ...latest]) {
+    if (!isSupplementalResponseItem(item)) continue;
+    const signature = supplementalResponseItemSignature(item);
+    if (!signature || seen.has(signature)) continue;
+    seen.add(signature);
+    out.push(item);
+  }
+  return out;
+}
+
 function safeJsonArgs(value: string): Record<string, JSONValue> {
   if (!value) return {};
   try {
@@ -1108,6 +1540,58 @@ function asToolKind(value: unknown, fallback: ToolKind): ToolKind {
   return fallback;
 }
 
+type StreamToolEventType = "tool.call" | "tool.result";
+
+function normalizeStreamToolEventType(
+  type: string,
+): StreamToolEventType | undefined {
+  if (type === "tool.call" || type === "gambit:tool.call") return "tool.call";
+  if (type === "tool.result" || type === "gambit:tool.result") {
+    return "tool.result";
+  }
+  return undefined;
+}
+
+function isTerminalResponseEventType(type: string): boolean {
+  return type === "response.completed" || type === "response.failed";
+}
+
+function normalizeSequenceNumber(value: unknown): number | undefined {
+  if (typeof value !== "number") return undefined;
+  if (!Number.isInteger(value) || value < 0) return undefined;
+  return value;
+}
+
+function createCanonicalStreamEventController(): (
+  streamEvent: Record<string, JSONValue>,
+) => Record<string, JSONValue> | null {
+  let nextSequenceNumber = 0;
+  let terminalStateReached = false;
+  return (streamEvent) => {
+    const type = typeof streamEvent.type === "string" ? streamEvent.type : "";
+    if (!type) return streamEvent;
+    const isResponseEvent = type.startsWith("response.");
+    const isToolEvent = normalizeStreamToolEventType(type) !== undefined;
+    if (!isResponseEvent && !isToolEvent) return streamEvent;
+    if (terminalStateReached) return null;
+    if (!isResponseEvent) return streamEvent;
+    const nextEvent: Record<string, JSONValue> = { ...streamEvent, type };
+    const existingSequenceNumber = normalizeSequenceNumber(
+      streamEvent.sequence_number,
+    );
+    if (existingSequenceNumber === undefined) {
+      nextSequenceNumber += 1;
+      nextEvent.sequence_number = nextSequenceNumber;
+    } else {
+      nextSequenceNumber = Math.max(nextSequenceNumber, existingSequenceNumber);
+    }
+    if (isTerminalResponseEventType(type)) {
+      terminalStateReached = true;
+    }
+    return nextEvent;
+  };
+}
+
 function projectStreamToolTraceEvents(input: {
   streamEvent: Record<string, JSONValue>;
   runId: string;
@@ -1118,10 +1602,11 @@ function projectStreamToolTraceEvents(input: {
   toolNames: Map<string, string>;
 }): void {
   if (!input.trace) return;
-  const type = typeof input.streamEvent.type === "string"
+  const rawType = typeof input.streamEvent.type === "string"
     ? input.streamEvent.type
     : "";
-  if (type !== "tool.call" && type !== "tool.result") return;
+  const type = normalizeStreamToolEventType(rawType);
+  if (!type) return;
   const actionCallId = typeof input.streamEvent.actionCallId === "string"
     ? input.streamEvent.actionCallId
     : "";
@@ -1203,6 +1688,776 @@ function traceOpenResponsesStreamEvent(input: {
   return true;
 }
 
+function createIntermediateOutputDisallowedError(input: {
+  source: string;
+  context?: IntermediateOutputErrorContext;
+}): Error {
+  const action = typeof input.context?.actionName === "string" &&
+      input.context.actionName.trim().length > 0
+    ? `action "${input.context.actionName.trim()}"`
+    : "action";
+  const deckSuffix = typeof input.context?.parentDeckPath === "string" &&
+      input.context.parentDeckPath.trim().length > 0
+    ? ` in ${input.context.parentDeckPath.trim()}`
+    : "";
+  const error = new Error(
+    `[gambit] ${action}${deckSuffix} disallows intermediate output emission (${input.source}). Set action.intermediateOutput.emit = "allow" to opt in.`,
+  ) as Error & { code?: string };
+  error.code = INTERMEDIATE_OUTPUT_DISALLOWED_CODE;
+  return error;
+}
+
+type IntermediateChildResponseEmitter = {
+  emitOutputItem: (item: ResponseItem, source: string) => void;
+  complete: () => void;
+  fail: (err: unknown) => void;
+};
+
+function createIntermediateChildResponseEmitter(input: {
+  runId: string;
+  actionCallId: string;
+  deckPath: string;
+  parentActionCallId?: string;
+  trace?: (event: import("./types.ts").TraceEvent) => void;
+  validateItem: ResponseItemEmissionValidator;
+  ensureActive: () => void;
+  allowEmission?: boolean;
+  errorContext?: IntermediateOutputErrorContext;
+  onEmit?: (emission: IntermediateOutputEmission) => void;
+}): IntermediateChildResponseEmitter {
+  const responseId = `${input.actionCallId}:intermediate`;
+  const canonicalizeStreamEvent = createCanonicalStreamEventController();
+  const emittedItems: Array<ResponseItem> = [];
+  let nextOutputIndex = 0;
+  let created = false;
+  let terminal = false;
+
+  const emitStreamEvent = (event: Record<string, JSONValue>) => {
+    const canonical = canonicalizeStreamEvent(event);
+    if (!canonical) return;
+    traceOpenResponsesStreamEvent({
+      streamEvent: canonical,
+      runId: input.runId,
+      actionCallId: input.actionCallId,
+      deckPath: input.deckPath,
+      parentActionCallId: input.parentActionCallId,
+      trace: input.trace,
+    });
+  };
+
+  const ensureCreated = () => {
+    if (created) return;
+    created = true;
+    emitStreamEvent({
+      type: "response.created",
+      response: {
+        id: responseId,
+        object: "response",
+        status: "in_progress",
+        output: [],
+      },
+    } as unknown as Record<string, JSONValue>);
+  };
+
+  return {
+    emitOutputItem: (item, source) => {
+      input.ensureActive();
+      if (input.allowEmission === false) {
+        throw createIntermediateOutputDisallowedError({
+          source,
+          context: input.errorContext,
+        });
+      }
+      if (terminal) return;
+      const validated = input.validateItem(item, source);
+      ensureCreated();
+      const outputIndex = nextOutputIndex++;
+      emittedItems.push(validated);
+      emitStreamEvent({
+        type: "response.output_item.added",
+        response_id: responseId,
+        output_index: outputIndex,
+        item: validated as unknown as JSONValue,
+      });
+      emitStreamEvent({
+        type: "response.output_item.done",
+        response_id: responseId,
+        output_index: outputIndex,
+        item: validated as unknown as JSONValue,
+      });
+      input.onEmit?.({
+        responseId,
+        actionCallId: input.actionCallId,
+        parentActionCallId: input.parentActionCallId,
+        deckPath: input.deckPath,
+        outputIndex,
+        item: validated,
+      });
+    },
+    complete: () => {
+      input.ensureActive();
+      if (terminal || !created) {
+        terminal = true;
+        return;
+      }
+      emitStreamEvent({
+        type: "response.completed",
+        response: {
+          id: responseId,
+          object: "response",
+          status: "completed",
+          output: emittedItems,
+        },
+      } as unknown as Record<string, JSONValue>);
+      terminal = true;
+    },
+    fail: (err) => {
+      if (terminal || !created) {
+        terminal = true;
+        return;
+      }
+      const code = typeof (err as { code?: unknown })?.code === "string"
+        ? (err as { code: string }).code
+        : undefined;
+      const message = err instanceof Error ? err.message : String(err);
+      emitStreamEvent({
+        type: "response.failed",
+        response_id: responseId,
+        error: {
+          ...(code ? { code } : {}),
+          message,
+        } as unknown as JSONValue,
+      });
+      terminal = true;
+    },
+  };
+}
+
+function parseIntermediateOutputEmissionFromTraceEvent(input: {
+  event: import("./types.ts").TraceEvent;
+  expectedParentActionCallId?: string;
+}): IntermediateOutputEmission | undefined {
+  if (input.event.type !== "response.output_item.done") return undefined;
+  const eventRecord = input.event as Record<string, unknown>;
+  const responseId = typeof eventRecord.response_id === "string"
+    ? eventRecord.response_id
+    : undefined;
+  if (!responseId || !responseId.endsWith(":intermediate")) return undefined;
+  const outputIndex = eventRecord.output_index;
+  if (!Number.isInteger(outputIndex) || Number(outputIndex) < 0) {
+    return undefined;
+  }
+  const item = eventRecord.item;
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return undefined;
+  }
+  const gambitMeta = eventRecord._gambit && typeof eventRecord._gambit ===
+      "object" &&
+      !Array.isArray(eventRecord._gambit)
+    ? eventRecord._gambit as Record<string, unknown>
+    : {};
+  const actionCallId = typeof gambitMeta.action_call_id === "string"
+    ? gambitMeta.action_call_id
+    : undefined;
+  if (!actionCallId) return undefined;
+  const parentActionCallId = typeof gambitMeta.parent_action_call_id ===
+      "string"
+    ? gambitMeta.parent_action_call_id
+    : undefined;
+  if (
+    input.expectedParentActionCallId !== undefined &&
+    parentActionCallId !== input.expectedParentActionCallId
+  ) {
+    return undefined;
+  }
+  const deckPath = typeof gambitMeta.deck_path === "string"
+    ? gambitMeta.deck_path
+    : "";
+  if (!deckPath) return undefined;
+  return {
+    responseId,
+    actionCallId,
+    parentActionCallId,
+    deckPath,
+    outputIndex: Number(outputIndex),
+    item: item as ResponseItem,
+  };
+}
+
+type AsyncActionJobRecord = PersistedAsyncActionJob & {
+  waiters: Set<() => void>;
+  runPromise?: Promise<unknown>;
+  controller?: AbortController;
+};
+
+type AppendableAsyncActionJobEvent =
+  | {
+    type: "intermediate_output";
+    emission: IntermediateOutputEmission;
+  }
+  | {
+    type: "terminal";
+    terminal: AsyncActionJobTerminalResult;
+  };
+
+function cloneAsyncActionTerminalResult(
+  input: AsyncActionJobTerminalResult,
+): AsyncActionJobTerminalResult {
+  return {
+    state: input.state,
+    status: input.status,
+    payload: input.payload,
+    message: input.message,
+    code: input.code,
+    meta: input.meta ? { ...input.meta } : undefined,
+  };
+}
+
+function cloneIntermediateEmission(
+  emission: IntermediateOutputEmission,
+): IntermediateOutputEmission {
+  return {
+    responseId: emission.responseId,
+    actionCallId: emission.actionCallId,
+    parentActionCallId: emission.parentActionCallId,
+    deckPath: emission.deckPath,
+    outputIndex: emission.outputIndex,
+    item: emission.item,
+  };
+}
+
+function cloneAsyncActionJobEvent(
+  event: AsyncActionJobEvent,
+): AsyncActionJobEvent {
+  if (event.type === "intermediate_output") {
+    return {
+      cursor: event.cursor,
+      type: "intermediate_output",
+      emission: cloneIntermediateEmission(event.emission),
+    };
+  }
+  return {
+    cursor: event.cursor,
+    type: "terminal",
+    terminal: cloneAsyncActionTerminalResult(event.terminal),
+  };
+}
+
+function parsePersistedAsyncActionJobs(
+  state: SavedState | undefined,
+): PersistedAsyncActionJobs | undefined {
+  const meta = state?.meta as Record<string, unknown> | undefined;
+  const raw = meta?.[ASYNC_ACTION_JOBS_META_KEY];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const asRecord = raw as Record<string, unknown>;
+  const version = Number.isInteger(asRecord.version)
+    ? Number(asRecord.version)
+    : undefined;
+  if (version !== ASYNC_ACTION_JOBS_META_VERSION) return undefined;
+  const rawJobs = asRecord.jobs;
+  if (!Array.isArray(rawJobs)) return undefined;
+  const jobs: Array<PersistedAsyncActionJob> = [];
+  for (const rawJob of rawJobs) {
+    if (!rawJob || typeof rawJob !== "object" || Array.isArray(rawJob)) {
+      continue;
+    }
+    const rec = rawJob as Record<string, unknown>;
+    const jobId = typeof rec.jobId === "string" ? rec.jobId : "";
+    const actionName = typeof rec.actionName === "string" ? rec.actionName : "";
+    const actionPath = typeof rec.actionPath === "string" ? rec.actionPath : "";
+    const stateValue = typeof rec.state === "string" ? rec.state : "";
+    if (!jobId || !actionName || !actionPath) continue;
+    if (
+      stateValue !== "running" && stateValue !== "completed" &&
+      stateValue !== "failed" && stateValue !== "canceled"
+    ) {
+      continue;
+    }
+    const parsedState = stateValue as AsyncActionJobState;
+    const cursorBase = Number.isInteger(rec.cursorBase)
+      ? Math.max(0, Number(rec.cursorBase))
+      : 0;
+    const nextCursor = Number.isInteger(rec.nextCursor)
+      ? Math.max(cursorBase, Number(rec.nextCursor))
+      : cursorBase;
+    const expectedCursor = Number.isInteger(rec.expectedCursor)
+      ? Math.max(cursorBase, Math.min(nextCursor, Number(rec.expectedCursor)))
+      : cursorBase;
+    const rawEvents = Array.isArray(rec.events) ? rec.events : [];
+    const events: Array<AsyncActionJobEvent> = [];
+    for (const rawEvent of rawEvents) {
+      if (
+        !rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)
+      ) {
+        continue;
+      }
+      const eventRec = rawEvent as Record<string, unknown>;
+      const cursor = Number.isInteger(eventRec.cursor)
+        ? Number(eventRec.cursor)
+        : NaN;
+      if (
+        !Number.isInteger(cursor) || cursor < cursorBase || cursor >= nextCursor
+      ) {
+        continue;
+      }
+      const eventType = typeof eventRec.type === "string" ? eventRec.type : "";
+      if (eventType === "intermediate_output") {
+        const emission = eventRec.emission;
+        if (
+          !emission || typeof emission !== "object" || Array.isArray(emission)
+        ) {
+          continue;
+        }
+        const emissionRec = emission as Record<string, unknown>;
+        const outputIndex = Number.isInteger(emissionRec.outputIndex)
+          ? Number(emissionRec.outputIndex)
+          : NaN;
+        if (!Number.isInteger(outputIndex) || outputIndex < 0) continue;
+        const responseId = typeof emissionRec.responseId === "string"
+          ? emissionRec.responseId
+          : "";
+        const actionCallId = typeof emissionRec.actionCallId === "string"
+          ? emissionRec.actionCallId
+          : "";
+        const deckPath = typeof emissionRec.deckPath === "string"
+          ? emissionRec.deckPath
+          : "";
+        const item = emissionRec.item;
+        if (!responseId || !actionCallId || !deckPath || !item) continue;
+        events.push({
+          cursor,
+          type: "intermediate_output",
+          emission: {
+            responseId,
+            actionCallId,
+            parentActionCallId:
+              typeof emissionRec.parentActionCallId === "string"
+                ? emissionRec.parentActionCallId
+                : undefined,
+            deckPath,
+            outputIndex,
+            item: item as ResponseItem,
+          },
+        });
+        continue;
+      }
+      if (eventType === "terminal") {
+        const terminal = eventRec.terminal;
+        if (
+          !terminal || typeof terminal !== "object" || Array.isArray(terminal)
+        ) {
+          continue;
+        }
+        const terminalRec = terminal as Record<string, unknown>;
+        const terminalState = terminalRec.state;
+        if (
+          terminalState !== "completed" && terminalState !== "failed" &&
+          terminalState !== "canceled"
+        ) {
+          continue;
+        }
+        events.push({
+          cursor,
+          type: "terminal",
+          terminal: {
+            state: terminalState,
+            status: typeof terminalRec.status === "number"
+              ? terminalRec.status
+              : undefined,
+            payload: terminalRec.payload,
+            message: typeof terminalRec.message === "string"
+              ? terminalRec.message
+              : undefined,
+            code: typeof terminalRec.code === "string"
+              ? terminalRec.code
+              : undefined,
+            meta: terminalRec.meta && typeof terminalRec.meta === "object" &&
+                !Array.isArray(terminalRec.meta)
+              ? terminalRec.meta as Record<string, unknown>
+              : undefined,
+          },
+        });
+      }
+    }
+    events.sort((a, b) => a.cursor - b.cursor);
+    const terminal = rec.terminal && typeof rec.terminal === "object" &&
+        !Array.isArray(rec.terminal)
+      ? (() => {
+        const terminalRec = rec.terminal as Record<string, unknown>;
+        const terminalState = terminalRec.state;
+        if (
+          terminalState !== "completed" && terminalState !== "failed" &&
+          terminalState !== "canceled"
+        ) {
+          return undefined;
+        }
+        return {
+          state: terminalState,
+          status: typeof terminalRec.status === "number"
+            ? terminalRec.status
+            : undefined,
+          payload: terminalRec.payload,
+          message: typeof terminalRec.message === "string"
+            ? terminalRec.message
+            : undefined,
+          code: typeof terminalRec.code === "string"
+            ? terminalRec.code
+            : undefined,
+          meta: terminalRec.meta && typeof terminalRec.meta === "object" &&
+              !Array.isArray(terminalRec.meta)
+            ? terminalRec.meta as Record<string, unknown>
+            : undefined,
+        } satisfies AsyncActionJobTerminalResult;
+      })()
+      : undefined;
+    jobs.push({
+      jobId,
+      actionName,
+      actionPath,
+      state: parsedState,
+      cursorBase,
+      nextCursor,
+      expectedCursor,
+      events,
+      terminal,
+    });
+  }
+  return { version, jobs };
+}
+
+function createAsyncActionJobController(input: {
+  state?: SavedState;
+  hasConfiguredAsyncActions: boolean;
+  onChange?: () => void;
+}): AsyncActionJobController {
+  const jobs = new Map<string, AsyncActionJobRecord>();
+  const notifyChange = () => input.onChange?.();
+  const notifyWaiters = (record: AsyncActionJobRecord) => {
+    if (record.waiters.size === 0) return;
+    for (const waiter of record.waiters) {
+      waiter();
+    }
+    record.waiters.clear();
+  };
+  const appendEvent = (
+    record: AsyncActionJobRecord,
+    event: AppendableAsyncActionJobEvent,
+  ) => {
+    const withCursor = {
+      ...event,
+      cursor: record.nextCursor,
+    } as AsyncActionJobEvent;
+    record.events.push(withCursor);
+    record.nextCursor += 1;
+    while (record.events.length > ASYNC_ACTION_JOB_MAX_EVENTS) {
+      record.events.shift();
+      record.cursorBase += 1;
+    }
+  };
+  const completeRecord = (
+    record: AsyncActionJobRecord,
+    terminal: AsyncActionJobTerminalResult,
+  ) => {
+    if (record.state !== "running") return;
+    record.state = terminal.state;
+    record.terminal = cloneAsyncActionTerminalResult(terminal);
+    appendEvent(record, {
+      type: "terminal",
+      terminal: cloneAsyncActionTerminalResult(terminal),
+    });
+    notifyWaiters(record);
+    notifyChange();
+  };
+
+  const persisted = parsePersistedAsyncActionJobs(input.state);
+  if (persisted) {
+    let normalizedPersisted = false;
+    for (const entry of persisted.jobs) {
+      const record: AsyncActionJobRecord = {
+        ...entry,
+        events: entry.events.map((event) => cloneAsyncActionJobEvent(event)),
+        terminal: entry.terminal
+          ? cloneAsyncActionTerminalResult(entry.terminal)
+          : undefined,
+        waiters: new Set<() => void>(),
+      };
+      if (record.expectedCursor < record.cursorBase) {
+        record.expectedCursor = record.cursorBase;
+        normalizedPersisted = true;
+      }
+      if (record.expectedCursor > record.nextCursor) {
+        record.expectedCursor = record.nextCursor;
+        normalizedPersisted = true;
+      }
+      if (record.state === "running") {
+        normalizedPersisted = true;
+        completeRecord(record, {
+          state: "canceled",
+          status: 499,
+          code: ASYNC_ACTION_JOB_INTERRUPTED_CODE,
+          message: "Async action job was interrupted before the run resumed.",
+        });
+      } else if (!record.terminal) {
+        const terminalEvent = [...record.events].reverse().find((event) =>
+          event.type === "terminal"
+        );
+        if (terminalEvent?.type === "terminal") {
+          record.terminal = cloneAsyncActionTerminalResult(
+            terminalEvent.terminal,
+          );
+          normalizedPersisted = true;
+        }
+      }
+      jobs.set(record.jobId, record);
+    }
+    if (normalizedPersisted) {
+      notifyChange();
+    }
+  }
+
+  const waitForJobChange = async (
+    record: AsyncActionJobRecord,
+    waitMs: number,
+    signal?: AbortSignal,
+  ) => {
+    if (waitMs <= 0) return;
+    await new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        resolve();
+      }, waitMs);
+      const onAbort = () => {
+        cleanup();
+        resolve();
+      };
+      const waiter = () => {
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        record.waiters.delete(waiter);
+        if (signal) signal.removeEventListener("abort", onAbort);
+      };
+      record.waiters.add(waiter);
+      if (signal) signal.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        cleanup();
+        resolve();
+      }
+    });
+  };
+
+  return {
+    hasConfiguredAsyncActions: input.hasConfiguredAsyncActions,
+    hasLiveJobs: () =>
+      Array.from(jobs.values()).some((job) => job.state === "running"),
+    startJob: ({ actionName, actionPath }) => {
+      const jobId = randomId("job");
+      const record: AsyncActionJobRecord = {
+        jobId,
+        actionName,
+        actionPath,
+        state: "running",
+        cursorBase: 0,
+        nextCursor: 0,
+        expectedCursor: 0,
+        events: [],
+        waiters: new Set<() => void>(),
+      };
+      jobs.set(jobId, record);
+      notifyChange();
+      return {
+        handle: {
+          jobId,
+          actionName,
+          state: "running",
+          cursor: {
+            min: record.cursorBase,
+            next: record.nextCursor,
+          },
+        },
+        appendIntermediateOutput: (emission) => {
+          if (record.state !== "running") return;
+          appendEvent(record, {
+            type: "intermediate_output",
+            emission: cloneIntermediateEmission(emission),
+          });
+          notifyWaiters(record);
+          notifyChange();
+        },
+        complete: (terminalResult) => {
+          completeRecord(record, {
+            state: "completed",
+            status: terminalResult.status,
+            payload: terminalResult.payload,
+            message: terminalResult.message,
+            code: terminalResult.code,
+            meta: terminalResult.meta,
+          });
+        },
+        fail: (terminalResult) => {
+          completeRecord(record, {
+            state: terminalResult.state,
+            status: terminalResult.status,
+            payload: terminalResult.payload,
+            message: terminalResult.message,
+            code: terminalResult.code,
+            meta: terminalResult.meta,
+          });
+        },
+        bindLiveRun: (runPromise, controller) => {
+          record.controller = controller;
+          record.runPromise = runPromise.finally(() => {
+            record.runPromise = undefined;
+            record.controller = undefined;
+          });
+        },
+      };
+    },
+    consume: async (consumeInput) => {
+      ensureRunActive(consumeInput.runDeadlineMs, consumeInput.signal);
+      const record = jobs.get(consumeInput.jobId);
+      if (!record) {
+        return {
+          ok: false,
+          status: 404,
+          code: "async_job_not_found",
+          message: `Unknown async action job: ${consumeInput.jobId}`,
+        };
+      }
+      let cursor = consumeInput.cursor;
+      if (!Number.isInteger(cursor) || cursor < 0) {
+        return {
+          ok: false,
+          status: 400,
+          code: "invalid_cursor",
+          message: "cursor must be a non-negative integer",
+        };
+      }
+      if (cursor < record.cursorBase) {
+        return {
+          ok: false,
+          status: 409,
+          code: "cursor_expired",
+          message:
+            `cursor ${cursor} is behind retained minimum cursor ${record.cursorBase}`,
+          payload: { minCursor: record.cursorBase },
+        };
+      }
+      if (cursor > record.nextCursor) {
+        return {
+          ok: false,
+          status: 400,
+          code: "invalid_cursor",
+          message:
+            `cursor ${cursor} is beyond current cursor ${record.nextCursor}`,
+          payload: { maxCursor: record.nextCursor },
+        };
+      }
+      if (cursor !== record.expectedCursor) {
+        return {
+          ok: false,
+          status: 409,
+          code: "cursor_mismatch",
+          message:
+            `cursor ${cursor} does not match expected cursor ${record.expectedCursor}`,
+          payload: { expectedCursor: record.expectedCursor },
+        };
+      }
+
+      const boundedWaitMs = Math.min(
+        ASYNC_ACTION_JOB_MAX_WAIT_MS,
+        Math.max(0, consumeInput.waitMs),
+      );
+      const remainingMs = Math.max(
+        0,
+        Math.floor(consumeInput.runDeadlineMs - performance.now()),
+      );
+      const waitMs = Math.min(boundedWaitMs, remainingMs);
+      if (
+        waitMs > 0 &&
+        record.state === "running" &&
+        cursor >= record.nextCursor
+      ) {
+        await waitForJobChange(record, waitMs, consumeInput.signal);
+      }
+      ensureRunActive(consumeInput.runDeadlineMs, consumeInput.signal);
+
+      cursor = consumeInput.cursor;
+      if (cursor < record.cursorBase) {
+        return {
+          ok: false,
+          status: 409,
+          code: "cursor_expired",
+          message:
+            `cursor ${cursor} is behind retained minimum cursor ${record.cursorBase}`,
+          payload: { minCursor: record.cursorBase },
+        };
+      }
+      const startIndex = Math.max(0, cursor - record.cursorBase);
+      const events = record.events.slice(
+        startIndex,
+        startIndex + consumeInput.limit,
+      ).map((event) => cloneAsyncActionJobEvent(event));
+      const nextCursor = cursor + events.length;
+      if (record.expectedCursor !== nextCursor) {
+        record.expectedCursor = nextCursor;
+        notifyChange();
+      }
+      return {
+        ok: true,
+        payload: {
+          jobId: record.jobId,
+          actionName: record.actionName,
+          state: record.state,
+          cursor: {
+            requested: consumeInput.cursor,
+            min: record.cursorBase,
+            next: nextCursor,
+            expected: record.expectedCursor,
+          },
+          events,
+          terminal: record.terminal
+            ? cloneAsyncActionTerminalResult(record.terminal)
+            : undefined,
+        },
+      };
+    },
+    snapshot: () => {
+      if (jobs.size === 0) return undefined;
+      return {
+        version: ASYNC_ACTION_JOBS_META_VERSION,
+        jobs: Array.from(jobs.values()).map((job) => ({
+          jobId: job.jobId,
+          actionName: job.actionName,
+          actionPath: job.actionPath,
+          state: job.state,
+          cursorBase: job.cursorBase,
+          nextCursor: job.nextCursor,
+          expectedCursor: job.expectedCursor,
+          events: job.events.map((event) => cloneAsyncActionJobEvent(event)),
+          terminal: job.terminal
+            ? cloneAsyncActionTerminalResult(job.terminal)
+            : undefined,
+        })),
+      };
+    },
+    cancelLiveJobs: ({ message, code }) => {
+      for (const record of jobs.values()) {
+        if (record.state !== "running") continue;
+        completeRecord(record, {
+          state: "canceled",
+          status: 499,
+          code,
+          message,
+        });
+        record.controller?.abort();
+      }
+    },
+  };
+}
+
 function mapResponseOutput(
   output: Array<ResponseItem>,
 ): {
@@ -1273,7 +2528,18 @@ function validateOutput(
 ): unknown {
   const responseSchema = resolveResponseSchema(deck);
   if (responseSchema) {
-    return validateWithSchema(responseSchema as never, output);
+    try {
+      return validateWithSchema(responseSchema as never, output);
+    } catch (directErr) {
+      if (typeof output !== "string") throw directErr;
+      try {
+        const parsed = JSON.parse(output);
+        return validateWithSchema(responseSchema as never, parsed);
+      } catch (parsedErr) {
+        if (parsedErr instanceof SyntaxError) throw directErr;
+        throw parsedErr;
+      }
+    }
   }
   if (isRoot) {
     if (typeof output === "string") return output;
@@ -1302,6 +2568,9 @@ type RuntimeCtxBase = {
   responsesMode?: boolean;
   permissions: NormalizedPermissionSet;
   permissionsTrace: PermissionTrace;
+  intermediateOutputAllow?: boolean;
+  onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+  intermediateOutputErrorContext?: IntermediateOutputErrorContext;
   workspacePermissions?: PermissionDeclarationInput;
   workspacePermissionsBaseDir?: string;
   sessionPermissions?: PermissionDeclarationInput;
@@ -1339,6 +2608,9 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       responsesMode: ctx.responsesMode,
       permissions: ctx.permissions,
       permissionsTrace: ctx.permissionsTrace,
+      intermediateOutputAllow: ctx.intermediateOutputAllow,
+      onIntermediateOutputItem: ctx.onIntermediateOutputItem,
+      intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
       workspacePermissions: ctx.workspacePermissions,
       workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
       sessionPermissions: ctx.sessionPermissions,
@@ -2099,6 +3371,8 @@ type OrchestrationRunStartMessage = {
     state?: SavedState;
     responsesMode?: boolean;
     allowRootStringInput?: boolean;
+    intermediateOutputAllow?: boolean;
+    intermediateOutputErrorContext?: IntermediateOutputErrorContext;
     runDeadlineMs: number;
   };
   permissionCeiling: WirePermissionSet;
@@ -2141,6 +3415,12 @@ type OrchestrationModelResolveRequest = {
   };
 };
 
+type OrchestrationModelCancelRequest = {
+  type: "model.request.cancel";
+  bridgeSession: string;
+  requestId: string;
+};
+
 type OrchestrationWorkerMessageToParent =
   | {
     type: "trace.event";
@@ -2152,6 +3432,7 @@ type OrchestrationWorkerMessageToParent =
   | OrchestrationModelChatRequest
   | OrchestrationModelResponsesRequest
   | OrchestrationModelResolveRequest
+  | OrchestrationModelCancelRequest
   | {
     type: "run.result";
     bridgeSession: string;
@@ -2225,6 +3506,7 @@ async function runLlmDeckInWorker(
     new URL("./runtime_orchestration_worker.ts", import.meta.url).href,
     buildWorkerPermissions(ctx.permissions, ctx.deckPath),
   );
+  const modelRequestControllers = new Map<string, AbortController>();
 
   let settled = false;
   const clearAndTerminate = () => {
@@ -2286,6 +3568,15 @@ async function runLlmDeckInWorker(
       }
 
       if (msg.type === "trace.event") {
+        const emission = ctx.onIntermediateOutputItem
+          ? parseIntermediateOutputEmissionFromTraceEvent({
+            event: msg.event,
+            expectedParentActionCallId: ctx.parentActionCallId,
+          })
+          : undefined;
+        if (emission) {
+          ctx.onIntermediateOutputItem?.(emission);
+        }
         ctx.trace?.(msg.event);
         return;
       }
@@ -2300,10 +3591,12 @@ async function runLlmDeckInWorker(
 
       if (msg.type === "model.chat.request") {
         (async () => {
+          const controller = new AbortController();
+          modelRequestControllers.set(msg.requestId, controller);
           try {
             const result = await ctx.modelProvider.chat({
               ...msg.input,
-              signal: ctx.signal,
+              signal: mergeAbortSignals(ctx.signal, controller.signal),
               onStreamText: (chunk) => {
                 worker.postMessage(
                   {
@@ -2334,6 +3627,8 @@ async function runLlmDeckInWorker(
                 },
               } satisfies OrchestrationParentMessage,
             );
+          } finally {
+            modelRequestControllers.delete(msg.requestId);
           }
         })();
         return;
@@ -2341,6 +3636,8 @@ async function runLlmDeckInWorker(
 
       if (msg.type === "model.responses.request") {
         (async () => {
+          const controller = new AbortController();
+          modelRequestControllers.set(msg.requestId, controller);
           try {
             if (!ctx.modelProvider.responses) {
               throw new Error(
@@ -2349,7 +3646,7 @@ async function runLlmDeckInWorker(
             }
             const result = await ctx.modelProvider.responses({
               ...msg.input,
-              signal: ctx.signal,
+              signal: mergeAbortSignals(ctx.signal, controller.signal),
               onStreamEvent: (streamEvent) => {
                 worker.postMessage(
                   {
@@ -2380,8 +3677,15 @@ async function runLlmDeckInWorker(
                 },
               } satisfies OrchestrationParentMessage,
             );
+          } finally {
+            modelRequestControllers.delete(msg.requestId);
           }
         })();
+        return;
+      }
+
+      if (msg.type === "model.request.cancel") {
+        modelRequestControllers.get(msg.requestId)?.abort();
         return;
       }
 
@@ -2465,6 +3769,8 @@ async function runLlmDeckInWorker(
           state: ctx.state,
           responsesMode: ctx.responsesMode,
           allowRootStringInput: ctx.allowRootStringInput,
+          intermediateOutputAllow: ctx.intermediateOutputAllow,
+          intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
           runDeadlineMs: ctx.runDeadlineMs,
         },
         permissionCeiling: toWirePermissionSet(ctx.permissions),
@@ -2473,6 +3779,9 @@ async function runLlmDeckInWorker(
     ensureRunActive(ctx.runDeadlineMs, ctx.signal);
     return await outcome;
   } finally {
+    for (const controller of modelRequestControllers.values()) {
+      controller.abort();
+    }
     if (timeoutId !== undefined) clearTimeout(timeoutId);
     clearAndTerminate();
   }
@@ -2486,6 +3795,8 @@ type WorkerSpawnRequest = {
     input: unknown;
     initialUserMessage?: unknown;
     parentActionCallId?: string;
+    intermediateOutputAllow?: boolean;
+    intermediateOutputErrorContext?: IntermediateOutputErrorContext;
     parentPermissionsBaseDir: string;
     parentPermissions: WirePermissionSet;
     workspacePermissions?: PermissionDeclarationInput;
@@ -2518,6 +3829,18 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
   let timeoutId: number | undefined;
   const activeSpawnRequests = new Set<string>();
   let currentState = ctx.state;
+  const intermediateEmitter = createIntermediateChildResponseEmitter({
+    runId,
+    actionCallId,
+    deckPath: ctx.deckPath,
+    parentActionCallId: ctx.parentActionCallId,
+    trace: ctx.trace,
+    validateItem: (item) => item,
+    ensureActive: () => ensureRunActive(ctx.runDeadlineMs, ctx.signal),
+    allowEmission: ctx.intermediateOutputAllow,
+    errorContext: ctx.intermediateOutputErrorContext,
+    onEmit: ctx.onIntermediateOutputItem,
+  });
 
   const outcome = new Promise<unknown>((resolve, reject) => {
     const finishResolve = (value: unknown) => {
@@ -2647,6 +3970,10 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
               responsesMode: ctx.responsesMode,
               initialUserMessage: req.payload.initialUserMessage,
               inputProvided: true,
+              intermediateOutputAllow: req.payload.intermediateOutputAllow,
+              onIntermediateOutputItem: ctx.onIntermediateOutputItem,
+              intermediateOutputErrorContext:
+                req.payload.intermediateOutputErrorContext,
               parentPermissions: bridgedParent,
               workspacePermissions: req.payload.workspacePermissions,
               workspacePermissionsBaseDir:
@@ -2694,6 +4021,22 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
         return;
       }
 
+      if (type === "response.item") {
+        const item = (msg as { item?: unknown }).item;
+        if (!item || typeof item !== "object") return;
+        try {
+          intermediateEmitter.emitOutputItem(
+            item as ResponseItem,
+            "worker.emitOutputItem",
+          );
+        } catch (err) {
+          intermediateEmitter.fail(err);
+          finishReject(err);
+          clearAndTerminate();
+        }
+        return;
+      }
+
       if (type === "run.result") {
         if (
           (msg as { completionNonce?: unknown }).completionNonce !==
@@ -2702,6 +4045,13 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
           logger.warn(
             `[gambit] rejected compute-worker run.result with invalid completion nonce`,
           );
+          return;
+        }
+        try {
+          intermediateEmitter.complete();
+        } catch (err) {
+          intermediateEmitter.fail(err);
+          finishReject(err);
           return;
         }
         finishResolve((msg as { result?: unknown }).result);
@@ -2718,7 +4068,11 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
           );
           return;
         }
-        finishReject(normalizeWorkerError((msg as { error?: unknown }).error));
+        const normalizedError = normalizeWorkerError(
+          (msg as { error?: unknown }).error,
+        );
+        intermediateEmitter.fail(normalizedError);
+        finishReject(normalizedError);
       }
     });
   });
@@ -2736,6 +4090,8 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
       initialUserMessage: ctx.initialUserMessage,
       depth: ctx.depth,
       parentActionCallId: ctx.parentActionCallId,
+      intermediateOutputAllow: ctx.intermediateOutputAllow,
+      intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
       permissions: toWirePermissionSet(ctx.permissions),
       workspacePermissions: ctx.workspacePermissions,
       workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
@@ -2757,6 +4113,9 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
 async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
   const { deck, runId } = ctx;
   const actionCallId = randomId("action");
+  const validateResponseItemEmission = createResponseItemEmissionValidator(
+    deck,
+  );
   let computeState = ctx.state
     ? {
       ...ctx.state,
@@ -2792,6 +4151,18 @@ async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
         : undefined,
     });
   };
+  const intermediateEmitter = createIntermediateChildResponseEmitter({
+    runId,
+    actionCallId,
+    deckPath: deck.path,
+    parentActionCallId: ctx.parentActionCallId,
+    trace: ctx.trace,
+    validateItem: validateResponseItemEmission,
+    ensureActive: () => ensureRunActive(ctx.runDeadlineMs, ctx.signal),
+    allowEmission: ctx.intermediateOutputAllow,
+    errorContext: ctx.intermediateOutputErrorContext,
+    onEmit: ctx.onIntermediateOutputItem,
+  });
 
   const execContext: ExecutionContext = {
     runId,
@@ -2831,6 +4202,13 @@ async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
       refs.push({ id: randomId("msg"), role: sanitized.role });
       state.messageRefs = refs;
       publishComputeState();
+    },
+    emitOutputItem: (item) => {
+      intermediateEmitter.emitOutputItem(
+        item,
+        "executionContext.emitOutputItem",
+      );
+      return Promise.resolve();
     },
     label: deck.label,
     log: (entry) => {
@@ -2901,6 +4279,9 @@ async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
         responsesMode: ctx.responsesMode,
         initialUserMessage: childInitialUserMessage,
         inputProvided: true,
+        intermediateOutputAllow: ctx.intermediateOutputAllow,
+        onIntermediateOutputItem: ctx.onIntermediateOutputItem,
+        intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
         parentPermissions: ctx.permissions,
         workspacePermissions: ctx.workspacePermissions,
         workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
@@ -2918,10 +4299,17 @@ async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
     return: (payload) => Promise.resolve(payload),
   };
 
-  ensureRunActive(ctx.runDeadlineMs, ctx.signal);
-  const raw = await deck.executor!(execContext);
-  ensureRunActive(ctx.runDeadlineMs, ctx.signal);
-  return validateOutput(deck, raw, ctx.depth === 0);
+  try {
+    ensureRunActive(ctx.runDeadlineMs, ctx.signal);
+    const raw = await deck.executor!(execContext);
+    ensureRunActive(ctx.runDeadlineMs, ctx.signal);
+    const validated = validateOutput(deck, raw, ctx.depth === 0);
+    intermediateEmitter.complete();
+    return validated;
+  } catch (err) {
+    intermediateEmitter.fail(err);
+    throw err;
+  }
 }
 
 async function runLlmDeck(
@@ -2941,9 +4329,25 @@ async function runLlmDeck(
   } = ctx;
   const actionCallId = randomId("action");
   const start = performance.now();
-  const respondEnabled = Boolean(deck.respond);
   const useResponses = Boolean(ctx.responsesMode) ||
     ctx.state?.format === "responses";
+  const validateResponseItemEmission = createResponseItemEmissionValidator(
+    deck,
+  );
+  const intermediateEmitter = ctx.parentActionCallId !== undefined
+    ? createIntermediateChildResponseEmitter({
+      runId,
+      actionCallId,
+      deckPath: deck.path,
+      parentActionCallId: ctx.parentActionCallId,
+      trace: ctx.trace,
+      validateItem: validateResponseItemEmission,
+      ensureActive: () => ensureRunActive(ctx.runDeadlineMs, ctx.signal),
+      allowEmission: ctx.intermediateOutputAllow,
+      errorContext: ctx.intermediateOutputErrorContext,
+      onEmit: ctx.onIntermediateOutputItem,
+    })
+    : undefined;
 
   const systemPrompt = buildSystemPrompt(deck);
 
@@ -2970,6 +4374,9 @@ async function runLlmDeck(
     onStreamText: ctx.onStreamText,
     pushMessages: (msgs) => messages.push(...msgs.map(sanitizeMessage)),
     responsesMode: ctx.responsesMode,
+    intermediateOutputAllow: ctx.intermediateOutputAllow,
+    onIntermediateOutputItem: ctx.onIntermediateOutputItem,
+    intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
     permissions: ctx.permissions,
     workspacePermissions: ctx.workspacePermissions,
     workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
@@ -2979,6 +4386,12 @@ async function runLlmDeck(
     workerSandbox: ctx.workerSandbox,
     signal: ctx.signal,
     onTool: ctx.onTool,
+  });
+  const asyncActionJobs = createAsyncActionJobController({
+    state: ctx.state,
+    hasConfiguredAsyncActions: deck.actionDecks.some((action) =>
+      action.asyncStart?.mode === "allow"
+    ),
   });
   let streamingBuffer = "";
   let streamingCommitted = false;
@@ -3049,7 +4462,14 @@ async function runLlmDeck(
   }
   idleController.touch();
 
-  const tools = await buildToolDefs(deck, ctx.permissions);
+  const tools = await buildToolDefs(deck, ctx.permissions, {
+    parentActionCallId: ctx.parentActionCallId,
+    intermediateOutputAllow: ctx.intermediateOutputAllow,
+    asyncActionJobs,
+  });
+  const responseTextConfig = useResponses
+    ? toResponseTextConfig(deck)
+    : undefined;
   ctx.trace?.({
     type: "deck.start",
     runId,
@@ -3107,6 +4527,7 @@ async function runLlmDeck(
       const projectedToolCalls = new Set<string>();
       const projectedToolResults = new Set<string>();
       const projectedToolNames = new Map<string, string>();
+      const canonicalizeStreamEvent = createCanonicalStreamEventController();
       type ModelCallResult = Awaited<ReturnType<ModelProvider["chat"]>>;
       const result: ModelCallResult = (useResponses && responses)
         ? await (async () => {
@@ -3117,6 +4538,7 @@ async function runLlmDeck(
               model,
               input: responseItems,
               tools: tools as Array<ResponseToolDefinition>,
+              text: responseTextConfig,
               stream: ctx.stream,
               params: providerParams,
             },
@@ -3126,11 +4548,18 @@ async function runLlmDeck(
             onStreamEvent:
               (ctx.trace || ctx.onStreamText || deck.handlers?.onIdle)
                 ? (event) => {
-                  if (ctx.trace) {
-                    const streamEvent = event as unknown as Record<
+                  const normalizedEvent = validateResponseEventItems(
+                    event,
+                    validateResponseItemEmission,
+                  );
+                  const streamEvent = canonicalizeStreamEvent(
+                    normalizedEvent as unknown as Record<
                       string,
                       import("./types.ts").JSONValue
-                    >;
+                    >,
+                  );
+                  if (!streamEvent) return;
+                  if (ctx.trace) {
                     const handledAsResponse = traceOpenResponsesStreamEvent({
                       streamEvent,
                       runId,
@@ -3161,18 +4590,31 @@ async function runLlmDeck(
                       toolNames: projectedToolNames,
                     });
                   }
-                  if (event.type === "response.output_text.delta") {
+                  const eventType = typeof streamEvent.type === "string"
+                    ? streamEvent.type
+                    : "";
+                  if (eventType === "response.output_text.delta") {
                     sawDelta = true;
-                    wrappedOnStreamText(event.delta);
+                    const delta = typeof streamEvent.delta === "string"
+                      ? streamEvent.delta
+                      : "";
+                    if (delta) wrappedOnStreamText(delta);
                   } else if (
-                    event.type === "response.output_text.done" && !sawDelta
+                    eventType === "response.output_text.done" && !sawDelta
                   ) {
-                    wrappedOnStreamText(event.text);
+                    const text = typeof streamEvent.text === "string"
+                      ? streamEvent.text
+                      : "";
+                    if (text) wrappedOnStreamText(text);
                   }
                 }
                 : undefined,
           });
-          responseOutputItems = response.output ?? [];
+          responseOutputItems = validateResponseOutputItems(
+            response.output ?? [],
+            validateResponseItemEmission,
+            "response.output",
+          );
           const mapped = mapResponseOutput(responseOutputItems);
           return {
             message: mapped.message,
@@ -3196,8 +4638,10 @@ async function runLlmDeck(
             : undefined,
           onStreamEvent: ctx.trace
             ? (event) => {
+              const streamEvent = canonicalizeStreamEvent(event);
+              if (!streamEvent) return;
               const handledAsResponse = traceOpenResponsesStreamEvent({
-                streamEvent: event,
+                streamEvent,
                 runId,
                 actionCallId,
                 deckPath: deck.path,
@@ -3212,12 +4656,12 @@ async function runLlmDeck(
                   actionCallId,
                   deckPath: deck.path,
                   model,
-                  event,
+                  event: streamEvent,
                   parentActionCallId: ctx.parentActionCallId,
                 });
               }
               projectStreamToolTraceEvents({
-                streamEvent: event,
+                streamEvent,
                 runId,
                 parentActionCallId: actionCallId,
                 trace: ctx.trace,
@@ -3251,16 +4695,39 @@ async function runLlmDeck(
         const mergedMessages = base.messages && base.messages.length > 0
           ? base.messages.map(sanitizeMessage)
           : messages.map(sanitizeMessage);
-        const responseItems = useResponses
-          ? responseItemsFromMessages(mergedMessages)
-          : updated?.items ?? ctx.state?.items;
+        let responseItems: Array<ResponseItem> | undefined;
+        if (useResponses) {
+          const conversationalItems = responseItemsFromMessages(mergedMessages);
+          const priorSupplemental = (updated?.items ?? ctx.state?.items ?? [])
+            .filter((item) => isSupplementalResponseItem(item));
+          const latestSupplemental = (responseOutputItems ?? [])
+            .filter((item) => isSupplementalResponseItem(item));
+          const supplementalItems = mergeSupplementalResponseItems(
+            priorSupplemental,
+            latestSupplemental,
+          );
+          responseItems = [
+            ...conversationalItems,
+            ...supplementalItems,
+          ];
+        } else {
+          responseItems = updated?.items ?? ctx.state?.items;
+        }
         const priorRefs = updated?.messageRefs ?? ctx.state?.messageRefs ?? [];
         const messageRefs: Array<MessageRef> = mergedMessages.map((m, idx) =>
           priorRefs[idx] ?? { id: randomId("msg"), role: m.role }
         );
         const feedback = updated?.feedback ?? ctx.state?.feedback;
         const traces = updated?.traces ?? ctx.state?.traces;
-        const meta = updated?.meta ?? ctx.state?.meta;
+        const sourceMeta = updated?.meta ?? ctx.state?.meta;
+        const nextMeta = sourceMeta ? { ...sourceMeta } : {};
+        const asyncActionSnapshot = asyncActionJobs.snapshot();
+        if (asyncActionSnapshot) {
+          nextMeta[ASYNC_ACTION_JOBS_META_KEY] = asyncActionSnapshot;
+        } else {
+          delete nextMeta[ASYNC_ACTION_JOBS_META_KEY];
+        }
+        const meta = Object.keys(nextMeta).length > 0 ? nextMeta : undefined;
         const notes = updated?.notes ?? ctx.state?.notes;
         const conversationScore = updated?.conversationScore ??
           ctx.state?.conversationScore;
@@ -3282,9 +4749,6 @@ async function runLlmDeck(
       };
 
       if (result.toolCalls && result.toolCalls.length > 0) {
-        let responded = false;
-        let respondValue: unknown;
-        let endSignal: GambitEndSignal | undefined;
         const appendedMessages: Array<ModelMessage> = [];
         const toolCallText = streamingBuffer ||
           (typeof message.content === "string" ? message.content : "");
@@ -3296,144 +4760,13 @@ async function runLlmDeck(
         }
 
         for (const call of result.toolCalls) {
-          if (respondEnabled && call.name === GAMBIT_TOOL_RESPOND) {
-            const status = typeof call.args?.status === "number"
-              ? call.args.status
-              : undefined;
-            const message = typeof call.args?.message === "string"
-              ? call.args.message
-              : undefined;
-            const code = typeof call.args?.code === "string"
-              ? call.args.code
-              : undefined;
-            const meta = (call.args?.meta &&
-                typeof call.args.meta === "object" &&
-                call.args.meta !== null)
-              ? call.args.meta as Record<string, unknown>
-              : undefined;
-            const rawPayload = call.args?.payload ?? call.args;
-            const validatedPayload = validateOutput(
-              deck,
-              rawPayload,
-              depth === 0,
+          if (REMOVED_LEGACY_RESPONSE_TOOL_NAMES.has(call.name)) {
+            throw legacyResponseToolMigrationError(
+              `Model emitted removed synthetic tool "${call.name}" for deck ${deck.path}.`,
             );
-            const respondEnvelope: {
-              payload: unknown;
-              status?: number;
-              message?: string;
-              code?: string;
-              meta?: Record<string, unknown>;
-            } = {
-              payload: validatedPayload,
-            };
-            if (status !== undefined) respondEnvelope.status = status;
-            if (message !== undefined) respondEnvelope.message = message;
-            if (code !== undefined) respondEnvelope.code = code;
-            if (meta !== undefined) respondEnvelope.meta = meta;
-            ctx.trace?.({
-              type: "tool.call",
-              runId,
-              actionCallId: call.id,
-              name: call.name,
-              args: call.args,
-              toolKind: "internal",
-              parentActionCallId: actionCallId,
-            });
-            const toolContent = JSON.stringify(call.args ?? {});
-            appendedMessages.push({
-              role: "assistant",
-              content: null,
-              tool_calls: [{
-                id: call.id,
-                type: "function",
-                function: {
-                  name: call.name,
-                  arguments: JSON.stringify(call.args ?? {}),
-                },
-              }],
-            });
-            appendedMessages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              name: call.name,
-              content: toolContent,
-            });
-            respondValue = respondEnvelope;
-            responded = true;
-            ctx.trace?.({
-              type: "tool.result",
-              runId,
-              actionCallId: call.id,
-              name: call.name,
-              result:
-                respondEnvelope as unknown as import("./types.ts").JSONValue,
-              toolKind: "internal",
-              parentActionCallId: actionCallId,
-            });
-            continue;
           }
-
-          if (deck.allowEnd && call.name === GAMBIT_TOOL_END) {
-            const status = typeof call.args?.status === "number"
-              ? call.args.status
-              : undefined;
-            const messageText = typeof call.args?.message === "string"
-              ? call.args.message
-              : undefined;
-            const code = typeof call.args?.code === "string"
-              ? call.args.code
-              : undefined;
-            const meta = (call.args?.meta &&
-                typeof call.args.meta === "object" &&
-                call.args.meta !== null)
-              ? call.args.meta as Record<string, unknown>
-              : undefined;
-            const payload = call.args?.payload;
-            ctx.trace?.({
-              type: "tool.call",
-              runId,
-              actionCallId: call.id,
-              name: call.name,
-              args: call.args,
-              toolKind: "internal",
-              parentActionCallId: actionCallId,
-            });
-            const toolContent = JSON.stringify(call.args ?? {});
-            appendedMessages.push({
-              role: "assistant",
-              content: null,
-              tool_calls: [{
-                id: call.id,
-                type: "function",
-                function: {
-                  name: call.name,
-                  arguments: JSON.stringify(call.args ?? {}),
-                },
-              }],
-            });
-            appendedMessages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              name: call.name,
-              content: toolContent,
-            });
-            const signal: GambitEndSignal = { __gambitEnd: true };
-            if (status !== undefined) signal.status = status;
-            if (messageText !== undefined) signal.message = messageText;
-            if (code !== undefined) signal.code = code;
-            if (meta !== undefined) signal.meta = meta;
-            if (payload !== undefined) signal.payload = payload;
-            endSignal = signal;
-            ctx.trace?.({
-              type: "tool.result",
-              runId,
-              actionCallId: call.id,
-              name: call.name,
-              result: signal as unknown as import("./types.ts").JSONValue,
-              toolKind: "internal",
-              parentActionCallId: actionCallId,
-            });
-            continue;
+          if (isContextToolName(call.name)) {
+            throw syntheticContextToolInvocationError(deck.path);
           }
 
           const actionRef = deck.actionDecks.find((a) => a.name === call.name);
@@ -3476,6 +4809,7 @@ async function runLlmDeck(
             defaultModel: ctx.defaultModel,
             modelOverride: ctx.modelOverride,
             trace: ctx.trace,
+            stream: ctx.stream,
             onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
               ? wrappedOnStreamText
               : undefined,
@@ -3491,7 +4825,15 @@ async function runLlmDeck(
             runDeadlineMs: ctx.runDeadlineMs,
             workerSandbox: ctx.workerSandbox,
             signal: ctx.signal,
+            intermediateOutputAllow: ctx.intermediateOutputAllow,
+            onIntermediateOutputItem: ctx.onIntermediateOutputItem,
+            intermediateOutputErrorContext: ctx.intermediateOutputErrorContext,
             onTool: ctx.onTool,
+            emitIntermediateOutputItem: intermediateEmitter
+              ? (item, source) =>
+                intermediateEmitter.emitOutputItem(item, source)
+              : undefined,
+            asyncActionJobs,
           });
           ctx.trace?.({
             type: "tool.result",
@@ -3542,31 +4884,10 @@ async function runLlmDeck(
           const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
         }
-        if (endSignal) {
-          ctx.trace?.({
-            type: "deck.end",
-            runId,
-            deckPath: deck.path,
-            actionCallId,
-            parentActionCallId: ctx.parentActionCallId,
-          });
-          return endSignal;
-        }
-        if (responded) {
-          ctx.trace?.({
-            type: "deck.end",
-            runId,
-            deckPath: deck.path,
-            actionCallId,
-            parentActionCallId: ctx.parentActionCallId,
-          });
-          return respondValue;
-        }
         continue;
       }
 
       if (
-        !respondEnabled &&
         result.finishReason === "stop" &&
         (message.content === null || message.content === undefined) &&
         (!result.toolCalls || result.toolCalls.length === 0)
@@ -3606,33 +4927,40 @@ async function runLlmDeck(
               .content as unknown as import("./types.ts").JSONValue,
           });
         }
-        if (!respondEnabled) {
-          const validated = validateOutput(deck, message.content, depth === 0);
-          ctx.trace?.({
-            type: "deck.end",
-            runId,
-            deckPath: deck.path,
-            actionCallId,
-            parentActionCallId: ctx.parentActionCallId,
-          });
-          return validated;
-        }
-      }
-
-      if (respondEnabled && result.finishReason === "stop") {
-        continue;
+        const validated = validateOutput(deck, message.content, depth === 0);
+        intermediateEmitter?.complete();
+        ctx.trace?.({
+          type: "deck.end",
+          runId,
+          deckPath: deck.path,
+          actionCallId,
+          parentActionCallId: ctx.parentActionCallId,
+        });
+        return validated;
       }
 
       if (passes >= guardrails.maxPasses) {
         throw new Error("Max passes exceeded without completing");
       }
     }
+    throw new Error("Model did not complete within guardrails");
+  } catch (err) {
+    intermediateEmitter?.fail(err);
+    throw err;
   } finally {
+    asyncActionJobs.cancelLiveJobs({
+      code: "async_job_parent_ended",
+      message:
+        "Parent run ended before async action job reached terminal state.",
+    });
     idleController.stop();
   }
-
-  throw new Error("Model did not complete within guardrails");
 }
+
+type ToolResultIntermediateOutputView = {
+  policy: "allow";
+  items: Array<IntermediateOutputEmission>;
+};
 
 async function handleToolCall(
   call: { id: string; name: string; args: Record<string, unknown> },
@@ -3660,7 +4988,12 @@ async function handleToolCall(
     runDeadlineMs: number;
     workerSandbox: boolean;
     signal?: AbortSignal;
+    intermediateOutputAllow?: boolean;
+    onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+    intermediateOutputErrorContext?: IntermediateOutputErrorContext;
     onTool?: RunOptions["onTool"];
+    emitIntermediateOutputItem?: (item: ResponseItem, source: string) => void;
+    asyncActionJobs?: AsyncActionJobController;
   },
 ): Promise<ToolCallResult> {
   ensureRunActive(ctx.runDeadlineMs, ctx.signal);
@@ -3668,6 +5001,7 @@ async function handleToolCall(
     deckPath: ctx.parentDeck.path,
     actionName: call.name,
   };
+  let intermediateOutputView: ToolResultIntermediateOutputView | undefined;
 
   const baseComplete = (payload: {
     status?: number;
@@ -3686,6 +5020,9 @@ async function handleToolCall(
       message: payload.message,
       code: payload.code,
       meta: payload.meta,
+      ...(intermediateOutputView
+        ? { intermediateOutput: intermediateOutputView }
+        : {}),
     });
   const extraMessages: Array<ModelMessage> = [];
   const started = performance.now();
@@ -3699,6 +5036,107 @@ async function handleToolCall(
         message,
       }),
     });
+
+    if (call.name === BUILTIN_TOOL_EMIT_OUTPUT_ITEM) {
+      if (!ctx.emitIntermediateOutputItem) {
+        return {
+          toolContent: baseComplete({
+            status: 400,
+            code: "invalid_tool_context",
+            message:
+              `${BUILTIN_TOOL_EMIT_OUTPUT_ITEM} is only available inside child LLM action decks`,
+          }),
+        };
+      }
+      let item: ResponseItem;
+      try {
+        item = parseEmitOutputItemArgs(call.args);
+      } catch (err) {
+        return {
+          toolContent: baseComplete({
+            status: 400,
+            code: "invalid_input",
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        };
+      }
+      try {
+        ctx.emitIntermediateOutputItem(
+          item,
+          `tool.${BUILTIN_TOOL_EMIT_OUTPUT_ITEM}`,
+        );
+      } catch (err) {
+        const errorCode = typeof (err as { code?: unknown })?.code === "string"
+          ? (err as { code: string }).code
+          : "invalid_input";
+        return {
+          toolContent: baseComplete({
+            status: errorCode === INTERMEDIATE_OUTPUT_DISALLOWED_CODE
+              ? 403
+              : 400,
+            code: errorCode,
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        };
+      }
+      return {
+        toolContent: baseComplete({
+          status: 200,
+          payload: { emitted: true, type: item.type },
+        }),
+      };
+    }
+
+    if (call.name === BUILTIN_TOOL_CONSUME_ASYNC_ACTION) {
+      if (!ctx.asyncActionJobs) {
+        return {
+          toolContent: baseComplete({
+            status: 400,
+            code: "invalid_tool_context",
+            message:
+              `${BUILTIN_TOOL_CONSUME_ASYNC_ACTION} is unavailable for this deck`,
+          }),
+        };
+      }
+      let parsedArgs: {
+        jobId: string;
+        cursor: number;
+        limit: number;
+        waitMs: number;
+      };
+      try {
+        parsedArgs = parseConsumeAsyncActionArgs(call.args);
+      } catch (err) {
+        return {
+          toolContent: baseComplete({
+            status: 400,
+            code: "invalid_input",
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        };
+      }
+      const consumed = await ctx.asyncActionJobs.consume({
+        ...parsedArgs,
+        runDeadlineMs: ctx.runDeadlineMs,
+        signal: ctx.signal,
+      });
+      if (!consumed.ok) {
+        return {
+          toolContent: baseComplete({
+            status: consumed.status,
+            code: consumed.code,
+            message: consumed.message,
+            payload: consumed.payload,
+          }),
+        };
+      }
+      return {
+        toolContent: baseComplete({
+          status: 200,
+          payload: consumed.payload,
+        }),
+      };
+    }
 
     if (call.name === BUILTIN_TOOL_READ_FILE) {
       let targetPath: string;
@@ -4165,6 +5603,143 @@ async function handleToolCall(
       };
     }
   }
+  const inheritedIntermediateOutputAllow = ctx.intermediateOutputAllow ?? true;
+  const actionDeclaresIntermediateOutput =
+    action.intermediateOutput?.emit === "allow";
+  const actionIntermediateOutputAllow = inheritedIntermediateOutputAllow &&
+    actionDeclaresIntermediateOutput;
+  const actionIntermediateOutputItems: Array<IntermediateOutputEmission> = [];
+  const actionIntermediateOutputErrorContext = inheritedIntermediateOutputAllow
+    ? {
+      actionName: action.name,
+      parentDeckPath: ctx.parentDeck.path,
+    }
+    : (ctx.intermediateOutputErrorContext ?? {
+      actionName: action.name,
+      parentDeckPath: ctx.parentDeck.path,
+    });
+  const actionIntermediateOutputCapture = actionIntermediateOutputAllow
+    ? (emission: IntermediateOutputEmission) => {
+      actionIntermediateOutputItems.push(emission);
+      ctx.onIntermediateOutputItem?.(emission);
+    }
+    : undefined;
+  const actionAsyncStartAllowed = action.asyncStart?.mode === "allow";
+  if (actionAsyncStartAllowed) {
+    if (!ctx.asyncActionJobs) {
+      return {
+        toolContent: baseComplete({
+          status: 500,
+          code: "async_job_unavailable",
+          message:
+            "Async action start is configured but async job controller is unavailable",
+        }),
+      };
+    }
+    const job = ctx.asyncActionJobs.startJob({
+      actionName: action.name,
+      actionPath: action.path,
+    });
+    const controller = new AbortController();
+    const childSignal = mergeAbortSignals(ctx.signal, controller.signal);
+    const asyncIntermediateOutputCapture = actionIntermediateOutputAllow
+      ? (emission: IntermediateOutputEmission) => {
+        job.appendIntermediateOutput(emission);
+        ctx.onIntermediateOutputItem?.(emission);
+      }
+      : undefined;
+    const runPromise = (async () => {
+      try {
+        const result = await runDeck({
+          path: action.path,
+          input: actionInput,
+          modelProvider: ctx.modelProvider,
+          isRoot: false,
+          guardrails: ctx.guardrails,
+          depth: ctx.depth + 1,
+          parentActionCallId: call.id,
+          runId: ctx.runId,
+          defaultModel: ctx.defaultModel,
+          modelOverride: ctx.modelOverride,
+          trace: ctx.trace,
+          stream: ctx.stream,
+          onStreamText: ctx.onStreamText,
+          responsesMode: ctx.responsesMode,
+          initialUserMessage: undefined,
+          intermediateOutputAllow: actionIntermediateOutputAllow,
+          onIntermediateOutputItem: asyncIntermediateOutputCapture,
+          intermediateOutputErrorContext: actionIntermediateOutputErrorContext,
+          parentPermissions: ctx.permissions,
+          referencePermissions: action.permissions,
+          referencePermissionsBaseDir: path.dirname(ctx.parentDeck.path),
+          workspacePermissions: ctx.workspacePermissions,
+          workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
+          sessionPermissions: ctx.sessionPermissions,
+          sessionPermissionsBaseDir: ctx.sessionPermissionsBaseDir,
+          runDeadlineMs: ctx.runDeadlineMs,
+          workerSandbox: ctx.workerSandbox,
+          signal: childSignal,
+          onTool: ctx.onTool,
+        });
+        const normalized = normalizeChildResult(result);
+        if (action.responseSchema) {
+          normalized.payload = validateWithSchema(
+            action.responseSchema as never,
+            normalized.payload,
+          );
+        }
+        job.complete(normalized);
+      } catch (err) {
+        const handled = await maybeHandleError({
+          err,
+          call,
+          ctx,
+          action,
+        });
+        if (handled) {
+          const handledEnvelope = parseToolContentEnvelope(handled.toolContent);
+          job.fail({
+            state: "failed",
+            status: handledEnvelope?.status,
+            payload: handledEnvelope?.payload,
+            message: handledEnvelope?.message ??
+              (err instanceof Error ? err.message : String(err)),
+            code: handledEnvelope?.code,
+            meta: handledEnvelope?.meta,
+          });
+          return;
+        }
+        if (isRunCanceledError(err)) {
+          job.fail({
+            state: "canceled",
+            status: 499,
+            code: typeof (err as { code?: unknown })?.code === "string"
+              ? (err as { code: string }).code
+              : "run_canceled",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
+        job.fail({
+          state: "failed",
+          code: typeof (err as { code?: unknown })?.code === "string"
+            ? (err as { code: string }).code
+            : undefined,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+    job.bindLiveRun(runPromise, controller);
+    return {
+      toolContent: baseComplete({
+        status: 202,
+        code: "async_action_started",
+        payload: {
+          job: job.handle,
+        },
+      }),
+    };
+  }
 
   const busyCfg = ctx.parentDeck.handlers?.onBusy ??
     ctx.parentDeck.handlers?.onInterval;
@@ -4196,6 +5771,9 @@ async function handleToolCall(
         onStreamText: ctx.onStreamText,
         responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
+        intermediateOutputAllow: actionIntermediateOutputAllow,
+        onIntermediateOutputItem: actionIntermediateOutputCapture,
+        intermediateOutputErrorContext: actionIntermediateOutputErrorContext,
         parentPermissions: ctx.permissions,
         referencePermissions: action.permissions,
         referencePermissionsBaseDir: path.dirname(ctx.parentDeck.path),
@@ -4238,6 +5816,9 @@ async function handleToolCall(
         onStreamText: ctx.onStreamText,
         responsesMode: ctx.responsesMode,
         initialUserMessage: undefined,
+        intermediateOutputAllow: actionIntermediateOutputAllow,
+        onIntermediateOutputItem: actionIntermediateOutputCapture,
+        intermediateOutputErrorContext: actionIntermediateOutputErrorContext,
         permissions: ctx.permissions,
         workspacePermissions: ctx.workspacePermissions,
         workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
@@ -4314,6 +5895,12 @@ async function handleToolCall(
       normalized.payload,
     );
   }
+  if (actionIntermediateOutputAllow) {
+    intermediateOutputView = {
+      policy: "allow",
+      items: actionIntermediateOutputItems,
+    };
+  }
   const toolContent = baseComplete(normalized);
 
   if (busyCfg?.path) {
@@ -4338,6 +5925,9 @@ async function handleToolCall(
           onStreamText: ctx.onStreamText,
           responsesMode: ctx.responsesMode,
           initialUserMessage: undefined,
+          intermediateOutputAllow: actionIntermediateOutputAllow,
+          onIntermediateOutputItem: actionIntermediateOutputCapture,
+          intermediateOutputErrorContext: actionIntermediateOutputErrorContext,
           permissions: ctx.permissions,
           workspacePermissions: ctx.workspacePermissions,
           workspacePermissionsBaseDir: ctx.workspacePermissionsBaseDir,
@@ -4357,28 +5947,6 @@ async function handleToolCall(
       }
     }
   }
-
-  const completeEventId = randomId("event");
-  extraMessages.push(
-    {
-      role: "assistant",
-      content: null,
-      tool_calls: [{
-        id: completeEventId,
-        type: "function",
-        function: {
-          name: GAMBIT_TOOL_COMPLETE,
-          arguments: toolContent,
-        },
-      }],
-    },
-    {
-      role: "tool",
-      tool_call_id: completeEventId,
-      name: GAMBIT_TOOL_COMPLETE,
-      content: toolContent,
-    },
-  );
 
   stopBusy();
   ctx.idle?.touch();
@@ -4409,6 +5977,35 @@ function normalizeChildResult(
   return { payload: result };
 }
 
+function parseToolContentEnvelope(
+  content: string,
+): {
+  status?: number;
+  payload?: unknown;
+  message?: string;
+  code?: string;
+  meta?: Record<string, unknown>;
+} | undefined {
+  try {
+    const parsed = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+    const rec = parsed as Record<string, unknown>;
+    return {
+      status: typeof rec.status === "number" ? rec.status : undefined,
+      payload: rec.payload,
+      message: typeof rec.message === "string" ? rec.message : undefined,
+      code: typeof rec.code === "string" ? rec.code : undefined,
+      meta: rec.meta && typeof rec.meta === "object" && !Array.isArray(rec.meta)
+        ? rec.meta as Record<string, unknown>
+        : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 async function runBusyHandler(args: {
   parentDeck: LoadedDeck;
   action: { name: string; path: string; label?: string; description?: string };
@@ -4427,6 +6024,9 @@ async function runBusyHandler(args: {
   onStreamText?: (chunk: string) => void;
   initialUserMessage?: unknown;
   responsesMode?: boolean;
+  intermediateOutputAllow?: boolean;
+  onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+  intermediateOutputErrorContext?: IntermediateOutputErrorContext;
   permissions: NormalizedPermissionSet;
   workspacePermissions?: PermissionDeclarationInput;
   workspacePermissionsBaseDir?: string;
@@ -4466,6 +6066,9 @@ async function runBusyHandler(args: {
       responsesMode: args.responsesMode,
       initialUserMessage: args.initialUserMessage,
       inputProvided: true,
+      intermediateOutputAllow: args.intermediateOutputAllow,
+      onIntermediateOutputItem: args.onIntermediateOutputItem,
+      intermediateOutputErrorContext: args.intermediateOutputErrorContext,
       parentPermissions: args.permissions,
       workspacePermissions: args.workspacePermissions,
       workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
@@ -4519,6 +6122,9 @@ function createIdleController(args: {
   onStreamText?: (chunk: string) => void;
   pushMessages: (msgs: Array<ModelMessage>) => void;
   responsesMode?: boolean;
+  intermediateOutputAllow?: boolean;
+  onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+  intermediateOutputErrorContext?: IntermediateOutputErrorContext;
   permissions: NormalizedPermissionSet;
   workspacePermissions?: PermissionDeclarationInput;
   workspacePermissionsBaseDir?: string;
@@ -4574,6 +6180,9 @@ function createIdleController(args: {
           stream: args.stream,
           onStreamText: args.onStreamText,
           responsesMode: args.responsesMode,
+          intermediateOutputAllow: args.intermediateOutputAllow,
+          onIntermediateOutputItem: args.onIntermediateOutputItem,
+          intermediateOutputErrorContext: args.intermediateOutputErrorContext,
           permissions: args.permissions,
           workspacePermissions: args.workspacePermissions,
           workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
@@ -4633,6 +6242,9 @@ async function runIdleHandler(args: {
   stream?: boolean;
   onStreamText?: (chunk: string) => void;
   responsesMode?: boolean;
+  intermediateOutputAllow?: boolean;
+  onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+  intermediateOutputErrorContext?: IntermediateOutputErrorContext;
   permissions: NormalizedPermissionSet;
   workspacePermissions?: PermissionDeclarationInput;
   workspacePermissionsBaseDir?: string;
@@ -4671,6 +6283,9 @@ async function runIdleHandler(args: {
       responsesMode: args.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
+      intermediateOutputAllow: args.intermediateOutputAllow,
+      onIntermediateOutputItem: args.onIntermediateOutputItem,
+      intermediateOutputErrorContext: args.intermediateOutputErrorContext,
       parentPermissions: args.permissions,
       workspacePermissions: args.workspacePermissions,
       workspacePermissionsBaseDir: args.workspacePermissionsBaseDir,
@@ -4725,6 +6340,9 @@ async function maybeHandleError(args: {
     stream?: boolean;
     onStreamText?: (chunk: string) => void;
     responsesMode?: boolean;
+    intermediateOutputAllow?: boolean;
+    onIntermediateOutputItem?: (emission: IntermediateOutputEmission) => void;
+    intermediateOutputErrorContext?: IntermediateOutputErrorContext;
     permissions: NormalizedPermissionSet;
     workspacePermissions?: PermissionDeclarationInput;
     workspacePermissionsBaseDir?: string;
@@ -4773,6 +6391,9 @@ async function maybeHandleError(args: {
       responsesMode: args.ctx.responsesMode,
       initialUserMessage: undefined,
       inputProvided: true,
+      intermediateOutputAllow: args.ctx.intermediateOutputAllow,
+      onIntermediateOutputItem: args.ctx.onIntermediateOutputItem,
+      intermediateOutputErrorContext: args.ctx.intermediateOutputErrorContext,
       parentPermissions: args.ctx.permissions,
       workspacePermissions: args.ctx.workspacePermissions,
       workspacePermissionsBaseDir: args.ctx.workspacePermissionsBaseDir,
@@ -4812,29 +6433,7 @@ async function maybeHandleError(args: {
       meta,
     });
 
-    const callId = randomId("event");
-    const extraMessages: Array<ModelMessage> = [
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: callId,
-          type: "function",
-          function: {
-            name: GAMBIT_TOOL_COMPLETE,
-            arguments: content,
-          },
-        }],
-      },
-      {
-        role: "tool",
-        tool_call_id: callId,
-        name: GAMBIT_TOOL_COMPLETE,
-        content,
-      },
-    ];
-
-    return { toolContent: content, extraMessages };
+    return { toolContent: content };
   } catch {
     // Fallback when the handler itself fails: still return a structured error envelope
     // so the assistant can continue gracefully.
@@ -4856,29 +6455,7 @@ async function maybeHandleError(args: {
       meta: { handlerFailed: true },
     });
 
-    const callId = randomId("event");
-    const extraMessages: Array<ModelMessage> = [
-      {
-        role: "assistant",
-        content: null,
-        tool_calls: [{
-          id: callId,
-          type: "function",
-          function: {
-            name: GAMBIT_TOOL_COMPLETE,
-            arguments: content,
-          },
-        }],
-      },
-      {
-        role: "tool",
-        tool_call_id: callId,
-        name: GAMBIT_TOOL_COMPLETE,
-        content,
-      },
-    ];
-
-    return { toolContent: content, extraMessages };
+    return { toolContent: content };
   }
 }
 
@@ -4935,6 +6512,71 @@ function parseToolLimit(value: unknown, fallback: number, max: number): number {
   return Math.min(max, Math.max(1, Number(value)));
 }
 
+function parseAsyncActionWaitMs(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (!Number.isInteger(value)) {
+    throw new Error("wait_ms must be a non-negative integer");
+  }
+  return Math.min(
+    ASYNC_ACTION_JOB_MAX_WAIT_MS,
+    Math.max(0, Number(value)),
+  );
+}
+
+function parseConsumeAsyncActionArgs(args: Record<string, unknown>): {
+  jobId: string;
+  cursor: number;
+  limit: number;
+  waitMs: number;
+} {
+  const rawJobId = typeof args.job_id === "string"
+    ? args.job_id
+    : typeof args.jobId === "string"
+    ? args.jobId
+    : "";
+  const jobId = rawJobId.trim();
+  if (!jobId) {
+    throw new Error("job_id is required");
+  }
+  const cursor = args.cursor === undefined ? 0 : args.cursor;
+  if (!Number.isInteger(cursor) || Number(cursor) < 0) {
+    throw new Error("cursor must be a non-negative integer");
+  }
+  const limit = parseToolLimit(args.limit, 32, 256);
+  const waitMs = parseAsyncActionWaitMs(
+    Object.hasOwn(args, "wait_ms") ? args.wait_ms : args.waitMs,
+  );
+  return {
+    jobId,
+    cursor: Number(cursor),
+    limit,
+    waitMs,
+  };
+}
+
+function parseEmitOutputItemArgs(args: Record<string, unknown>): ResponseItem {
+  const rawItem = Object.hasOwn(args, "item") ? args.item : args;
+  if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+    throw new Error(
+      "item must be an object matching the OpenResponses response item shape",
+    );
+  }
+  const canonicalItem = canonicalizeJsonValue(rawItem);
+  if (
+    !canonicalItem || typeof canonicalItem !== "object" ||
+    Array.isArray(canonicalItem)
+  ) {
+    throw new Error(
+      "item must be an object matching the OpenResponses response item shape",
+    );
+  }
+  const type = (canonicalItem as { type?: unknown }).type;
+  if (typeof type !== "string" || !type.trim()) {
+    throw new Error("item.type must be a non-empty string");
+  }
+  return canonicalItem as ResponseItem;
+}
+
 function toStringArray(value: unknown): Array<string> {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
@@ -4983,6 +6625,11 @@ function applySimplePatch(
 async function buildToolDefs(
   deck: LoadedDeck,
   permissions: NormalizedPermissionSet,
+  options?: {
+    parentActionCallId?: string;
+    intermediateOutputAllow?: boolean;
+    asyncActionJobs?: AsyncActionJobController;
+  },
 ): Promise<Array<ToolDefinition>> {
   const defs: Array<ToolDefinition> = [];
   const addBuiltinTools = () => {
@@ -5098,49 +6745,60 @@ async function buildToolDefs(
         },
       });
     }
+
+    if (
+      options?.parentActionCallId !== undefined &&
+      (options.intermediateOutputAllow ?? true)
+    ) {
+      defs.push({
+        type: "function",
+        function: {
+          name: BUILTIN_TOOL_EMIT_OUTPUT_ITEM,
+          description:
+            "Emit a supplemental output item to the parent before action completion.",
+          parameters: {
+            type: "object",
+            properties: {
+              item: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+            required: ["item"],
+            additionalProperties: false,
+          },
+        },
+      });
+    }
+
+    if (
+      options?.asyncActionJobs &&
+      (options.asyncActionJobs.hasConfiguredAsyncActions ||
+        options.asyncActionJobs.hasLiveJobs())
+    ) {
+      defs.push({
+        type: "function",
+        function: {
+          name: BUILTIN_TOOL_CONSUME_ASYNC_ACTION,
+          description:
+            "Consume ordered async action job events/results by cursor.",
+          parameters: {
+            type: "object",
+            properties: {
+              job_id: { type: "string" },
+              cursor: { type: "number" },
+              limit: { type: "number" },
+              wait_ms: { type: "number" },
+            },
+            required: ["job_id"],
+            additionalProperties: false,
+          },
+        },
+      });
+    }
   };
 
   addBuiltinTools();
-  if (deck.allowEnd) {
-    defs.push({
-      type: "function",
-      function: {
-        name: GAMBIT_TOOL_END,
-        description: "End the current run once all goals are complete.",
-        parameters: {
-          type: "object",
-          properties: {
-            status: { type: "number" },
-            payload: {},
-            message: { type: "string" },
-            code: { type: "string" },
-            meta: { type: "object" },
-          },
-          additionalProperties: true,
-        },
-      },
-    });
-  }
-  if (deck.respond) {
-    defs.push({
-      type: "function",
-      function: {
-        name: GAMBIT_TOOL_RESPOND,
-        description: "Finish the current deck with a structured response.",
-        parameters: {
-          type: "object",
-          properties: {
-            status: { type: "number" },
-            payload: {},
-            message: { type: "string" },
-            code: { type: "string" },
-            meta: { type: "object" },
-          },
-          additionalProperties: true,
-        },
-      },
-    });
-  }
   for (const action of deck.actionDecks) {
     if (isBuiltinTool(action.name)) {
       throw new Error(

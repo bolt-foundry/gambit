@@ -18,5 +18,3 @@ Rules:
 - If the caller provided a goal, tailor the review to that goal.
 
 Return the review using the response schema.
-
-![respond](gambit://snippets/respond.md)

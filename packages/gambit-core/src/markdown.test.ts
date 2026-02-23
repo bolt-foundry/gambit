@@ -357,6 +357,8 @@ Root deck.
   assertEquals(deck.actionDecks.length, 1);
   assertEquals(deck.actionDecks[0].name, "do_thing");
   assert(deck.actionDecks[0].path.endsWith("actions/do/PROMPT.md"));
+  assertEquals(deck.actionDecks[0].intermediateOutput?.emit, "deny");
+  assertEquals(deck.actionDecks[0].asyncStart?.mode, "deny");
   assertEquals(deck.testDecks.length, 1);
   assert(deck.testDecks[0].path.endsWith("scenarios/happy/PROMPT.md"));
   assertEquals(deck.graderDecks.length, 1);
@@ -560,6 +562,8 @@ execute = "./actions/compute_rollup.deck.ts"
 description = "Compute rollup totals."
 contextSchema = "./input.zod.ts"
 responseSchema = "./output.zod.ts"
+intermediateOutput = { emit = "allow" }
+asyncStart = { mode = "allow" }
 +++
 
 Root deck.
@@ -573,6 +577,8 @@ Root deck.
     deck.actionDecks[0].execute,
     deck.actionDecks[0].path,
   );
+  assertEquals(deck.actionDecks[0].intermediateOutput?.emit, "allow");
+  assertEquals(deck.actionDecks[0].asyncStart?.mode, "allow");
   const parsedInput = deck.actionDecks[0].contextSchema?.parse({ count: 2 });
   const parsedOutput = deck.actionDecks[0].responseSchema?.parse({ total: 3 });
   assertEquals(parsedInput, { count: 2 });
@@ -681,5 +687,52 @@ Root deck.
       line.includes("shadowed") && line.includes("search_docs")
     ),
     "expected action-shadow warning for tool name collision",
+  );
+});
+
+Deno.test("markdown deck loads response item extension declarations", async () => {
+  const dir = await Deno.makeTempDir();
+  const extensionSchemaPath = path.join(dir, "followups_extension.zod.ts");
+  await Deno.writeTextFile(
+    extensionSchemaPath,
+    `import { z } from "zod";
+export default z.object({
+  followups: z.array(z.string()),
+});
+`,
+  );
+  const deckPath = await writeTempDeck(
+    dir,
+    "PROMPT.md",
+    `+++
+label = "root"
+
+[[responseItemExtensions]]
+type = "gambit:followups"
+description = "Follow-up chip payloads."
+dataSchema = "./followups_extension.zod.ts"
++++
+Root deck.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+  assertEquals(deck.responseItemExtensions.length, 1);
+  assertEquals(deck.responseItemExtensions[0].type, "gambit:followups");
+  assertEquals(
+    deck.responseItemExtensions[0].description,
+    "Follow-up chip payloads.",
+  );
+  assert(
+    deck.responseItemExtensions[0].dataSchema,
+    "expected extension schema to load",
+  );
+  assertEquals(
+    deck.responseItemExtensions[0].dataSchema.parse({
+      followups: ["What else should I read?"],
+    }),
+    {
+      followups: ["What else should I read?"],
+    },
   );
 });

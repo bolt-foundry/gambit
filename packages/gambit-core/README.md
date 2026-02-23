@@ -211,8 +211,9 @@ clarifying questions before choosing an action.
 `loadDeck` normalizes relative paths, merges card fragments, enforces unique
 action names, and warns about deprecated fields (`actions`,
 `handlers.onInterval`, `intervalMs`). The Markdown loader also injects helper
-text for built-in tools like `gambit_context`, `gambit_respond`, and
-`gambit_end` when you add `gambit://` markers.
+text for built-in tools like `gambit_context` when you add `gambit://` markers.
+Legacy `gambit_respond` and `gambit_end` markers are migration-only and now
+hard-fail in default runtime paths.
 
 ## Compatibility and utilities
 
@@ -224,9 +225,9 @@ text for built-in tools like `gambit_context`, `gambit_respond`, and
   conforming to the `responses()` signature in `ModelProvider`.
 - **Constants**:
   [`GAMBIT_TOOL_CONTEXT`, `GAMBIT_TOOL_RESPOND`, `GAMBIT_TOOL_END`](src/constants.ts)
-  (`GAMBIT_TOOL_INIT` remains as a deprecated alias). define the reserved tool
-  names the runtime expects when the assistant starts, responds, and explicitly
-  ends runs.
+  (`GAMBIT_TOOL_INIT` remains as a deprecated alias). `GAMBIT_TOOL_RESPOND` and
+  `GAMBIT_TOOL_END` remain for migration detection and legacy trace handling;
+  default runtime paths no longer expose them as callable synthetic tools.
 
 ## Persisted state and traces
 

@@ -142,12 +142,11 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 - `gambit_context`: injected automatically when `--context` (formerly `--init`)
   is provided; carries the raw input as the first tool result. `gambit_init`
   remains as a deprecated alias.
-- `gambit_respond`: enable by inserting the
-  `![respond](gambit://snippets/respond.md)` marker in Markdown decks (or
-  `respond: true` in TypeScript). Required for LLM decks finish via a structured
-  envelope: `{ status?, payload, message?, code?, meta? }`.
-- `gambit_complete`: emitted by child actions and handled errors to wrap their
-  results for the parent.
+- `gambit_respond` / `gambit_end`: removed from runtime defaults. Do not add
+  `gambit://snippets/respond.md`, `gambit://snippets/end.md`, `respond: true`,
+  or `allowEnd: true` in new decks.
+- Child action and handled-error metadata (`status`, `code`, `meta`, `payload`)
+  are returned via the action tool result payload envelope.
 - Optional handlers (deck-only): `handlers.onBusy`, `handlers.onIdle`,
   `handlers.onError` point to other decks. Inputs are structured (see
   `../reference/handlers.md`); errors inside handlers are swallowed.
@@ -157,9 +156,9 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 - In Markdown, use image syntax to embed snippets:
   `![behavior](./cards/behavior.card.md)`. Local snippet files often still live
   under `cards/` with a `.card.md` suffix for legacy compatibility. Special
-  markers: `gambit://snippets/context.md` hints init tool,
-  `gambit://snippets/respond.md` injects respond instructions, and
-  `gambit://snippets/end.md` enables the `gambit_end` hang-up tool.
+  markers: `gambit://snippets/context.md` hints init tool, while
+  `gambit://snippets/respond.md` and `gambit://snippets/end.md` are legacy
+  migration markers and should not be used for new deck behavior.
 - Snippets can also be TS files exported with `defineCard`. They may contain
   action/scenario/grader deck references and schema fragments, but no handlers.
 

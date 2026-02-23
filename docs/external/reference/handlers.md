@@ -65,8 +65,8 @@ Notes:
     childInput?: Record<string, unknown>,
   }
   ```
-  Return `{ message?, code?, status?, meta?, payload? }` to populate a
-  `gambit_complete` envelope.
+  Return `{ message?, code?, status?, meta?, payload? }` to populate the
+  structured action tool result envelope.
 
 ## Outputs and streaming
 
