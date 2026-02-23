@@ -39,5 +39,3 @@ Response requirements:
   - `summary`: concise policy guidance for that part
 - Focus each item on how policy applies to the user's proposed change.
 - Do not return path lists or per-policy metadata in the response.
-
-![respond](gambit://snippets/respond.md)

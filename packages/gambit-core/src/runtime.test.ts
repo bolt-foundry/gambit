@@ -59,6 +59,64 @@ Deno.test("deck loads contextSchema/responseSchema aliases", async () => {
   assert(deck.outputSchema, "expected legacy outputSchema alias to be set");
 });
 
+Deno.test(
+  "deck actions normalize intermediate output + async start policy with safe defaults",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "child.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        run: () => ({ done: true }),
+      });
+      `,
+    );
+    const deckPath = await writeTempDeck(
+      dir,
+      "policy-parent.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        actionDecks: [
+          { name: "default_policy", path: "${childPath}" },
+          {
+            name: "allow_policy",
+            path: "${childPath}",
+            intermediateOutput: { emit: "allow" },
+            asyncStart: { mode: "allow" },
+          },
+        ],
+        run: () => "ok",
+      });
+      `,
+    );
+
+    const deck = await loadDeck(deckPath);
+    const byName = new Map(
+      deck.actionDecks.map((entry) => [entry.name, entry]),
+    );
+    assertEquals(
+      byName.get("default_policy")?.intermediateOutput?.emit,
+      "deny",
+    );
+    assertEquals(
+      byName.get("default_policy")?.asyncStart?.mode,
+      "deny",
+    );
+    assertEquals(byName.get("allow_policy")?.intermediateOutput?.emit, "allow");
+    assertEquals(byName.get("allow_policy")?.asyncStart?.mode, "allow");
+  },
+);
+
 Deno.test("compute deck supports canonical schema module imports", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -267,6 +325,1758 @@ Deno.test("compute deck log supports title/body", async () => {
   assertEquals(logEvent.body, { ok: true });
 });
 
+Deno.test(
+  "child compute deck emits canonical intermediate response items before terminal tool.result across runtime paths",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const childPath = await writeTempDeck(
+      dir,
+      "intermediate-child.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        responseItemExtensions: [{
+          type: "gambit:action_progress",
+          dataSchema: z.object({
+            step: z.string(),
+            percent: z.number(),
+          }),
+        }],
+        run: async (ctx) => {
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "start", percent: 10 },
+          });
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "middle", percent: 60 },
+          });
+          return { done: true };
+        },
+      });
+      `,
+    );
+
+    const parentPath = await writeTempDeck(
+      dir,
+      "intermediate-parent.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        actionDecks: [{
+          name: "child",
+          path: "${childPath}",
+          intermediateOutput: { emit: "allow" },
+        }],
+      });
+      `,
+    );
+
+    const runWithPath = async (workerSandbox: boolean) => {
+      const traces: Array<TraceEvent> = [];
+      let callCount = 0;
+      const provider: ModelProvider = {
+        chat() {
+          callCount += 1;
+          if (callCount === 1) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child",
+                args: { task: "go" },
+              }],
+            });
+          }
+          return Promise.resolve({
+            message: { role: "assistant", content: "parent-done" },
+            finishReason: "stop" as const,
+          });
+        },
+      };
+
+      const result = await runDeck({
+        path: parentPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+        trace: (event) => traces.push(event),
+        workerSandbox,
+        ...(workerSandbox
+          ? {
+            workspacePermissions: {
+              read: true,
+              write: false,
+              run: false,
+              net: false,
+              env: false,
+            },
+            workspacePermissionsBaseDir: dir,
+          }
+          : {}),
+      });
+
+      const childResponseEvents = traces.filter((event): event is TraceEvent & {
+        type: `response.${string}`;
+        sequence_number?: number;
+        item?: ResponseItem;
+        _gambit?: { parent_action_call_id?: string };
+      } =>
+        event.type.startsWith("response.") &&
+        (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+            ?.parent_action_call_id === "call-child"
+      );
+
+      const steps = childResponseEvents.filter((event) =>
+        event.type === "response.output_item.done"
+      ).map((event) => {
+        const item = event.item;
+        if (!item || item.type !== "gambit:action_progress") return "";
+        const data = item.data as Record<string, unknown>;
+        return typeof data.step === "string" ? data.step : "";
+      }).filter((step) => step.length > 0);
+
+      const completedIndex = traces.findIndex((event) =>
+        event.type === "response.completed" &&
+        (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+            ?.parent_action_call_id === "call-child"
+      );
+      const childToolResultIndex = traces.findIndex((event) =>
+        event.type === "tool.result" && event.actionCallId === "call-child"
+      );
+      const childToolResult = traces.find((event) =>
+        event.type === "tool.result" && event.actionCallId === "call-child"
+      ) as Extract<TraceEvent, { type: "tool.result" }> | undefined;
+      const parsedToolResult = childToolResult &&
+          typeof childToolResult.result === "string"
+        ? JSON.parse(childToolResult.result) as {
+          intermediateOutput?: {
+            policy?: string;
+            items?: Array<{
+              outputIndex?: number;
+              item?: ResponseItem;
+            }>;
+          };
+        }
+        : undefined;
+      const toolResultSteps = (parsedToolResult?.intermediateOutput?.items ??
+        []).map((entry) => {
+          const item = entry.item;
+          if (!item || item.type !== "gambit:action_progress") return "";
+          const data = item.data as Record<string, unknown>;
+          return typeof data.step === "string" ? data.step : "";
+        }).filter((step) => step.length > 0);
+
+      return {
+        result,
+        responseTypes: childResponseEvents.map((event) => event.type),
+        sequenceNumbers: childResponseEvents.map((event) =>
+          (event as { sequence_number?: number }).sequence_number
+        ),
+        steps,
+        toolResultPolicy: parsedToolResult?.intermediateOutput?.policy,
+        toolResultSteps,
+        completedBeforeToolResult: completedIndex >= 0 &&
+          childToolResultIndex >= 0 && completedIndex < childToolResultIndex,
+      };
+    };
+
+    const inProcess = await runWithPath(false);
+    const worker = await runWithPath(true);
+
+    assertEquals(inProcess.result, "parent-done");
+    assertEquals(worker.result, inProcess.result);
+    assertEquals(
+      inProcess.responseTypes,
+      [
+        "response.created",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.completed",
+      ],
+    );
+    assertEquals(worker.responseTypes, inProcess.responseTypes);
+    assertEquals(inProcess.sequenceNumbers, [1, 2, 3, 4, 5, 6]);
+    assertEquals(worker.sequenceNumbers, inProcess.sequenceNumbers);
+    assertEquals(inProcess.steps, ["start", "middle"]);
+    assertEquals(worker.steps, inProcess.steps);
+    assertEquals(inProcess.toolResultPolicy, "allow");
+    assertEquals(worker.toolResultPolicy, inProcess.toolResultPolicy);
+    assertEquals(inProcess.toolResultSteps, ["start", "middle"]);
+    assertEquals(worker.toolResultSteps, inProcess.toolResultSteps);
+    assertEquals(inProcess.completedBeforeToolResult, true);
+    assertEquals(worker.completedBeforeToolResult, true);
+  },
+);
+
+Deno.test(
+  "cancellation suppresses late intermediate child response items",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const childPath = await writeTempDeck(
+      dir,
+      "cancel-intermediate-child.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        responseItemExtensions: [{
+          type: "gambit:action_progress",
+          dataSchema: z.object({
+            step: z.string(),
+            percent: z.number(),
+          }),
+        }],
+        run: async (ctx) => {
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "early", percent: 5 },
+          });
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "late", percent: 95 },
+          });
+          return { done: true };
+        },
+      });
+      `,
+    );
+
+    const parentPath = await writeTempDeck(
+      dir,
+      "cancel-intermediate-parent.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        actionDecks: [{
+          name: "child",
+          path: "${childPath}",
+          intermediateOutput: { emit: "allow" },
+        }],
+      });
+      `,
+    );
+
+    const traces: Array<TraceEvent> = [];
+    let callCount = 0;
+    const provider: ModelProvider = {
+      chat() {
+        callCount += 1;
+        if (callCount === 1) {
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-child",
+              name: "child",
+              args: { task: "x" },
+            }],
+          });
+        }
+        return Promise.resolve({
+          message: { role: "assistant", content: "unreachable" },
+          finishReason: "stop" as const,
+        });
+      },
+    };
+
+    const controller = new AbortController();
+    let aborted = false;
+    const abortRun = () => {
+      if (aborted) return;
+      aborted = true;
+      controller.abort("cancel child");
+    };
+    const fallbackAbortTimer = setTimeout(() => abortRun(), 1_000);
+    try {
+      const err = await assertRejects(
+        () =>
+          runDeck({
+            path: parentPath,
+            input: "hi",
+            modelProvider: provider,
+            isRoot: true,
+            trace: (event) => {
+              traces.push(event);
+              if (event.type !== "response.output_item.done") return;
+              const parentActionCallId = (event as {
+                _gambit?: { parent_action_call_id?: string };
+              })._gambit?.parent_action_call_id;
+              if (parentActionCallId !== "call-child") return;
+              const item = (event as { item?: ResponseItem }).item;
+              if (!item || item.type !== "gambit:action_progress") return;
+              const data = item.data as Record<string, unknown>;
+              if (data.step === "early") {
+                abortRun();
+              }
+            },
+            signal: controller.signal,
+          }),
+      );
+      assertEquals(isRunCanceledError(err), true);
+    } finally {
+      clearTimeout(fallbackAbortTimer);
+    }
+
+    const childResponseEvents = traces.filter((event): event is TraceEvent & {
+      type: `response.${string}`;
+      item?: ResponseItem;
+      _gambit?: { parent_action_call_id?: string };
+    } =>
+      event.type.startsWith("response.") &&
+      (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+          ?.parent_action_call_id === "call-child"
+    );
+
+    const steps = childResponseEvents.filter((event) =>
+      event.type === "response.output_item.done"
+    ).map((event) => {
+      const item = event.item;
+      if (!item || item.type !== "gambit:action_progress") return "";
+      const data = item.data as Record<string, unknown>;
+      return typeof data.step === "string" ? data.step : "";
+    }).filter((step) => step.length > 0);
+
+    assertEquals(
+      childResponseEvents.map((event) => event.type),
+      [
+        "response.created",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.failed",
+      ],
+    );
+    assertEquals(steps, ["early"]);
+    assertEquals(
+      traces.some((event) =>
+        event.type === "tool.result" && event.actionCallId === "call-child"
+      ),
+      false,
+    );
+    assertEquals(callCount, 1);
+  },
+);
+
+Deno.test(
+  "action intermediate output policy defaults to deny and blocks child emissions without leaks",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const childPath = await writeTempDeck(
+      dir,
+      "deny-intermediate-child.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        responseItemExtensions: [{
+          type: "gambit:action_progress",
+          dataSchema: z.object({
+            step: z.string(),
+            percent: z.number(),
+          }),
+        }],
+        run: async (ctx) => {
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "blocked", percent: 15 },
+          });
+          return { done: true };
+        },
+      });
+      `,
+    );
+
+    const parentPath = await writeTempDeck(
+      dir,
+      "deny-intermediate-parent.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        actionDecks: [{ name: "child", path: "${childPath}" }],
+      });
+      `,
+    );
+
+    const runWithPath = async (workerSandbox: boolean) => {
+      const traces: Array<TraceEvent> = [];
+      let callCount = 0;
+      const provider: ModelProvider = {
+        chat() {
+          callCount += 1;
+          if (callCount === 1) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child",
+                args: { task: "go" },
+              }],
+            });
+          }
+          return Promise.resolve({
+            message: { role: "assistant", content: "unreachable" },
+            finishReason: "stop" as const,
+          });
+        },
+      };
+
+      const error = await assertRejects(
+        () =>
+          runDeck({
+            path: parentPath,
+            input: "hi",
+            modelProvider: provider,
+            isRoot: true,
+            trace: (event) => traces.push(event),
+            workerSandbox,
+            ...(workerSandbox
+              ? {
+                workspacePermissions: {
+                  read: true,
+                  write: false,
+                  run: false,
+                  net: false,
+                  env: false,
+                },
+                workspacePermissionsBaseDir: dir,
+              }
+              : {}),
+          }),
+        Error,
+      );
+
+      return {
+        errorMessage: error.message,
+        callCount,
+        childResponseEvents: traces.filter((event): event is TraceEvent & {
+          type: `response.${string}`;
+          _gambit?: { parent_action_call_id?: string };
+        } =>
+          event.type.startsWith("response.") &&
+          (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+              ?.parent_action_call_id === "call-child"
+        ),
+      };
+    };
+
+    const inProcess = await runWithPath(false);
+    const worker = await runWithPath(true);
+
+    assert(
+      inProcess.errorMessage.includes(
+        "disallows intermediate output emission",
+      ),
+    );
+    assert(
+      worker.errorMessage.includes(
+        "disallows intermediate output emission",
+      ),
+    );
+    assertEquals(inProcess.childResponseEvents.length, 0);
+    assertEquals(worker.childResponseEvents.length, 0);
+    assertEquals(inProcess.callCount, 1);
+    assertEquals(worker.callCount, 1);
+  },
+);
+
+Deno.test(
+  "markdown LLM child emits intermediate items via gambit_emit_output_item before parent tool.result",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const childDir = path.join(dir, "child");
+    await Deno.mkdir(childDir, { recursive: true });
+
+    await Deno.writeTextFile(
+      path.join(dir, "child_input.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({ task: z.string() });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_output.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.string();
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_progress.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({
+        step: z.string(),
+        percent: z.number(),
+      });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(childDir, "PROMPT.md"),
+      `+++
+label = "child_markdown_emit_item"
+modelParams = { model = "dummy-model", temperature = 0 }
+contextSchema = "../child_input.zod.ts"
+responseSchema = "../child_output.zod.ts"
+
+[[responseItemExtensions]]
+type = "gambit:action_progress"
+dataSchema = "../child_progress.zod.ts"
++++
+
+CHILD-MARKER
+`,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "PROMPT.md",
+      `+++
+label = "parent_markdown_emit_item"
+modelParams = { model = "dummy-model", temperature = 0 }
+
+[[actions]]
+name = "child_action"
+path = "./child/PROMPT.md"
+description = "Child markdown action deck."
+intermediateOutput = { emit = "allow" }
++++
+
+PARENT-MARKER
+`,
+    );
+
+    const traces: Array<TraceEvent> = [];
+    const provider: ModelProvider = {
+      chat({ messages, tools }) {
+        const system = String(messages[0]?.content ?? "");
+        if (system.includes("PARENT-MARKER")) {
+          const hasChildResult = messages.some((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          if (!hasChildResult) {
+            const toolNames = (tools ?? []).map((entry) => entry.function.name);
+            assert(toolNames.includes("child_action"));
+            assertEquals(toolNames.includes("gambit_emit_output_item"), false);
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child_action",
+                args: { task: "go" },
+              }],
+            });
+          }
+          return Promise.resolve({
+            message: { role: "assistant", content: "parent done" },
+            finishReason: "stop" as const,
+          });
+        }
+
+        if (system.includes("CHILD-MARKER")) {
+          const toolNames = (tools ?? []).map((entry) => entry.function.name);
+          assert(toolNames.includes("gambit_emit_output_item"));
+          const hasEmitResult = messages.some((message) =>
+            message.role === "tool" && message.tool_call_id === "call-emit"
+          );
+          if (!hasEmitResult) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-emit",
+                name: "gambit_emit_output_item",
+                args: {
+                  item: {
+                    type: "gambit:action_progress",
+                    data: { step: "middle", percent: 55 },
+                  },
+                },
+              }],
+            });
+          }
+          return Promise.resolve({
+            message: { role: "assistant", content: "child done" },
+            finishReason: "stop" as const,
+          });
+        }
+
+        throw new Error("unexpected provider call");
+      },
+    };
+
+    const result = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: provider,
+      isRoot: true,
+      trace: (event) => traces.push(event),
+    });
+
+    assertEquals(result, "parent done");
+
+    const childResponseEvents = traces.filter((event): event is TraceEvent & {
+      type: `response.${string}`;
+      item?: ResponseItem;
+      _gambit?: { parent_action_call_id?: string };
+    } =>
+      event.type.startsWith("response.") &&
+      (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+          ?.parent_action_call_id === "call-child"
+    );
+    assertEquals(
+      childResponseEvents.map((event) => event.type),
+      [
+        "response.created",
+        "response.output_item.added",
+        "response.output_item.done",
+        "response.completed",
+      ],
+    );
+
+    const doneItemEvent = childResponseEvents.find((event) =>
+      event.type === "response.output_item.done"
+    );
+    assert(
+      doneItemEvent,
+      "expected response.output_item.done for child action",
+    );
+    assertEquals(doneItemEvent.item?.type, "gambit:action_progress");
+    const itemData = doneItemEvent.item &&
+        doneItemEvent.item.type === "gambit:action_progress"
+      ? doneItemEvent.item.data as Record<string, unknown>
+      : {};
+    assertEquals(itemData.step, "middle");
+    assertEquals(itemData.percent, 55);
+    const childToolResultEvent = traces.find((event) =>
+      event.type === "tool.result" && event.actionCallId === "call-child"
+    ) as Extract<TraceEvent, { type: "tool.result" }> | undefined;
+    assert(childToolResultEvent, "expected tool.result for child action");
+    const childToolResultPayload = JSON.parse(
+      String(childToolResultEvent.result),
+    ) as {
+      intermediateOutput?: {
+        policy?: string;
+        items?: Array<{
+          item?: ResponseItem;
+        }>;
+      };
+    };
+    assertEquals(childToolResultPayload.intermediateOutput?.policy, "allow");
+    const childToolResultItem = childToolResultPayload.intermediateOutput?.items
+      ?.[0]?.item;
+    assertEquals(childToolResultItem?.type, "gambit:action_progress");
+    if (childToolResultItem?.type === "gambit:action_progress") {
+      const data = childToolResultItem.data as Record<string, unknown>;
+      assertEquals(data.step, "middle");
+      assertEquals(data.percent, 55);
+    }
+
+    const completedIndex = traces.findIndex((event) =>
+      event.type === "response.completed" &&
+      (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+          ?.parent_action_call_id === "call-child"
+    );
+    const childToolResultIndex = traces.findIndex((event) =>
+      event.type === "tool.result" && event.actionCallId === "call-child"
+    );
+    assertEquals(
+      completedIndex >= 0 && childToolResultIndex >= 0 &&
+        completedIndex < childToolResultIndex,
+      true,
+    );
+  },
+);
+
+Deno.test(
+  "markdown LLM child opt-out policy rejects gambit_emit_output_item and leaks no intermediate items",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const childDir = path.join(dir, "child");
+    await Deno.mkdir(childDir, { recursive: true });
+
+    await Deno.writeTextFile(
+      path.join(dir, "child_input.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({ task: z.string() });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_output.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.string();
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_progress.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({
+        step: z.string(),
+        percent: z.number(),
+      });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(childDir, "PROMPT.md"),
+      `+++
+label = "child_markdown_emit_item_opt_out"
+modelParams = { model = "dummy-model", temperature = 0 }
+contextSchema = "../child_input.zod.ts"
+responseSchema = "../child_output.zod.ts"
+
+[[responseItemExtensions]]
+type = "gambit:action_progress"
+dataSchema = "../child_progress.zod.ts"
++++
+
+CHILD-OPT-OUT-MARKER
+`,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "PROMPT.md",
+      `+++
+label = "parent_markdown_emit_item_opt_out"
+modelParams = { model = "dummy-model", temperature = 0 }
+
+[[actions]]
+name = "child_action"
+path = "./child/PROMPT.md"
+description = "Child markdown action deck."
++++
+
+PARENT-OPT-OUT-MARKER
+`,
+    );
+
+    const traces: Array<TraceEvent> = [];
+    let childToolErrorSeen = false;
+    let parentToolEnvelope:
+      | { intermediateOutput?: unknown; payload?: unknown }
+      | undefined;
+    const provider: ModelProvider = {
+      chat({ messages, tools }) {
+        const system = String(messages[0]?.content ?? "");
+        if (system.includes("PARENT-OPT-OUT-MARKER")) {
+          const childToolMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          if (!childToolMessage) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child_action",
+                args: { task: "go" },
+              }],
+            });
+          }
+          parentToolEnvelope = JSON.parse(
+            String(childToolMessage.content ?? "{}"),
+          ) as { intermediateOutput?: unknown; payload?: unknown };
+          return Promise.resolve({
+            message: { role: "assistant", content: "parent done" },
+            finishReason: "stop" as const,
+          });
+        }
+
+        if (system.includes("CHILD-OPT-OUT-MARKER")) {
+          const toolNames = (tools ?? []).map((entry) => entry.function.name);
+          assertEquals(toolNames.includes("gambit_emit_output_item"), false);
+          const emitToolMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-emit"
+          );
+          if (!emitToolMessage) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-emit",
+                name: "gambit_emit_output_item",
+                args: {
+                  item: {
+                    type: "gambit:action_progress",
+                    data: { step: "blocked", percent: 22 },
+                  },
+                },
+              }],
+            });
+          }
+          const emitEnvelope = JSON.parse(
+            String(emitToolMessage.content ?? "{}"),
+          ) as { status?: number; code?: string };
+          assertEquals(emitEnvelope.status, 403);
+          assertEquals(emitEnvelope.code, "intermediate_output_disallowed");
+          childToolErrorSeen = true;
+          return Promise.resolve({
+            message: { role: "assistant", content: "child done" },
+            finishReason: "stop" as const,
+          });
+        }
+
+        throw new Error("unexpected provider call");
+      },
+    };
+
+    const result = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: provider,
+      isRoot: true,
+      trace: (event) => traces.push(event),
+    });
+
+    assertEquals(result, "parent done");
+    assertEquals(childToolErrorSeen, true);
+    assertEquals(parentToolEnvelope?.intermediateOutput, undefined);
+    const childResponseEvents = traces.filter((event): event is TraceEvent & {
+      type: `response.${string}`;
+      _gambit?: { parent_action_call_id?: string };
+    } =>
+      event.type.startsWith("response.") &&
+      (event as { _gambit?: { parent_action_call_id?: string } })._gambit
+          ?.parent_action_call_id === "call-child"
+    );
+    assertEquals(childResponseEvents.length, 0);
+  },
+);
+
+Deno.test(
+  "async action start returns deterministic job handle and parent consumes intermediate+terminal events (in-process and worker parity)",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "child-async.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      const progressSchema = z.object({
+        step: z.string(),
+        percent: z.number(),
+      });
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({
+          done: z.boolean(),
+          result: z.string(),
+        }),
+        responseItemExtensions: [{
+          type: "gambit:action_progress",
+          dataSchema: progressSchema,
+        }],
+        async run(ctx) {
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "started", percent: 10 },
+          });
+          await new Promise((resolve) => setTimeout(resolve, 35));
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "midstream", percent: 60 },
+          });
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          return { done: true, result: "ok:" + ctx.input.task };
+        },
+      });
+      `,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "parent-async.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model", temperature: 0 },
+        body: "PARENT-ASYNC-MARKER",
+        actionDecks: [{
+          name: "child_action",
+          path: "${childPath}",
+          description: "Async child action.",
+          intermediateOutput: { emit: "allow" },
+          asyncStart: { mode: "allow" },
+        }],
+      });
+      `,
+    );
+
+    const runWithPath = async (workerSandbox: boolean) => {
+      const consumeEnvelopes: Array<Record<string, unknown>> = [];
+      let startEnvelope: Record<string, unknown> | undefined;
+      let cursor = 0;
+      let pollIdx = 0;
+      let jobId = "";
+
+      const provider: ModelProvider = {
+        chat({ messages, tools }) {
+          const system = String(messages[0]?.content ?? "");
+          if (!system.includes("PARENT-ASYNC-MARKER")) {
+            throw new Error("unexpected provider call");
+          }
+          const toolNames = (tools ?? []).map((entry) => entry.function.name);
+          assert(toolNames.includes("child_action"));
+          assert(toolNames.includes("gambit_consume_async_action"));
+
+          const childStartMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          if (!childStartMessage) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child_action",
+                args: { task: "ship" },
+              }],
+            });
+          }
+
+          startEnvelope = JSON.parse(
+            String(childStartMessage.content ?? "{}"),
+          ) as Record<string, unknown>;
+          assertEquals(startEnvelope.status, 202);
+          const payload = (startEnvelope.payload ?? {}) as {
+            job?: { jobId?: string; cursor?: { next?: number } };
+          };
+          jobId = String(payload.job?.jobId ?? "");
+          assert(jobId.length > 0);
+          if (pollIdx === 0) {
+            pollIdx = 1;
+            cursor = 0;
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: `call-poll-${pollIdx}`,
+                name: "gambit_consume_async_action",
+                args: {
+                  job_id: jobId,
+                  cursor,
+                  limit: 1,
+                  wait_ms: 400,
+                },
+              }],
+            });
+          }
+
+          const pollMessage = messages.find((message) =>
+            message.role === "tool" &&
+            message.tool_call_id === `call-poll-${pollIdx}`
+          );
+          assert(pollMessage, `missing consume result for poll ${pollIdx}`);
+          const envelope = JSON.parse(
+            String(pollMessage.content ?? "{}"),
+          ) as Record<string, unknown>;
+          consumeEnvelopes.push(envelope);
+          assertEquals(envelope.status, 200);
+          const consumePayload = (envelope.payload ?? {}) as {
+            cursor?: { next?: number };
+            terminal?: { state?: string };
+            events?: Array<{ type?: string; terminal?: { state?: string } }>;
+          };
+          cursor = Number(consumePayload.cursor?.next ?? cursor);
+          const terminalFromEvent = (consumePayload.events ?? []).find((
+            event,
+          ) => event.type === "terminal")?.terminal?.state;
+          const terminalState = consumePayload.terminal?.state ??
+            terminalFromEvent;
+          if (terminalState) {
+            return Promise.resolve({
+              message: { role: "assistant", content: "parent async done" },
+              finishReason: "stop" as const,
+            });
+          }
+          assert(
+            pollIdx < 6,
+            "async consume polling exceeded expected retries",
+          );
+          pollIdx += 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: `call-poll-${pollIdx}`,
+              name: "gambit_consume_async_action",
+              args: {
+                job_id: jobId,
+                cursor,
+                limit: 16,
+                wait_ms: 400,
+              },
+            }],
+          });
+        },
+      };
+
+      const result = await runDeck({
+        path: parentPath,
+        input: "hi",
+        modelProvider: provider,
+        isRoot: true,
+        ...(workerSandbox
+          ? {
+            workerSandbox: true,
+            workspacePermissions: {
+              read: true,
+              write: true,
+              run: false,
+              net: false,
+              env: false,
+            },
+            workspacePermissionsBaseDir: dir,
+          }
+          : {}),
+      });
+
+      assertEquals(result, "parent async done");
+      assert(startEnvelope, "expected async start envelope");
+      assert(
+        consumeEnvelopes.length >= 2,
+        "expected multiple async consume turns",
+      );
+      const allEvents = consumeEnvelopes.flatMap((envelope) => {
+        const payload = (envelope.payload ?? {}) as {
+          events?: Array<{ type?: string; cursor?: number }>;
+        };
+        return payload.events ?? [];
+      });
+      const firstIntermediateEvent = allEvents.find((event) =>
+        event.type === "intermediate_output"
+      );
+      assert(
+        firstIntermediateEvent,
+        "expected at least one intermediate event",
+      );
+      assertEquals(firstIntermediateEvent.cursor, 0);
+      const finalEnvelope = consumeEnvelopes[consumeEnvelopes.length - 1];
+      const finalPayload = (finalEnvelope.payload ?? {}) as {
+        terminal?: { state?: string };
+        events?: Array<{ type?: string; terminal?: { state?: string } }>;
+      };
+      const finalTerminalFromEvent = (finalPayload.events ?? []).find((event) =>
+        event.type === "terminal"
+      )?.terminal?.state;
+      const finalTerminalState = finalPayload.terminal?.state ??
+        finalTerminalFromEvent;
+      assertEquals(finalTerminalState, "completed");
+      return {
+        sawIntermediate: Boolean(firstIntermediateEvent),
+        finalTerminalState,
+      };
+    };
+
+    const inProcess = await runWithPath(false);
+    const worker = await runWithPath(true);
+    assertEquals(inProcess.sawIntermediate, true);
+    assertEquals(worker.sawIntermediate, true);
+    assertEquals(inProcess.finalTerminalState, "completed");
+    assertEquals(worker.finalTerminalState, "completed");
+  },
+);
+
+Deno.test(
+  "async action consume rejects duplicate cursor replay with stable cursor_mismatch",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "child-async-cursor.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      const progressSchema = z.object({
+        step: z.string(),
+        percent: z.number(),
+      });
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        responseItemExtensions: [{
+          type: "gambit:action_progress",
+          dataSchema: progressSchema,
+        }],
+        async run(ctx) {
+          await ctx.emitOutputItem({
+            type: "gambit:action_progress",
+            data: { step: "single", percent: 100 },
+          });
+          return { done: true };
+        },
+      });
+      `,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "parent-async-cursor.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model", temperature: 0 },
+        body: "PARENT-ASYNC-CURSOR-MARKER",
+        actionDecks: [{
+          name: "child_action",
+          path: "${childPath}",
+          description: "Async cursor test action.",
+          intermediateOutput: { emit: "allow" },
+          asyncStart: { mode: "allow" },
+        }],
+      });
+      `,
+    );
+
+    let phase = 0;
+    let jobId = "";
+    let firstCursorNext = 0;
+    const provider: ModelProvider = {
+      chat({ messages }) {
+        const system = String(messages[0]?.content ?? "");
+        if (!system.includes("PARENT-ASYNC-CURSOR-MARKER")) {
+          throw new Error("unexpected provider call");
+        }
+        if (phase === 0) {
+          phase = 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-child",
+              name: "child_action",
+              args: { task: "cursor" },
+            }],
+          });
+        }
+
+        if (phase === 1) {
+          const startMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          assert(startMessage);
+          const startEnvelope = JSON.parse(
+            String(startMessage.content ?? "{}"),
+          ) as {
+            status?: number;
+            payload?: { job?: { jobId?: string } };
+          };
+          assertEquals(startEnvelope.status, 202);
+          jobId = String(startEnvelope.payload?.job?.jobId ?? "");
+          assert(jobId.length > 0);
+          phase = 2;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-consume-1",
+              name: "gambit_consume_async_action",
+              args: { job_id: jobId, cursor: 0, limit: 8, wait_ms: 300 },
+            }],
+          });
+        }
+
+        if (phase === 2) {
+          const consume1Message = messages.find((message) =>
+            message.role === "tool" &&
+            message.tool_call_id === "call-consume-1"
+          );
+          assert(consume1Message);
+          const consume1Envelope = JSON.parse(
+            String(consume1Message.content ?? "{}"),
+          ) as {
+            status?: number;
+            payload?: { cursor?: { next?: number } };
+          };
+          assertEquals(consume1Envelope.status, 200);
+          firstCursorNext = Number(consume1Envelope.payload?.cursor?.next ?? 0);
+          assert(firstCursorNext > 0);
+          phase = 3;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-consume-duplicate",
+              name: "gambit_consume_async_action",
+              args: { job_id: jobId, cursor: 0, limit: 8, wait_ms: 0 },
+            }],
+          });
+        }
+
+        const duplicateMessage = messages.find((message) =>
+          message.role === "tool" &&
+          message.tool_call_id === "call-consume-duplicate"
+        );
+        assert(duplicateMessage);
+        const duplicateEnvelope = JSON.parse(
+          String(duplicateMessage.content ?? "{}"),
+        ) as { status?: number; code?: string };
+        assertEquals(duplicateEnvelope.status, 409);
+        assertEquals(duplicateEnvelope.code, "cursor_mismatch");
+        assert(firstCursorNext > 0);
+        return Promise.resolve({
+          message: { role: "assistant", content: "cursor done" },
+          finishReason: "stop" as const,
+        });
+      },
+    };
+
+    const result = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: provider,
+      isRoot: true,
+    });
+
+    assertEquals(result, "cursor done");
+  },
+);
+
+Deno.test(
+  "async action consume surfaces child timeout as deterministic terminal failure",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "child-async-timeout.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        guardrails: { timeoutMs: 20 },
+        async run() {
+          await new Promise((resolve) => setTimeout(resolve, 120));
+          return { done: true };
+        },
+      });
+      `,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "parent-async-timeout.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model", temperature: 0 },
+        body: "PARENT-ASYNC-TIMEOUT-MARKER",
+        actionDecks: [{
+          name: "child_action",
+          path: "${childPath}",
+          description: "Async timeout action.",
+          asyncStart: { mode: "allow" },
+        }],
+      });
+      `,
+    );
+
+    let phase = 0;
+    let jobId = "";
+    let cursor = 0;
+    const provider: ModelProvider = {
+      chat({ messages }) {
+        const system = String(messages[0]?.content ?? "");
+        if (!system.includes("PARENT-ASYNC-TIMEOUT-MARKER")) {
+          throw new Error("unexpected provider call");
+        }
+        if (phase === 0) {
+          phase = 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-child",
+              name: "child_action",
+              args: { task: "timeout" },
+            }],
+          });
+        }
+        if (phase === 1) {
+          const startMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          assert(startMessage);
+          const startEnvelope = JSON.parse(
+            String(startMessage.content ?? "{}"),
+          ) as { payload?: { job?: { jobId?: string } } };
+          jobId = String(startEnvelope.payload?.job?.jobId ?? "");
+          assert(jobId.length > 0);
+          phase = 2;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-consume-timeout-1",
+              name: "gambit_consume_async_action",
+              args: { job_id: jobId, cursor, limit: 8, wait_ms: 200 },
+            }],
+          });
+        }
+        const consumeMessage = messages.find((message) =>
+          message.role === "tool" &&
+          message.tool_call_id === `call-consume-timeout-${phase - 1}`
+        );
+        assert(consumeMessage);
+        const consumeEnvelope = JSON.parse(
+          String(consumeMessage.content ?? "{}"),
+        ) as {
+          status?: number;
+          payload?: {
+            cursor?: { next?: number };
+            terminal?: { state?: string; code?: string; message?: string };
+            events?: Array<{ type?: string; terminal?: { state?: string } }>;
+          };
+        };
+        assertEquals(consumeEnvelope.status, 200);
+        cursor = Number(consumeEnvelope.payload?.cursor?.next ?? cursor);
+        const terminalFromEvent = (consumeEnvelope.payload?.events ?? []).find(
+          (event) => event.type === "terminal",
+        )?.terminal?.state;
+        const terminalState = consumeEnvelope.payload?.terminal?.state ??
+          terminalFromEvent;
+        if (terminalState === "failed") {
+          const terminalCode = consumeEnvelope.payload?.terminal?.code;
+          const terminalMessage = String(
+            consumeEnvelope.payload?.terminal?.message ?? "",
+          );
+          assertEquals(
+            terminalCode === "timeout" ||
+              terminalMessage.includes("Timeout exceeded"),
+            true,
+          );
+          return Promise.resolve({
+            message: { role: "assistant", content: "timeout done" },
+            finishReason: "stop" as const,
+          });
+        }
+        assert(phase < 5);
+        phase += 1;
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls" as const,
+          toolCalls: [{
+            id: `call-consume-timeout-${phase - 1}`,
+            name: "gambit_consume_async_action",
+            args: { job_id: jobId, cursor, limit: 8, wait_ms: 200 },
+          }],
+        });
+      },
+    };
+
+    const result = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: provider,
+      isRoot: true,
+    });
+    assertEquals(result, "timeout done");
+  },
+);
+
+Deno.test(
+  "state resume converts interrupted running async jobs into deterministic canceled terminal events",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "child-async-resume.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({ task: z.string() }),
+        responseSchema: z.object({ done: z.boolean() }),
+        async run() {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          return { done: true };
+        },
+      });
+      `,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "parent-async-resume.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model", temperature: 0 },
+        body: "PARENT-ASYNC-RESUME-MARKER",
+        actionDecks: [{
+          name: "child_action",
+          path: "${childPath}",
+          description: "Async resume action.",
+          asyncStart: { mode: "allow" },
+        }],
+      });
+      `,
+    );
+
+    const abortController = new AbortController();
+    let capturedState: import("./state.ts").SavedState | undefined;
+    const firstRunProvider: ModelProvider = {
+      chat({ messages }) {
+        const system = String(messages[0]?.content ?? "");
+        if (!system.includes("PARENT-ASYNC-RESUME-MARKER")) {
+          throw new Error("unexpected provider call");
+        }
+        const startMessage = messages.find((message) =>
+          message.role === "tool" && message.tool_call_id === "call-child"
+        );
+        if (!startMessage) {
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-child",
+              name: "child_action",
+              args: { task: "resume" },
+            }],
+          });
+        }
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            content: "should not complete first run",
+          },
+          finishReason: "stop" as const,
+        });
+      },
+    };
+
+    const firstRunError = await assertRejects(
+      () =>
+        runDeck({
+          path: parentPath,
+          input: "hi",
+          modelProvider: firstRunProvider,
+          isRoot: true,
+          signal: abortController.signal,
+          onStateUpdate: (state) => {
+            const asyncMeta = (state.meta ??
+              {})["gambit_async_action_jobs_v1"];
+            if (!capturedState && asyncMeta) {
+              capturedState = state;
+              abortController.abort("interrupt after async start");
+            }
+          },
+        }),
+    );
+    assertEquals(isRunCanceledError(firstRunError), true);
+    assert(capturedState, "expected to capture state after async start");
+
+    let resumePhase = 0;
+    const resumeProvider: ModelProvider = {
+      chat({ messages }) {
+        const system = String(messages[0]?.content ?? "");
+        if (!system.includes("PARENT-ASYNC-RESUME-MARKER")) {
+          throw new Error("unexpected provider call");
+        }
+        if (resumePhase === 0) {
+          const startMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          assert(startMessage);
+          const startEnvelope = JSON.parse(
+            String(startMessage.content ?? "{}"),
+          ) as { payload?: { job?: { jobId?: string } } };
+          const resumedJobId = String(startEnvelope.payload?.job?.jobId ?? "");
+          assert(resumedJobId.length > 0);
+          resumePhase = 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-consume-resume",
+              name: "gambit_consume_async_action",
+              args: {
+                job_id: resumedJobId,
+                cursor: 0,
+                limit: 8,
+                wait_ms: 0,
+              },
+            }],
+          });
+        }
+        const consumeMessage = messages.find((message) =>
+          message.role === "tool" &&
+          message.tool_call_id === "call-consume-resume"
+        );
+        assert(consumeMessage);
+        const consumeEnvelope = JSON.parse(
+          String(consumeMessage.content ?? "{}"),
+        ) as {
+          status?: number;
+          payload?: {
+            terminal?: { state?: string; code?: string };
+            events?: Array<{ type?: string; terminal?: { state?: string } }>;
+          };
+        };
+        assertEquals(consumeEnvelope.status, 200);
+        const terminalFromEvent = (consumeEnvelope.payload?.events ?? []).find((
+          event,
+        ) => event.type === "terminal")?.terminal?.state;
+        const terminalState = consumeEnvelope.payload?.terminal?.state ??
+          terminalFromEvent;
+        assertEquals(terminalState, "canceled");
+        assertEquals(
+          consumeEnvelope.payload?.terminal?.code,
+          "async_action_interrupted",
+        );
+        return Promise.resolve({
+          message: { role: "assistant", content: "resume done" },
+          finishReason: "stop" as const,
+        });
+      },
+    };
+
+    const resumed = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: resumeProvider,
+      isRoot: true,
+      state: capturedState,
+    });
+    assertEquals(resumed, "resume done");
+  },
+);
+
+Deno.test(
+  "markdown LLM parent consumes async child midstream and terminal outputs through consume API",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const childDir = path.join(dir, "child");
+    await Deno.mkdir(childDir, { recursive: true });
+    await Deno.writeTextFile(
+      path.join(dir, "child_input.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({ task: z.string() });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_output.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({ done: z.boolean() });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(dir, "child_progress.zod.ts"),
+      `
+      import { z } from "zod";
+      export default z.object({
+        step: z.string(),
+        percent: z.number(),
+      });
+      `,
+    );
+    await Deno.writeTextFile(
+      path.join(childDir, "PROMPT.md"),
+      `+++
+label = "child_markdown_async"
+modelParams = { model = "dummy-model", temperature = 0 }
+contextSchema = "../child_input.zod.ts"
+responseSchema = "../child_output.zod.ts"
+
+[[responseItemExtensions]]
+type = "gambit:action_progress"
+dataSchema = "../child_progress.zod.ts"
++++
+
+CHILD-MARKDOWN-ASYNC-MARKER
+`,
+    );
+    const parentPath = await writeTempDeck(
+      dir,
+      "PROMPT.md",
+      `+++
+label = "parent_markdown_async"
+modelParams = { model = "dummy-model", temperature = 0 }
+
+[[actions]]
+name = "child_action"
+path = "./child/PROMPT.md"
+description = "Async markdown child action."
+intermediateOutput = { emit = "allow" }
+asyncStart = { mode = "allow" }
++++
+
+PARENT-MARKDOWN-ASYNC-MARKER
+`,
+    );
+
+    let pollIdx = 0;
+    let cursor = 0;
+    let jobId = "";
+    const provider: ModelProvider = {
+      chat({ messages, tools }) {
+        const system = String(messages[0]?.content ?? "");
+        if (system.includes("PARENT-MARKDOWN-ASYNC-MARKER")) {
+          const toolNames = (tools ?? []).map((entry) => entry.function.name);
+          assert(toolNames.includes("child_action"));
+          assert(toolNames.includes("gambit_consume_async_action"));
+          const startMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-child"
+          );
+          if (!startMessage) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-child",
+                name: "child_action",
+                args: { task: "markdown" },
+              }],
+            });
+          }
+          if (pollIdx === 0) {
+            const startEnvelope = JSON.parse(
+              String(startMessage.content ?? "{}"),
+            ) as { status?: number; payload?: { job?: { jobId?: string } } };
+            assertEquals(startEnvelope.status, 202);
+            jobId = String(startEnvelope.payload?.job?.jobId ?? "");
+            assert(jobId.length > 0);
+            pollIdx = 1;
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-consume-1",
+                name: "gambit_consume_async_action",
+                args: { job_id: jobId, cursor: 0, limit: 16, wait_ms: 400 },
+              }],
+            });
+          }
+
+          const consumeMessage = messages.find((message) =>
+            message.role === "tool" &&
+            message.tool_call_id === `call-consume-${pollIdx}`
+          );
+          assert(consumeMessage);
+          const consumeEnvelope = JSON.parse(
+            String(consumeMessage.content ?? "{}"),
+          ) as {
+            status?: number;
+            payload?: {
+              cursor?: { next?: number };
+              terminal?: { state?: string };
+              events?: Array<{ type?: string; terminal?: { state?: string } }>;
+            };
+          };
+          assertEquals(consumeEnvelope.status, 200);
+          const payload = consumeEnvelope.payload ?? {};
+          cursor = Number(payload.cursor?.next ?? cursor);
+          const terminalFromEvent = (payload.events ?? []).find((event) =>
+            event.type === "terminal"
+          )?.terminal?.state;
+          const terminalState = payload.terminal?.state ?? terminalFromEvent;
+          if (terminalState === "completed") {
+            return Promise.resolve({
+              message: { role: "assistant", content: "markdown async done" },
+              finishReason: "stop" as const,
+            });
+          }
+          assert(pollIdx < 5);
+          pollIdx += 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: `call-consume-${pollIdx}`,
+              name: "gambit_consume_async_action",
+              args: { job_id: jobId, cursor, limit: 16, wait_ms: 400 },
+            }],
+          });
+        }
+
+        if (system.includes("CHILD-MARKDOWN-ASYNC-MARKER")) {
+          const toolNames = (tools ?? []).map((entry) => entry.function.name);
+          assert(toolNames.includes("gambit_emit_output_item"));
+          const emitMessage = messages.find((message) =>
+            message.role === "tool" && message.tool_call_id === "call-emit"
+          );
+          if (!emitMessage) {
+            return Promise.resolve({
+              message: { role: "assistant", content: null },
+              finishReason: "tool_calls" as const,
+              toolCalls: [{
+                id: "call-emit",
+                name: "gambit_emit_output_item",
+                args: {
+                  item: {
+                    type: "gambit:action_progress",
+                    data: { step: "markdown-start", percent: 20 },
+                  },
+                },
+              }],
+            });
+          }
+          return Promise.resolve({
+            message: { role: "assistant", content: '{"done":true}' },
+            finishReason: "stop" as const,
+          });
+        }
+        throw new Error("unexpected provider call");
+      },
+    };
+
+    const result = await runDeck({
+      path: parentPath,
+      input: "hi",
+      modelProvider: provider,
+      isRoot: true,
+    });
+    assertEquals(result, "markdown async done");
+  },
+);
+
 Deno.test("module-level run export is rejected", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -338,6 +2148,56 @@ Deno.test("LLM deck fails fast when finishReason=tool_calls with no calls", asyn
   );
 });
 
+Deno.test(
+  "LLM deck hard-fails when model emits synthetic context tool calls",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "llm-context-tool.deck.ts",
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    for (const name of ["gambit_context", "gambit_init"] as const) {
+      const provider: ModelProvider = {
+        chat() {
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: `call-${name}`,
+              name,
+              args: {},
+            }],
+          });
+        },
+      };
+
+      await assertRejects(
+        () =>
+          runDeck({
+            path: deckPath,
+            input: "hi",
+            modelProvider: provider,
+            isRoot: true,
+          }),
+        Error,
+        "synthetic context tool",
+      );
+    }
+  },
+);
+
 Deno.test("LLM deck fails fast when finishReason=length with no content", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -378,14 +2238,16 @@ Deno.test("LLM deck fails fast when finishReason=length with no content", async 
   );
 });
 
-Deno.test("LLM deck completes via gambit_respond", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
+Deno.test(
+  "LLM deck hard-fails when legacy synthetic respond control is enabled",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
 
-  const deckPath = await writeTempDeck(
-    dir,
-    "respond.deck.ts",
-    `
+    const deckPath = await writeTempDeck(
+      dir,
+      "respond.deck.ts",
+      `
     import { defineDeck } from "${modHref}";
     import { z } from "zod";
     export default defineDeck({
@@ -395,31 +2257,122 @@ Deno.test("LLM deck completes via gambit_respond", async () => {
       respond: true,
     });
     `,
-  );
+    );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "tool_calls",
-        toolCalls: [{
-          id: "respond-1",
-          name: "gambit_respond",
-          args: { payload: "ok" },
-        }],
+    let providerCalled = false;
+    const provider: ModelProvider = {
+      chat() {
+        providerCalled = true;
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: "hi",
+          modelProvider: provider,
+          isRoot: true,
+        }),
+      Error,
+      "enables removed synthetic response controls (respond)",
+    );
+    assertEquals(providerCalled, false);
+  },
+);
+
+Deno.test(
+  "LLM deck hard-fails when legacy synthetic end control is enabled",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "allow-end.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        allowEnd: true,
       });
-    },
-  };
+      `,
+    );
 
-  const result = await runDeck({
-    path: deckPath,
-    input: "hi",
-    modelProvider: provider,
-    isRoot: true,
-  });
+    let providerCalled = false;
+    const provider: ModelProvider = {
+      chat() {
+        providerCalled = true;
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
 
-  assertEquals(result, { payload: "ok" });
-});
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: "hi",
+          modelProvider: provider,
+          isRoot: true,
+        }),
+      Error,
+      "enables removed synthetic response controls (allowEnd)",
+    );
+    assertEquals(providerCalled, false);
+  },
+);
+
+Deno.test(
+  "markdown decks with legacy respond snippets hard-fail with migration guidance",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const deckPath = await writeTempDeck(
+      dir,
+      "PROMPT.md",
+      `+++
+[modelParams]
+model = "dummy-model"
++++
+
+![](gambit://snippets/respond.md)
+`,
+    );
+
+    let providerCalled = false;
+    const provider: ModelProvider = {
+      chat() {
+        providerCalled = true;
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: "hi",
+          modelProvider: provider,
+          isRoot: true,
+        }),
+      Error,
+      "gambit://snippets/respond.md",
+    );
+    assertEquals(providerCalled, false);
+  },
+);
 
 Deno.test("root deck with object inputSchema accepts --message without --context", async () => {
   const dir = await Deno.makeTempDir();
@@ -460,53 +2413,53 @@ Deno.test("root deck with object inputSchema accepts --message without --context
   assertEquals(result, "ok");
 });
 
-Deno.test("LLM deck gambit_respond propagates status and message", async () => {
-  const dir = await Deno.makeTempDir();
-  const modHref = modImportPath();
+Deno.test(
+  "LLM deck hard-fails when model emits removed synthetic response tools",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
 
-  const deckPath = await writeTempDeck(
-    dir,
-    "respond.deck.ts",
-    `
+    const deckPath = await writeTempDeck(
+      dir,
+      "respond.deck.ts",
+      `
     import { defineDeck } from "${modHref}";
     import { z } from "zod";
     export default defineDeck({
       inputSchema: z.string(),
       outputSchema: z.string(),
       modelParams: { model: "dummy-model" },
-      respond: true,
     });
     `,
-  );
+    );
 
-  const provider: ModelProvider = {
-    chat() {
-      return Promise.resolve({
-        message: { role: "assistant", content: null },
-        finishReason: "tool_calls",
-        toolCalls: [{
-          id: "respond-1",
-          name: "gambit_respond",
-          args: { payload: "fail", status: 503, message: "nope", code: "X" },
-        }],
-      });
-    },
-  };
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: null },
+          finishReason: "tool_calls",
+          toolCalls: [{
+            id: "respond-1",
+            name: "gambit_respond",
+            args: { payload: "fail" },
+          }],
+        });
+      },
+    };
 
-  const result = await runDeck({
-    path: deckPath,
-    input: "hi",
-    modelProvider: provider,
-    isRoot: true,
-  });
-
-  assertEquals(result, {
-    status: 503,
-    payload: "fail",
-    message: "nope",
-    code: "X",
-  });
-});
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: "hi",
+          modelProvider: provider,
+          isRoot: true,
+        }),
+      Error,
+      'Model emitted removed synthetic tool "gambit_respond"',
+    );
+  },
+);
 
 Deno.test("busy handler uses action start time", async () => {
   const origNow = performance.now;
@@ -911,6 +2864,92 @@ Deno.test("LLM deck streams via onStreamText", async () => {
   assertEquals(sawStreamFlag, true);
 });
 
+Deno.test("LLM parent forwards stream flag to child LLM action deck", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "child_stream.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.object({ q: z.string() }),
+      responseSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      body: "CHILD-SYSTEM",
+    });
+    `,
+  );
+
+  const parentPath = await writeTempDeck(
+    dir,
+    "parent_stream.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string(),
+      responseSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      actionDecks: [{ name: "child_action", path: "${childPath}" }],
+      body: "PARENT-SYSTEM",
+    });
+    `,
+  );
+
+  let sawParentStreamFlag = false;
+  let sawChildStreamFlag = false;
+
+  const provider: ModelProvider = {
+    chat(input) {
+      const system = String(input.messages[0]?.content ?? "");
+      if (system.includes("PARENT-SYSTEM")) {
+        const hasChildResult = input.messages.some((message) =>
+          message.role === "tool" && message.name === "child_action"
+        );
+        if (!hasChildResult) {
+          sawParentStreamFlag = Boolean(input.stream);
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls" as const,
+            toolCalls: [{
+              id: "call-child",
+              name: "child_action",
+              args: { q: "hello" },
+            }],
+          });
+        }
+        return Promise.resolve({
+          message: { role: "assistant", content: "parent done" },
+          finishReason: "stop" as const,
+        });
+      }
+      if (system.includes("CHILD-SYSTEM")) {
+        sawChildStreamFlag = Boolean(input.stream);
+        return Promise.resolve({
+          message: { role: "assistant", content: "child done" },
+          finishReason: "stop" as const,
+        });
+      }
+      throw new Error("unexpected provider call");
+    },
+  };
+
+  const result = await runDeck({
+    path: parentPath,
+    input: "run",
+    modelProvider: provider,
+    isRoot: true,
+    stream: true,
+  });
+
+  assertEquals(result, "parent done");
+  assertEquals(sawParentStreamFlag, true);
+  assertEquals(sawChildStreamFlag, true);
+});
+
 Deno.test("LLM deck defaults to assistant-first and sends a user message when provided", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -1123,6 +3162,254 @@ Deno.test("responses mode stores response items and calls responses()", async ()
   assert((updatedState?.messages?.length ?? 0) > 0);
 });
 
+Deno.test(
+  "responses mode validates and deterministically canonicalizes declared extension items",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses_extension_items.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        responseItemExtensions: [{
+          type: "gambit:followups",
+          dataSchema: z.object({
+            alpha: z.object({
+              a: z.number(),
+              b: z.number(),
+            }),
+            zeta: z.number(),
+          }),
+        }],
+      });
+      `,
+    );
+
+    let responseCallCount = 0;
+    const provider: ModelProvider = {
+      responses({ onStreamEvent }) {
+        responseCallCount += 1;
+        const extensionData = responseCallCount % 2 === 1
+          ? { zeta: 7, alpha: { b: 2, a: 1 } }
+          : { alpha: { a: 1, b: 2 }, zeta: 7 };
+        const extensionItem: ResponseItem = {
+          type: "gambit:followups",
+          id: "followups_1",
+          data: extensionData as JSONValue,
+        };
+        onStreamEvent?.({
+          type: "response.output_item.done",
+          output_index: 1,
+          item: extensionItem,
+        });
+        const response: import("./types.ts").CreateResponseResponse = {
+          id: "resp_1",
+          object: "response",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done" }],
+          } as ResponseItem, extensionItem],
+        };
+        onStreamEvent?.({
+          type: "response.completed",
+          response,
+        });
+        return Promise.resolve(response);
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const runOnce = async () => {
+      let savedState: import("./state.ts").SavedState | undefined;
+      const traces: Array<TraceEvent> = [];
+      const result = await runDeck({
+        path: deckPath,
+        input: undefined,
+        inputProvided: false,
+        initialUserMessage: "hello",
+        modelProvider: provider,
+        isRoot: true,
+        responsesMode: true,
+        stream: true,
+        onStateUpdate: (state) => {
+          savedState = state;
+        },
+        trace: (event) => traces.push(event),
+      });
+      return { result, savedState, traces };
+    };
+
+    const first = await runOnce();
+    const second = await runOnce();
+
+    assertEquals(first.result, "done");
+    assertEquals(second.result, "done");
+
+    const firstExtension = first.savedState?.items?.find((item) =>
+      item.type === "gambit:followups"
+    ) as { data?: unknown } | undefined;
+    assert(firstExtension, "expected extension item in saved state");
+    assertEquals(
+      JSON.stringify(firstExtension.data),
+      '{"alpha":{"a":1,"b":2},"zeta":7}',
+    );
+
+    const extractSerializedExtensionItems = (traces: Array<TraceEvent>) =>
+      traces
+        .filter((event) =>
+          event.type === "response.output_item.done" ||
+          event.type === "response.completed"
+        )
+        .map((event) => {
+          if (event.type === "response.output_item.done") {
+            const item = (event as { item?: unknown }).item;
+            return JSON.stringify(item);
+          }
+          const response = (event as { response?: { output?: unknown } })
+            .response;
+          const output = Array.isArray(response?.output) ? response.output : [];
+          const extensionItem = output.find((entry) =>
+            typeof entry === "object" &&
+            entry !== null &&
+            (entry as { type?: unknown }).type === "gambit:followups"
+          );
+          return JSON.stringify(extensionItem);
+        });
+
+    assertEquals(
+      extractSerializedExtensionItems(first.traces),
+      extractSerializedExtensionItems(second.traces),
+    );
+  },
+);
+
+Deno.test(
+  "responses mode rejects undeclared extension item types",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses_extension_undeclared.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    const provider: ModelProvider = {
+      responses() {
+        return Promise.resolve({
+          id: "resp_undeclared",
+          object: "response",
+          output: [{
+            type: "gambit:followups",
+            id: "followups_1",
+            data: { followups: ["next"] },
+          }],
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const error = await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: undefined,
+          inputProvided: false,
+          initialUserMessage: "hello",
+          modelProvider: provider,
+          isRoot: true,
+          responsesMode: true,
+        }),
+      Error,
+    );
+    assert(
+      error.message.includes(
+        'undeclared response extension item type "gambit:followups"',
+      ),
+    );
+  },
+);
+
+Deno.test(
+  "responses mode rejects extension item payloads that fail declared schemas",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses_extension_invalid_payload.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+        responseItemExtensions: [{
+          type: "gambit:followups",
+          dataSchema: z.object({
+            followups: z.array(z.string()).min(1),
+          }),
+        }],
+      });
+      `,
+    );
+
+    const provider: ModelProvider = {
+      responses() {
+        return Promise.resolve({
+          id: "resp_invalid_extension",
+          object: "response",
+          output: [{
+            type: "gambit:followups",
+            id: "followups_1",
+            data: { followups: [123] },
+          }],
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: undefined,
+          inputProvided: false,
+          initialUserMessage: "hello",
+          modelProvider: provider,
+          isRoot: true,
+          responsesMode: true,
+        }),
+      Error,
+    );
+  },
+);
+
 Deno.test("responses mode projects tool stream events into tool traces", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -1236,6 +3523,262 @@ Deno.test("responses mode projects tool stream events into tool traces", async (
   assertEquals(toolResults[0].result, { ok: true });
 });
 
+Deno.test(
+  "responses mode projects namespaced tool stream events into tool traces",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses_tool_stream_events_namespaced.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    const traces: Array<TraceEvent> = [];
+    const provider: ModelProvider = {
+      responses({ onStreamEvent }) {
+        // Legacy providers may emit namespaced tool events. Runtime normalizes
+        // them, but `ResponseEvent` intentionally models only canonical types.
+        onStreamEvent?.(
+          {
+            type: "gambit:tool.call",
+            actionCallId: "tool_2",
+            name: "external_lookup",
+            args: { query: "hello" },
+          } as unknown as import("./types.ts").ResponseEvent,
+        );
+        onStreamEvent?.(
+          {
+            type: "gambit:tool.result",
+            actionCallId: "tool_2",
+            name: "external_lookup",
+            result: { ok: true },
+          } as unknown as import("./types.ts").ResponseEvent,
+        );
+        return Promise.resolve({
+          id: "resp_1",
+          object: "response",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const result = await runDeck({
+      path: deckPath,
+      input: undefined,
+      inputProvided: false,
+      initialUserMessage: "hello",
+      modelProvider: provider,
+      isRoot: true,
+      responsesMode: true,
+      stream: true,
+      trace: (event) => traces.push(event),
+    });
+
+    assertEquals(result, "done");
+    const toolCalls = traces.filter((event) =>
+      event.type === "tool.call" && event.name === "external_lookup"
+    ) as Array<Extract<TraceEvent, { type: "tool.call" }>>;
+    const toolResults = traces.filter((event) =>
+      event.type === "tool.result" && event.name === "external_lookup"
+    ) as Array<Extract<TraceEvent, { type: "tool.result" }>>;
+    assertEquals(toolCalls.length, 1);
+    assertEquals(toolResults.length, 1);
+    assertEquals(toolCalls[0].actionCallId, "tool_2");
+    assertEquals(toolResults[0].actionCallId, "tool_2");
+    assertEquals(toolCalls[0].args, { query: "hello" });
+    assertEquals(toolResults[0].result, { ok: true });
+  },
+);
+
+Deno.test(
+  "responses mode enforces deterministic response ordering and suppresses post-terminal events across runtime paths",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses-canonical-ordering.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string(),
+        outputSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    const runWithPath = async (workerSandbox: boolean) => {
+      const traces: Array<TraceEvent> = [];
+      const chunks: Array<string> = [];
+      const provider: ModelProvider = {
+        responses({ onStreamEvent }) {
+          onStreamEvent?.({
+            type: "response.created",
+            response: {
+              id: "resp_stream",
+              object: "response",
+              status: "in_progress",
+              output: [],
+            },
+          });
+          onStreamEvent?.({
+            type: "response.output_text.delta",
+            output_index: 0,
+            delta: "he",
+          });
+          onStreamEvent?.({
+            type: "tool.call",
+            actionCallId: "tool_1",
+            name: "external_lookup",
+            args: { query: "hello" },
+          });
+          onStreamEvent?.({
+            type: "tool.result",
+            actionCallId: "tool_1",
+            name: "external_lookup",
+            result: { ok: true },
+          });
+          onStreamEvent?.({
+            type: "response.output_text.delta",
+            output_index: 0,
+            delta: "llo",
+          });
+          onStreamEvent?.({
+            type: "response.completed",
+            response: {
+              id: "resp_stream",
+              object: "response",
+              status: "completed",
+              output: [{
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "hello" }],
+              }],
+            },
+          });
+          onStreamEvent?.({
+            type: "response.output_text.delta",
+            output_index: 0,
+            delta: "-late",
+          });
+          onStreamEvent?.({
+            type: "tool.result",
+            actionCallId: "tool_1",
+            name: "external_lookup",
+            result: { ok: false },
+          });
+          onStreamEvent?.({
+            type: "response.failed",
+            error: { message: "late" },
+          });
+          return Promise.resolve({
+            id: "resp_stream",
+            object: "response",
+            output: [{
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "hello" }],
+            }],
+          });
+        },
+        chat() {
+          throw new Error("chat should not be called in responses mode");
+        },
+      };
+
+      const result = await runDeck({
+        path: deckPath,
+        input: undefined,
+        inputProvided: false,
+        initialUserMessage: "hello",
+        modelProvider: provider,
+        isRoot: true,
+        responsesMode: true,
+        stream: true,
+        trace: (event) => traces.push(event),
+        onStreamText: (chunk) => chunks.push(chunk),
+        workerSandbox,
+        workspacePermissions: {
+          read: true,
+          write: false,
+          run: false,
+          net: false,
+          env: false,
+        },
+        workspacePermissionsBaseDir: dir,
+      });
+
+      const responseEvents = traces.filter((event): event is TraceEvent & {
+        type: `response.${string}`;
+        sequence_number?: number;
+      } => event.type.startsWith("response."));
+      const responseTypes = responseEvents.map((event) => event.type);
+      const sequenceNumbers = responseEvents.map((event) =>
+        (event as { sequence_number?: unknown }).sequence_number
+      );
+      const projectedToolCalls = traces.filter((event) =>
+        event.type === "tool.call" && event.name === "external_lookup"
+      );
+      const projectedToolResults = traces.filter((event) =>
+        event.type === "tool.result" && event.name === "external_lookup"
+      );
+
+      return {
+        result,
+        chunks,
+        responseTypes,
+        sequenceNumbers,
+        projectedToolCallCount: projectedToolCalls.length,
+        projectedToolResultCount: projectedToolResults.length,
+      };
+    };
+
+    const inProcess = await runWithPath(false);
+    const worker = await runWithPath(true);
+
+    assertEquals(inProcess.result, "hello");
+    assertEquals(worker.result, inProcess.result);
+    assertEquals(inProcess.chunks, ["he", "llo"]);
+    assertEquals(worker.chunks, inProcess.chunks);
+    assertEquals(
+      inProcess.responseTypes,
+      [
+        "response.created",
+        "response.output_text.delta",
+        "response.output_text.delta",
+        "response.completed",
+      ],
+    );
+    assertEquals(worker.responseTypes, inProcess.responseTypes);
+    assertEquals(inProcess.sequenceNumbers, [1, 2, 3, 4]);
+    assertEquals(worker.sequenceNumbers, inProcess.sequenceNumbers);
+    assertEquals(inProcess.projectedToolCallCount, 1);
+    assertEquals(inProcess.projectedToolResultCount, 1);
+    assertEquals(worker.projectedToolCallCount, 1);
+    assertEquals(worker.projectedToolResultCount, 1);
+  },
+);
+
 Deno.test("responses mode treats empty output as empty string", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -1283,6 +3826,117 @@ Deno.test("responses mode treats empty output as empty string", async () => {
   assertEquals(result, "");
 });
 
+Deno.test(
+  "responses mode requests json_schema text format for structured output and parses JSON-string responses",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses-structured-output.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        responseSchema: z.object({ answer: z.string() }),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    let capturedTextConfig: unknown;
+    const provider: ModelProvider = {
+      responses({ request }) {
+        capturedTextConfig = request.text;
+        return Promise.resolve({
+          id: "resp_structured",
+          object: "response",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: '{"answer":"ok"}' }],
+          }],
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const result = await runDeck({
+      path: deckPath,
+      input: undefined,
+      inputProvided: false,
+      initialUserMessage: "hi",
+      modelProvider: provider,
+      isRoot: true,
+      responsesMode: true,
+    });
+
+    assertEquals(result, { answer: "ok" });
+    const textConfig = capturedTextConfig as {
+      format?: { type?: string; strict?: boolean; schema?: { type?: string } };
+    } | undefined;
+    assertEquals(textConfig?.format?.type, "json_schema");
+    assertEquals(textConfig?.format?.strict, true);
+    assertEquals(textConfig?.format?.schema?.type, "object");
+  },
+);
+
+Deno.test(
+  "responses mode does not force json_schema text format for string outputs",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+
+    const deckPath = await writeTempDeck(
+      dir,
+      "responses-string-output.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+
+    let capturedTextConfig: unknown;
+    const provider: ModelProvider = {
+      responses({ request }) {
+        capturedTextConfig = request.text;
+        return Promise.resolve({
+          id: "resp_string",
+          object: "response",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "ok" }],
+          }],
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const result = await runDeck({
+      path: deckPath,
+      input: undefined,
+      inputProvided: false,
+      initialUserMessage: "hi",
+      modelProvider: provider,
+      isRoot: true,
+      responsesMode: true,
+    });
+
+    assertEquals(result, "ok");
+    assertEquals(capturedTextConfig, undefined);
+  },
+);
+
 Deno.test("loadState derives messages when only response items are stored", async () => {
   const dir = await Deno.makeTempDir();
   const statePath = path.join(dir, "responses-only.json");
@@ -1322,7 +3976,7 @@ Deno.test("loadState derives messages when only response items are stored", asyn
   assertEquals(loaded.messages?.[2]?.role, "tool");
 });
 
-Deno.test("onError handler result surfaces via gambit_complete when an action fails", async () => {
+Deno.test("onError handler result surfaces via action tool envelope when an action fails", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -1398,8 +4052,14 @@ Deno.test("onError handler result surfaces via gambit_complete when an action fa
 
   // provider that first issues a tool call to failing_action, then finishes
   let calls = 0;
+  let sawSyntheticComplete = false;
   const provider: ModelProvider = {
-    chat() {
+    chat(input) {
+      sawSyntheticComplete = sawSyntheticComplete ||
+        input.messages.some((m) =>
+          m.tool_calls?.some((t) => t.function.name === "gambit_complete") ||
+          (m.role === "tool" && m.name === "gambit_complete")
+        );
       calls++;
       if (calls === 1) {
         return Promise.resolve({
@@ -1439,6 +4099,7 @@ Deno.test("onError handler result surfaces via gambit_complete when an action fa
   assertEquals(parsed.status, 200);
   assertEquals(parsed.code, "HANDLED");
   assertEquals(parsed.payload.notice, "fallback");
+  assertEquals(sawSyntheticComplete, false);
 });
 
 Deno.test("run.start traces input and gambit_context payload", async () => {
@@ -4610,6 +7271,9 @@ Deno.test("LLM built-in tools are gated by effective permissions", async () => {
   assert(toolNames.includes("grep_files"));
   assertEquals(toolNames.includes("apply_patch"), false);
   assertEquals(toolNames.includes("exec"), false);
+  assertEquals(toolNames.includes("gambit_emit_output_item"), false);
+  assertEquals(toolNames.includes("gambit_respond"), false);
+  assertEquals(toolNames.includes("gambit_end"), false);
 });
 
 Deno.test("LLM built-in tools include exec when run permissions are granted", async () => {
@@ -4661,6 +7325,9 @@ Deno.test("LLM built-in tools include exec when run permissions are granted", as
   assertEquals(toolNames.includes("list_dir"), false);
   assertEquals(toolNames.includes("grep_files"), false);
   assertEquals(toolNames.includes("apply_patch"), false);
+  assertEquals(toolNames.includes("gambit_emit_output_item"), false);
+  assertEquals(toolNames.includes("gambit_respond"), false);
+  assertEquals(toolNames.includes("gambit_end"), false);
 });
 
 Deno.test(
@@ -5385,7 +8052,7 @@ Deno.test(
   },
 );
 
-Deno.test("runDeck rejects workerSandbox requests when signal is provided", async () => {
+Deno.test("runDeck rejects root workerSandbox requests when signal is provided", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
   const deckPath = await writeTempDeck(
@@ -5417,6 +8084,169 @@ Deno.test("runDeck rejects workerSandbox requests when signal is provided", asyn
     (err as { code?: unknown }).code,
     "worker_sandbox_signal_unsupported",
   );
+});
+
+Deno.test("runDeck allows workerSandbox child runs when signal is provided", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "worker-sandbox-child-signal.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({}),
+      outputSchema: z.string(),
+      run: () => "ok",
+    });
+    `,
+  );
+
+  const controller = new AbortController();
+  const result = await runDeck({
+    path: deckPath,
+    input: {},
+    modelProvider: dummyProvider,
+    isRoot: false,
+    parentActionCallId: "parent",
+    depth: 1,
+    workerSandbox: true,
+    signal: controller.signal,
+    workspacePermissions: {
+      read: true,
+      write: false,
+      run: false,
+      net: false,
+      env: false,
+    },
+    workspacePermissionsBaseDir: dir,
+  });
+
+  assertEquals(result, "ok");
+});
+
+Deno.test("worker sandbox async-start cancellation aborts in-flight child model calls", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const childPath = await writeTempDeck(
+    dir,
+    "async-cancel-child-worker.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({ task: z.string() }),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      body: "ASYNC-CANCEL-CHILD-WORKER",
+    });
+    `,
+  );
+  const parentPath = await writeTempDeck(
+    dir,
+    "async-cancel-parent-worker.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string(),
+      outputSchema: z.string(),
+      modelParams: { model: "dummy-model" },
+      body: "ASYNC-CANCEL-PARENT-WORKER",
+      actionDecks: [{
+        name: "child_async",
+        path: "${childPath}",
+        asyncStart: { mode: "allow" },
+      }],
+    });
+    `,
+  );
+
+  let parentPass = 0;
+  let childProviderCalled = false;
+  let childSawSignal = false;
+  let childAborted = false;
+  let childResolved = false;
+  const provider: ModelProvider = {
+    chat(input) {
+      const system = String(input.messages[0]?.content ?? "");
+      if (system.includes("ASYNC-CANCEL-PARENT-WORKER")) {
+        if (parentPass === 0) {
+          parentPass = 1;
+          return Promise.resolve({
+            message: { role: "assistant", content: null },
+            finishReason: "tool_calls",
+            toolCalls: [{
+              id: "call-child",
+              name: "child_async",
+              args: { task: "cancel" },
+            }],
+          });
+        }
+        return new Promise((resolve) => {
+          const startedAt = Date.now();
+          const waitForChildStart = () => {
+            if (childProviderCalled || Date.now() - startedAt > 3000) {
+              resolve({
+                message: { role: "assistant", content: "parent done" },
+                finishReason: "stop",
+              });
+              return;
+            }
+            setTimeout(waitForChildStart, 5);
+          };
+          waitForChildStart();
+        });
+      }
+      if (!system.includes("ASYNC-CANCEL-CHILD-WORKER")) {
+        throw new Error("unexpected provider call");
+      }
+      childProviderCalled = true;
+      childSawSignal = Boolean(input.signal);
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          childResolved = true;
+          resolve({
+            message: { role: "assistant", content: "late child" },
+            finishReason: "stop",
+          });
+        }, 10000);
+        input.signal?.addEventListener(
+          "abort",
+          () => {
+            childAborted = true;
+            clearTimeout(timeoutId);
+            reject(new DOMException("Run canceled", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    },
+  };
+
+  const result = await runDeck({
+    path: parentPath,
+    input: "start",
+    modelProvider: provider,
+    isRoot: true,
+    workerSandbox: true,
+    workspacePermissions: {
+      read: true,
+      write: false,
+      run: false,
+      net: false,
+      env: false,
+    },
+    workspacePermissionsBaseDir: dir,
+  });
+
+  assertEquals(result, "parent done");
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assertEquals(childProviderCalled, true);
+  assertEquals(childSawSignal, true);
+  assertEquals(childAborted, true);
+  assertEquals(childResolved, false);
 });
 
 Deno.test("runDeck abort signal cancels in-flight model call and fires onCancel once", async () => {

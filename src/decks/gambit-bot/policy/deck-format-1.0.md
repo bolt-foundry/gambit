@@ -55,17 +55,16 @@ Schema requirements:
 - Action targets and scenario/grader decks MUST declare `contextSchema` and
   `responseSchema` (these schemas define the IO contract visible to the parent
   deck).
-  - For action targets that resolve to decks, and for grader decks, include
-    `gambit://snippets/respond.md` so the deck returns structured output via
-    `gambit_respond`.
+  - Action targets that resolve to decks, and grader decks, MUST return
+    schema-valid output directly (no synthetic respond/end tools).
   - For scenario decks that need model-filled init inputs, include
     `gambit://snippets/init.md` so the model populates any missing required
     context fields before the run.
   - For scenario/persona decks that should stay in the synthetic participant
     role and terminate consistently, include
     `gambit://snippets/scenario-participant.md`.
-  - Scenario decks MAY omit the respond snippet if they are intended to produce
-    plain chat output, but they MUST still declare schemas.
+  - Scenario decks MUST still declare schemas, even when intended to produce
+    plain chat output.
     - For plain chat output, `responseSchema` SHOULD be a string schema (for
       example, `gambit://schemas/scenarios/plain_chat_output.zod.ts`).
   - Grader decks MUST be compatible with the built-in grader schemas:
@@ -110,26 +109,26 @@ Snippets are embedded using Markdown image syntax. Built-in Gambit snippets use
 the `gambit://snippets/*` namespace, for example:
 
 ```markdown
-![respond](gambit://snippets/respond.md)
+![init](gambit://snippets/init.md)
 ```
 
 Built-in snippets (v1.0):
 
-| URI                                         | Purpose                                                                                    |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `gambit://snippets/context.md`              | Context primer; explains the `gambit_context` tool result and how to treat seeded data.    |
-| `gambit://snippets/init.md`                 | Init-fill helper; instructs the model to populate missing required init/context fields.    |
-| `gambit://snippets/scenario-participant.md` | Scenario participant contract; keeps the deck in user role and ends via one empty message. |
-| `gambit://snippets/respond.md`              | Respond instruction; tells the model to call `gambit_respond` with a structured payload.   |
-| `gambit://snippets/end.md`                  | Explicit end instruction; documents how/when to call `gambit_end`.                         |
-| `gambit://snippets/generate-test-input.md`  | Deprecated alias for `gambit://snippets/init.md` (legacy name).                            |
+| URI                                         | Purpose                                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `gambit://snippets/context.md`              | Context primer; explains the `gambit_context` tool result and how to treat seeded data.           |
+| `gambit://snippets/init.md`                 | Init-fill helper; instructs the model to populate missing required init/context fields.           |
+| `gambit://snippets/scenario-participant.md` | Scenario participant contract; keeps the deck in user role and ends via one empty message.        |
+| `gambit://snippets/respond.md`              | Legacy migration marker; do not use for new decks (default runtime hard-fails synthetic respond). |
+| `gambit://snippets/end.md`                  | Legacy migration marker; do not use for new decks (default runtime hard-fails synthetic end).     |
+| `gambit://snippets/generate-test-input.md`  | Deprecated alias for `gambit://snippets/init.md` (legacy name).                                   |
 
 Notes:
 
 - These are not files in your repo. They are resolved by Gambit from its
   built-in snippet registry/bundle.
-- Use built-in snippets for standard, shared behaviors (for example, response
-  envelopes, lifecycle hints, etc.). The exact list of built-in snippet names is
+- Use built-in snippets for standard, shared behaviors (for example, init or
+  scenario-participant guidance). The exact list of built-in snippet names is
   defined by Gambit (the list above is the v1.0 set).
 - `gambit://snippets/init.md` is distinct from the legacy `gambit://init` marker
   (deprecated). The init snippet is intended to prompt the model to populate
@@ -302,9 +301,9 @@ behave, so bot and simulator surfaces can rely on stable semantics.
 
 - Action targets MUST return data that conforms to the resolved
   `responseSchema`.
-- If the underlying action path includes the respond snippet (for example,
-  `gambit://snippets/respond.md`) or returns an explicit envelope, callers
-  SHOULD assume `gambit_respond`-compatible envelope semantics.
+- If legacy transcripts include explicit respond-style envelopes, callers should
+  treat them as historical compatibility payloads rather than canonical runtime
+  behavior.
 
 **Action result envelope**
 
@@ -318,8 +317,8 @@ behave, so bot and simulator surfaces can rely on stable semantics.
 - `payload` is the deck output validated against the action deck’s
   `responseSchema`. If the action deck returns a bare value, it becomes
   `payload`.
-- If the action target returns an envelope (for example via `gambit_respond`),
-  its `status`, `message`, `code`, and `meta` are preserved.
+- Legacy action envelopes may still include `status`, `message`, `code`, and
+  `meta`; preserve them when present for backward compatibility.
 
 **External tool result envelope (`onTool`)**
 
@@ -473,8 +472,10 @@ sync, so in practice the enforcement boundary is the same.
 - `[[mcpServers]]` is reserved in v1.0 and MUST error as unsupported in the
   current runtime phase.
 - Legacy built-in card/snippet URIs (`gambit://cards/*.card.md`) and legacy
-  markers (`gambit://init`, `gambit://respond`, `gambit://end`) are deprecated;
-  use `gambit://snippets/*.md`.
+  markers (`gambit://init`, `gambit://respond`, `gambit://end`) are deprecated.
+  Use canonical `gambit://snippets/*.md` URIs, and treat
+  `gambit://snippets/respond.md` / `gambit://snippets/end.md` as migration-only
+  markers to remove.
 - Legacy schema URIs ending in `.ts` (for example
   `gambit://schemas/graders/respond.ts`) are deprecated; use `.zod.ts` (for
   example `gambit://schemas/graders/respond.zod.ts`).

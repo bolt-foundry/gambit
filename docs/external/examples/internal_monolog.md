@@ -5,9 +5,8 @@ without tool calls) before completing its work.
 
 - `internal_monolog_parent.deck.md`: root deck that calls the child tool and
   relays its answer.
-- `monolog_child.deck.md`: LLM child with the `gambit://snippets/respond.md`
-  marker that first thinks aloud (monolog), then calls a compute action, then
-  responds.
+- `monolog_child.deck.md`: LLM child that first thinks aloud (monolog), then
+  calls a compute action, then returns schema-valid assistant output.
 - `lookup_fact.deck.ts`: simple compute action the child calls.
 
 Run in the debug UI to see monolog traces:
@@ -21,5 +20,5 @@ Send a question (e.g., "What is Rust?"). In the Traces & Tools panel you’ll se
 - `model.result` from the child showing a content-only assistant turn (monolog).
 - A `monolog` trace entry (emitted because the child is non-root and spoke
   without tool calls).
-- Subsequent tool call/result for `lookup_fact`, then the final respond
-  envelope.
+- Subsequent tool call/result for `lookup_fact`, then final schema-valid
+  assistant output.

@@ -75,6 +75,37 @@ function safeJson(input: string): Record<string, JSONValue> {
   return {};
 }
 
+function toJsonValue(value: unknown): JSONValue {
+  if (
+    value === null || typeof value === "string" || typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => toJsonValue(entry));
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, JSONValue> = {};
+    for (
+      const [key, entry] of Object.entries(value as Record<string, unknown>)
+    ) {
+      if (entry === undefined) continue;
+      out[key] = toJsonValue(entry);
+    }
+    return out;
+  }
+  return String(value);
+}
+
+function isExtensionResponseItem(
+  item: ResponseItem,
+): item is Extract<ResponseItem, { type: `${string}:${string}` }> {
+  return item.type.includes(":");
+}
+
 function isAsyncIterable<T>(value: unknown): value is AsyncIterable<T> {
   return Boolean(
     value &&
@@ -309,6 +340,29 @@ function mapOpenAIOutputItem(
       encrypted_content: reasoning.encrypted_content,
     };
   }
+  if (typeof itemType === "string" && itemType.includes(":")) {
+    const raw = item as unknown as Record<string, unknown>;
+    const payloadEntries = Object.entries(raw).filter(([key, value]) => {
+      if (key === "type" || key === "id") return false;
+      if (value === undefined) return false;
+      return true;
+    });
+    let data: JSONValue;
+    if (payloadEntries.length === 1 && payloadEntries[0][0] === "data") {
+      data = toJsonValue(payloadEntries[0][1]);
+    } else {
+      const payloadObject: Record<string, JSONValue> = {};
+      for (const [key, value] of payloadEntries) {
+        payloadObject[key] = toJsonValue(value);
+      }
+      data = payloadObject;
+    }
+    return {
+      type: itemType as `${string}:${string}`,
+      id: typeof raw.id === "string" ? raw.id : undefined,
+      data,
+    } as unknown as ResponseItem;
+  }
   return null;
 }
 
@@ -432,6 +486,13 @@ function toOpenAIInputItems(
           text: part.text,
         })),
         encrypted_content: item.encrypted_content ?? null,
+      });
+    }
+    if (isExtensionResponseItem(item)) {
+      mapped.push({
+        type: item.type,
+        id: item.id,
+        data: item.data,
       });
     }
   }

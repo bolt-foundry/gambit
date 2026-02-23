@@ -434,7 +434,7 @@ export default function TestBotChatPanel(props: Props) {
                       ? (
                         <div className="respond-summary">
                           <div className="respond-meta">
-                            <Badge>gambit_respond</Badge>
+                            <Badge>legacy respond envelope</Badge>
                             {typeof message.respondStatus === "number" && (
                               <Badge variant="ghost">
                                 status {message.respondStatus}

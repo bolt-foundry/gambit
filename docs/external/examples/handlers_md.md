@@ -3,8 +3,8 @@
 What it shows
 
 - Busy/idle/error handlers authored in Markdown decks, paired with TS actions.
-- Using `gambit://snippets/respond.md` in an error handler to force structured
-  completion.
+- Returning structured, schema-valid handler outputs without synthetic respond
+  tools.
 
 Key files
 
@@ -22,9 +22,10 @@ Why it’s structured this way
 - Markdown handlers keep prompts readable while still validating IO via schemas.
 - `onBusy` uses `repeatMs` to stream periodic status messages; `onIdle` fires
   after inactivity.
-- `onError` returns a fixed envelope via `gambit_respond`, ensuring the parent
-  sees a consistent `{status, code, message, meta, payload}` even when children
-  fail.
+- `onError` returns a fixed structured object that matches `responseSchema`,
+  ensuring the parent sees a consistent
+  `{status, code, message, meta,
+  payload}` shape even when children fail.
 
 How to run
 

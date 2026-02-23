@@ -1363,6 +1363,33 @@ export function deriveBuildDisplayMessages(
       });
       continue;
     }
+    if (itemType.includes(":")) {
+      const extensionData = Object.hasOwn(item, "data")
+        ? (item as { data?: unknown }).data
+        : item;
+      const extensionText = (() => {
+        try {
+          return JSON.stringify(extensionData);
+        } catch {
+          return String(extensionData);
+        }
+      })();
+      if (!extensionText || extensionText === "{}") continue;
+      const outputIndex = typeof payload.output_index === "number"
+        ? String(payload.output_index)
+        : "";
+      const actionScope = asString(record.actionCallId) ||
+        asString(record.runId);
+      const baseExtensionId = asString(item.id) || asString(payload.item_id) ||
+        (outputIndex ? `extension-${outputIndex}` : itemType);
+      upsertReasoning({
+        reasoningId: scopedId(actionScope, `extension:${baseExtensionId}`),
+        text: `${itemType}: ${extensionText}`,
+        raw: item,
+        mode: "replace",
+      });
+      continue;
+    }
     if (itemType !== "reasoning") continue;
     let text = "";
     const summary = item.summary;
@@ -1538,7 +1565,8 @@ export type ReasoningDetail = {
   actionCallId?: string;
 };
 
-const RESPOND_TOOL_NAME = "gambit_respond";
+// Legacy traces may still include synthetic respond envelopes.
+const LEGACY_RESPOND_TOOL_NAME = "gambit_respond";
 
 const stringifyMessageContent = (value: unknown): string => {
   if (value === null || value === undefined) return "";
@@ -1564,7 +1592,7 @@ const summarizeRespondMessage = (
 ): RespondInfo & { displayText: string } | null => {
   if (!message || message.role !== "tool") return null;
   const name = typeof message.name === "string" ? message.name : undefined;
-  if (name !== RESPOND_TOOL_NAME) return null;
+  if (name !== LEGACY_RESPOND_TOOL_NAME) return null;
   const parsed = safeParseJson(
     typeof message.content === "string" ? message.content : "",
   ) as Record<string, unknown> | undefined;
@@ -1627,7 +1655,7 @@ export function buildConversationEntries(
         message: {
           role: "assistant",
           content: respondSummary.displayText,
-          name: RESPOND_TOOL_NAME,
+          name: LEGACY_RESPOND_TOOL_NAME,
         },
         feedback: ref ? feedbackByRef.get(ref.id) : undefined,
         respond: {

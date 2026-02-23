@@ -3,8 +3,8 @@
 What it shows
 
 - Busy/idle/error handlers written in TypeScript with explicit Zod schemas.
-- Demonstrates handled errors producing `gambit_complete` envelopes and status
-  streaming.
+- Demonstrates handled errors producing structured action tool-result envelopes
+  and status streaming.
 
 Key files
 

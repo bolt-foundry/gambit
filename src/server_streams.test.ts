@@ -46,6 +46,40 @@ async function waitForWorkspaceStatus(
   );
 }
 
+async function waitForTestRunTerminalStatus(
+  port: number,
+  workspaceId: string,
+  runId: string,
+  timeoutMs = 3000,
+): Promise<{ status?: string; error?: string }> {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: string | undefined;
+  let lastError: string | undefined;
+  while (Date.now() < deadline) {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceId)
+      }/test/${encodeURIComponent(runId)}`,
+    );
+    const body = await response.json().catch(() => ({})) as {
+      test?: { run?: { status?: string; error?: string } };
+    };
+    const status = body.test?.run?.status;
+    const error = body.test?.run?.error;
+    lastStatus = status;
+    lastError = error;
+    if (status && status !== "idle" && status !== "running") {
+      return { status, error };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(
+    `Timed out waiting for test run ${runId} terminal status (last status=${
+      lastStatus ?? "unknown"
+    } error=${lastError ?? "none"})`,
+  );
+}
+
 Deno.test("simulator streams responses", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -245,6 +279,217 @@ Deno.test("durable stream SSE sanitizes injected event names", async () => {
 
   await server.shutdown();
   await server.finished;
+});
+
+Deno.test("test deck selection remains isolated across concurrent simulator instances", async () => {
+  const dirA = await Deno.makeTempDir();
+  const dirB = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const writeDeckSet = async (baseDir: string, name: string) => {
+    const rootDeckPath = path.join(baseDir, `${name}-root.deck.ts`);
+    const scenarioDeckPath = path.join(baseDir, `${name}-scenario.deck.ts`);
+    const escapedScenarioPath = scenarioDeckPath.replaceAll("\\", "\\\\");
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+      });
+      `,
+    );
+    await Deno.writeTextFile(
+      rootDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+        testDecks: [{
+          id: "${name}-scenario",
+          label: "${name}",
+          path: "${escapedScenarioPath}",
+        }],
+      });
+      `,
+    );
+    return { rootDeckPath, scenarioDeckPath };
+  };
+
+  const a = await writeDeckSet(dirA, "a");
+  const b = await writeDeckSet(dirB, "b");
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const serverA = startWebSocketSimulator({
+    deckPath: a.rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const serverB = startWebSocketSimulator({
+    deckPath: b.rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const portA = (serverA.addr as Deno.NetAddr).port;
+  const portB = (serverB.addr as Deno.NetAddr).port;
+
+  try {
+    const workspaceRes = await fetch(
+      `http://127.0.0.1:${portA}/api/workspace/new`,
+      {
+        method: "POST",
+      },
+    );
+    assertEquals(workspaceRes.ok, true);
+    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+    const workspaceId = workspaceBody.workspaceId ?? "";
+    assert(workspaceId.length > 0);
+
+    // Ensure server B loads its own deck registry before server A resolves A's scenario path.
+    const warmupRes = await fetch(`http://127.0.0.1:${portB}/api/test`);
+    assertEquals(warmupRes.ok, true);
+    await warmupRes.arrayBuffer();
+
+    const runRes = await fetch(`http://127.0.0.1:${portA}/api/test/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        botDeckPath: a.scenarioDeckPath,
+        maxTurns: 1,
+      }),
+    });
+    const runBody = await runRes.json().catch(() => ({})) as {
+      error?: string;
+      run?: { id?: string };
+    };
+    assert(
+      runRes.ok,
+      `scenario run failed with cross-instance bleed: status=${runRes.status} error=${
+        runBody.error ?? "unknown"
+      }`,
+    );
+    assert((runBody.run?.id ?? "").length > 0);
+  } finally {
+    await serverA.shutdown();
+    await serverA.finished;
+    await serverB.shutdown();
+    await serverB.finished;
+  }
+});
+
+Deno.test("scenario run completes with workerSandbox enabled", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const rootDeckPath = path.join(dir, "scenario-worker-root.deck.ts");
+  const scenarioDeckPath = path.join(dir, "scenario-worker-scenario.deck.ts");
+  const escapedScenarioPath = scenarioDeckPath.replaceAll("\\", "\\\\");
+
+  await Deno.writeTextFile(
+    scenarioDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    rootDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "worker-scenario",
+        label: "Worker Scenario",
+        path: "${escapedScenarioPath}",
+      }],
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath: rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+    workerSandbox: true,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  try {
+    const workspaceRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspace/new`,
+      { method: "POST" },
+    );
+    assertEquals(workspaceRes.ok, true);
+    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+    const workspaceId = workspaceBody.workspaceId ?? "";
+    assert(workspaceId.length > 0);
+
+    const runRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        botDeckPath: scenarioDeckPath,
+        maxTurns: 1,
+      }),
+    });
+    const runBody = await runRes.json().catch(() => ({})) as {
+      error?: string;
+      run?: { id?: string };
+    };
+    assert(
+      runRes.ok,
+      `scenario run failed to start: status=${runRes.status} error=${
+        runBody.error ?? "unknown"
+      }`,
+    );
+    const runId = runBody.run?.id ?? "";
+    assert(runId.length > 0);
+
+    const terminal = await waitForTestRunTerminalStatus(
+      port,
+      workspaceId,
+      runId,
+    );
+    assertEquals(terminal.status, "completed");
+    assertEquals(terminal.error, undefined);
+  } finally {
+    await server.shutdown();
+    await server.finished;
+  }
 });
 
 Deno.test("build bot endpoint streams status and runs", async () => {

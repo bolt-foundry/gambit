@@ -44,5 +44,3 @@ Evidence requirements:
 
 Return JSON matching:
 `{ "score": -3..3, "reason": "...", "evidence": ["..."]? }`.
-
-![respond](gambit://snippets/respond.md)

@@ -95,7 +95,10 @@ for (const filename of ["README.md", "LICENSE"]) {
   await Deno.copyFile(src, dest);
 }
 
-for (const assetDir of ["cards", "schemas"]) {
+const builtinAssetDirs = ["cards", "snippets", "schemas", "decks"] as const;
+const distAssetRoots = ["", "esm", "script"] as const;
+
+for (const assetDir of builtinAssetDirs) {
   const srcDir = join(packageRoot, assetDir);
   let info: Deno.FileInfo;
   try {
@@ -104,6 +107,34 @@ for (const assetDir of ["cards", "schemas"]) {
     continue;
   }
   if (!info.isDirectory) continue;
-  const destDir = join(distDir, assetDir);
-  await copyDir(srcDir, destDir);
+  for (const root of distAssetRoots) {
+    const destDir = root
+      ? join(distDir, root, assetDir)
+      : join(distDir, assetDir);
+    await copyDir(srcDir, destDir);
+  }
+}
+
+const requiredBuiltins = [
+  "esm/snippets/context.md",
+  "script/snippets/context.md",
+  "esm/cards/respond.card.md",
+  "script/cards/respond.card.md",
+  "esm/decks/openai/codex-sdk/PROMPT.md",
+  "script/decks/openai/codex-sdk/PROMPT.md",
+] as const;
+for (const rel of requiredBuiltins) {
+  try {
+    const info = await Deno.stat(join(distDir, rel));
+    if (!info.isFile) {
+      throw new Error(
+        `Expected npm built-in asset to be a file: ${join(distDir, rel)}`,
+      );
+    }
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Missing npm built-in asset (${rel}): ${reason}`,
+    );
+  }
 }

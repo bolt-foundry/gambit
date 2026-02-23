@@ -36,6 +36,12 @@ function buildResponseFixture(): OpenAI.Responses.Response {
         arguments: '{"query":"hi"}',
         status: "completed",
       },
+      {
+        type: "gambit:followups",
+        id: "ext_1",
+        followups: ["What else can Gambit evaluate?"],
+        source: { provider: "openrouter" },
+      },
     ],
     parallel_tool_calls: false,
     temperature: null,
@@ -203,6 +209,11 @@ Deno.test("openrouter responses stream mapping (conformance)", async () => {
   assert(result);
   assertEquals(result.output[0].type, "message");
   assertEquals(result.output[1].type, "function_call");
+  assertEquals(result.output[2].type, "gambit:followups");
+  assertEquals(
+    (result.output[2] as { data?: Record<string, unknown> }).data?.followups,
+    ["What else can Gambit evaluate?"],
+  );
   assertExists(
     seen.find((event) =>
       (event as { type?: string }).type === "response.created"

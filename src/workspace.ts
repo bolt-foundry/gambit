@@ -110,8 +110,6 @@ responseSchema = "gambit://schemas/graders/grader_output.zod.ts"
 model = ["ollama/hf.co/LiquidAI/LFM2-1.2B-Tool-GGUF:latest", "openrouter/openai/gpt-5.1-chat"]
 +++
 
-![respond](gambit://snippets/respond.md)
-
 You are grading the assistant's response for clarity and helpfulness.
 
 Score 1 if the assistant is clear and directly answers the user.

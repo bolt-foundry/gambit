@@ -54,17 +54,37 @@ export type DeckReferenceDefinition = {
   permissions?: PermissionDeclarationInput;
 };
 
+export type ActionIntermediateOutputEmitPolicy = "allow" | "deny";
+
+export type ActionIntermediateOutputPolicy = {
+  emit?: ActionIntermediateOutputEmitPolicy;
+};
+
+export type ActionAsyncStartMode = "allow" | "deny";
+
+export type ActionAsyncStartPolicy = {
+  mode?: ActionAsyncStartMode;
+};
+
 export type ActionDeckDefinition = DeckReferenceDefinition & {
   name: string;
   execute?: string;
   contextSchema?: ZodTypeAny;
   responseSchema?: ZodTypeAny;
+  intermediateOutput?: ActionIntermediateOutputPolicy;
+  asyncStart?: ActionAsyncStartPolicy;
 };
 
 export type ExternalToolDefinition = {
   name: string;
   description?: string;
   inputSchema?: ZodTypeAny;
+};
+
+export type ResponseItemExtensionDefinition = {
+  type: `${string}:${string}`;
+  dataSchema: ZodTypeAny;
+  description?: string;
 };
 
 export type TestDeckDefinition = DeckReferenceDefinition;
@@ -126,6 +146,7 @@ export type DeckDefinition<Input = unknown> = BaseDefinition & {
   kind: "gambit.deck";
   modelParams?: ModelParams;
   tools?: ReadonlyArray<ExternalToolDefinition>;
+  responseItemExtensions?: ReadonlyArray<ResponseItemExtensionDefinition>;
   handlers?: HandlersConfig;
   prompt?: string; // deprecated; prefer body
   body?: string;
@@ -178,6 +199,7 @@ export type ExecutionContext<Input = unknown> = {
   appendMessage: (
     message: { role: "user" | "assistant"; content: string },
   ) => void;
+  emitOutputItem: (item: ResponseItem) => Promise<void>;
   log: (entry: LogEntry | string) => void;
   spawnAndWait: (opts: {
     path: string;
@@ -253,11 +275,20 @@ export type ResponseReasoningItem = {
   encrypted_content?: string | null;
 };
 
-export type ResponseItem =
+export type ResponseExtensionItem = {
+  // Namespaced extension item type (for example "gambit:followups").
+  type: `${string}:${string}`;
+  id?: string;
+  data: JSONValue;
+};
+
+export type ResponseCoreItem =
   | ResponseMessageItem
   | ResponseFunctionCallItem
   | ResponseFunctionCallOutputItem
   | ResponseReasoningItem;
+
+export type ResponseItem = ResponseCoreItem | ResponseExtensionItem;
 
 export type ResponseToolDefinition = {
   type: "function";
@@ -590,6 +621,7 @@ export type LoadedDeck = WithDeckRefs<DeckDefinition> & {
   testDecks: Array<TestDeckDefinition>;
   graderDecks: Array<GraderDeckDefinition>;
   tools: Array<ExternalToolDefinition>;
+  responseItemExtensions: Array<ResponseItemExtensionDefinition>;
   executor?: DeckExecutor;
   guardrails?: Partial<Guardrails>;
   inlineEmbeds?: boolean;

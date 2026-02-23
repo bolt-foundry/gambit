@@ -208,3 +208,36 @@ Deno.test("deriveBuildDisplayMessages dedupes model.result after streamed output
   assertEquals(assistantRows.length, 1);
   assertEquals(assistantRows[0]?.content, "hi there");
 });
+
+Deno.test("deriveBuildDisplayMessages projects namespaced extension items", () => {
+  const traces: TraceEvent[] = [
+    {
+      type: "model.stream.event",
+      actionCallId: "action-1",
+      event: {
+        type: "codex.event",
+        payload: {
+          type: "response.output_item.done",
+          output_index: 1,
+          item: {
+            type: "gambit:followups",
+            id: "followups_1",
+            data: {
+              followups: ["What should I evaluate next?"],
+            },
+          },
+        },
+      },
+    },
+  ];
+
+  const display = deriveBuildDisplayMessages([], traces);
+  const extensionRows = display.filter((row) =>
+    row.kind === "reasoning" &&
+    typeof row.content === "string" &&
+    row.content.includes("gambit:followups")
+  );
+
+  assertEquals(extensionRows.length, 1);
+  assertEquals(extensionRows[0]?.reasoningRaw?.type, "gambit:followups");
+});

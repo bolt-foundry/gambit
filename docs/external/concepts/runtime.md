@@ -21,17 +21,14 @@ safe/observable.
 - `gambit_context`: sent once when `--context` (formerly `--init`) is provided;
   payload is the raw input. Useful for assistant-first flows so the model can
   read input without a user turn. `gambit_init` remains as a deprecated alias.
-- `gambit_respond`: enable with the `gambit://snippets/respond.md` marker in
-  Markdown (or `respond: true` in TypeScript decks). Required for LLM decks that
-  should finish with a structured envelope
-  `{ payload, status?, message?, code?, meta? }`.
-- `gambit_complete`: emitted automatically for child completions and handled
-  errors so the parent can see
+- `gambit_respond` / `gambit_end`: removed from runtime defaults. Do not add
+  `gambit://snippets/respond.md`, `gambit://snippets/end.md`, `respond: true`,
+  or `allowEnd: true` in new decks. Return normal assistant output that matches
+  `responseSchema`; model status/code/meta fields directly in that schema when
+  needed.
+- Child action results are returned through the action tool result payload.
+  Handled errors use the same envelope shape:
   `{ runId, actionCallId, source, status?, payload?, message?, code?, meta? }`.
-- `gambit_end`: enable with `![end](gambit://snippets/end.md)` in Markdown (or
-  `allowEnd: true` in TypeScript decks). Calling it returns a sentinel
-  `{ __gambitEnd: true, payload?, status?, message?, code?, meta? }` so
-  CLI/scenario loops stop reinjecting the closing assistant turn.
 
 ## State and turn order
 
@@ -54,8 +51,8 @@ safe/observable.
   repeats if `repeatMs` is set. Input mirrors busy with `kind:"idle"` and no
   `childInput`.
 - Error (`handlers.onError`): wraps child errors; should return
-  `{ payload?, status?, message?, code?, meta? }` which becomes a
-  `gambit_complete` envelope. If the handler itself fails, the runtime still
+  `{ payload?, status?, message?, code?, meta? }` which becomes the structured
+  action tool result envelope. If the handler itself fails, the runtime still
   returns a structured error envelope.
 - Handler failures are swallowed so they never crash the main run.
 
