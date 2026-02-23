@@ -11,7 +11,10 @@ since = "f9185fb1967a31e92a4a26dbb94cfe1322148406"
 
 ## v0.8.5-rc.10
 
-- TBD
+- #4004: add OpenResponses convergence runtime + extensions + async action
+  semantics in gambit-core.
+- #4004: retire synthetic respond/end docs and align deck authoring guidance.
+- #4010: fix gambit-core npm runtime layouts to ship built-in snippets/decks.
 
 ## v0.8.5-rc.9
 
