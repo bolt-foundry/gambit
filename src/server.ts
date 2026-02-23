@@ -2220,6 +2220,12 @@ export function startWebSocketSimulator(opts: {
       .replace(/[-_]+/g, " ")
       .trim() || base;
   };
+  const parseDeckMaxTurns = (value: unknown): number | undefined => {
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    const rounded = Math.round(value);
+    if (rounded < 1 || rounded > 200) return undefined;
+    return rounded;
+  };
 
   const buildTestBotSnapshot = (
     state: SavedState,
@@ -3175,6 +3181,9 @@ export function startWebSocketSimulator(opts: {
           const id = testDeck.id && typeof testDeck.id === "string"
             ? testDeck.id
             : slugify(`${label || "test-deck"}-${index}`);
+          const maxTurns = parseDeckMaxTurns(
+            (testDeck as { maxTurns?: unknown }).maxTurns,
+          );
           return {
             id,
             label: label || id,
@@ -3182,6 +3191,7 @@ export function startWebSocketSimulator(opts: {
               ? testDeck.description
               : undefined,
             path: testDeck.path,
+            ...(maxTurns !== undefined ? { maxTurns } : {}),
           };
         });
         updateTestDeckRegistry(availableTestDecks);
@@ -4597,7 +4607,7 @@ export function startWebSocketSimulator(opts: {
           registerWorkspace(workspaceRecord);
         }
         const run = startTestBotRun({
-          maxTurnsOverride,
+          maxTurnsOverride: maxTurnsOverride ?? botDeckSelection.maxTurns,
           deckInput,
           botInput,
           initialUserMessage,
