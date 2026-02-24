@@ -49,10 +49,22 @@ export type WorkbenchFlagContext = {
   message: string;
 };
 
+export type WorkbenchVerifyOutlierContext = {
+  source: "verify_outlier";
+  workspaceId?: string;
+  runId?: string;
+  capturedAt: string;
+  outlierKey: string;
+  instability?: boolean;
+  score?: number;
+  message: string;
+};
+
 export type WorkbenchMessageContext =
   | WorkbenchScenarioErrorContext
   | WorkbenchRatingContext
-  | WorkbenchFlagContext;
+  | WorkbenchFlagContext
+  | WorkbenchVerifyOutlierContext;
 
 export type WorkbenchScenarioErrorChip = WorkbenchScenarioErrorContext & {
   enabled: boolean;
@@ -151,6 +163,30 @@ function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
       capturedAt: record.capturedAt,
       flagId: typeof record.flagId === "string" ? record.flagId : undefined,
       refId: record.refId,
+      score: typeof record.score === "number" && Number.isFinite(record.score)
+        ? record.score
+        : undefined,
+      message: record.message,
+    };
+  }
+  if (record.source === "verify_outlier") {
+    if (
+      typeof record.outlierKey !== "string" ||
+      record.outlierKey.trim().length === 0 ||
+      typeof record.message !== "string" ||
+      record.message.trim().length === 0
+    ) {
+      return null;
+    }
+    return {
+      source: "verify_outlier",
+      workspaceId,
+      runId,
+      capturedAt: record.capturedAt,
+      outlierKey: record.outlierKey,
+      instability: typeof record.instability === "boolean"
+        ? record.instability
+        : undefined,
       score: typeof record.score === "number" && Number.isFinite(record.score)
         ? record.score
         : undefined,
@@ -581,6 +617,19 @@ export function ChatView(props: {
           capturedAt: chip.capturedAt,
           flagId: chip.flagId,
           refId: chip.refId,
+          score: chip.score,
+          message: chip.message,
+        });
+        continue;
+      }
+      if (chip.source === "verify_outlier") {
+        activeContexts.push({
+          source: "verify_outlier",
+          workspaceId: chip.workspaceId,
+          runId: chip.runId,
+          capturedAt: chip.capturedAt,
+          outlierKey: chip.outlierKey,
+          instability: chip.instability,
           score: chip.score,
           message: chip.message,
         });

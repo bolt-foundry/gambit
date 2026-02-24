@@ -387,20 +387,23 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
       let didChange = false;
       const syncedChips = composerChips.filter((chip) => {
         if (chip.source === "message_rating") {
+          if (!chip.chipId.startsWith("rating:")) return true;
           const stillExists = ratingByChipId.has(chip.chipId);
           if (!stillExists) didChange = true;
           return stillExists;
         }
         if (chip.source === "grading_flag") {
+          if (!chip.chipId.startsWith("flag:")) return true;
           const stillExists = flagByChipId.has(chip.chipId);
           if (!stillExists) didChange = true;
           return stillExists;
         }
         return true;
       }).map((chip) => {
-        const latest = chip.source === "message_rating"
+        const latest = chip.source === "message_rating" &&
+            chip.chipId.startsWith("rating:")
           ? ratingByChipId.get(chip.chipId)
-          : chip.source === "grading_flag"
+          : chip.source === "grading_flag" && chip.chipId.startsWith("flag:")
           ? flagByChipId.get(chip.chipId)
           : undefined;
         if (!latest) return chip;

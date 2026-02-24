@@ -26,6 +26,7 @@ import {
   buildVerifyConsistencyReport,
   VERIFY_CONSISTENCY_THRESHOLDS,
 } from "./verify_metrics.ts";
+import type { WorkbenchComposerChip } from "./Chat.tsx";
 
 const MAX_BATCH_SIZE = 24;
 const MAX_BATCH_CONCURRENCY = 6;
@@ -137,15 +138,33 @@ const clampInt = (value: number, min: number, max: number): number => {
   return Math.max(min, Math.min(max, rounded));
 };
 
+const formatSignedScore = (value: number | null | undefined): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : ""}${value}`;
+};
+
+const scoreBadgeVariant = (
+  value: number | null | undefined,
+): "ghost" | "error" | "completed" | "idle" => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "ghost";
+  if (value < 0) return "error";
+  if (value > 0) return "completed";
+  return "idle";
+};
+
 function VerifyPage(
   {
     setNavActions,
     onAppPathChange,
     activeWorkspaceId,
+    composerChips,
+    onComposerChipsChange,
   }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
     activeWorkspaceId?: string | null;
+    composerChips?: WorkbenchComposerChip[];
+    onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
   },
 ) {
   const {
@@ -551,6 +570,74 @@ function VerifyPage(
   );
 
   const topOutliers = consistencyReport.outliers.slice(0, 8);
+  const resolvedComposerChips = useMemo(
+    () => composerChips ?? [],
+    [composerChips],
+  );
+  const composerChipIds = useMemo(
+    () => new Set(resolvedComposerChips.map((chip) => chip.chipId)),
+    [resolvedComposerChips],
+  );
+
+  const mergeComposerChip = useCallback(
+    (base: WorkbenchComposerChip[], chip: WorkbenchComposerChip) => {
+      const next = [...base];
+      const existingIndex = next.findIndex((entry) =>
+        entry.chipId === chip.chipId
+      );
+      if (existingIndex >= 0) {
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...chip,
+          enabled: true,
+        };
+        return next;
+      }
+      next.push(chip);
+      return next;
+    },
+    [],
+  );
+
+  const addComposerChip = useCallback((chip: WorkbenchComposerChip) => {
+    if (!onComposerChipsChange) return;
+    onComposerChipsChange(mergeComposerChip(resolvedComposerChips, chip));
+  }, [mergeComposerChip, onComposerChipsChange, resolvedComposerChips]);
+
+  const removeComposerChip = useCallback((chipId: string) => {
+    if (!onComposerChipsChange) return;
+    onComposerChipsChange(
+      resolvedComposerChips.filter((chip) => chip.chipId !== chipId),
+    );
+  }, [onComposerChipsChange, resolvedComposerChips]);
+
+  const buildOutlierChip = useCallback(
+    (outlier: typeof topOutliers[number]) => {
+      const chipId = `verify:${selectedSessionId ?? ""}:${outlier.key}`;
+      const runId = outlier.maxRunId ?? outlier.minRunId;
+      const score = outlier.maxScore ?? outlier.minScore ?? undefined;
+      const agreementText = outlier.agreementRate === null
+        ? "agreement unavailable"
+        : `agreement ${Math.round(outlier.agreementRate * 100)}%`;
+      const deltaText = outlier.scoreDelta === null
+        ? "delta unavailable"
+        : `delta ${outlier.scoreDelta}`;
+      return {
+        chipId,
+        source: "verify_outlier" as const,
+        workspaceId: selectedSessionId ?? undefined,
+        runId,
+        capturedAt: new Date().toISOString(),
+        outlierKey: outlier.key,
+        instability: outlier.instability,
+        score,
+        message:
+          `Verify outlier ${outlier.label}: ${agreementText}, ${deltaText}, samples ${outlier.sampleSize}`,
+        enabled: true,
+      };
+    },
+    [selectedSessionId],
+  );
 
   useEffect(() => {
     if (!setNavActions) return;
@@ -828,13 +915,63 @@ function VerifyPage(
                           >
                             <div className="verify-outlier-header">
                               <strong>{outlier.label}</strong>
-                              <Badge
-                                variant={outlier.instability
-                                  ? "error"
-                                  : "completed"}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
                               >
-                                {outlier.instability ? "Unstable" : "Stable"}
-                              </Badge>
+                                {outlier.minScore === outlier.maxScore
+                                  ? (
+                                    <Badge
+                                      variant={scoreBadgeVariant(
+                                        outlier.minScore,
+                                      )}
+                                    >
+                                      {formatSignedScore(outlier.minScore)}
+                                    </Badge>
+                                  )
+                                  : (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                      }}
+                                    >
+                                      <Badge
+                                        variant={scoreBadgeVariant(
+                                          outlier.minScore,
+                                        )}
+                                        style={{
+                                          borderTopRightRadius: 0,
+                                          borderBottomRightRadius: 0,
+                                        }}
+                                      >
+                                        {formatSignedScore(outlier.minScore)}
+                                      </Badge>
+                                      <Badge
+                                        variant={scoreBadgeVariant(
+                                          outlier.maxScore,
+                                        )}
+                                        style={{
+                                          marginLeft: "-1px",
+                                          borderTopLeftRadius: 0,
+                                          borderBottomLeftRadius: 0,
+                                        }}
+                                      >
+                                        {formatSignedScore(outlier.maxScore)}
+                                      </Badge>
+                                    </div>
+                                  )}
+                                <Badge
+                                  variant={outlier.instability
+                                    ? "error"
+                                    : "completed"}
+                                >
+                                  {outlier.instability ? "Unstable" : "Stable"}
+                                </Badge>
+                              </div>
                             </div>
                             <div className="verify-outlier-meta">
                               agreement {outlier.agreementRate === null
@@ -848,6 +985,31 @@ function VerifyPage(
                                 ? ` · ref ${outlier.messageRefId}`
                                 : ""}
                             </div>
+                            {(() => {
+                              const outlierChip = buildOutlierChip(outlier);
+                              const inChat = composerChipIds.has(
+                                outlierChip.chipId,
+                              );
+                              return (
+                                <div className="workbench-summary-actions">
+                                  <Button
+                                    variant="secondary"
+                                    size="small"
+                                    onClick={() =>
+                                      inChat
+                                        ? removeComposerChip(
+                                          outlierChip.chipId,
+                                        )
+                                        : addComposerChip(outlierChip)}
+                                    disabled={!onComposerChipsChange}
+                                  >
+                                    {inChat
+                                      ? "Remove from chat"
+                                      : "Add to chat"}
+                                  </Button>
+                                </div>
+                              );
+                            })()}
                             {runLinks.length > 0 && (
                               <div className="verify-outlier-links">
                                 {runLinks.map((runId) => {
