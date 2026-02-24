@@ -973,6 +973,137 @@ Deno.test("turn-mode calibrate running events include selected scenario run meta
   await server.finished;
 });
 
+Deno.test("concurrent calibrate runs preserve all grading runs", async () => {
+  const dir = await Deno.makeTempDir();
+  const sessionsDir = path.join(dir, "sessions");
+  const modHref = modImportPath();
+  const rootDeckPath = path.join(dir, "concurrent-calibrate-root.deck.ts");
+  const graderDeckPath = path.join(dir, "concurrent-calibrate-grader.deck.ts");
+  const escapedGraderPath = graderDeckPath.replaceAll("\\", "\\\\");
+
+  await Deno.writeTextFile(
+    graderDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.object({
+        session: z.any().optional(),
+      }),
+      outputSchema: z.object({
+        score: z.number(),
+        reason: z.string(),
+        pass: z.boolean(),
+      }),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    rootDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      graderDecks: [{
+        id: "concurrency-grader",
+        label: "Concurrency Grader",
+        path: "${escapedGraderPath}",
+      }],
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          resolve({
+            message: {
+              role: "assistant",
+              content: JSON.stringify({
+                score: 1,
+                reason: "ok",
+                pass: true,
+              }),
+            },
+            finishReason: "stop",
+          });
+        }, 30);
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath: rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+    sessionDir: sessionsDir,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const workspaceRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    {
+      method: "POST",
+    },
+  );
+  assertEquals(workspaceRes.ok, true);
+  const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+  const workspaceId = workspaceBody.workspaceId ?? "";
+  assert(workspaceId.length > 0);
+
+  const runRequests = Array.from(
+    { length: 3 },
+    () =>
+      fetch(`http://127.0.0.1:${port}/api/calibrate/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspaceId,
+          graderId: "concurrency-grader",
+        }),
+      }),
+  );
+  const runResponses = await Promise.all(runRequests);
+  for (const response of runResponses) {
+    const body = await response.json().catch(() => ({})) as { error?: string };
+    assert(
+      response.ok,
+      `calibrate run failed: status=${response.status} error=${
+        body.error ?? "unknown"
+      }`,
+    );
+  }
+
+  const workspaceStateRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspaces/${
+      encodeURIComponent(workspaceId)
+    }`,
+  );
+  assertEquals(workspaceStateRes.ok, true);
+  const workspaceStateBody = await workspaceStateRes.json() as {
+    grade?: {
+      sessions?: Array<{
+        id?: string;
+        gradingRuns?: Array<{ id?: string }>;
+      }>;
+    };
+  };
+  const session = (workspaceStateBody.grade?.sessions ?? []).find((entry) =>
+    entry.id === workspaceId
+  );
+  assert(session);
+  assertEquals((session.gradingRuns ?? []).length, 3);
+
+  await server.shutdown();
+  await server.finished;
+});
+
 Deno.test("test stop aborts in-flight runtime execution", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

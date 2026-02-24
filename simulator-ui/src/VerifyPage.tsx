@@ -69,6 +69,14 @@ type VerifyRunSampleResponse = {
   error?: string;
 };
 
+type VerifyReportScope = "current_batch" | "all_matching";
+type VerifyExampleSort =
+  | "default"
+  | "delta_desc"
+  | "agreement_asc"
+  | "samples_desc"
+  | "label_asc";
+
 const parseScenarioRunSummary = (value: unknown): ScenarioRunSummary | null => {
   if (!value || typeof value !== "object") return null;
   const summary = value as Record<string, unknown>;
@@ -199,6 +207,11 @@ function VerifyPage(
     initialRunIds: [],
     requests: [],
   });
+  const [reportScope, setReportScope] = useState<VerifyReportScope>(
+    "all_matching",
+  );
+  const [inconsistentOnly, setInconsistentOnly] = useState(false);
+  const [exampleSort, setExampleSort] = useState<VerifyExampleSort>("default");
   const batchSeqRef = useRef(0);
 
   const updateVerifyPath = useCallback((sessionId: string | null) => {
@@ -545,10 +558,10 @@ function VerifyPage(
 
   const reportRuns = useMemo(
     () =>
-      completedBatchRuns.length > 0
+      reportScope === "current_batch"
         ? completedBatchRuns
         : historicalCompletedRuns,
-    [completedBatchRuns, historicalCompletedRuns],
+    [completedBatchRuns, historicalCompletedRuns, reportScope],
   );
 
   const consistencyReport = useMemo(
@@ -569,7 +582,43 @@ function VerifyPage(
       batchState.status !== "running",
   );
 
-  const topOutliers = consistencyReport.outliers.slice(0, 8);
+  const displayedOutliers = useMemo(() => {
+    const filtered = inconsistentOnly
+      ? consistencyReport.outliers.filter((outlier) => outlier.instability)
+      : consistencyReport.outliers;
+    if (exampleSort === "default") return filtered;
+    const next = [...filtered];
+    if (exampleSort === "delta_desc") {
+      next.sort((a, b) => {
+        const aDelta = a.scoreDelta ?? -1;
+        const bDelta = b.scoreDelta ?? -1;
+        if (aDelta !== bDelta) return bDelta - aDelta;
+        return a.label.localeCompare(b.label);
+      });
+      return next;
+    }
+    if (exampleSort === "agreement_asc") {
+      next.sort((a, b) => {
+        const aAgreement = a.agreementRate ?? Number.POSITIVE_INFINITY;
+        const bAgreement = b.agreementRate ?? Number.POSITIVE_INFINITY;
+        if (aAgreement !== bAgreement) return aAgreement - bAgreement;
+        return a.label.localeCompare(b.label);
+      });
+      return next;
+    }
+    if (exampleSort === "samples_desc") {
+      next.sort((a, b) => {
+        if (a.sampleSize !== b.sampleSize) return b.sampleSize - a.sampleSize;
+        return a.label.localeCompare(b.label);
+      });
+      return next;
+    }
+    next.sort((a, b) => a.label.localeCompare(b.label));
+    return next;
+  }, [consistencyReport.outliers, exampleSort, inconsistentOnly]);
+  const reportScopeLabel = reportScope === "current_batch"
+    ? "current batch"
+    : "all matching runs";
   const resolvedComposerChips = useMemo(
     () => composerChips ?? [],
     [composerChips],
@@ -612,7 +661,7 @@ function VerifyPage(
   }, [onComposerChipsChange, resolvedComposerChips]);
 
   const buildOutlierChip = useCallback(
-    (outlier: typeof topOutliers[number]) => {
+    (outlier: typeof consistencyReport.outliers[number]) => {
       const chipId = `verify:${selectedSessionId ?? ""}:${outlier.key}`;
       const runId = outlier.maxRunId ?? outlier.minRunId;
       const score = outlier.maxScore ?? outlier.minScore ?? undefined;
@@ -774,23 +823,11 @@ function VerifyPage(
           {!loading && (
             <>
               <div className="verify-status-row">
-                <div className="verify-status-main">
+                <div className="verify-status-main flex-row items-center gap-8">
                   <strong>Batch status</strong>
-                  <div className="verify-status-meta">
-                    <Badge status={batchState.status}>
-                      {batchState.status}
-                    </Badge>
-                    {batchState.startedAt
-                      ? ` · started ${
-                        formatTimestampShort(batchState.startedAt)
-                      }`
-                      : ""}
-                    {batchState.finishedAt
-                      ? ` · finished ${
-                        formatTimestampShort(batchState.finishedAt)
-                      }`
-                      : ""}
-                  </div>
+                  <Badge status={batchState.status}>
+                    {batchState.status}
+                  </Badge>
                 </div>
                 {consistencyReport.sampleSize > 0 && (
                   <span
@@ -803,14 +840,6 @@ function VerifyPage(
                   </span>
                 )}
               </div>
-              {batchState.requested > 0 && (
-                <div className="verify-progress-row">
-                  <span>Queued: {queuedCount}</span>
-                  <span>Running: {batchState.active}</span>
-                  <span>Completed: {batchState.completed}</span>
-                  <span>Failed: {batchState.failed}</span>
-                </div>
-              )}
               {batchState.status === "idle" &&
                 consistencyReport.sampleSize === 0 && (
                 <Callout>
@@ -818,57 +847,87 @@ function VerifyPage(
                   instability for the selected grader.
                 </Callout>
               )}
-              {consistencyReport.sampleSize > 0 && (
-                <>
-                  <div className="verify-metric-grid">
-                    <div className="verify-metric-card">
+              <div className="verify-metric-grid">
+                <div className="verify-metric-card">
+                  <div className="verify-sample-size-row">
+                    <div className="verify-sample-size-copy">
                       <div className="verify-metric-label">Sample size</div>
                       <div className="verify-metric-value">
                         {consistencyReport.sampleSize}
                       </div>
                     </div>
-                    <div className="verify-metric-card">
-                      <div className="verify-metric-label">Agreement rate</div>
-                      <div className="verify-metric-value">
-                        {consistencyReport.agreementRate === null
-                          ? "—"
-                          : `${
-                            Math.round(consistencyReport.agreementRate * 100)
-                          }%`}
-                      </div>
-                    </div>
-                    <div className="verify-metric-card">
-                      <div className="verify-metric-label">
-                        Score spread (min/median/max)
-                      </div>
-                      <div className="verify-metric-value verify-metric-value--compact">
-                        {consistencyReport.scoreSpreadMin === null
-                          ? "—"
-                          : `${consistencyReport.scoreSpreadMin} / ${
-                            consistencyReport.scoreSpreadMedian ?? "—"
-                          } / ${consistencyReport.scoreSpreadMax ?? "—"}`}
-                      </div>
-                    </div>
-                    <div className="verify-metric-card">
-                      <div className="verify-metric-label">
-                        Instability count
-                      </div>
-                      <div className="verify-metric-value">
-                        {consistencyReport.instabilityCount}
-                      </div>
+                    <div className="verify-sample-scope-select">
+                      <Listbox
+                        value={reportScope}
+                        onChange={(value) =>
+                          setReportScope(value as VerifyReportScope)}
+                        size="small"
+                        popoverMatchTriggerWidth={false}
+                        popoverMinWidth={320}
+                        popoverAlign="right"
+                        options={[
+                          {
+                            value: "current_batch",
+                            label:
+                              `Current batch (${completedBatchRuns.length})`,
+                            triggerLabel: "Current batch",
+                            triggerMeta: null,
+                            meta: "Only runs from the latest batch launch",
+                          },
+                          {
+                            value: "all_matching",
+                            label:
+                              `All matching runs (${historicalCompletedRuns.length})`,
+                            triggerLabel: "All matching runs",
+                            triggerMeta: null,
+                            meta:
+                              "All runs matching selected scenario + grader",
+                          },
+                        ]}
+                      />
                     </div>
                   </div>
-                  <Callout
-                    variant={consistencyReport.verdict === "FAIL"
-                      ? "danger"
-                      : consistencyReport.verdict === "WARN"
-                      ? "emphasis"
-                      : "muted"}
-                    title={`Verdict: ${consistencyReport.verdict}`}
-                  >
-                    {consistencyReport.verdictReason}
-                  </Callout>
-                </>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">Agreement rate</div>
+                  <div className="verify-metric-value">
+                    {consistencyReport.agreementRate === null
+                      ? "—"
+                      : `${Math.round(consistencyReport.agreementRate * 100)}%`}
+                  </div>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">
+                    Score spread (min/median/max)
+                  </div>
+                  <div className="verify-metric-value verify-metric-value--compact">
+                    {consistencyReport.scoreSpreadMin === null
+                      ? "—"
+                      : `${consistencyReport.scoreSpreadMin} / ${
+                        consistencyReport.scoreSpreadMedian ?? "—"
+                      } / ${consistencyReport.scoreSpreadMax ?? "—"}`}
+                  </div>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">
+                    Instability count
+                  </div>
+                  <div className="verify-metric-value">
+                    {consistencyReport.instabilityCount}
+                  </div>
+                </div>
+              </div>
+              {consistencyReport.sampleSize > 0 && (
+                <Callout
+                  variant={consistencyReport.verdict === "FAIL"
+                    ? "danger"
+                    : consistencyReport.verdict === "WARN"
+                    ? "emphasis"
+                    : "muted"}
+                  title={`Verdict: ${consistencyReport.verdict}`}
+                >
+                  {consistencyReport.verdictReason}
+                </Callout>
               )}
               <Callout title="Thresholds in code">
                 Min sample size: {VERIFY_CONSISTENCY_THRESHOLDS.minSampleSize}
@@ -889,17 +948,49 @@ function VerifyPage(
                 {VERIFY_CONSISTENCY_THRESHOLDS.warn.maxInstabilityCount}.
               </Callout>
               <div className="verify-section">
-                <strong>Most inconsistent examples</strong>
-                {topOutliers.length === 0
+                <div className="verify-section-header">
+                  <strong>Examples</strong>
+                  <div className="verify-section-controls">
+                    <Button
+                      variant={inconsistentOnly
+                        ? "primary-deemph"
+                        : "secondary"}
+                      size="small"
+                      onClick={() => setInconsistentOnly((prev) => !prev)}
+                    >
+                      Inconsistent
+                    </Button>
+                    <div className="verify-section-sort">
+                      <Listbox
+                        value={exampleSort}
+                        onChange={(value) =>
+                          setExampleSort(value as VerifyExampleSort)}
+                        size="small"
+                        options={[
+                          { value: "default", label: "Sort: default" },
+                          { value: "delta_desc", label: "Sort: score delta" },
+                          {
+                            value: "agreement_asc",
+                            label: "Sort: agreement",
+                          },
+                          { value: "samples_desc", label: "Sort: sample size" },
+                          { value: "label_asc", label: "Sort: label" },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                </div>
+                {displayedOutliers.length === 0
                   ? (
                     <Callout>
-                      Inconsistent examples will appear here as soon as at least
-                      one completed run is available in this batch.
+                      {consistencyReport.outliers.length === 0
+                        ? `Examples will appear here as soon as at least one completed run is available in ${reportScopeLabel}.`
+                        : `No examples match the current filters in ${reportScopeLabel}.`}
                     </Callout>
                   )
                   : (
                     <div className="verify-outlier-list">
-                      {topOutliers.map((outlier) => {
+                      {displayedOutliers.map((outlier) => {
                         const runLinks = (() => {
                           if (!selectedSessionId) return [];
                           const ids = [
@@ -973,64 +1064,72 @@ function VerifyPage(
                                 </Badge>
                               </div>
                             </div>
-                            <div className="verify-outlier-meta">
-                              agreement {outlier.agreementRate === null
-                                ? "—"
-                                : `${Math.round(outlier.agreementRate * 100)}%`}
-                              {" "}
-                              · delta {outlier.scoreDelta ?? "—"} · samples{" "}
-                              {outlier.sampleSize}
-                              {outlier.passFlip ? " · pass/fail flip" : ""}
-                              {outlier.messageRefId
-                                ? ` · ref ${outlier.messageRefId}`
-                                : ""}
-                            </div>
-                            {(() => {
-                              const outlierChip = buildOutlierChip(outlier);
-                              const inChat = composerChipIds.has(
-                                outlierChip.chipId,
-                              );
-                              return (
-                                <div className="workbench-summary-actions">
-                                  <Button
-                                    variant="secondary"
-                                    size="small"
-                                    onClick={() =>
-                                      inChat
-                                        ? removeComposerChip(
-                                          outlierChip.chipId,
-                                        )
-                                        : addComposerChip(outlierChip)}
-                                    disabled={!onComposerChipsChange}
-                                  >
-                                    {inChat
-                                      ? "Remove from chat"
-                                      : "Add to chat"}
-                                  </Button>
+                            <div className="flex-row items-center">
+                              <div className="flex-1 flex-column">
+                                <div className="verify-outlier-meta">
+                                  agreement {outlier.agreementRate === null
+                                    ? "—"
+                                    : `${
+                                      Math.round(outlier.agreementRate * 100)
+                                    }%`} · delta {outlier.scoreDelta ?? "—"}
+                                  {" "}
+                                  · samples {outlier.sampleSize}
+                                  {outlier.passFlip ? " · pass/fail flip" : ""}
+                                  {outlier.messageRefId
+                                    ? ` · ref ${outlier.messageRefId}`
+                                    : ""}
                                 </div>
-                              );
-                            })()}
-                            {runLinks.length > 0 && (
-                              <div className="verify-outlier-links">
-                                {runLinks.map((runId) => {
-                                  if (!selectedSessionId) return null;
-                                  const href = buildGradePath(
-                                    selectedSessionId,
-                                    runId,
-                                  );
-                                  return (
-                                    <a
-                                      key={runId}
-                                      href={href}
-                                      onClick={(event) =>
-                                        handleInternalLinkClick(event, href)}
-                                    >
-                                      Open grade run {runId}
-                                    </a>
-                                  );
-                                })}
+                                {runLinks.length > 0 && (
+                                  <div className="verify-outlier-links">
+                                    {runLinks.map((runId) => {
+                                      if (!selectedSessionId) return null;
+                                      const href = buildGradePath(
+                                        selectedSessionId,
+                                        runId,
+                                      );
+                                      return (
+                                        <a
+                                          key={runId}
+                                          href={href}
+                                          onClick={(event) =>
+                                            handleInternalLinkClick(
+                                              event,
+                                              href,
+                                            )}
+                                        >
+                                          Open grade run {runId}
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                              {(() => {
+                                const outlierChip = buildOutlierChip(outlier);
+                                const inChat = composerChipIds.has(
+                                  outlierChip.chipId,
+                                );
+                                return (
+                                  <div className="workbench-summary-actions">
+                                    <Button
+                                      variant="secondary"
+                                      size="small"
+                                      onClick={() =>
+                                        inChat
+                                          ? removeComposerChip(
+                                            outlierChip.chipId,
+                                          )
+                                          : addComposerChip(outlierChip)}
+                                      disabled={!onComposerChipsChange}
+                                    >
+                                      {inChat
+                                        ? "Remove from chat"
+                                        : "Add to chat"}
+                                    </Button>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           </div>
                         );
                       })}
@@ -1040,6 +1139,29 @@ function VerifyPage(
               {batchState.requests.length > 0 && (
                 <div className="verify-section">
                   <strong>Batch requests</strong>
+                  {(batchState.startedAt ||
+                    batchState.finishedAt) && (
+                    <div className="verify-status-meta">
+                      {batchState.startedAt
+                        ? `started ${
+                          formatTimestampShort(batchState.startedAt)
+                        }`
+                        : ""}
+                      {batchState.finishedAt
+                        ? ` · finished ${
+                          formatTimestampShort(batchState.finishedAt)
+                        }`
+                        : ""}
+                    </div>
+                  )}
+                  {batchState.requested > 0 && (
+                    <div className="verify-progress-row">
+                      <span>Queued: {queuedCount}</span>
+                      <span>Running: {batchState.active}</span>
+                      <span>Completed: {batchState.completed}</span>
+                      <span>Failed: {batchState.failed}</span>
+                    </div>
+                  )}
                   <ul className="verify-request-list">
                     {batchState.requests.map((request, index) => (
                       <li

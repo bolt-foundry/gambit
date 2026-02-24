@@ -370,8 +370,9 @@ code:not(pre *) {
 }
 .verify-status-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
 }
 .verify-status-main {
@@ -391,6 +392,7 @@ code:not(pre *) {
   color: var(--color-text-muted);
 }
 .verify-verdict-badge {
+  margin-left: auto;
   border-radius: calc(10px * var(--corner-radius-scale, 1));
   corner-shape: squircle;
   border: 1px solid var(--color-border);
@@ -443,6 +445,26 @@ code:not(pre *) {
   font-weight: 700;
   color: var(--color-text);
 }
+.verify-sample-size-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.verify-sample-size-copy {
+  display: flex;
+  flex-direction: column;
+}
+.verify-sample-size-row .verify-metric-value {
+  margin-top: 4px;
+}
+.verify-sample-scope-select {
+  min-width: 170px;
+}
+.verify-sample-scope-select .gds-listbox-field-label {
+  display: none;
+}
 .verify-metric-value--compact {
   font-size: 14px;
 }
@@ -450,6 +472,25 @@ code:not(pre *) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.verify-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.verify-section-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.verify-section-sort {
+  min-width: 150px;
+}
+.verify-section-sort .gds-listbox-field-label {
+  display: none;
 }
 .verify-outlier-list {
   display: flex;
@@ -2451,6 +2492,23 @@ code:not(pre *) {
 .gds-listbox-trigger:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.gds-listbox--size-small .gds-listbox-field-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.gds-listbox--size-small .gds-listbox-trigger {
+  padding: 4px 28px 4px 10px;
+  gap: 0;
+}
+.gds-listbox--size-small .gds-listbox-label {
+  font-size: 13px;
+}
+.gds-listbox--size-small .gds-listbox-meta {
+  display: none;
+}
+.gds-listbox--size-small .gds-listbox-caret {
+  right: 9px;
 }
 .gds-listbox-label {
   font-weight: 600;
