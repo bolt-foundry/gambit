@@ -1418,17 +1418,26 @@ function App() {
   const isGrade = !isDocs &&
     routeTab === "grade";
   const isVerify = !isDocs && verifyTabEnabled && routeTab === "verify";
-  const currentPage = isDocs
-    ? "docs"
-    : isBuild
-    ? "build"
-    : isTestBot
-    ? "test"
-    : isGrade
-    ? "grade"
-    : isVerify
-    ? "verify"
-    : "debug";
+  let currentPage:
+    | "docs"
+    | "build"
+    | "test"
+    | "grade"
+    | "verify"
+    | "debug";
+  if (isDocs) {
+    currentPage = "docs";
+  } else if (isBuild) {
+    currentPage = "build";
+  } else if (isTestBot) {
+    currentPage = "test";
+  } else if (isGrade) {
+    currentPage = "grade";
+  } else if (isVerify) {
+    currentPage = "verify";
+  } else {
+    currentPage = "debug";
+  }
 
   useEffect(() => {
     if (activeWorkspaceId || lastWorkspaceIdRef.current) return;
@@ -1447,13 +1456,22 @@ function App() {
           workspaceId?: string;
         };
         if (!res.ok || typeof data.workspaceId !== "string") return;
-        const nextPath = currentPage === "test"
-          ? buildWorkspacePath("test", data.workspaceId)
-          : currentPage === "grade"
-          ? buildGradePath(data.workspaceId)
-          : currentPage === "verify"
-          ? buildWorkspacePath("verify", data.workspaceId)
-          : buildWorkspacePath("build", data.workspaceId);
+        let nextPath: string;
+        switch (currentPage) {
+          case "test":
+            nextPath = buildWorkspacePath("test", data.workspaceId);
+            break;
+          case "grade":
+            nextPath = buildGradePath(data.workspaceId);
+            break;
+          case "verify":
+            nextPath = buildWorkspacePath("verify", data.workspaceId);
+            break;
+          case "build":
+          default:
+            nextPath = buildWorkspacePath("build", data.workspaceId);
+            break;
+        }
         replacePath(nextPath);
       })
       .finally(() => {
@@ -1500,15 +1518,26 @@ function App() {
   ]);
   const handleSelectSession = useCallback(
     (sessionId: string) => {
-      const nextPath = currentPage === "test" || currentPage === "docs"
-        ? buildWorkspacePath("test", sessionId)
-        : currentPage === "grade"
-        ? buildGradePath(sessionId)
-        : currentPage === "verify"
-        ? buildVerifyPath(sessionId)
-        : currentPage === "build"
-        ? buildWorkspacePath("build", sessionId)
-        : buildWorkspacePath("debug", sessionId);
+      let nextPath: string;
+      switch (currentPage) {
+        case "docs":
+        case "test":
+          nextPath = buildWorkspacePath("test", sessionId);
+          break;
+        case "grade":
+          nextPath = buildGradePath(sessionId);
+          break;
+        case "verify":
+          nextPath = buildVerifyPath(sessionId);
+          break;
+        case "build":
+          nextPath = buildWorkspacePath("build", sessionId);
+          break;
+        case "debug":
+        default:
+          nextPath = buildWorkspacePath("debug", sessionId);
+          break;
+      }
       navigate(nextPath);
       setSessionsDrawerOpen(false);
     },
@@ -1604,6 +1633,77 @@ function App() {
     });
     setWorkbenchDrawerOpen(true);
   }, [activeWorkspaceId]);
+
+  const pageContent = useMemo(() => {
+    switch (currentPage) {
+      case "docs":
+        return <DocsPage />;
+      case "build":
+        return <BuildPage setNavActions={setNavActions} />;
+      case "debug":
+        return (
+          <SimulatorApp
+            basePath={simulatorBasePath}
+            setNavActions={setNavActions}
+            workspacesApi={workspacesApi}
+            onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
+            activeWorkspaceId={activeWorkspaceId}
+          />
+        );
+      case "test":
+        return (
+          <TestBotPage
+            onReplaceTestBotSession={handleReplaceTestBotSession}
+            onResetTestBotSession={handleResetTestBotSession}
+            activeWorkspaceId={activeWorkspaceId}
+            requestedRunId={requestedTestRunId}
+            resetToken={testBotResetToken}
+            setNavActions={setNavActions}
+            onFeedbackPersisted={handleFeedbackPersisted}
+            onAddErrorToWorkbench={handleAddErrorToWorkbench}
+          />
+        );
+      case "verify":
+        return (
+          <VerifyPage
+            setNavActions={setNavActions}
+            onAppPathChange={handleAppPathChange}
+            activeWorkspaceId={activeWorkspaceId}
+          />
+        );
+      case "grade":
+      default:
+        return (
+          <GradePage
+            setNavActions={setNavActions}
+            onAppPathChange={handleAppPathChange}
+            activeWorkspaceId={activeWorkspaceId}
+            requestedGradeRunId={requestedGradeRunId}
+            onFlagsUpdate={applyFlagsUpdate}
+            onOptimisticToggleFlag={optimisticToggleFlag}
+            onOptimisticFlagReason={optimisticFlagReason}
+            onAddErrorToWorkbench={handleAddErrorToWorkbench}
+          />
+        );
+    }
+  }, [
+    activeWorkspaceId,
+    applyFlagsUpdate,
+    currentPage,
+    handleAddErrorToWorkbench,
+    handleAppPathChange,
+    handleFeedbackPersisted,
+    handleReplaceTestBotSession,
+    handleResetTestBotSession,
+    optimisticFlagReason,
+    optimisticToggleFlag,
+    requestedGradeRunId,
+    requestedTestRunId,
+    setNavActions,
+    simulatorBasePath,
+    testBotResetToken,
+    workspacesApi,
+  ]);
 
   return (
     <WorkspaceProvider
@@ -1716,53 +1816,7 @@ function App() {
             </div>
             <div className="app-content-frame">
               <div className="page-shell">
-                {currentPage === "docs"
-                  ? <DocsPage />
-                  : currentPage === "build"
-                  ? <BuildPage setNavActions={setNavActions} />
-                  : currentPage === "debug"
-                  ? (
-                    <SimulatorApp
-                      basePath={simulatorBasePath}
-                      setNavActions={setNavActions}
-                      workspacesApi={workspacesApi}
-                      onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
-                      activeWorkspaceId={activeWorkspaceId}
-                    />
-                  )
-                  : currentPage === "test"
-                  ? (
-                    <TestBotPage
-                      onReplaceTestBotSession={handleReplaceTestBotSession}
-                      onResetTestBotSession={handleResetTestBotSession}
-                      activeWorkspaceId={activeWorkspaceId}
-                      requestedRunId={requestedTestRunId}
-                      resetToken={testBotResetToken}
-                      setNavActions={setNavActions}
-                      onFeedbackPersisted={handleFeedbackPersisted}
-                      onAddErrorToWorkbench={handleAddErrorToWorkbench}
-                    />
-                  )
-                  : currentPage === "verify"
-                  ? (
-                    <VerifyPage
-                      setNavActions={setNavActions}
-                      onAppPathChange={handleAppPathChange}
-                      activeWorkspaceId={activeWorkspaceId}
-                    />
-                  )
-                  : (
-                    <GradePage
-                      setNavActions={setNavActions}
-                      onAppPathChange={handleAppPathChange}
-                      activeWorkspaceId={activeWorkspaceId}
-                      requestedGradeRunId={requestedGradeRunId}
-                      onFlagsUpdate={applyFlagsUpdate}
-                      onOptimisticToggleFlag={optimisticToggleFlag}
-                      onOptimisticFlagReason={optimisticFlagReason}
-                      onAddErrorToWorkbench={handleAddErrorToWorkbench}
-                    />
-                  )}
+                {pageContent}
               </div>
               {workbenchDrawerOpen && (
                 <WorkbenchDrawer
