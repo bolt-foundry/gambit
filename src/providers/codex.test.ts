@@ -124,6 +124,41 @@ Deno.test("codex provider responses returns updatedState with thread metadata", 
   assertEquals(result?.updatedState?.meta?.["codex.threadId"], "thread-rsp");
 });
 
+Deno.test("codex provider updatedState does not carry prior traces", async () => {
+  const provider = createCodexProvider({
+    runCommand: () =>
+      Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(
+          [
+            JSON.stringify({ type: "thread.started", thread_id: "thread-rsp" }),
+            JSON.stringify({
+              type: "item.completed",
+              item: { type: "agent_message", text: "response mode reply" },
+            }),
+          ].join("\n"),
+        ),
+        stderr: new Uint8Array(),
+      }),
+  });
+
+  const result = await provider.chat({
+    model: "codex-cli/default",
+    messages: [{ role: "user", content: "hello" }],
+    state: {
+      runId: "run-1",
+      messages: [],
+      traces: [{
+        type: "response.completed",
+        response: { id: "resp-1", object: "response", status: "completed" },
+      }] as unknown as SavedState["traces"],
+    } as SavedState,
+  });
+
+  assertEquals(result.updatedState?.traces, undefined);
+});
+
 Deno.test("codex provider responses forwards request.params to codex args", async () => {
   const calls: Array<Array<string>> = [];
   const provider = createCodexProvider({

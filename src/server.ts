@@ -174,6 +174,18 @@ const extractPersistedWorkspacePayload = (
   }
   return nested as Record<string, unknown>;
 };
+const safeJsonStringify = (value: unknown): string => {
+  const stack: Array<unknown> = [];
+  return JSON.stringify(value, function (_key, candidate) {
+    if (!candidate || typeof candidate !== "object") return candidate;
+    while (stack.length > 0 && stack[stack.length - 1] !== this) {
+      stack.pop();
+    }
+    if (stack.includes(candidate)) return "[Circular]";
+    stack.push(candidate);
+    return candidate;
+  });
+};
 const GAMBIT_BOT_SOURCE_DECK_URL = new URL(
   "./decks/gambit-bot/PROMPT.md",
   import.meta.url,
@@ -3685,7 +3697,7 @@ export function startWebSocketSimulator(opts: {
             },
           );
         }
-        return new Response(JSON.stringify(payload), {
+        return new Response(safeJsonStringify(payload), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -3719,7 +3731,7 @@ export function startWebSocketSimulator(opts: {
             },
           );
         }
-        return new Response(JSON.stringify(payload), {
+        return new Response(safeJsonStringify(payload), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -3746,7 +3758,7 @@ export function startWebSocketSimulator(opts: {
             },
           );
         }
-        return new Response(JSON.stringify(payload), {
+        return new Response(safeJsonStringify(payload), {
           headers: { "content-type": "application/json" },
         });
       }
@@ -6498,6 +6510,14 @@ function simulatorReactHtml(
       normalized === "no" ||
       normalized === "off");
   })();
+  const verifyTabEnabled = (() => {
+    const raw = Deno.env.get("GAMBIT_SIMULATOR_VERIFY_TAB");
+    if (raw === undefined) return false;
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true" ||
+      normalized === "yes" ||
+      normalized === "on";
+  })();
   const chatAccordionEnabled = (() => {
     const raw = Deno.env.get("GAMBIT_SIMULATOR_CHAT_ACCORDION");
     if (raw === undefined) return true;
@@ -6546,6 +6566,11 @@ function simulatorReactHtml(
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
     window.__GAMBIT_VERSION__ = ${JSON.stringify(gambitVersion)};
     window.__GAMBIT_BUILD_TAB_ENABLED__ = ${JSON.stringify(buildTabEnabled)};
+    window.__GAMBIT_VERIFY_TAB_ENABLED__ = ${
+    JSON.stringify(
+      verifyTabEnabled,
+    )
+  };
     window.__GAMBIT_CHAT_ACCORDION_ENABLED__ = ${
     JSON.stringify(
       chatAccordionEnabled,

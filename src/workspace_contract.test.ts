@@ -17,6 +17,10 @@ Deno.test("buildWorkspacePath supports run-addressed test and grade routes", () 
     buildWorkspacePath("debug", "ws_1", { runId: "ignored" }),
     "/workspaces/ws_1/debug",
   );
+  assertEquals(
+    buildWorkspacePath("verify", "ws_1"),
+    "/workspaces/ws_1/verify",
+  );
 });
 
 Deno.test("parseWorkspaceRoute parses run-addressed test and grade routes", () => {
@@ -34,9 +38,17 @@ Deno.test("parseWorkspaceRoute parses run-addressed test and grade routes", () =
     testRunId: undefined,
     gradeRunId: "grade_1",
   });
+  assertEquals(parseWorkspaceRoute("/workspaces/ws_1/verify"), {
+    workspaceId: "ws_1",
+    tab: "verify",
+    isNew: false,
+    testRunId: undefined,
+    gradeRunId: undefined,
+  });
 });
 
 Deno.test("parseWorkspaceRoute rejects unsupported route combinations", () => {
   assertEquals(parseWorkspaceRoute("/workspaces/ws_1/debug/run_1"), null);
   assertEquals(parseWorkspaceRoute("/workspaces/new/test/run_1"), null);
+  assertEquals(parseWorkspaceRoute("/workspaces/ws_1/verify/run_1"), null);
 });

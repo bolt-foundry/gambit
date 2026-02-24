@@ -1381,6 +1381,7 @@ export function WorkspaceProvider(
       const data = await res.json() as {
         session?: CalibrateSession;
         run?: CalibrationRun;
+        error?: string;
       };
       if (data.session) {
         setGradeSessions((prev) => {
@@ -1392,6 +1393,17 @@ export function WorkspaceProvider(
           }
           return [data.session!, ...prev];
         });
+      }
+      if (!data.run) {
+        throw new Error(
+          data.error ?? "Calibration response missing run payload",
+        );
+      }
+      if (data.run.status !== "completed") {
+        throw new Error(
+          data.run.error ??
+            `Calibration run ended with status ${data.run.status}`,
+        );
       }
       setGradeError(null);
       return data;

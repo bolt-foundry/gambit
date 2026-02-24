@@ -250,6 +250,24 @@ function appendSyntheticTools(
   }
 }
 
+function mapText(
+  text: CreateResponseRequest["text"],
+): CreateResponseRequest["text"] | undefined {
+  if (!text) return undefined;
+  const format = text.format;
+  if (!format || typeof format !== "object" || format.type !== "json_schema") {
+    return text;
+  }
+  if (format.strict === false) return text;
+  return {
+    ...text,
+    format: {
+      ...format,
+      strict: false,
+    },
+  };
+}
+
 function mapToolChoice(
   toolChoice: CreateResponseRequest["tool_choice"],
 ): Record<string, unknown> | string | undefined {
@@ -615,7 +633,7 @@ async function createResponse(
     max_tool_calls: request.max_tool_calls,
     store: request.store,
     include: request.include,
-    text: request.text,
+    text: mapText(request.text),
     stream_options: request.stream_options,
     background: request.background,
     truncation: request.truncation,

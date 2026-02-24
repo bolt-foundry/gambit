@@ -9,6 +9,9 @@ temperature = 0.2
 effort = "medium"
 summary = "detailed"
 
+[guardrails]
+timeoutMs = 0
+
 [[scenarios]]
 path = "./scenarios/faq_bot_build_flow/PROMPT.md"
 label = "FAQ bot build flow"

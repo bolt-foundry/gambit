@@ -68,6 +68,9 @@ export const handleUiRoutes = async (
     url.pathname.startsWith("/simulate") ||
     url.pathname.startsWith("/debug") ||
     url.pathname.startsWith("/build") ||
+    url.pathname.startsWith("/test") ||
+    url.pathname.startsWith("/grade") ||
+    url.pathname.startsWith("/verify") ||
     url.pathname.startsWith("/editor") ||
     url.pathname.startsWith("/docs")
   ) {

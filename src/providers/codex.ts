@@ -603,7 +603,6 @@ function buildUpdatedState(input: {
     items: priorState?.items,
     messageRefs: priorState?.messageRefs,
     feedback: priorState?.feedback,
-    traces: priorState?.traces,
     meta,
     notes: priorState?.notes,
     conversationScore: priorState?.conversationScore,

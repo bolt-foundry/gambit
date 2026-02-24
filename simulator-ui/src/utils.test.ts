@@ -105,6 +105,16 @@ Deno.test("getWorkspaceRouteFromPath parses run-addressed grade route", () => {
   });
 });
 
+Deno.test("getWorkspaceRouteFromPath parses verify route", () => {
+  assertEquals(getWorkspaceRouteFromPath("/workspaces/ws_1/verify"), {
+    workspaceId: "ws_1",
+    tab: "verify",
+    isNew: false,
+    testRunId: undefined,
+    gradeRunId: undefined,
+  });
+});
+
 Deno.test("deriveBuildDisplayMessages keeps assistant turns ordered when item ids repeat across actions", () => {
   const traces: TraceEvent[] = [
     {
