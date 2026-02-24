@@ -396,6 +396,142 @@ Deno.test("test deck selection remains isolated across concurrent simulator inst
   }
 });
 
+Deno.test("deck-level maxTurns is clamped and used by /api/test/run", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const rootDeckPath = path.join(dir, "max-turns-root.deck.ts");
+  const lowDeckPath = path.join(dir, "max-turns-low.deck.ts");
+  const highDeckPath = path.join(dir, "max-turns-high.deck.ts");
+  const escapedLowPath = lowDeckPath.replaceAll("\\", "\\\\");
+  const escapedHighPath = highDeckPath.replaceAll("\\", "\\\\");
+
+  await Deno.writeTextFile(
+    lowDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    highDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  await Deno.writeTextFile(
+    rootDeckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "low-max-turns",
+        label: "Low maxTurns",
+        path: "${escapedLowPath}",
+        maxTurns: 0,
+      }, {
+        id: "high-max-turns",
+        label: "High maxTurns",
+        path: "${escapedHighPath}",
+        maxTurns: 500,
+      }],
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat() {
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath: rootDeckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  try {
+    const workspaceRes = await fetch(
+      `http://127.0.0.1:${port}/api/workspace/new`,
+      { method: "POST" },
+    );
+    assertEquals(workspaceRes.ok, true);
+    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
+    const workspaceId = workspaceBody.workspaceId ?? "";
+    assert(workspaceId.length > 0);
+
+    const listRes = await fetch(
+      `http://127.0.0.1:${port}/api/test?workspaceId=${
+        encodeURIComponent(workspaceId)
+      }`,
+    );
+    assertEquals(listRes.ok, true);
+    const listBody = await listRes.json() as {
+      testDecks?: Array<{ id?: string; maxTurns?: number }>;
+    };
+    const lowDeck = listBody.testDecks?.find((deck) =>
+      deck.id === "low-max-turns"
+    );
+    const highDeck = listBody.testDecks?.find((deck) =>
+      deck.id === "high-max-turns"
+    );
+    assertEquals(lowDeck?.maxTurns, 1);
+    assertEquals(highDeck?.maxTurns, 200);
+
+    const lowRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        botDeckPath: lowDeckPath,
+      }),
+    });
+    assertEquals(lowRunRes.ok, true);
+    const lowRunBody = await lowRunRes.json() as {
+      run?: { maxTurns?: number };
+    };
+    assertEquals(lowRunBody.run?.maxTurns, 1);
+
+    const highRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId,
+        botDeckPath: highDeckPath,
+      }),
+    });
+    assertEquals(highRunRes.ok, true);
+    const highRunBody = await highRunRes.json() as {
+      run?: { maxTurns?: number };
+    };
+    assertEquals(highRunBody.run?.maxTurns, 200);
+  } finally {
+    await server.shutdown();
+    await server.finished;
+  }
+});
+
 Deno.test("scenario run completes with workerSandbox enabled", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -536,7 +672,7 @@ Deno.test("build bot endpoint streams status and runs", async () => {
   const html = await homepage.text();
   assert(html.includes("__GAMBIT_BUILD_TAB_ENABLED__"));
   assert(html.includes("__GAMBIT_VERIFY_TAB_ENABLED__"));
-  assert(/__GAMBIT_VERIFY_TAB_ENABLED__\s*=\s*false/.test(html));
+  assert(/__GAMBIT_VERIFY_TAB_ENABLED__\s*=\s*true/.test(html));
 
   const runId = "test-build-run";
   const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {

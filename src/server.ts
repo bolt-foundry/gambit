@@ -2235,7 +2235,8 @@ export function startWebSocketSimulator(opts: {
   const parseDeckMaxTurns = (value: unknown): number | undefined => {
     if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
     const rounded = Math.round(value);
-    if (rounded < 1 || rounded > 200) return undefined;
+    if (rounded < 1) return 1;
+    if (rounded > 200) return 200;
     return rounded;
   };
 
@@ -6512,11 +6513,11 @@ function simulatorReactHtml(
   })();
   const verifyTabEnabled = (() => {
     const raw = Deno.env.get("GAMBIT_SIMULATOR_VERIFY_TAB");
-    if (raw === undefined) return false;
+    if (raw === undefined) return true;
     const normalized = raw.trim().toLowerCase();
-    return normalized === "1" || normalized === "true" ||
-      normalized === "yes" ||
-      normalized === "on";
+    return !(normalized === "0" || normalized === "false" ||
+      normalized === "no" ||
+      normalized === "off");
   })();
   const chatAccordionEnabled = (() => {
     const raw = Deno.env.get("GAMBIT_SIMULATOR_CHAT_ACCORDION");
@@ -6566,11 +6567,7 @@ function simulatorReactHtml(
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
     window.__GAMBIT_VERSION__ = ${JSON.stringify(gambitVersion)};
     window.__GAMBIT_BUILD_TAB_ENABLED__ = ${JSON.stringify(buildTabEnabled)};
-    window.__GAMBIT_VERIFY_TAB_ENABLED__ = ${
-    JSON.stringify(
-      verifyTabEnabled,
-    )
-  };
+    window.__GAMBIT_VERIFY_TAB_ENABLED__ = ${JSON.stringify(verifyTabEnabled)};
     window.__GAMBIT_CHAT_ACCORDION_ENABLED__ = ${
     JSON.stringify(
       chatAccordionEnabled,
