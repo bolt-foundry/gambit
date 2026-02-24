@@ -83,8 +83,13 @@ export default function TestBotPage(props: {
   resetToken?: number;
   setNavActions?: (actions: React.ReactNode | null) => void;
   onFeedbackPersisted?: (workspaceId: string) => void;
-  onAddScenarioErrorToWorkbench?: (
-    payload: { workspaceId?: string; runId?: string; error: string },
+  onAddErrorToWorkbench?: (
+    payload: {
+      source?: "scenario_run_error" | "grader_run_error";
+      workspaceId?: string;
+      runId?: string;
+      error: string;
+    },
   ) => void;
 }) {
   const {
@@ -95,7 +100,7 @@ export default function TestBotPage(props: {
     resetToken,
     setNavActions,
     onFeedbackPersisted,
-    onAddScenarioErrorToWorkbench,
+    onAddErrorToWorkbench,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
   const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
@@ -1253,7 +1258,7 @@ export default function TestBotPage(props: {
           handleStartAssistant={handleStartAssistant}
           onScore={handleTestBotScore}
           onReasonChange={handleTestBotReason}
-          onAddScenarioErrorToWorkbench={onAddScenarioErrorToWorkbench}
+          onAddErrorToWorkbench={onAddErrorToWorkbench}
         />
       </PageGrid>
     </PageShell>

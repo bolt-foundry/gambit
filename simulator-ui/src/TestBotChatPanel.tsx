@@ -61,8 +61,13 @@ type Props = {
     score: number,
     reason: string,
   ) => void | Promise<void>;
-  onAddScenarioErrorToWorkbench?: (
-    payload: { workspaceId?: string; runId?: string; error: string },
+  onAddErrorToWorkbench?: (
+    payload: {
+      source?: "scenario_run_error" | "grader_run_error";
+      workspaceId?: string;
+      runId?: string;
+      error: string;
+    },
   ) => void;
 };
 
@@ -98,7 +103,7 @@ export default function TestBotChatPanel(props: Props) {
     handleStartAssistant,
     onScore,
     onReasonChange,
-    onAddScenarioErrorToWorkbench,
+    onAddErrorToWorkbench,
   } = props;
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const lastRunMessageCountRef = useRef(0);
@@ -334,12 +339,13 @@ export default function TestBotChatPanel(props: Props) {
               variant="secondary"
               size="small"
               onClick={() =>
-                onAddScenarioErrorToWorkbench?.({
+                onAddErrorToWorkbench?.({
+                  source: "scenario_run_error",
                   workspaceId: runWorkspaceId ?? activeWorkspaceId ?? undefined,
                   runId: run.id,
                   error: run.error!,
                 })}
-              disabled={!onAddScenarioErrorToWorkbench}
+              disabled={!onAddErrorToWorkbench}
               data-testid="testbot-add-error-to-chat"
             >
               Add to chat

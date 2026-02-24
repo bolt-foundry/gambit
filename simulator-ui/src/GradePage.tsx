@@ -119,6 +119,7 @@ function GradePage(
     onFlagsUpdate,
     onOptimisticToggleFlag,
     onOptimisticFlagReason,
+    onAddErrorToWorkbench,
     requestedGradeRunId,
   }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
@@ -131,6 +132,14 @@ function GradePage(
       turnIndex?: number;
     }) => void;
     onOptimisticFlagReason?: (refId: string, reason: string) => void;
+    onAddErrorToWorkbench?: (
+      payload: {
+        source?: "scenario_run_error" | "grader_run_error";
+        workspaceId?: string;
+        runId?: string;
+        error: string;
+      },
+    ) => void;
     requestedGradeRunId?: string | null;
   },
 ) {
@@ -763,7 +772,33 @@ function GradePage(
             gap: 12,
           }}
         >
-          {error && <div className="error">{error}</div>}
+          {error && (
+            <Callout
+              variant="danger"
+              title="Grader run failed"
+              actions={
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() =>
+                    onAddErrorToWorkbench?.({
+                      source: "grader_run_error",
+                      workspaceId: selectedSessionId ?? activeWorkspaceId ??
+                        undefined,
+                      runId: routeGradeRunId ?? expandedRunId ?? undefined,
+                      error,
+                    })}
+                  disabled={!onAddErrorToWorkbench}
+                  data-testid="grade-add-error-to-chat"
+                >
+                  Add to chat
+                </Button>
+              }
+              data-testid="grade-error-callout"
+            >
+              {error}
+            </Callout>
+          )}
           {loading && (
             <div className="editor-status">Loading calibration data…</div>
           )}
@@ -1131,7 +1166,32 @@ function GradePage(
                                 </div>
                               )}
                               {item.error && (
-                                <div className="error">{item.error}</div>
+                                <Callout
+                                  variant="danger"
+                                  title="Grade run failed"
+                                  actions={
+                                    <Button
+                                      variant="secondary"
+                                      size="small"
+                                      onClick={() =>
+                                        onAddErrorToWorkbench?.({
+                                          source: "grader_run_error",
+                                          workspaceId: selectedSessionId ??
+                                            activeWorkspaceId ??
+                                            undefined,
+                                          runId: item.runId,
+                                          error: item.error!,
+                                        })}
+                                      disabled={!onAddErrorToWorkbench}
+                                      data-testid="grade-run-add-error-to-chat"
+                                    >
+                                      Add to chat
+                                    </Button>
+                                  }
+                                  data-testid="grade-run-error-callout"
+                                >
+                                  {item.error}
+                                </Callout>
                               )}
                               {isOpen && (
                                 <div className="calibrate-result-details">

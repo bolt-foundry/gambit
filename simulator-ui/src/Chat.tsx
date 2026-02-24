@@ -16,8 +16,10 @@ import { useBuildChat } from "./BuildChatContext.tsx";
 
 export { bucketBuildChatDisplay };
 
+type WorkbenchErrorSource = "scenario_run_error" | "grader_run_error";
+
 export type WorkbenchScenarioErrorContext = {
-  source: "scenario_run_error";
+  source: WorkbenchErrorSource;
   workspaceId?: string;
   runId?: string;
   capturedAt: string;
@@ -61,6 +63,20 @@ export type WorkbenchComposerChip = WorkbenchMessageContext & {
   enabled: boolean;
 };
 
+function isWorkbenchErrorContext(
+  context: WorkbenchMessageContext,
+): context is WorkbenchScenarioErrorContext {
+  return context.source === "scenario_run_error" ||
+    context.source === "grader_run_error";
+}
+
+function isWorkbenchErrorChip(
+  chip: WorkbenchComposerChip,
+): chip is WorkbenchComposerChip & WorkbenchScenarioErrorContext {
+  return chip.source === "scenario_run_error" ||
+    chip.source === "grader_run_error";
+}
+
 const ERROR_CONTEXT_START_MARKER = "[gambit:error-context/v1]";
 const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
 const WORKBENCH_CONTEXT_START_MARKER = "[gambit:workbench-context/v2]";
@@ -82,12 +98,15 @@ function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
     : undefined;
   const runId = typeof record.runId === "string" ? record.runId : undefined;
 
-  if (record.source === "scenario_run_error") {
+  if (
+    record.source === "scenario_run_error" ||
+    record.source === "grader_run_error"
+  ) {
     if (typeof record.error !== "string" || record.error.trim().length === 0) {
       return null;
     }
     return {
-      source: "scenario_run_error",
+      source: record.source,
       workspaceId,
       runId,
       capturedAt: record.capturedAt,
@@ -201,9 +220,7 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
 } | null {
   const decoded = decodeWorkbenchMessageWithContext(content);
   if (decoded) {
-    const errorContext = decoded.contexts.find((context) =>
-      context.source === "scenario_run_error"
-    );
+    const errorContext = decoded.contexts.find(isWorkbenchErrorContext);
     if (!errorContext) return null;
     return { context: errorContext, body: decoded.body };
   }
@@ -260,6 +277,8 @@ function UserMessageContent(props: { content: string }) {
               className="workbench-context-chip--transcript"
               context={context}
               testId={context.source === "scenario_run_error"
+                ? "workbench-transcript-error-chip"
+                : context.source === "grader_run_error"
                 ? "workbench-transcript-error-chip"
                 : undefined}
             />
@@ -501,13 +520,13 @@ export function ChatView(props: {
       return;
     }
     if (!onScenarioErrorChipChange) return;
-    const errorChip = next.find((chip) => chip.source === "scenario_run_error");
+    const errorChip = next.find(isWorkbenchErrorChip);
     if (!errorChip) {
       onScenarioErrorChipChange(null);
       return;
     }
     onScenarioErrorChipChange({
-      source: "scenario_run_error",
+      source: errorChip.source,
       workspaceId: errorChip.workspaceId,
       runId: errorChip.runId,
       capturedAt: errorChip.capturedAt,
@@ -528,32 +547,35 @@ export function ChatView(props: {
     const message = chatDraft.trim();
     const activeChips = resolvedComposerChips.filter((chip) => chip.enabled);
     const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
-    const activeContexts = activeChips
-      .map((chip) => {
-        if (chip.source === "scenario_run_error") {
-          return {
-            source: "scenario_run_error" as const,
-            workspaceId: chip.workspaceId,
-            runId: chip.runId,
-            capturedAt: chip.capturedAt,
-            error: chip.error,
-          };
-        }
-        if (chip.source === "message_rating") {
-          return {
-            source: "message_rating" as const,
-            workspaceId: chip.workspaceId,
-            runId: chip.runId,
-            capturedAt: chip.capturedAt,
-            messageRefId: chip.messageRefId,
-            statePath: chip.statePath,
-            statePointer: chip.statePointer,
-            score: chip.score,
-            reason: chip.reason,
-          };
-        }
-        return {
-          source: "grading_flag" as const,
+    const activeContexts: WorkbenchMessageContext[] = [];
+    for (const chip of activeChips) {
+      if (isWorkbenchErrorChip(chip)) {
+        activeContexts.push({
+          source: chip.source,
+          workspaceId: chip.workspaceId,
+          runId: chip.runId,
+          capturedAt: chip.capturedAt,
+          error: chip.error,
+        });
+        continue;
+      }
+      if (chip.source === "message_rating") {
+        activeContexts.push({
+          source: "message_rating",
+          workspaceId: chip.workspaceId,
+          runId: chip.runId,
+          capturedAt: chip.capturedAt,
+          messageRefId: chip.messageRefId,
+          statePath: chip.statePath,
+          statePointer: chip.statePointer,
+          score: chip.score,
+          reason: chip.reason,
+        });
+        continue;
+      }
+      if (chip.source === "grading_flag") {
+        activeContexts.push({
+          source: "grading_flag",
           workspaceId: chip.workspaceId,
           runId: chip.runId,
           capturedAt: chip.capturedAt,
@@ -561,8 +583,9 @@ export function ChatView(props: {
           refId: chip.refId,
           score: chip.score,
           message: chip.message,
-        };
-      });
+        });
+      }
+    }
     if (!message && activeContexts.length === 0) return;
     const outboundMessage = activeContexts.length > 0
       ? encodeWorkbenchMessageWithContext(message, activeContexts)
