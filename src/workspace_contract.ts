@@ -4,13 +4,19 @@ export const WORKSPACE_ROUTE_BASE = "/workspaces";
 export const WORKSPACE_API_BASE = "/api/workspace";
 export const WORKSPACES_API_BASE = "/api/workspaces";
 
-export type WorkspaceRouteTab = "debug" | "build" | "test" | "grade";
+export type WorkspaceRouteTab =
+  | "debug"
+  | "build"
+  | "test"
+  | "grade"
+  | "verify";
 
 export const WORKSPACE_ROUTE_TABS: Array<WorkspaceRouteTab> = [
   "debug",
   "build",
   "test",
   "grade",
+  "verify",
 ];
 
 export type WorkspaceRoute = {
@@ -91,7 +97,7 @@ export const parseWorkspaceRoute = (
   pathname: string,
 ): WorkspaceRoute | null => {
   const match = pathname.match(
-    /^\/workspaces\/([^/]+)\/(debug|build|test|grade)(?:\/([^/]+))?$/,
+    /^\/workspaces\/([^/]+)\/(debug|build|test|grade|verify)(?:\/([^/]+))?$/,
   );
   if (!match) return null;
   const rawId = decodeURIComponent(match[1]);

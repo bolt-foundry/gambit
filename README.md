@@ -167,6 +167,14 @@ It also serves:
 ```
 http://localhost:8000/test
 http://localhost:8000/grade
+http://localhost:8000/verify (when GAMBIT_SIMULATOR_VERIFY_TAB=1)
+```
+
+To seed deterministic Verify fixtures for local iteration:
+
+```bash
+cd packages/gambit
+deno task verify:seed-fixture
 ```
 
 The Debug UI shows transcript lanes plus a trace/tools feed. If the deck has an\

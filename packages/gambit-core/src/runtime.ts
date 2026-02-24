@@ -450,7 +450,10 @@ function deadlineForRun(
   guardrails: Guardrails,
   existing?: number,
 ): number {
-  const timeoutDeadline = performance.now() + guardrails.timeoutMs;
+  const timeoutMs = guardrails.timeoutMs === 0
+    ? Number.POSITIVE_INFINITY
+    : guardrails.timeoutMs;
+  const timeoutDeadline = performance.now() + timeoutMs;
   if (typeof existing === "number" && Number.isFinite(existing)) {
     return Math.min(existing, timeoutDeadline);
   }

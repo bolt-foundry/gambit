@@ -53,7 +53,12 @@ if (!windowObj.location) {
 }
 
 type WorkspaceSocketMessage = import("./utils.ts").WorkspaceSocketMessage;
-const { WorkspaceProvider, useWorkspaceBuild, useWorkspaceTest } = await import(
+const {
+  WorkspaceProvider,
+  useWorkspaceBuild,
+  useWorkspaceGrade,
+  useWorkspaceTest,
+} = await import(
   "./WorkspaceContext.tsx"
 );
 
@@ -757,6 +762,99 @@ Deno.test("WorkspaceContext build stop failure does not refresh stale workspace 
     // Must not re-fetch stale workspace ws-1 during stop failure recovery.
     assertEquals(ws1Fetches, 1);
     assertEquals(hook.run.id, "ws-2");
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+    globalThis.fetch = originalFetch;
+    globalThis.EventSource = originalEventSource;
+    FakeEventSource.instances = [];
+  }
+});
+
+Deno.test("WorkspaceContext runGrader treats error-status calibration runs as failures", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+
+  let hook: any = null;
+  const requests: Array<{ url: string; body?: unknown }> = [];
+
+  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    let parsedBody: unknown;
+    if (typeof init?.body === "string" && init.body.length > 0) {
+      parsedBody = JSON.parse(init.body);
+    }
+    requests.push({ url, body: parsedBody });
+
+    if (url.endsWith("/api/workspaces/ws-1")) {
+      return new Response(JSON.stringify(createSnapshot()), { status: 200 });
+    }
+    if (url.endsWith("/api/calibrate/run")) {
+      return new Response(
+        JSON.stringify({
+          session: {
+            id: "ws-1",
+            gradingRuns: [{
+              id: "cal-1",
+              graderId: "grader-1",
+              graderPath:
+                "/tmp/tester/graders/order_tracking_resolution/PROMPT.md",
+              status: "error",
+              error: "400 Provider returned error",
+            }],
+          },
+          run: {
+            id: "cal-1",
+            graderId: "grader-1",
+            graderPath:
+              "/tmp/tester/graders/order_tracking_resolution/PROMPT.md",
+            status: "error",
+            error: "400 Provider returned error",
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  function Harness() {
+    hook = useWorkspaceGrade();
+    return null;
+  }
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <WorkspaceProvider workspaceId="ws-1">
+          <Harness />
+        </WorkspaceProvider>,
+      );
+    });
+    assert(hook);
+
+    await act(async () => {
+      await assertRejects(
+        async () => {
+          await hook.runGrader({
+            workspaceId: "ws-1",
+            graderId: "grader-1",
+          });
+        },
+        Error,
+        "400 Provider returned error",
+      );
+    });
+
+    const request = requests.find((entry) =>
+      entry.url.endsWith("/api/calibrate/run")
+    );
+    assert(request);
   } finally {
     if (renderer) {
       await act(async () => {

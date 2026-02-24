@@ -2784,6 +2784,104 @@ Deno.test("child deck timeout override tightens inherited deadline", async () =>
   }
 });
 
+Deno.test("child deck timeoutMs=0 disables deck-local timeout", async () => {
+  const origNow = performance.now;
+  let now = 0;
+  (performance as { now: () => number }).now = () => now;
+
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "child-timeout-zero.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.any(),
+      outputSchema: z.string(),
+      guardrails: { timeoutMs: 0 },
+      run() {
+        (globalThis).__advanceNow?.(20);
+        return "late";
+      }
+    });
+    `,
+  );
+
+  try {
+    (globalThis as { __advanceNow?: (delta: number) => void }).__advanceNow = (
+      delta,
+    ) => {
+      now += delta;
+    };
+    const result = await runDeck({
+      path: deckPath,
+      input: {},
+      modelProvider: dummyProvider,
+      isRoot: true,
+      guardrails: { timeoutMs: 1_000 },
+      runDeadlineMs: 1_000,
+    });
+    assertEquals(result, "late");
+  } finally {
+    delete (globalThis as { __advanceNow?: (delta: number) => void })
+      .__advanceNow;
+    (performance as { now: () => number }).now = origNow;
+  }
+});
+
+Deno.test("child deck timeoutMs=0 still respects inherited deadline", async () => {
+  const origNow = performance.now;
+  let now = 0;
+  (performance as { now: () => number }).now = () => now;
+
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = await writeTempDeck(
+    dir,
+    "child-timeout-zero-inherited.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.any(),
+      outputSchema: z.string(),
+      guardrails: { timeoutMs: 0 },
+      run() {
+        (globalThis).__advanceNow?.(20);
+        return "late";
+      }
+    });
+    `,
+  );
+
+  try {
+    (globalThis as { __advanceNow?: (delta: number) => void }).__advanceNow = (
+      delta,
+    ) => {
+      now += delta;
+    };
+    await assertRejects(
+      () =>
+        runDeck({
+          path: deckPath,
+          input: {},
+          modelProvider: dummyProvider,
+          isRoot: true,
+          guardrails: { timeoutMs: 1_000 },
+          runDeadlineMs: 10,
+        }),
+      Error,
+      "Timeout exceeded",
+    );
+  } finally {
+    delete (globalThis as { __advanceNow?: (delta: number) => void })
+      .__advanceNow;
+    (performance as { now: () => number }).now = origNow;
+  }
+});
+
 Deno.test("worker sandbox flag defaults false when env access is denied", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

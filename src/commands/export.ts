@@ -289,6 +289,28 @@ async function readMarkdownToolSchemaFiles(
   return Array.from(out);
 }
 
+async function readMarkdownResponseExtensionSchemaFiles(
+  filePath: string,
+): Promise<Array<string>> {
+  if (!filePath.endsWith(".md")) return [];
+  const { attrs, baseDir } = await readMarkdownFrontMatter(filePath);
+  if (!attrs) return [];
+  const out = new Set<string>();
+  const rawExtensions = attrs.responseItemExtensions;
+  if (!Array.isArray(rawExtensions)) return [];
+  for (const rawExtension of rawExtensions) {
+    if (!rawExtension || typeof rawExtension !== "object") continue;
+    const extension = rawExtension as { dataSchema?: unknown };
+    if (
+      typeof extension.dataSchema === "string" &&
+      extension.dataSchema.trim()
+    ) {
+      out.add(path.resolve(baseDir, extension.dataSchema));
+    }
+  }
+  return Array.from(out);
+}
+
 async function readMarkdownFrontMatter(
   filePath: string,
 ): Promise<{ attrs?: Record<string, unknown>; baseDir: string }> {
@@ -346,6 +368,13 @@ async function collectDeckDependencyPaths(
     for (const schemaPath of await readMarkdownToolSchemaFiles(resolved)) {
       files.add(schemaPath);
     }
+    for (
+      const schemaPath of await readMarkdownResponseExtensionSchemaFiles(
+        resolved,
+      )
+    ) {
+      files.add(schemaPath);
+    }
 
     const deck = await loadDeck(resolved);
     for (const card of deck.cards ?? []) {
@@ -354,6 +383,13 @@ async function collectDeckDependencyPaths(
         files.add(schemaPath);
       }
       for (const schemaPath of await readMarkdownToolSchemaFiles(card.path)) {
+        files.add(schemaPath);
+      }
+      for (
+        const schemaPath of await readMarkdownResponseExtensionSchemaFiles(
+          card.path,
+        )
+      ) {
         files.add(schemaPath);
       }
       for (const action of card.actionDecks ?? []) {

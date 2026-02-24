@@ -70,6 +70,13 @@ export async function handleServeCommand(opts: {
   const baseRoot = resolveServeWorkspaceRoot(cwd);
   await ensureGambitBotPolicyMirror(baseRoot);
   let resolvedDeckPath = opts.deckPath?.trim();
+  let restoredWorkspace:
+    | {
+      id: string;
+      rootDeckPath: string;
+      rootDir: string;
+    }
+    | undefined;
 
   if (opts.artifactPath?.trim()) {
     const restored = await restoreServeArtifactBundle({
@@ -77,6 +84,11 @@ export async function handleServeCommand(opts: {
       projectRoot: baseRoot,
     });
     resolvedDeckPath = restored.rootDeckPath;
+    restoredWorkspace = {
+      id: restored.sessionId,
+      rootDeckPath: restored.rootDeckPath,
+      rootDir: path.join(restored.sessionDir, "deck"),
+    };
     logger.log(
       `[serve] restored artifact workspace ${restored.sessionId} (${
         restored.restored ? "new restore" : "already restored"
@@ -127,6 +139,7 @@ export async function handleServeCommand(opts: {
       contextProvided: opts.contextProvided,
       port,
       verbose: opts.verbose,
+      workspace: restoredWorkspace,
       autoBundle,
       forceBundle,
       sourceMap,

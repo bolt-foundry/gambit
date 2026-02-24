@@ -297,11 +297,14 @@ export const DEFAULT_WORKSPACE_DEBUG_PATH = buildWorkspacePath("debug");
 export const DEFAULT_TEST_PATH = buildWorkspacePath("test");
 export const DEFAULT_BUILD_PATH = buildWorkspacePath("build");
 export const DEFAULT_GRADE_PATH = buildWorkspacePath("grade");
+export const DEFAULT_VERIFY_PATH = buildWorkspacePath("verify");
 export const GRADE_PATH_SUFFIX = "/grade";
 export const buildGradePath = (workspaceId: string, gradeRunId?: string) =>
   buildWorkspacePath("grade", workspaceId, { runId: gradeRunId });
 export const buildTestPath = (workspaceId?: string | null, runId?: string) =>
   buildWorkspacePath("test", workspaceId, { runId });
+export const buildVerifyPath = (workspaceId?: string | null) =>
+  buildWorkspacePath("verify", workspaceId);
 export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
 export const SIMULATOR_STREAM_ID = "gambit-simulator";
 export const WORKSPACE_STREAM_ID = "gambit-workspace";
@@ -312,6 +315,10 @@ export const BUILD_STREAM_ID = "gambit-build";
 export const buildTabEnabled = Boolean(
   (window as unknown as { __GAMBIT_BUILD_TAB_ENABLED__?: boolean })
     .__GAMBIT_BUILD_TAB_ENABLED__,
+);
+export const verifyTabEnabled = Boolean(
+  (window as unknown as { __GAMBIT_VERIFY_TAB_ENABLED__?: boolean })
+    .__GAMBIT_VERIFY_TAB_ENABLED__,
 );
 export const workspaceOnboardingEnabled = Boolean(
   (window as unknown as { __GAMBIT_WORKSPACE_ONBOARDING__?: boolean })
@@ -1713,6 +1720,12 @@ export function normalizeAppPath(input: string): string {
     }
     return DEFAULT_GRADE_PATH;
   }
+  if (trimmed === "/verify") {
+    if (window.location.pathname !== DEFAULT_VERIFY_PATH) {
+      window.history.replaceState({}, "", DEFAULT_VERIFY_PATH);
+    }
+    return DEFAULT_VERIFY_PATH;
+  }
   if (trimmed === "/build") {
     if (window.location.pathname !== DEFAULT_BUILD_PATH) {
       window.history.replaceState({}, "", DEFAULT_BUILD_PATH);
@@ -1729,7 +1742,7 @@ export function normalizeAppPath(input: string): string {
     return DEFAULT_WORKSPACE_DEBUG_PATH;
   }
   if (
-    /^\/workspaces\/[^/]+\/(debug|build)$/.test(trimmed) ||
+    /^\/workspaces\/[^/]+\/(debug|build|verify)$/.test(trimmed) ||
     /^\/workspaces\/[^/]+\/(test|grade)(?:\/[^/]+)?$/.test(trimmed)
   ) {
     return trimmed;
@@ -1744,7 +1757,8 @@ export function normalizeAppPath(input: string): string {
   if (
     trimmed.startsWith("/workspaces/") && !trimmed.includes("/debug") &&
     !trimmed.includes("/test") && !trimmed.includes("/grade") &&
-    !trimmed.includes("/build") && trimmed !== DEFAULT_WORKSPACE_DEBUG_PATH
+    !trimmed.includes("/build") && !trimmed.includes("/verify") &&
+    trimmed !== DEFAULT_WORKSPACE_DEBUG_PATH
   ) {
     const remainder = trimmed.slice("/workspaces/".length);
     if (remainder && remainder !== "new") {

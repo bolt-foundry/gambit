@@ -18,6 +18,7 @@ import {
   buildGradePath,
   buildTabEnabled,
   buildTestPath,
+  buildVerifyPath,
   classNames,
   cloneValue,
   deckDisplayPath,
@@ -25,6 +26,7 @@ import {
   deckPath,
   DEFAULT_GRADE_PATH,
   DEFAULT_TEST_PATH,
+  DEFAULT_VERIFY_PATH,
   deriveInitialFromSchema,
   DOCS_PATH,
   extractInitFromTraces,
@@ -42,6 +44,7 @@ import {
   setDurableStreamOffset,
   SIMULATOR_STREAM_ID,
   toRelativePath,
+  verifyTabEnabled,
   workspaceIdFromWindow,
   WORKSPACES_BASE_PATH,
 } from "./utils.ts";
@@ -67,6 +70,7 @@ import {
 import GradePage from "./GradePage.tsx";
 import TestBotPage from "./TestBotPage.tsx";
 import BuildPage from "./BuildPage.tsx";
+import VerifyPage from "./VerifyPage.tsx";
 import type { WorkbenchComposerChip } from "./Chat.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
@@ -1395,6 +1399,16 @@ function App() {
     }
   }, [path, replacePath]);
 
+  useEffect(() => {
+    if (verifyTabEnabled) return;
+    const route = getWorkspaceRouteFromPath(path);
+    if (route?.tab !== "verify") return;
+    const fallback = route.workspaceId
+      ? buildGradePath(route.workspaceId)
+      : DEFAULT_GRADE_PATH;
+    replacePath(fallback);
+  }, [path, replacePath, verifyTabEnabled]);
+
   const isDocs = path === DOCS_PATH;
   const routeTab = liveRoute?.tab ?? pathRoute?.tab;
   const isBuild = buildTabEnabled &&
@@ -1403,6 +1417,7 @@ function App() {
     (routeTab === "test" || /\/test$/.test(path));
   const isGrade = !isDocs &&
     routeTab === "grade";
+  const isVerify = !isDocs && verifyTabEnabled && routeTab === "verify";
   const currentPage = isDocs
     ? "docs"
     : isBuild
@@ -1411,6 +1426,8 @@ function App() {
     ? "test"
     : isGrade
     ? "grade"
+    : isVerify
+    ? "verify"
     : "debug";
 
   useEffect(() => {
@@ -1419,7 +1436,7 @@ function App() {
     if (workspaceInitRef.current) return;
     if (
       currentPage !== "build" && currentPage !== "test" &&
-      currentPage !== "grade"
+      currentPage !== "grade" && currentPage !== "verify"
     ) {
       return;
     }
@@ -1434,6 +1451,8 @@ function App() {
           ? buildWorkspacePath("test", data.workspaceId)
           : currentPage === "grade"
           ? buildGradePath(data.workspaceId)
+          : currentPage === "verify"
+          ? buildWorkspacePath("verify", data.workspaceId)
           : buildWorkspacePath("build", data.workspaceId);
         replacePath(nextPath);
       })
@@ -1447,7 +1466,7 @@ function App() {
       "",
     ) || "/";
     const directMatch = normalizedPath.match(
-      /^\/workspaces\/([^/]+)\/(?:debug|build|test|grade)(?:\/[^/]+)?$/,
+      /^\/workspaces\/([^/]+)\/(?:debug|build|test|grade|verify)(?:\/[^/]+)?$/,
     );
     if (directMatch?.[1] && directMatch[1] !== "new") {
       return decodeURIComponent(directMatch[1]);
@@ -1469,8 +1488,12 @@ function App() {
         ? buildGradePath(workspaceId, workspaceRunIds.gradeRunId ?? undefined)
         : DEFAULT_GRADE_PATH;
     }
+    if (next === "verify") {
+      return workspaceId ? buildVerifyPath(workspaceId) : DEFAULT_VERIFY_PATH;
+    }
     return buildWorkspacePath("debug", workspaceId);
   }, [
+    DEFAULT_VERIFY_PATH,
     resolveNavWorkspaceId,
     workspaceRunIds.gradeRunId,
     workspaceRunIds.testRunId,
@@ -1481,6 +1504,8 @@ function App() {
         ? buildWorkspacePath("test", sessionId)
         : currentPage === "grade"
         ? buildGradePath(sessionId)
+        : currentPage === "verify"
+        ? buildVerifyPath(sessionId)
         : currentPage === "build"
         ? buildWorkspacePath("build", sessionId)
         : buildWorkspacePath("debug", sessionId);
@@ -1638,6 +1663,14 @@ function App() {
                     testId: "nav-grade",
                     href: resolveNavPath("grade"),
                   },
+                  ...(verifyTabEnabled
+                    ? [{
+                      id: "verify",
+                      label: "Verify",
+                      testId: "nav-verify",
+                      href: resolveNavPath("verify"),
+                    }]
+                    : []),
                   {
                     id: "debug",
                     label: "Debug",
@@ -1702,6 +1735,14 @@ function App() {
                       setNavActions={setNavActions}
                       onFeedbackPersisted={handleFeedbackPersisted}
                       onAddScenarioErrorToWorkbench={handleAddScenarioErrorToWorkbench}
+                    />
+                  )
+                  : currentPage === "verify"
+                  ? (
+                    <VerifyPage
+                      setNavActions={setNavActions}
+                      onAppPathChange={handleAppPathChange}
+                      activeWorkspaceId={activeWorkspaceId}
                     />
                   )
                   : (

@@ -1,7 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type {
+  JSONValue,
+  ModelProvider,
+  SavedState,
+} from "@bolt-foundry/gambit-core";
 import {
   modImportPath,
   readDurableStreamEvents,
@@ -531,6 +535,8 @@ Deno.test("build bot endpoint streams status and runs", async () => {
   const homepage = await fetch(`http://127.0.0.1:${port}/build`);
   const html = await homepage.text();
   assert(html.includes("__GAMBIT_BUILD_TAB_ENABLED__"));
+  assert(html.includes("__GAMBIT_VERIFY_TAB_ENABLED__"));
+  assert(/__GAMBIT_VERIFY_TAB_ENABLED__\s*=\s*false/.test(html));
 
   const runId = "test-build-run";
   const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
@@ -1305,6 +1311,103 @@ Deno.test("build reset aborts in-flight runtime execution", async () => {
   assertEquals(resetBody.reset, true);
 
   await waitForAbortCount(() => abortCount, 1);
+
+  await server.shutdown();
+  await server.finished;
+});
+
+Deno.test("workspace test run endpoint safely serializes circular trace payloads", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+  const deckPath = path.join(dir, "workspace-circular-trace.deck.ts");
+  await Deno.writeTextFile(
+    deckPath,
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+  );
+
+  const provider: ModelProvider = {
+    chat(input) {
+      const updatedState: SavedState = {
+        runId: input.state?.runId ?? "run-circular",
+        messages: [
+          ...(input.state?.messages ?? []),
+          { role: "assistant", content: "ok" },
+        ],
+      };
+      const circularTrace = {
+        type: "response.completed",
+        response: {
+          id: "resp-circular",
+          object: "response",
+          status: "completed",
+          output: [],
+          updatedState,
+        },
+      } as unknown as Record<string, JSONValue>;
+      (updatedState as { traces?: unknown }).traces = [circularTrace];
+      input.onStreamEvent?.(circularTrace);
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+        updatedState,
+      });
+    },
+  };
+
+  const server = startWebSocketSimulator({
+    deckPath,
+    modelProvider: provider,
+    port: 0,
+  });
+  const port = (server.addr as Deno.NetAddr).port;
+
+  const createWorkspaceRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspace/new`,
+    { method: "POST" },
+  );
+  const createWorkspaceBody = await createWorkspaceRes.json() as {
+    workspaceId?: string;
+  };
+  const workspaceId = createWorkspaceBody.workspaceId ?? "";
+  assert(workspaceId.length > 0, "workspace id required");
+
+  const runId = "test-circular";
+  const startRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspaceId,
+      runId,
+      message: "hello",
+      stream: true,
+    }),
+  });
+  assertEquals(startRes.ok, true);
+  await startRes.text();
+
+  const terminal = await waitForTestRunTerminalStatus(port, workspaceId, runId);
+  assertEquals(terminal.status, "completed");
+
+  const readRes = await fetch(
+    `http://127.0.0.1:${port}/api/workspaces/${
+      encodeURIComponent(workspaceId)
+    }/test/${encodeURIComponent(runId)}`,
+  );
+  assertEquals(readRes.status, 200);
+  const readText = await readRes.text();
+  assertEquals(readText.includes('"[Circular]"'), true);
+  const readPayload = JSON.parse(readText) as {
+    test?: { run?: { id?: string } };
+  };
+  assertEquals(readPayload.test?.run?.id, runId);
 
   await server.shutdown();
   await server.finished;

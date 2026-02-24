@@ -229,3 +229,65 @@ Deno.test("openrouter responses preserves extension payloads", async () => {
     data: 0.42,
   }]);
 });
+
+Deno.test("openrouter responses forces json_schema text format strict=false", async () => {
+  let received: Record<string, unknown> | null = null;
+  const client = {
+    responses: {
+      create: (params: Record<string, unknown>) => {
+        received = params;
+        return Promise.resolve(buildResponseFixture());
+      },
+    },
+    chat: {
+      completions: {
+        create: () => Promise.reject(new Error("chat not expected")),
+      },
+    },
+  } as OpenAIClient;
+
+  const provider = createOpenRouterProvider({
+    apiKey: "test",
+    client,
+  });
+  const textConfig = {
+    format: {
+      type: "json_schema" as const,
+      name: "grader_output",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          score: { type: "number" },
+          reason: { type: "string" },
+          evidence: { type: "string" },
+        },
+        required: ["score", "reason"],
+      },
+    },
+    verbosity: "high" as const,
+  };
+
+  await provider.responses?.({
+    request: {
+      model: "openrouter/gpt-4o",
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+      text: textConfig,
+    },
+  });
+
+  const receivedText = received?.["text"] as
+    | {
+      format?: { type?: string; strict?: boolean };
+      verbosity?: "low" | "medium" | "high";
+    }
+    | undefined;
+  assertEquals(receivedText?.format?.type, "json_schema");
+  assertEquals(receivedText?.format?.strict, false);
+  assertEquals(receivedText?.verbosity, "high");
+  assertEquals(textConfig.format.strict, true);
+});
