@@ -807,6 +807,9 @@ function GradePage(
               <div className="flex-column gap-4">
                 <div className="flex-row items-center gap-8">
                   <strong>Grader runs</strong>
+                  <span className="secondary-note">
+                    ({filteredSessionRuns.length})
+                  </span>
                 </div>
               </div>
               {runItems.length === 0 && (

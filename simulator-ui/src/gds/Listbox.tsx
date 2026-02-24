@@ -15,6 +15,8 @@ export type ListboxOption = {
   kind?: "option";
   value: string;
   label: string;
+  triggerLabel?: string;
+  triggerMeta?: string | null;
   meta?: string | null;
   disabled?: boolean;
 } | {
@@ -33,6 +35,10 @@ export type ListboxProps = {
   label?: string;
   labelClassName?: string;
   id?: string;
+  popoverMatchTriggerWidth?: boolean;
+  popoverMinWidth?: number;
+  popoverAlign?: "left" | "right";
+  size?: "default" | "small";
 };
 
 export default function Listbox(props: ListboxProps) {
@@ -45,6 +51,10 @@ export default function Listbox(props: ListboxProps) {
     label,
     labelClassName,
     id,
+    popoverMatchTriggerWidth = true,
+    popoverMinWidth,
+    popoverAlign = "left",
+    size = "default",
   } = props;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -66,18 +76,39 @@ export default function Listbox(props: ListboxProps) {
     }
     return null;
   }, [options, value]);
+  const selectedTriggerMeta = useMemo(() => {
+    if (!selected) return null;
+    if ("triggerMeta" in selected) return selected.triggerMeta ?? null;
+    return selected.meta ?? null;
+  }, [selected]);
 
   const updatePopover = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    setPopoverStyle({
+    const style: React.CSSProperties = {
       position: "fixed",
       top: rect.bottom + 6,
-      left: rect.left,
-      width: rect.width,
-    });
-  }, []);
+    };
+    if (popoverMatchTriggerWidth) {
+      style.width = rect.width;
+    } else if (
+      typeof popoverMinWidth === "number" && Number.isFinite(popoverMinWidth)
+    ) {
+      style.minWidth = popoverMinWidth;
+    }
+    if (popoverAlign === "right") {
+      style.left = popoverMatchTriggerWidth
+        ? rect.right - rect.width
+        : rect.right;
+      if (!popoverMatchTriggerWidth) {
+        style.transform = "translateX(-100%)";
+      }
+    } else {
+      style.left = rect.left;
+    }
+    setPopoverStyle(style);
+  }, [popoverAlign, popoverMatchTriggerWidth, popoverMinWidth]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -117,8 +148,12 @@ export default function Listbox(props: ListboxProps) {
     };
   }, [open, updatePopover]);
 
+  const rootClassName = size === "small"
+    ? "gds-listbox gds-listbox--size-small"
+    : "gds-listbox";
+
   return (
-    <div className="gds-listbox" ref={rootRef}>
+    <div className={rootClassName} ref={rootRef}>
       {label && (
         <label className={labelClasses} htmlFor={controlId} id={labelId}>
           {label}
@@ -136,12 +171,12 @@ export default function Listbox(props: ListboxProps) {
         ref={triggerRef}
       >
         <ScrollingText
-          text={selected?.label ?? placeholder}
+          text={selected?.triggerLabel ?? selected?.label ?? placeholder}
           className="gds-listbox-label"
         />
-        {selected?.meta && (
+        {selectedTriggerMeta && (
           <ScrollingText
-            text={selected.meta}
+            text={selectedTriggerMeta}
             className="gds-listbox-meta"
           />
         )}

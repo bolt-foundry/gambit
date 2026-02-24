@@ -3868,16 +3868,16 @@ export function startWebSocketSimulator(opts: {
           const runId = randomId("cal");
           let entry: GradingRunRecord;
           const upsertCalibrationRun = (
-            state: SavedState,
             nextEntry: GradingRunRecord,
           ): SavedState => {
+            const latestState = readSessionState(workspaceId) ?? sessionState;
             const previousRuns = Array.isArray(
-                (state.meta as { gradingRuns?: unknown })?.gradingRuns,
+                (latestState.meta as { gradingRuns?: unknown })?.gradingRuns,
               )
-              ? ((state.meta as { gradingRuns: Array<GradingRunRecord> })
+              ? ((latestState.meta as { gradingRuns: Array<GradingRunRecord> })
                 .gradingRuns)
-              : Array.isArray(state.meta?.calibrationRuns)
-              ? (state.meta?.calibrationRuns as Array<GradingRunRecord>)
+              : Array.isArray(latestState.meta?.calibrationRuns)
+              ? (latestState.meta?.calibrationRuns as Array<GradingRunRecord>)
               : [];
             const index = previousRuns.findIndex((run) =>
               run.id === nextEntry.id
@@ -3886,9 +3886,9 @@ export function startWebSocketSimulator(opts: {
               ? previousRuns.map((run, i) => (i === index ? nextEntry : run))
               : [...previousRuns, nextEntry];
             const nextState = persistSessionState({
-              ...state,
+              ...latestState,
               meta: {
-                ...(state.meta ?? {}),
+                ...(latestState.meta ?? {}),
                 gradingRuns: nextRuns,
               },
             });
@@ -3911,7 +3911,6 @@ export function startWebSocketSimulator(opts: {
             });
             return nextState;
           };
-          let currentState = sessionState;
           try {
             const result = await (async () => {
               if (runMode !== "turns") {
@@ -3926,7 +3925,7 @@ export function startWebSocketSimulator(opts: {
                   gradingRunId: runId,
                   input: { session: sessionPayload },
                 };
-                currentState = upsertCalibrationRun(currentState, entry);
+                upsertCalibrationRun(entry);
                 return await runDeckWithFallback({
                   path: grader.path,
                   input: { session: sessionPayload },
@@ -3962,7 +3961,7 @@ export function startWebSocketSimulator(opts: {
                 input: { session: sessionPayload },
                 result: { mode: "turns", totalTurns, turns: [] },
               };
-              currentState = upsertCalibrationRun(currentState, entry);
+              upsertCalibrationRun(entry);
               if (totalTurns === 0) {
                 return { mode: "turns", totalTurns, turns: [] };
               }
@@ -3999,7 +3998,7 @@ export function startWebSocketSimulator(opts: {
                   ...entry,
                   result: { mode: "turns", totalTurns, turns: [...turns] },
                 };
-                currentState = upsertCalibrationRun(currentState, entry);
+                upsertCalibrationRun(entry);
               }
               return { mode: "turns", totalTurns, turns };
             })();
@@ -4039,7 +4038,7 @@ export function startWebSocketSimulator(opts: {
               error: message,
             };
           }
-          const nextState = upsertCalibrationRun(currentState, entry);
+          const nextState = upsertCalibrationRun(entry);
           const sessionMeta = buildSessionMeta(workspaceId, nextState);
           return new Response(
             JSON.stringify({
