@@ -17,6 +17,12 @@ type WorkbenchComposerChipContext =
     source: "grading_flag";
     message: string;
     score?: number;
+  }
+  | {
+    source: "verify_outlier";
+    message: string;
+    instability?: boolean;
+    score?: number;
   };
 
 function formatScoreLabel(score: number): string {
@@ -29,6 +35,7 @@ function formatContextLabel(context: WorkbenchComposerChipContext): string {
   if (context.source === "message_rating") {
     return formatScoreLabel(context.score);
   }
+  if (context.source === "verify_outlier") return "Verify";
   return "Flag";
 }
 
@@ -41,8 +48,21 @@ function formatContextTooltip(context: WorkbenchComposerChipContext): string {
       return context.reason?.trim() ||
         `Rating ${formatScoreLabel(context.score)}`;
     case "grading_flag":
+    case "verify_outlier":
       return context.message;
   }
+}
+
+function getVerifyOutlierClass(
+  context: Extract<WorkbenchComposerChipContext, { source: "verify_outlier" }>,
+): string {
+  if (typeof context.instability === "boolean") {
+    return getScoreClass(context.instability ? -1 : 1);
+  }
+  if (typeof context.score === "number" && Number.isFinite(context.score)) {
+    return getScoreClass(context.score);
+  }
+  return getScoreClass(0);
 }
 
 export default function WorkbenchComposerChip(
@@ -83,6 +103,8 @@ export default function WorkbenchComposerChip(
     context.source === "grading_flag" && "workbench-context-chip--flag",
     context.source === "grading_flag" && typeof score === "number" &&
       getScoreClass(score),
+    context.source === "verify_outlier" && "workbench-context-chip--flag",
+    context.source === "verify_outlier" && getVerifyOutlierClass(context),
     context.source === "message_rating" && "workbench-context-chip--rating",
     context.source === "message_rating" && typeof score === "number" &&
       getScoreClass(score),
@@ -101,6 +123,8 @@ export default function WorkbenchComposerChip(
   const isPassive = !showToggle && !showRemove;
   const content = context.source === "grading_flag"
     ? <Icon name="flag" size={10} />
+    : context.source === "verify_outlier"
+    ? "Verify"
     : label;
 
   if (isPassive) {

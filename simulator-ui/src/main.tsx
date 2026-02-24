@@ -1669,6 +1669,8 @@ function App() {
             setNavActions={setNavActions}
             onAppPathChange={handleAppPathChange}
             activeWorkspaceId={activeWorkspaceId}
+            composerChips={workbenchComposerChips}
+            onComposerChipsChange={setWorkbenchComposerChips}
           />
         );
       case "grade":
@@ -1702,6 +1704,7 @@ function App() {
     setNavActions,
     simulatorBasePath,
     testBotResetToken,
+    workbenchComposerChips,
     workspacesApi,
   ]);
 
