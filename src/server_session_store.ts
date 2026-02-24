@@ -196,17 +196,20 @@ const normalizeEventType = (
 };
 
 const safeStringify = (value: unknown, space?: number): string => {
-  const seen = new WeakSet<object>();
+  const stack: Array<unknown> = [];
   return JSON.stringify(
     value,
-    (_key, candidate) => {
+    function (_key, candidate) {
       if (!candidate || typeof candidate !== "object") {
         return candidate;
       }
-      if (seen.has(candidate as object)) {
+      while (stack.length > 0 && stack[stack.length - 1] !== this) {
+        stack.pop();
+      }
+      if (stack.includes(candidate)) {
         return "[Circular]";
       }
-      seen.add(candidate as object);
+      stack.push(candidate);
       return candidate;
     },
     space,
