@@ -856,7 +856,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
             activeWorkspaceId="ws-1"
             onReplaceTestBotSession={() => {}}
             onResetTestBotSession={() => {}}
-            onAddScenarioErrorToWorkbench={(payload) => {
+            onAddErrorToWorkbench={(payload) => {
               addPayload = payload;
             }}
           />

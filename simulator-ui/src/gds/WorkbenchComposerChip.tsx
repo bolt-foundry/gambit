@@ -5,7 +5,7 @@ import Tooltip from "./Tooltip.tsx";
 
 type WorkbenchComposerChipContext =
   | {
-    source: "scenario_run_error";
+    source: "scenario_run_error" | "grader_run_error";
     error: string;
   }
   | {
@@ -24,7 +24,8 @@ function formatScoreLabel(score: number): string {
 }
 
 function formatContextLabel(context: WorkbenchComposerChipContext): string {
-  if (context.source === "scenario_run_error") return "Error";
+  if (context.source === "scenario_run_error") return "Scenario error";
+  if (context.source === "grader_run_error") return "Grader error";
   if (context.source === "message_rating") {
     return formatScoreLabel(context.score);
   }
@@ -32,12 +33,16 @@ function formatContextLabel(context: WorkbenchComposerChipContext): string {
 }
 
 function formatContextTooltip(context: WorkbenchComposerChipContext): string {
-  if (context.source === "scenario_run_error") return context.error;
-  if (context.source === "message_rating") {
-    return context.reason?.trim() ||
-      `Rating ${formatScoreLabel(context.score)}`;
+  switch (context.source) {
+    case "scenario_run_error":
+    case "grader_run_error":
+      return context.error;
+    case "message_rating":
+      return context.reason?.trim() ||
+        `Rating ${formatScoreLabel(context.score)}`;
+    case "grading_flag":
+      return context.message;
   }
-  return context.message;
 }
 
 export default function WorkbenchComposerChip(
@@ -73,7 +78,8 @@ export default function WorkbenchComposerChip(
   const score = "score" in context ? context.score : undefined;
   const badgeClassName = classNames(
     "workbench-context-chip",
-    context.source === "scenario_run_error" && "workbench-context-chip--error",
+    (context.source === "scenario_run_error" ||
+      context.source === "grader_run_error") && "workbench-context-chip--error",
     context.source === "grading_flag" && "workbench-context-chip--flag",
     context.source === "grading_flag" && typeof score === "number" &&
       getScoreClass(score),
@@ -81,7 +87,8 @@ export default function WorkbenchComposerChip(
     context.source === "message_rating" && typeof score === "number" &&
       getScoreClass(score),
   );
-  const testIds = context.source === "scenario_run_error"
+  const testIds = context.source === "scenario_run_error" ||
+      context.source === "grader_run_error"
     ? {
       badge: "workbench-error-chip",
       toggle: "workbench-error-chip-toggle",

@@ -1564,16 +1564,22 @@ function App() {
     },
     [activeWorkspaceId, workspacesApi.deleteWorkspace],
   );
-  const handleAddScenarioErrorToWorkbench = useCallback((
-    payload: { workspaceId?: string; runId?: string; error: string },
+  const handleAddErrorToWorkbench = useCallback((
+    payload: {
+      source?: "scenario_run_error" | "grader_run_error";
+      workspaceId?: string;
+      runId?: string;
+      error: string;
+    },
   ) => {
     const resolvedWorkspaceId = payload.workspaceId ?? activeWorkspaceId ??
       undefined;
+    const source = payload.source ?? "scenario_run_error";
     const nextChip: WorkbenchComposerChip = {
-      chipId: `error:${resolvedWorkspaceId ?? ""}:${
+      chipId: `error:${source}:${resolvedWorkspaceId ?? ""}:${
         payload.runId ?? ""
       }:${payload.error}`,
-      source: "scenario_run_error",
+      source,
       workspaceId: resolvedWorkspaceId,
       runId: payload.runId,
       error: payload.error,
@@ -1734,7 +1740,7 @@ function App() {
                       resetToken={testBotResetToken}
                       setNavActions={setNavActions}
                       onFeedbackPersisted={handleFeedbackPersisted}
-                      onAddScenarioErrorToWorkbench={handleAddScenarioErrorToWorkbench}
+                      onAddErrorToWorkbench={handleAddErrorToWorkbench}
                     />
                   )
                   : currentPage === "verify"
@@ -1754,6 +1760,7 @@ function App() {
                       onFlagsUpdate={applyFlagsUpdate}
                       onOptimisticToggleFlag={optimisticToggleFlag}
                       onOptimisticFlagReason={optimisticFlagReason}
+                      onAddErrorToWorkbench={handleAddErrorToWorkbench}
                     />
                   )}
               </div>
