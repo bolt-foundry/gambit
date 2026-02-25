@@ -1,6 +1,6 @@
 +++
 [release]
-since = "f9185fb1967a31e92a4a26dbb94cfe1322148406"
+since = "e5b1e61b190c9b4f3dcc5c80f2d610ddd4f16d80"
 +++
 
 # Changelog
@@ -8,6 +8,27 @@ since = "f9185fb1967a31e92a4a26dbb94cfe1322148406"
 ## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.11
+
+- #4014: restructure FAQ deck and artifact paths.
+- #4029: include response extension schemas in artifact export and default
+  `serve --artifact` to the restored workspace.
+- #4046: ship verify workflow updates (feature-flagged routing, consistency UI,
+  deterministic fixture seeding, outlier/report controls and chips), harden
+  calibrate persistence + status handling, tighten provider/serialization
+  behavior, and move unbounded build timeout to explicit deck opt-in.
+- #4048: default verify tab bootstrap flag to enabled.
+- #4049: clamp deck-level `maxTurns` bounds in test run selection.
+- #4053: add grader error chips to workbench chat.
+- #4054: preserve shared references in safe session serialization.
+- #4055: refactor simulator-ui routing to replace nested ternaries.
+- #4057: align verify outlier chip semantics and display.
+- #4060: improve verify report controls and harden concurrent calibrate
+  persistence.
+- #4061: align verify turn labels and stabilize initial run filtering.
+- #4064: prevent simulator feedback reason text from being clobbered while
+  editing.
 
 ## v0.8.5-rc.10
 
