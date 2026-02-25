@@ -320,15 +320,23 @@ export function FeedbackControls(props: {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
 
+  // Keep local draft in sync with persisted feedback, but never while the user
+  // is actively typing or a save is in flight, otherwise server echoes can
+  // clobber in-progress text and make the textarea feel flaky.
   useEffect(() => {
-    setReason(feedback?.reason ?? "");
-    if (typeof feedback?.score === "number" || feedback?.reason !== undefined) {
-      setStatus("saved");
-    } else {
-      setStatus("idle");
+    const isEditing = status === "unsaved" || status === "saving";
+    if (!isEditing) {
+      setReason(feedback?.reason ?? "");
+      if (
+        typeof feedback?.score === "number" || feedback?.reason !== undefined
+      ) {
+        setStatus("saved");
+      } else {
+        setStatus("idle");
+      }
+      setErrorMessage(null);
     }
-    setErrorMessage(null);
-  }, [feedback?.reason, feedback?.score]);
+  }, [feedback?.reason, feedback?.score, status]);
 
   useEffect(() => {
     if (typeof feedback?.score === "number") {
