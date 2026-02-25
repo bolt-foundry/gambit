@@ -374,12 +374,42 @@ function VerifyPage(
   }, [selectedSession?.gradingRuns]);
 
   const filteredRuns = useMemo(() => {
+    const latestScenarioRunIdFromRuns = sessionRuns
+      .map((run) => scenarioRunIdFromCalibrationRun(run))
+      .find((runId): runId is string => Boolean(runId));
+    const hasOption = (runId: string | null | undefined): runId is string =>
+      Boolean(
+        runId &&
+          scenarioRunOptions.some((entry) => entry.scenarioRunId === runId),
+      );
+    const meta = sessionDetail?.meta && typeof sessionDetail.meta === "object"
+      ? sessionDetail.meta as Record<string, unknown>
+      : {};
+    const currentScenarioRunId = typeof meta.scenarioRunId === "string" &&
+        meta.scenarioRunId.trim().length > 0
+      ? meta.scenarioRunId
+      : null;
+    const activeScenarioRunFilterId = hasOption(workspaceRouting.testRunId)
+      ? workspaceRouting.testRunId
+      : hasOption(selectedScenarioRunId)
+      ? selectedScenarioRunId
+      : hasOption(currentScenarioRunId)
+      ? currentScenarioRunId
+      : scenarioRunOptions[0]?.scenarioRunId ?? latestScenarioRunIdFromRuns ??
+        null;
     return sessionRuns.filter((run) => {
       if (selectedGraderId && run.graderId !== selectedGraderId) return false;
-      if (!selectedScenarioRunId) return true;
-      return scenarioRunIdFromCalibrationRun(run) === selectedScenarioRunId;
+      if (!activeScenarioRunFilterId) return true;
+      return scenarioRunIdFromCalibrationRun(run) === activeScenarioRunFilterId;
     });
-  }, [selectedGraderId, selectedScenarioRunId, sessionRuns]);
+  }, [
+    scenarioRunOptions,
+    selectedGraderId,
+    selectedScenarioRunId,
+    sessionDetail?.meta,
+    sessionRuns,
+    workspaceRouting.testRunId,
+  ]);
 
   const runConsistencySample = useCallback(async (payload: {
     workspaceId: string;
