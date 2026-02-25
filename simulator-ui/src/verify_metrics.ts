@@ -129,7 +129,7 @@ const flattenRunExamples = (
         ? turnRecord.messageRefId
         : undefined;
       const key = messageRefId ? `ref:${messageRefId}` : `turn:${index}`;
-      const label = `Turn ${index + 1}`;
+      const label = `Assistant turn ${fallbackIndex + 1}`;
       const parsed = extractScoreReasonPass(turnRecord.result);
       buckets.push({
         key,
