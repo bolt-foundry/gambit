@@ -1733,7 +1733,7 @@ export function startWebSocketSimulator(opts: {
     const entries: Array<BuildBotFileEntry> = [];
     const shouldSkipRelativePath = (relativePath: string) => {
       const segments = relativePath.split(/\\|\//g).filter(Boolean);
-      return segments.includes(".gambit");
+      return segments.includes(".gambit") || segments.includes(".codex");
     };
     const walk = async (dir: string, relativePrefix: string) => {
       for await (const entry of Deno.readDir(dir)) {
