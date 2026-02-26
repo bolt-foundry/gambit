@@ -3022,19 +3022,22 @@ function collectLocalImportGraph(entryPath: string): Set<string> {
   return visited;
 }
 
-const moduleBaseFilePath = (() => {
+const moduleBaseUrl = (() => {
   try {
-    return path.fromFileUrl(import.meta.url);
+    return new URL(import.meta.url);
   } catch {
     return undefined;
   }
 })();
+const moduleBaseFilePath = moduleBaseUrl?.protocol === "file:"
+  ? path.fromFileUrl(moduleBaseUrl)
+  : undefined;
 
 const WORKER_ENTRY_PATHS = moduleBaseFilePath
   ? [
     "./runtime_worker.ts",
     "./runtime_orchestration_worker.ts",
-  ].map((relative) => path.fromFileUrl(new URL(relative, import.meta.url)))
+  ].map((relative) => path.fromFileUrl(new URL(relative, moduleBaseUrl)))
   : [];
 const BUILTIN_SCHEMAS_DIR = moduleBaseFilePath
   ? path.resolve(path.dirname(moduleBaseFilePath), "../schemas")

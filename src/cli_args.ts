@@ -308,8 +308,8 @@ type CommandDoc = {
 
 function resolveBundledPath(specifier: string): string | null {
   try {
-    const resolved = import.meta.resolve(specifier);
-    if (resolved.startsWith("file:")) {
+    const resolved = new URL(specifier, import.meta.url);
+    if (resolved.protocol === "file:") {
       return path.fromFileUrl(resolved);
     }
   } catch {

@@ -7,7 +7,18 @@ const logger = console;
 export type ScaffoldKind = "demo";
 
 function resolveCandidate(specifier: string): string | undefined {
-  const url = new URL(import.meta.resolve(specifier));
+  let resolvedSpecifier: string;
+  try {
+    resolvedSpecifier = import.meta.resolve(specifier);
+  } catch {
+    try {
+      resolvedSpecifier = new URL(specifier, import.meta.url).href;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const url = new URL(resolvedSpecifier);
   if (url.protocol !== "file:") return undefined;
   const candidatePath = path.fromFileUrl(url);
   try {
