@@ -616,9 +616,14 @@ function defaultCommandRunner(input: {
   onStdoutLine?: (line: string) => void;
 }): Promise<CommandOutput> {
   const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
+  const env = Deno.env.toObject();
+  if (!env.CODEX_HOME || env.CODEX_HOME.trim().length === 0) {
+    env.CODEX_HOME = path.join(input.cwd, ".codex");
+  }
   const child = new Deno.Command(codexBin, {
     args: input.args,
     cwd: input.cwd,
+    env,
     stdout: "piped",
     stderr: "piped",
   }).spawn();
