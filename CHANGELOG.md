@@ -1,13 +1,19 @@
 +++
 [release]
-since = "8b3194ba8de6f5bfe71e33b5012c0aec17626a78"
+since = "175e4900662b374cedd1ebe648e7c25b070ef600"
 +++
 
 # Changelog
 
-## Unreleased (v0.8.5)
+## Unreleased (v0.8.6)
 
 - TBD
+
+## v0.8.5
+
+- #4071: exclude `.codex` entries from Build file listing.
+- #4073: include gambit-core snippets/decks/workers in compiled CLI assets and
+  support non-file `import.meta.url` runtime initialization.
 
 ## v0.8.5-rc.12
 
