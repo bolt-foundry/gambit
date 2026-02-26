@@ -3022,21 +3022,30 @@ function collectLocalImportGraph(entryPath: string): Set<string> {
   return visited;
 }
 
-const WORKER_ENTRY_PATHS = [
-  "./runtime_worker.ts",
-  "./runtime_orchestration_worker.ts",
-].map((relative) => path.fromFileUrl(new URL(relative, import.meta.url)));
-const BUILTIN_SCHEMAS_DIR = path.resolve(
-  path.dirname(path.fromFileUrl(import.meta.url)),
-  "../schemas",
-);
-const BUILTIN_SNIPPETS_DIR = path.resolve(
-  path.dirname(path.fromFileUrl(import.meta.url)),
-  "../snippets",
-);
+const moduleBaseFilePath = (() => {
+  try {
+    return path.fromFileUrl(import.meta.url);
+  } catch {
+    return undefined;
+  }
+})();
+
+const WORKER_ENTRY_PATHS = moduleBaseFilePath
+  ? [
+    "./runtime_worker.ts",
+    "./runtime_orchestration_worker.ts",
+  ].map((relative) => path.fromFileUrl(new URL(relative, import.meta.url)))
+  : [];
+const BUILTIN_SCHEMAS_DIR = moduleBaseFilePath
+  ? path.resolve(path.dirname(moduleBaseFilePath), "../schemas")
+  : undefined;
+const BUILTIN_SNIPPETS_DIR = moduleBaseFilePath
+  ? path.resolve(path.dirname(moduleBaseFilePath), "../snippets")
+  : undefined;
 
 let builtinSchemaBootstrapCache: Array<string> | undefined;
 function builtinSchemaBootstrapReads(): Array<string> {
+  if (!BUILTIN_SCHEMAS_DIR) return [];
   if (builtinSchemaBootstrapCache) return builtinSchemaBootstrapCache;
   const schemaModules: Array<string> = [];
   const stack: Array<string> = [BUILTIN_SCHEMAS_DIR];
@@ -3072,6 +3081,7 @@ function builtinSchemaBootstrapReads(): Array<string> {
 
 let builtinSnippetBootstrapCache: Array<string> | undefined;
 function builtinSnippetBootstrapReads(): Array<string> {
+  if (!BUILTIN_SNIPPETS_DIR) return [];
   if (builtinSnippetBootstrapCache) return builtinSnippetBootstrapCache;
   const snippetFiles: Array<string> = [];
   const stack: Array<string> = [BUILTIN_SNIPPETS_DIR];
@@ -3115,6 +3125,10 @@ function workerBootstrapReadAllowlist(deckPath: string): Array<string> {
 let trustedWorkerBootstrapCache: Array<string> | undefined;
 function trustedWorkerBootstrapReads(): Array<string> {
   if (trustedWorkerBootstrapCache) return trustedWorkerBootstrapCache;
+  if (!moduleBaseFilePath) {
+    trustedWorkerBootstrapCache = [];
+    return trustedWorkerBootstrapCache;
+  }
   const definitionsPath = path.fromFileUrl(
     new URL("./definitions.ts", import.meta.url),
   );
