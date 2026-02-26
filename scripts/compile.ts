@@ -32,7 +32,15 @@ const resolveCoreDir = async (): Promise<string> => {
 const coreDir = await resolveCoreDir();
 const coreRel = normalizePath(path.relative(packageRoot, coreDir));
 const coreCards = normalizePath(path.join(coreRel, "cards"));
+const coreSnippets = normalizePath(path.join(coreRel, "snippets"));
 const coreSchemas = normalizePath(path.join(coreRel, "schemas"));
+const coreDecks = normalizePath(path.join(coreRel, "decks"));
+const coreRuntimeWorker = normalizePath(
+  path.join(coreRel, "src", "runtime_worker.ts"),
+);
+const coreRuntimeOrchestrationWorker = normalizePath(
+  path.join(coreRel, "src", "runtime_orchestration_worker.ts"),
+);
 
 const docIncludeCandidates = [
   "docs/cli/commands",
@@ -54,7 +62,11 @@ const includePaths = [
   "deno.jsonc",
   ...docIncludes,
   coreCards,
+  coreSnippets,
   coreSchemas,
+  coreDecks,
+  coreRuntimeWorker,
+  coreRuntimeOrchestrationWorker,
   "src/decks",
   "scaffolds",
   "simulator-ui/dist",
