@@ -419,14 +419,14 @@ function cloneValue<T>(value: T): T {
 }
 
 function resolveDeckPath(p: string): string {
-  const absolutePath = path.isAbsolute(p) ? p : path.resolve(p);
-  try {
-    const url = import.meta.resolve(path.toFileUrl(absolutePath).href);
-    if (url.startsWith("file:")) return path.fromFileUrl(url);
-    return url;
-  } catch {
-    return absolutePath;
+  if (p.startsWith("file:")) {
+    try {
+      return path.fromFileUrl(p);
+    } catch {
+      return p;
+    }
   }
+  return path.isAbsolute(p) ? p : path.resolve(p);
 }
 
 function materializeDefaults(schema?: NormalizedSchema): unknown {

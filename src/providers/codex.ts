@@ -21,10 +21,18 @@ const CODEX_REASONING_SUMMARY_ENV = "GAMBIT_CODEX_REASONING_SUMMARY";
 const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
-const MCP_SERVER_PATH = path.resolve(
-  path.dirname(path.fromFileUrl(import.meta.url)),
-  "../mcp_server.ts",
-);
+const MCP_SERVER_PATH = (() => {
+  try {
+    const moduleUrl = new URL(import.meta.url);
+    if (moduleUrl.protocol !== "file:") return null;
+    return path.resolve(
+      path.dirname(path.fromFileUrl(moduleUrl)),
+      "../mcp_server.ts",
+    );
+  } catch {
+    return null;
+  }
+})();
 
 type CodexTurnUsage = {
   input_tokens?: unknown;
@@ -147,7 +155,7 @@ function codexConfigArgs(input: {
     args.push("-c", `model_verbosity=${tomlString(verbosity.trim())}`);
   }
 
-  if (shouldEnableMcpBridge()) {
+  if (shouldEnableMcpBridge() && MCP_SERVER_PATH) {
     args.push("-c", `mcp_servers.gambit.command=${tomlString("deno")}`);
     args.push(
       "-c",
