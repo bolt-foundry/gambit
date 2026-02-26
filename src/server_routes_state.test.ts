@@ -151,7 +151,7 @@ Deno.test("build API errors are persisted to session errors sidecar", async () =
   await server.finished;
 });
 
-Deno.test("build files API excludes .gambit directory entries", async () => {
+Deno.test("build files API excludes .gambit and .codex directory entries", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
 
@@ -213,6 +213,12 @@ Deno.test("build files API excludes .gambit directory entries", async () => {
     path.join(root, ".gambit", "nested", "also-hidden.txt"),
     "secret",
   );
+  await Deno.mkdir(path.join(root, ".codex", "nested"), { recursive: true });
+  await Deno.writeTextFile(path.join(root, ".codex", "hidden.txt"), "secret");
+  await Deno.writeTextFile(
+    path.join(root, ".codex", "nested", "also-hidden.txt"),
+    "secret",
+  );
   await Deno.writeTextFile(path.join(root, "visible.txt"), "visible");
   await Deno.mkdir(path.join(root, "scenarios", "scenario_a"), {
     recursive: true,
@@ -243,6 +249,10 @@ Body
   assertEquals(paths.includes("visible.txt"), true);
   assertEquals(
     paths.some((value) => value === ".gambit" || value.startsWith(".gambit/")),
+    false,
+  );
+  assertEquals(
+    paths.some((value) => value === ".codex" || value.startsWith(".codex/")),
     false,
   );
   const scenarioPrompt = (refreshedBody.entries ?? []).find((entry) =>
