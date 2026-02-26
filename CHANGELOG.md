@@ -1,6 +1,6 @@
 +++
 [release]
-since = "e5b1e61b190c9b4f3dcc5c80f2d610ddd4f16d80"
+since = "8b3194ba8de6f5bfe71e33b5012c0aec17626a78"
 +++
 
 # Changelog
@@ -8,6 +8,10 @@ since = "e5b1e61b190c9b4f3dcc5c80f2d610ddd4f16d80"
 ## Unreleased (v0.8.5)
 
 - TBD
+
+## v0.8.5-rc.12
+
+- fix(gambit): add codex trust preflight for workbench chat
 
 ## v0.8.5-rc.11
 
