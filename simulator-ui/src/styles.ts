@@ -2317,7 +2317,7 @@ code:not(pre *) {
   margin: 0;
   flex: 1;
   max-width: 100%;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--color-border);
   border-radius: calc(10px * var(--corner-radius-scale, 1));
   corner-shape: squircle;
