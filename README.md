@@ -78,6 +78,18 @@ open http://localhost:8000/debug
 
 Use the CLI to run decks locally, stream output, and capture traces/state.
 
+### Environment setup
+
+For local development, copy `.env.example` to `.env` if you want local
+overrides:
+
+```bash
+cp .env.example .env
+```
+
+Gambit uses your system Codex login/config by default. If you need a custom
+location, set `CODEX_HOME` explicitly.
+
 Run with npx (no install):
 
 ```

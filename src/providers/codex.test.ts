@@ -487,6 +487,21 @@ Deno.test("codex provider adds mcp config args by default", () => {
   }
 });
 
+Deno.test("codex provider configures workspace-write sandbox automatically", () => {
+  const args = parseCodexArgsForTest({
+    model: "codex-cli/default",
+    messages: [{ role: "user", content: "hi" }],
+    cwd: "/tmp/test-cwd",
+  });
+  const joined = args.join(" ");
+  assertEquals(joined.includes('approval_policy="never"'), true);
+  assertEquals(joined.includes('sandbox_mode="workspace-write"'), true);
+  assertEquals(
+    joined.includes('sandbox_workspace_write.writable_roots=["/tmp/test-cwd"]'),
+    true,
+  );
+});
+
 Deno.test("codex provider omits MCP root deck env when deck path is absent", () => {
   const args = parseCodexArgsForTest({
     model: "codex-cli/default",

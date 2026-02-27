@@ -1376,126 +1376,11 @@ export function startWebSocketSimulator(opts: {
     return root;
   };
 
-  const resolveCodexConfigPath = (workspaceRoot: string): string =>
-    path.join(workspaceRoot, ".codex", "config.toml");
-
-  const toTomlQuoted = (value: string): string =>
-    value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-
-  const hasTomlSection = (content: string, sectionHeader: string): boolean =>
-    new RegExp(
-      `^${sectionHeader.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`,
-      "m",
-    )
-      .test(content);
-
-  const splitTomlTopLevel = (
-    content: string,
-  ): { topLevel: string; sections: string } => {
-    const sectionMatch = content.match(/^\s*\[[^\]]+\]\s*$/m);
-    if (!sectionMatch || sectionMatch.index === undefined) {
-      return { topLevel: content, sections: "" };
-    }
-    const index = sectionMatch.index;
-    return {
-      topLevel: content.slice(0, index),
-      sections: content.slice(index),
-    };
-  };
-
-  const hasTomlScalar = (
-    content: string,
-    key: string,
-    expectedValue: string,
-  ): boolean =>
-    new RegExp(`^\\s*${key}\\s*=\\s*${expectedValue}\\s*$`, "m").test(content);
-
-  const upsertTopLevelTomlScalar = (
-    content: string,
-    key: string,
-    expectedValue: string,
-  ): { next: string; changed: boolean } => {
-    const desiredLine = `${key} = ${expectedValue}`;
-    const linePattern = new RegExp(`^\\s*${key}\\s*=\\s*.*$`, "m");
-    const { topLevel, sections } = splitTomlTopLevel(content);
-    if (linePattern.test(topLevel)) {
-      const nextTopLevel = topLevel.replace(linePattern, desiredLine);
-      const next = `${nextTopLevel}${sections}`;
-      return { next, changed: next !== content };
-    }
-    const prefix = topLevel.trim().length === 0
-      ? ""
-      : `${topLevel.replace(/\s*$/, "")}\n`;
-    const next = `${prefix}${desiredLine}\n${sections}`;
-    return { next, changed: true };
-  };
-
-  const ensureCodexDefaults = (
-    content: string,
-  ): { next: string; changed: boolean } => {
-    let next = content;
-    let changed = false;
-    for (
-      const [key, expectedValue] of [
-        ["profile", '"codebot"'],
-        ["sandbox_mode", '"danger-full-access"'],
-        ["approval_policy", '"never"'],
-      ] as const
-    ) {
-      const updated = upsertTopLevelTomlScalar(next, key, expectedValue);
-      next = updated.next;
-      changed = changed || updated.changed;
-    }
-    if (!hasTomlSection(next, "[profiles.codebot]")) {
-      const prefix = next.trim().length === 0
-        ? ""
-        : `${next.replace(/\s*$/, "")}\n\n`;
-      next = `${prefix}[profiles.codebot]\n`;
-      changed = true;
-    }
-    return { next, changed };
-  };
-
-  const evaluateCodexWriteEnabled = (args: {
-    content: string;
-    trustedPath: string;
-  }): { trusted: boolean; writeEnabled: boolean } => {
-    const { content, trustedPath } = args;
-    const { topLevel } = splitTomlTopLevel(content);
-    const sectionHeader = `[projects."${toTomlQuoted(trustedPath)}"]`;
-    const sectionStart = content.indexOf(sectionHeader);
-    let trusted = false;
-    if (sectionStart >= 0) {
-      const sectionEndMarker = content.indexOf("\n[", sectionStart + 1);
-      const sectionEnd = sectionEndMarker >= 0
-        ? sectionEndMarker
-        : content.length;
-      const section = content.slice(sectionStart, sectionEnd);
-      trusted = /^\s*trust_level\s*=\s*"trusted"\s*$/m.test(section);
-    }
-    const hasProfile = hasTomlScalar(topLevel, "profile", '"codebot"');
-    const hasSandbox = hasTomlScalar(
-      topLevel,
-      "sandbox_mode",
-      '"danger-full-access"',
-    );
-    const hasApproval = hasTomlScalar(topLevel, "approval_policy", '"never"');
-    const hasCodebotProfileSection = hasTomlSection(
-      content,
-      "[profiles.codebot]",
-    );
-    return {
-      trusted,
-      writeEnabled: trusted && hasProfile && hasSandbox && hasApproval &&
-        hasCodebotProfileSection,
-    };
-  };
-
-  const readCodexLoginStatus = async (
-    workspaceRoot: string,
-  ): Promise<{ codexLoggedIn: boolean; codexLoginStatus: string }> => {
+  const readCodexLoginStatus = async (): Promise<{
+    codexLoggedIn: boolean;
+    codexLoginStatus: string;
+  }> => {
     const env = Deno.env.toObject();
-    env.CODEX_HOME = path.join(workspaceRoot, ".codex");
     const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
     try {
       const output = await new Deno.Command(codexBin, {
@@ -1525,104 +1410,17 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
-  const readCodexTrustStatus = async (
+  const readCodexWorkspaceStatus = async (
     workspaceId?: string | null,
   ): Promise<{
-    configPath: string;
     trustedPath: string;
-    trusted: boolean;
     writeEnabled: boolean;
     codexLoggedIn: boolean;
     codexLoginStatus: string;
   }> => {
     const trustedPath = await resolveBuildBotRoot(workspaceId);
-    const configPath = resolveCodexConfigPath(trustedPath);
-    let current = "";
-    try {
-      current = await Deno.readTextFile(configPath);
-    } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
-        const login = await readCodexLoginStatus(trustedPath);
-        return {
-          configPath,
-          trustedPath,
-          trusted: false,
-          writeEnabled: false,
-          ...login,
-        };
-      }
-      throw err;
-    }
-    const evaluated = evaluateCodexWriteEnabled({
-      content: current,
-      trustedPath,
-    });
-    const login = await readCodexLoginStatus(trustedPath);
-    return { configPath, trustedPath, ...evaluated, ...login };
-  };
-
-  const trustWorkspaceInCodexConfig = async (
-    workspaceId?: string | null,
-  ): Promise<{
-    configPath: string;
-    trustedPath: string;
-    changed: boolean;
-    trusted: boolean;
-    writeEnabled: boolean;
-    codexLoggedIn: boolean;
-    codexLoginStatus: string;
-  }> => {
-    const trustedPath = await resolveBuildBotRoot(workspaceId);
-    const configPath = resolveCodexConfigPath(trustedPath);
-    await ensureDir(path.dirname(configPath));
-    let current = "";
-    try {
-      current = await Deno.readTextFile(configPath);
-    } catch (err) {
-      if (!(err instanceof Deno.errors.NotFound)) throw err;
-    }
-    const defaultsApplied = ensureCodexDefaults(current);
-    let updated = defaultsApplied.next;
-    let changed = defaultsApplied.changed;
-
-    const sectionHeader = `[projects."${toTomlQuoted(trustedPath)}"]`;
-    const sectionStart = updated.indexOf(sectionHeader);
-
-    if (sectionStart >= 0) {
-      const sectionEndMarker = updated.indexOf("\n[", sectionStart + 1);
-      const sectionEnd = sectionEndMarker >= 0
-        ? sectionEndMarker
-        : updated.length;
-      const section = updated.slice(sectionStart, sectionEnd);
-      const trustedLinePattern = /^\s*trust_level\s*=\s*"trusted"\s*$/m;
-      const trustLevelLinePattern = /^\s*trust_level\s*=\s*"[^"]*"\s*$/m;
-      if (!trustedLinePattern.test(section)) {
-        const nextSection = trustLevelLinePattern.test(section)
-          ? section.replace(trustLevelLinePattern, 'trust_level = "trusted"')
-          : `${section}\ntrust_level = "trusted"`;
-        updated = `${updated.slice(0, sectionStart)}${nextSection}${
-          updated.slice(sectionEnd)
-        }`;
-        changed = true;
-      }
-    } else {
-      const prefix = updated.trim().length === 0
-        ? ""
-        : `${updated.replace(/\s*$/, "")}\n\n`;
-      updated = `${prefix}${sectionHeader}\ntrust_level = "trusted"\n`;
-      changed = true;
-    }
-
-    if (changed) {
-      await Deno.writeTextFile(configPath, updated);
-    }
-
-    const evaluated = evaluateCodexWriteEnabled({
-      content: updated,
-      trustedPath,
-    });
-    const login = await readCodexLoginStatus(trustedPath);
-    return { configPath, trustedPath, changed, ...evaluated, ...login };
+    const login = await readCodexLoginStatus();
+    return { trustedPath, writeEnabled: true, ...login };
   };
 
   const logWorkspaceBotRoot = async (
@@ -5809,17 +5607,7 @@ export function startWebSocketSimulator(opts: {
         }
         try {
           await logWorkspaceBotRoot("/api/codex/trust-workspace", workspaceId);
-          if (req.method === "GET") {
-            const status = await readCodexTrustStatus(workspaceId);
-            return new Response(
-              JSON.stringify({
-                ok: true,
-                ...status,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          const result = await trustWorkspaceInCodexConfig(workspaceId);
+          const result = await readCodexWorkspaceStatus(workspaceId);
           return new Response(
             JSON.stringify({
               ok: true,

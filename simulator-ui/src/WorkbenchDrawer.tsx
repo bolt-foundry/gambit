@@ -96,34 +96,33 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
   const [chatHistoryError, setChatHistoryError] = useState<string | null>(null);
   const [copiedStatePath, setCopiedStatePath] = useState(false);
   const [copiedCodexLoginCommand, setCopiedCodexLoginCommand] = useState(false);
-  const [codexTrustPending, setCodexTrustPending] = useState(false);
-  const [codexTrustError, setCodexTrustError] = useState<string | null>(null);
-  const [codexTrustSuccess, setCodexTrustSuccess] = useState<string | null>(
-    null,
+  const [codexLoginRecheckPending, setCodexLoginRecheckPending] = useState(
+    false,
   );
-  const [codexWorkspaceWriteEnabled, setCodexWorkspaceWriteEnabled] = useState<
-    boolean | null
-  >(null);
+  const [showCodexLoginRecheck, setShowCodexLoginRecheck] = useState(false);
+  const [codexAutoRecheckActive, setCodexAutoRecheckActive] = useState(false);
   const [codexWorkspaceLoggedIn, setCodexWorkspaceLoggedIn] = useState<
     boolean | null
   >(null);
+  const [codexLoginError, setCodexLoginError] = useState<string | null>(null);
   const [codexLoginStatusText, setCodexLoginStatusText] = useState<
     string | null
   >(null);
-  const [codexTrustedPath, setCodexTrustedPath] = useState<string | null>(null);
-  const [codexTrustOverlayDismissed, setCodexTrustOverlayDismissed] = useState(
+  const [codexLoginOverlayDismissed, setCodexLoginOverlayDismissed] = useState(
     false,
   );
   const initializedChipTrackingRef = useRef(false);
   const seenRatingChipIdsRef = useRef(new Set<string>());
   const seenFlagChipIdsRef = useRef(new Set<string>());
-  const showCodexTrustOverlay = (codexWorkspaceWriteEnabled === false ||
-        codexWorkspaceLoggedIn === false) &&
-      !codexTrustOverlayDismissed || Boolean(codexTrustError);
+  const showCodexLoginOverlay = codexWorkspaceLoggedIn === false &&
+      !codexLoginOverlayDismissed || Boolean(codexLoginError);
   const workspaceIdForTrust = (sessionId ?? run.id) || undefined;
-  const codexLoginCommand = codexTrustedPath
-    ? `CODEX_HOME="${codexTrustedPath}/.codex" codex login`
-    : 'CODEX_HOME="<workspace>/.codex" codex login';
+  const codexStatusEndpoint = workspaceIdForTrust
+    ? `/api/codex/trust-workspace?workspaceId=${
+      encodeURIComponent(workspaceIdForTrust)
+    }`
+    : "/api/codex/trust-workspace";
+  const codexLoginCommand = "codex login";
   const resolvedStatePath = useMemo(() => {
     if (statePath) return statePath;
     const meta = sessionDetail?.meta;
@@ -353,27 +352,21 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     initializedChipTrackingRef.current = false;
     seenRatingChipIdsRef.current.clear();
     seenFlagChipIdsRef.current.clear();
-    setCodexTrustPending(false);
-    setCodexTrustError(null);
-    setCodexTrustSuccess(null);
-    setCodexWorkspaceWriteEnabled(null);
     setCodexWorkspaceLoggedIn(null);
+    setCodexLoginError(null);
     setCodexLoginStatusText(null);
-    setCodexTrustedPath(null);
     setCopiedCodexLoginCommand(false);
-    setCodexTrustOverlayDismissed(false);
+    setCodexLoginRecheckPending(false);
+    setShowCodexLoginRecheck(false);
+    setCodexAutoRecheckActive(false);
+    setCodexLoginOverlayDismissed(false);
   }, [sessionId]);
 
   useEffect(() => {
     if (!open) return;
-    if (!workspaceIdForTrust) return;
     let canceled = false;
-    setCodexTrustError(null);
-    fetch(
-      `/api/codex/trust-workspace?workspaceId=${
-        encodeURIComponent(workspaceIdForTrust)
-      }`,
-    )
+    setCodexLoginError(null);
+    fetch(codexStatusEndpoint)
       .then(async (response) => {
         const payload = await response.json() as {
           ok?: boolean;
@@ -381,30 +374,28 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
           writeEnabled?: boolean;
           codexLoggedIn?: boolean;
           codexLoginStatus?: string;
-          trustedPath?: string;
           error?: string;
         };
         if (!response.ok || payload.ok === false) {
           throw new Error(payload.error || response.statusText);
         }
         if (canceled) return;
-        setCodexWorkspaceWriteEnabled(payload.writeEnabled === true);
         setCodexWorkspaceLoggedIn(payload.codexLoggedIn === true);
+        if (payload.codexLoggedIn === true) {
+          setShowCodexLoginRecheck(false);
+          setCodexAutoRecheckActive(false);
+        }
         setCodexLoginStatusText(
           typeof payload.codexLoginStatus === "string"
             ? payload.codexLoginStatus
             : null,
         );
-        setCodexTrustedPath(
-          typeof payload.trustedPath === "string" ? payload.trustedPath : null,
-        );
       })
       .catch((err) => {
         if (canceled) return;
-        setCodexWorkspaceWriteEnabled(null);
         setCodexWorkspaceLoggedIn(null);
         setCodexLoginStatusText(null);
-        setCodexTrustError(err instanceof Error ? err.message : String(err));
+        setCodexLoginError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
         if (canceled) return;
@@ -412,7 +403,17 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     return () => {
       canceled = true;
     };
-  }, [open, workspaceIdForTrust]);
+  }, [codexStatusEndpoint, open]);
+
+  useEffect(() => {
+    if (!showCodexLoginOverlay) return;
+    if (codexWorkspaceLoggedIn !== false) return;
+    if (showCodexLoginRecheck) return;
+    const timeout = window.setTimeout(() => {
+      setShowCodexLoginRecheck(true);
+    }, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [codexWorkspaceLoggedIn, showCodexLoginOverlay, showCodexLoginRecheck]);
 
   useEffect(() => {
     if (loading) return;
@@ -570,8 +571,58 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
   const handleCopyCodexLoginCommand = useCallback(() => {
     navigator.clipboard?.writeText(codexLoginCommand);
     setCopiedCodexLoginCommand(true);
+    setShowCodexLoginRecheck(true);
+    setCodexAutoRecheckActive(true);
     window.setTimeout(() => setCopiedCodexLoginCommand(false), 1200);
   }, [codexLoginCommand]);
+  const handleRecheckCodexLogin = useCallback(async () => {
+    setCodexLoginRecheckPending(true);
+    setCodexLoginError(null);
+    try {
+      const response = await fetch(codexStatusEndpoint);
+      const payload = await response.json() as {
+        ok?: boolean;
+        codexLoggedIn?: boolean;
+        codexLoginStatus?: string;
+        error?: string;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || response.statusText);
+      }
+      setCodexWorkspaceLoggedIn(payload.codexLoggedIn === true);
+      if (payload.codexLoggedIn === true) {
+        setShowCodexLoginRecheck(false);
+        setCodexAutoRecheckActive(false);
+      }
+      setCodexLoginStatusText(
+        typeof payload.codexLoginStatus === "string"
+          ? payload.codexLoginStatus
+          : null,
+      );
+    } catch (err) {
+      setCodexWorkspaceLoggedIn(null);
+      setCodexLoginStatusText(null);
+      setCodexLoginError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCodexLoginRecheckPending(false);
+    }
+  }, [codexStatusEndpoint]);
+  useEffect(() => {
+    if (!codexAutoRecheckActive) return;
+    if (!showCodexLoginOverlay) return;
+    if (codexWorkspaceLoggedIn !== false) return;
+    const interval = window.setInterval(() => {
+      if (codexLoginRecheckPending) return;
+      void handleRecheckCodexLogin();
+    }, 2000);
+    return () => window.clearInterval(interval);
+  }, [
+    codexAutoRecheckActive,
+    codexLoginRecheckPending,
+    codexWorkspaceLoggedIn,
+    handleRecheckCodexLogin,
+    showCodexLoginOverlay,
+  ]);
   useEffect(() => {
     if (!open) return;
     if (!onClose) return;
@@ -583,90 +634,6 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, open]);
-  const trustWorkspaceInCodex = useCallback(async () => {
-    setCodexTrustPending(true);
-    setCodexTrustError(null);
-    setCodexTrustSuccess(null);
-    try {
-      const statusResponse = await fetch(
-        `/api/codex/trust-workspace?workspaceId=${
-          encodeURIComponent(workspaceIdForTrust ?? "")
-        }`,
-      );
-      const statusPayload = await statusResponse.json() as {
-        ok?: boolean;
-        trusted?: boolean;
-        writeEnabled?: boolean;
-        codexLoggedIn?: boolean;
-        codexLoginStatus?: string;
-        trustedPath?: string;
-        error?: string;
-      };
-      if (!statusResponse.ok || statusPayload.ok === false) {
-        throw new Error(statusPayload.error || statusResponse.statusText);
-      }
-      if (
-        statusPayload.writeEnabled === true &&
-        statusPayload.codexLoggedIn === true
-      ) {
-        setCodexWorkspaceWriteEnabled(true);
-        setCodexWorkspaceLoggedIn(true);
-        setCodexTrustSuccess(
-          "Workspace is already configured for Codex writes.",
-        );
-        setCodexTrustOverlayDismissed(true);
-        return;
-      }
-      setCodexWorkspaceWriteEnabled(statusPayload.writeEnabled === true);
-      setCodexWorkspaceLoggedIn(statusPayload.codexLoggedIn === true);
-      setCodexLoginStatusText(
-        typeof statusPayload.codexLoginStatus === "string"
-          ? statusPayload.codexLoginStatus
-          : null,
-      );
-      setCodexTrustedPath(
-        typeof statusPayload.trustedPath === "string"
-          ? statusPayload.trustedPath
-          : null,
-      );
-
-      const response = await fetch("/api/codex/trust-workspace", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId: workspaceIdForTrust }),
-      });
-      const payload = await response.json() as {
-        ok?: boolean;
-        error?: string;
-        trustedPath?: string;
-        writeEnabled?: boolean;
-        codexLoggedIn?: boolean;
-        codexLoginStatus?: string;
-      };
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || response.statusText);
-      }
-      const trustedPath = typeof payload.trustedPath === "string"
-        ? payload.trustedPath
-        : "workspace";
-      setCodexTrustSuccess(`Codex write enabled for: ${trustedPath}`);
-      setCodexWorkspaceWriteEnabled(payload.writeEnabled === true);
-      setCodexWorkspaceLoggedIn(payload.codexLoggedIn === true);
-      setCodexLoginStatusText(
-        typeof payload.codexLoginStatus === "string"
-          ? payload.codexLoginStatus
-          : null,
-      );
-      setCodexTrustedPath(
-        typeof payload.trustedPath === "string" ? payload.trustedPath : null,
-      );
-      setCodexTrustOverlayDismissed(payload.codexLoggedIn === true);
-    } catch (err) {
-      setCodexTrustError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCodexTrustPending(false);
-    }
-  }, [workspaceIdForTrust]);
   if (!open) return null;
   return (
     <aside className="workbench-drawer-docked" role="dialog">
@@ -779,39 +746,19 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                         chatHistoryOpen ? " is-history" : ""
                       }`}
                     >
-                      {showCodexTrustOverlay && (
+                      {showCodexLoginOverlay && (
                         <div className="workbench-chat-readonly-overlay">
                           <div className="workbench-chat-readonly-card">
                             <h3 className="workbench-chat-readonly-title">
-                              Codex setup required
+                              Codex login required
                             </h3>
-                            {codexWorkspaceWriteEnabled === false && (
-                              <p className="workbench-chat-readonly-copy">
-                                Codex write access is disabled for this
-                                workspace. Trust this workspace to enable file
-                                edits.
-                              </p>
-                            )}
-                            <div className="workbench-chat-readonly-actions">
-                              {codexWorkspaceWriteEnabled === false && (
-                                <Button
-                                  variant="primary"
-                                  onClick={() => trustWorkspaceInCodex()}
-                                  disabled={codexTrustPending}
-                                >
-                                  {codexTrustPending
-                                    ? "Trusting..."
-                                    : "Trust workspace"}
-                                </Button>
-                              )}
-                            </div>
                             {codexWorkspaceLoggedIn === false && (
                               <>
                                 <p className="workbench-chat-readonly-copy">
                                   Codex login is required for this workspace.
                                 </p>
                                 <p className="workbench-chat-readonly-copy">
-                                  Run this in this workspace to authenticate
+                                  Run this in your terminal to authenticate
                                   Codex, then restart Gambit.
                                 </p>
                                 <div className="workbench-chat-command-row">
@@ -820,7 +767,7 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                                   </pre>
                                   <Button
                                     variant="secondary"
-                                    size="small"
+                                    size="medium"
                                     onClick={handleCopyCodexLoginCommand}
                                   >
                                     <Icon
@@ -834,20 +781,36 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                                       : "Copy"}
                                   </Button>
                                 </div>
+                                {showCodexLoginRecheck && (
+                                  <div className="workbench-chat-readonly-actions">
+                                    <Button
+                                      variant="primary"
+                                      size="medium"
+                                      style={{ width: "100%" }}
+                                      onClick={() => handleRecheckCodexLogin()}
+                                      disabled={codexLoginRecheckPending}
+                                    >
+                                      {codexLoginRecheckPending
+                                        ? "Rechecking..."
+                                        : "Recheck login"}
+                                    </Button>
+                                  </div>
+                                )}
                               </>
                             )}
                             {codexLoginStatusText &&
                               !/^not logged in$/i.test(
                                 codexLoginStatusText.trim(),
                               ) && <Callout>{codexLoginStatusText}</Callout>}
-                            {codexTrustError && (
-                              <div className="error">{codexTrustError}</div>
+                            {codexLoginError && (
+                              <div className="error">{codexLoginError}</div>
                             )}
                             <Button
                               variant="secondary"
-                              onClick={() =>
-                                setCodexTrustOverlayDismissed(true)}
-                              disabled={codexTrustPending}
+                              onClick={() => {
+                                setCodexLoginOverlayDismissed(true);
+                                setCodexAutoRecheckActive(false);
+                              }}
                             >
                               Dismiss
                             </Button>
@@ -870,7 +833,6 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
             defaultOpen: false,
             content: (
               <div className="workbench-ratings">
-                {codexTrustSuccess && <Callout>{codexTrustSuccess}</Callout>}
                 {showCopyStatePath && handleCopyStatePath && (
                   <>
                     <Button variant="secondary" onClick={handleCopyStatePath}>

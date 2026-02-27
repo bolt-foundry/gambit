@@ -122,6 +122,12 @@ function codexConfigArgs(input: {
   params?: Record<string, unknown>;
 }): Array<string> {
   const args: Array<string> = [];
+  args.push("-c", `approval_policy=${tomlString("never")}`);
+  args.push("-c", `sandbox_mode=${tomlString("workspace-write")}`);
+  args.push(
+    "-c",
+    `sandbox_workspace_write.writable_roots=${tomlStringArray([input.cwd])}`,
+  );
   const params = input.params ?? {};
   const reasoning = asRecord(params.reasoning);
   const effort = typeof reasoning.effort === "string"
@@ -625,9 +631,6 @@ function defaultCommandRunner(input: {
 }): Promise<CommandOutput> {
   const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
   const env = Deno.env.toObject();
-  if (!env.CODEX_HOME || env.CODEX_HOME.trim().length === 0) {
-    env.CODEX_HOME = path.join(input.cwd, ".codex");
-  }
   const child = new Deno.Command(codexBin, {
     args: input.args,
     cwd: input.cwd,
