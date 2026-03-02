@@ -20,6 +20,7 @@ const CODEX_REASONING_EFFORT_ENV = "GAMBIT_CODEX_REASONING_EFFORT";
 const CODEX_REASONING_SUMMARY_ENV = "GAMBIT_CODEX_REASONING_SUMMARY";
 const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
+const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const MCP_SERVER_PATH = (() => {
   try {
@@ -95,17 +96,27 @@ function runCwd(): string {
 }
 
 function shouldEnableMcpBridge(): boolean {
-  const parseTruthy = (value: string): boolean => {
-    const normalized = value.trim().toLowerCase();
-    if (!normalized) return false;
-    return normalized === "1" || normalized === "true" || normalized === "yes";
-  };
   const disableRaw = Deno.env.get(CODEX_DISABLE_MCP_ENV);
   if (disableRaw && parseTruthy(disableRaw)) return false;
   const enableRaw = Deno.env.get(CODEX_MCP_ENV);
   if (!enableRaw) return true;
   const normalized = enableRaw.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function parseTruthy(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function shouldSkipCodexSandboxConfig(
+  params?: Record<string, unknown>,
+): boolean {
+  const yolo = params?.gambitYolo;
+  if (typeof yolo === "boolean") return yolo;
+  const envRaw = Deno.env.get(CODEX_SKIP_SANDBOX_CONFIG_ENV);
+  return Boolean(envRaw && parseTruthy(envRaw));
 }
 
 function tomlString(value: string): string {
@@ -123,11 +134,13 @@ function codexConfigArgs(input: {
 }): Array<string> {
   const args: Array<string> = [];
   args.push("-c", `approval_policy=${tomlString("never")}`);
-  args.push("-c", `sandbox_mode=${tomlString("workspace-write")}`);
-  args.push(
-    "-c",
-    `sandbox_workspace_write.writable_roots=${tomlStringArray([input.cwd])}`,
-  );
+  if (!shouldSkipCodexSandboxConfig(input.params)) {
+    args.push("-c", `sandbox_mode=${tomlString("workspace-write")}`);
+    args.push(
+      "-c",
+      `sandbox_workspace_write.writable_roots=${tomlStringArray([input.cwd])}`,
+    );
+  }
   const params = input.params ?? {};
   const reasoning = asRecord(params.reasoning);
   const effort = typeof reasoning.effort === "string"
@@ -630,11 +643,9 @@ function defaultCommandRunner(input: {
   onStdoutLine?: (line: string) => void;
 }): Promise<CommandOutput> {
   const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
-  const env = Deno.env.toObject();
   const child = new Deno.Command(codexBin, {
     args: input.args,
     cwd: input.cwd,
-    env,
     stdout: "piped",
     stderr: "piped",
   }).spawn();

@@ -502,6 +502,31 @@ Deno.test("codex provider configures workspace-write sandbox automatically", () 
   );
 });
 
+Deno.test("codex provider skips sandbox config when yolo env is enabled", () => {
+  const previous = Deno.env.get("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG");
+  Deno.env.set("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG", "1");
+  try {
+    const args = parseCodexArgsForTest({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hi" }],
+      cwd: "/tmp/test-cwd",
+    });
+    const joined = args.join(" ");
+    assertEquals(joined.includes('approval_policy="never"'), true);
+    assertEquals(joined.includes('sandbox_mode="workspace-write"'), false);
+    assertEquals(
+      joined.includes("sandbox_workspace_write.writable_roots"),
+      false,
+    );
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG", previous);
+    }
+  }
+});
+
 Deno.test("codex provider omits MCP root deck env when deck path is absent", () => {
   const args = parseCodexArgsForTest({
     model: "codex-cli/default",

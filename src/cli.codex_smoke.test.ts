@@ -105,14 +105,19 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"tota
   return { binPath, argsLogPath };
 }
 
-async function runCheck(deckPath: string): Promise<{
+async function runCheck(
+  deckPath: string,
+  env?: Record<string, string>,
+  extraArgs: Array<string> = [],
+): Promise<{
   code: number;
   stdout: string;
   stderr: string;
 }> {
-  const args = await denoRunArgs(["check", deckPath]);
+  const args = await denoRunArgs(["check", deckPath, ...extraArgs]);
   const command = new Deno.Command(Deno.execPath(), {
     args,
+    env,
     stdout: "piped",
     stderr: "piped",
   });
@@ -122,6 +127,22 @@ async function runCheck(deckPath: string): Promise<{
     stdout: new TextDecoder().decode(out.stdout),
     stderr: new TextDecoder().decode(out.stderr),
   };
+}
+
+async function writeMockCodexLoginBin(dir: string): Promise<string> {
+  const binPath = path.join(dir, "mock-codex-login.sh");
+  const script = `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 2 ] && [ "$1" = "login" ] && [ "$2" = "status" ]; then
+  echo "Logged in (mock)"
+  exit 0
+fi
+echo "unsupported mock invocation" >&2
+exit 1
+`;
+  await Deno.writeTextFile(binPath, script);
+  await Deno.chmod(binPath, 0o755);
+  return binPath;
 }
 
 async function runInit(): Promise<{
@@ -195,16 +216,38 @@ async function runDeck(input: {
 
 Deno.test({
   name: "cli smoke: check passes with codex-cli/default",
-  permissions: { read: true, write: true, run: true },
+  permissions: { read: true, write: true, run: true, env: true },
 }, async () => {
   const dir = await Deno.makeTempDir();
   const deckPath = await writeDeck(dir, "codex-cli/default");
-  const result = await runCheck(deckPath);
+  const mockCodexBin = await writeMockCodexLoginBin(dir);
+  const result = await runCheck(deckPath, { GAMBIT_CODEX_BIN: mockCodexBin });
   assertEquals(
     result.code,
     0,
     formatCommandDiagnostics("check codex-cli/default", result),
   );
+});
+
+Deno.test({
+  name: "cli smoke: check --json emits structured diagnostics on failure",
+  permissions: { read: true, write: true, run: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "codex/default");
+  const result = await runCheck(deckPath, undefined, ["--json"]);
+  assertEquals(
+    result.code,
+    1,
+    formatCommandDiagnostics("check --json", result),
+  );
+  const payload = JSON.parse(result.stdout) as {
+    ok?: boolean;
+    failures?: Array<{ code?: string }>;
+  };
+  assertEquals(payload.ok, false);
+  assertEquals(Array.isArray(payload.failures), true);
+  assertEquals(payload.failures?.[0]?.code, "legacy_codex_prefix");
 });
 
 Deno.test({
@@ -231,7 +274,7 @@ Deno.test({
     formatCommandDiagnostics("check codex/default", result),
   );
   const combined = `${result.stdout}\n${result.stderr}`;
-  assertEquals(combined.includes("legacy codex prefix is unsupported"), true);
+  assertEquals(combined.includes("Legacy codex prefix is unsupported"), true);
 });
 
 Deno.test({

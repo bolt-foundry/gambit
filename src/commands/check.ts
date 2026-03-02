@@ -1,5 +1,9 @@
 import * as path from "@std/path";
 import { loadDeck } from "@bolt-foundry/gambit-core";
+import {
+  type CodexLoginStatus,
+  readCodexLoginStatus,
+} from "../codex_preflight.ts";
 import type { ModelAliasResolver } from "../project_config.ts";
 import { CODEX_PREFIX } from "../providers/codex.ts";
 import { GOOGLE_PREFIX } from "../providers/google.ts";
@@ -8,6 +12,7 @@ import { OPENROUTER_PREFIX } from "../providers/openrouter.ts";
 import type { ProviderKey } from "../providers/router.ts";
 
 const logger = console;
+
 type DeckModelSpec = {
   candidates: Array<string>;
 };
@@ -34,6 +39,31 @@ type LoadedDeck = {
   testDecks?: Array<DeckRef>;
   graderDecks?: Array<DeckRef>;
   cards?: Array<LoadedCard>;
+};
+
+export type CheckFailure = {
+  model: string;
+  provider: string;
+  code:
+    | "unknown_model_alias"
+    | "legacy_codex_prefix"
+    | "missing_fallback_provider"
+    | "missing_model_name"
+    | "model_not_installed"
+    | "missing_api_key"
+    | "not_logged_in"
+    | "provider_error"
+    | "unknown_provider";
+  message: string;
+};
+
+export type CheckReport = {
+  ok: boolean;
+  decksChecked: number;
+  modelsResolved: number;
+  remoteChecksEnabled: boolean;
+  skippedRemoteModels: Array<string>;
+  failures: Array<CheckFailure>;
 };
 
 function collectCardDeckRefs(card: LoadedCard): Array<string> {
@@ -160,29 +190,47 @@ export async function handleCheckCommand(opts: {
   openRouterApiKey?: string;
   googleApiKey?: string;
   ollamaBaseURL?: string;
-}) {
+  codexLoginStatusChecker?: () => Promise<CodexLoginStatus>;
+  json?: boolean;
+}): Promise<CheckReport> {
+  const failures: Array<CheckFailure> = [];
+  const addFailure = (
+    model: string,
+    provider: string,
+    code: CheckFailure["code"],
+    message: string,
+  ) => failures.push({ model, provider, code, message });
+
   const effectiveFallbackProvider = opts.fallbackProvider === undefined
     ? "openrouter"
     : opts.fallbackProvider;
   const shouldCheckRemote = Boolean(opts.checkOnline);
   const collected = await collectDeckModels(opts.deckPath, opts.modelResolver);
-  if (collected.missingAliases.size > 0) {
-    const missing = Array.from(collected.missingAliases).join(", ");
-    throw new Error(
-      `Unknown model aliases: ${missing}. Define them in gambit.toml or update the deck.`,
+
+  for (const alias of Array.from(collected.missingAliases)) {
+    addFailure(
+      alias,
+      "alias",
+      "unknown_model_alias",
+      `Unknown model alias "${alias}". Define it in gambit.toml or update the deck.`,
     );
   }
-  if (collected.specs.length === 0) {
-    logger.log("No explicit models found in deck tree.");
-    return;
-  }
+
   const uniqueModels = new Set<string>();
   for (const spec of collected.specs) {
     spec.candidates.forEach((candidate) => uniqueModels.add(candidate));
   }
   const skippedRemote = new Set<string>();
-  const failures: Array<string> = [];
   let ollamaTags: Promise<Set<string>> | null = null;
+  let codexStatus: Promise<CodexLoginStatus> | null = null;
+
+  const getCodexLoginStatus = async (): Promise<CodexLoginStatus> => {
+    if (!codexStatus) {
+      const checker = opts.codexLoginStatusChecker ?? readCodexLoginStatus;
+      codexStatus = checker();
+    }
+    return await codexStatus;
+  };
 
   const getOllamaTags = async (): Promise<Set<string>> => {
     if (!ollamaTags) {
@@ -232,24 +280,29 @@ export async function handleCheckCommand(opts: {
     return { strippedModel: model };
   };
 
-  const checkCandidate = async (candidate: string): Promise<{
-    available: boolean;
-    skipped?: boolean;
-  }> => {
+  const checkCandidate = async (candidate: string): Promise<void> => {
     const parsed = parseProvider(candidate);
     if (parsed.legacyCodex) {
-      failures.push(
-        `${candidate} (legacy codex prefix is unsupported; use codex-cli/default or codex-cli/<model>)`,
+      addFailure(
+        candidate,
+        "codex-cli",
+        "legacy_codex_prefix",
+        "Legacy codex prefix is unsupported; use codex-cli/default or codex-cli/<model>.",
       );
-      return { available: false };
+      return;
     }
     const prefixed = Boolean(parsed.providerKey);
     let providerKey = parsed.providerKey;
     let resolvedModel = parsed.strippedModel;
     if (!providerKey) {
       if (effectiveFallbackProvider === null) {
-        failures.push(`${candidate} (no fallback provider configured)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "fallback",
+          "missing_fallback_provider",
+          "No fallback provider configured for unprefixed model.",
+        );
+        return;
       }
       providerKey = effectiveFallbackProvider;
       resolvedModel = candidate;
@@ -257,72 +310,116 @@ export async function handleCheckCommand(opts: {
 
     if (providerKey === "ollama") {
       if (!resolvedModel.trim()) {
-        failures.push(`${candidate} (ollama: missing model name)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "ollama",
+          "missing_model_name",
+          "Missing model name for ollama provider.",
+        );
+        return;
       }
       try {
         const tags = await getOllamaTags();
         if (!tags.has(resolvedModel)) {
-          failures.push(`${candidate} (ollama: model not installed)`);
-          return { available: false };
+          addFailure(
+            candidate,
+            "ollama",
+            "model_not_installed",
+            `Model "${resolvedModel}" is not installed in ollama.`,
+          );
+          return;
         }
-        return { available: true };
       } catch (err) {
-        failures.push(
-          `${candidate} (ollama: ${(err as Error).message})`,
+        addFailure(
+          candidate,
+          "ollama",
+          "provider_error",
+          (err as Error).message,
         );
-        return { available: false };
       }
+      return;
     }
 
     if (providerKey === "openrouter") {
       if (!resolvedModel.trim()) {
-        failures.push(`${candidate} (openrouter: missing model name)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "openrouter",
+          "missing_model_name",
+          "Missing model name for openrouter provider.",
+        );
+        return;
       }
       if (!shouldCheckRemote) {
         skippedRemote.add(candidate);
-        return { available: true, skipped: true };
+        return;
       }
       if (!opts.openRouterApiKey) {
-        failures.push(`${candidate} (openrouter: OPENROUTER_API_KEY not set)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "openrouter",
+          "missing_api_key",
+          "OPENROUTER_API_KEY is not set.",
+        );
       }
-      return { available: true };
+      return;
     }
 
     if (providerKey === "google") {
       if (!resolvedModel.trim()) {
-        failures.push(`${candidate} (google: missing model name)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "google",
+          "missing_model_name",
+          "Missing model name for google provider.",
+        );
+        return;
       }
       if (!shouldCheckRemote) {
         skippedRemote.add(candidate);
-        return { available: true, skipped: true };
+        return;
       }
       if (opts.googleApiKey) {
-        return { available: true };
+        return;
       }
       if (
         prefixed && effectiveFallbackProvider === "openrouter" &&
         opts.openRouterApiKey
       ) {
-        return { available: true };
+        return;
       }
-      failures.push(`${candidate} (google: GOOGLE_API_KEY not set)`);
-      return { available: false };
+      addFailure(
+        candidate,
+        "google",
+        "missing_api_key",
+        "GOOGLE_API_KEY is not set.",
+      );
+      return;
     }
 
     if (providerKey === "codex-cli") {
       if (!resolvedModel.trim()) {
-        failures.push(`${candidate} (codex-cli: missing model name)`);
-        return { available: false };
+        addFailure(
+          candidate,
+          "codex-cli",
+          "missing_model_name",
+          "Missing model name for codex-cli provider.",
+        );
+        return;
       }
-      return { available: true };
+      const login = await getCodexLoginStatus();
+      if (!login.codexLoggedIn) {
+        addFailure(
+          candidate,
+          "codex-cli",
+          "not_logged_in",
+          login.codexLoginStatus,
+        );
+      }
+      return;
     }
 
-    failures.push(`${candidate} (unknown provider)`);
-    return { available: false };
+    addFailure(candidate, "unknown", "unknown_provider", "Unknown provider.");
   };
 
   for (const spec of collected.specs) {
@@ -331,16 +428,36 @@ export async function handleCheckCommand(opts: {
     }
   }
 
-  if (failures.length > 0) {
-    throw new Error(`Model availability check failed: ${failures.join("; ")}`);
+  const report: CheckReport = {
+    ok: failures.length === 0,
+    decksChecked: collected.specs.length,
+    modelsResolved: uniqueModels.size,
+    remoteChecksEnabled: shouldCheckRemote,
+    skippedRemoteModels: Array.from(skippedRemote).sort(),
+    failures,
+  };
+
+  if (!report.ok && !opts.json) {
+    const failureText = report.failures.map((failure) =>
+      `${failure.model} (${failure.provider}: ${failure.message})`
+    ).join("; ");
+    throw new Error(`Model availability check failed: ${failureText}`);
   }
 
-  logger.log(
-    `Checked ${collected.specs.length} deck(s); ${uniqueModels.size} model(s) resolved.`,
-  );
-  if (!shouldCheckRemote && skippedRemote.size > 0) {
-    logger.log(
-      `Skipped remote availability checks for ${skippedRemote.size} model(s). Use --online to verify remote providers.`,
-    );
+  if (!opts.json) {
+    if (collected.specs.length === 0) {
+      logger.log("No explicit models found in deck tree.");
+    } else {
+      logger.log(
+        `Checked ${collected.specs.length} deck(s); ${uniqueModels.size} model(s) resolved.`,
+      );
+    }
+    if (!shouldCheckRemote && skippedRemote.size > 0) {
+      logger.log(
+        `Skipped remote availability checks for ${skippedRemote.size} model(s). Use --online to verify remote providers.`,
+      );
+    }
   }
+
+  return report;
 }

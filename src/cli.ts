@@ -36,6 +36,7 @@ import { createDefaultedRuntime } from "./default_runtime.ts";
 
 const logger = console;
 const BOT_ROOT_ENV = "GAMBIT_BOT_ROOT";
+const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
 
 function printInitRemovedGuidance() {
   logger.error(
@@ -173,6 +174,13 @@ async function main() {
     }
 
     const args = parseCliArgs(Deno.args);
+    if (args.yolo) {
+      try {
+        Deno.env.set(CODEX_SKIP_SANDBOX_CONFIG_ENV, "1");
+      } catch {
+        // ignore env set failures
+      }
+    }
     if (args.verbose) {
       try {
         Deno.env.set("GAMBIT_VERBOSE", "1");
@@ -351,7 +359,7 @@ async function main() {
         logger.error("check requires a deck path.");
         Deno.exit(1);
       }
-      await handleCheckCommand({
+      const report = await handleCheckCommand({
         deckPath,
         modelResolver: modelAliasResolver,
         fallbackProvider,
@@ -359,7 +367,14 @@ async function main() {
         openRouterApiKey: openRouterApiKey ?? undefined,
         googleApiKey: googleApiKey ?? undefined,
         ollamaBaseURL,
+        json: args.json,
       });
+      if (args.json) {
+        logger.log(JSON.stringify(report, null, 2));
+        if (!report.ok) {
+          Deno.exit(1);
+        }
+      }
       return;
     }
 
