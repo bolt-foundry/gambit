@@ -47,6 +47,8 @@ import {
   appendDurableStreamEvent,
   handleDurableStreamRequest,
 } from "./durable_streams.ts";
+import { type CheckReport, handleCheckCommand } from "./commands/check.ts";
+import { readCodexLoginStatus } from "./codex_preflight.ts";
 import type { FeedbackEntry, SavedState } from "@bolt-foundry/gambit-core";
 import type {
   CreateResponseRequest,
@@ -65,7 +67,6 @@ import type {
 import type { ZodTypeAny } from "zod";
 
 const GAMBIT_TOOL_RESPOND = "gambit_respond";
-const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 
 const logger = console;
 const moduleLocation = (() => {
@@ -1376,51 +1377,37 @@ export function startWebSocketSimulator(opts: {
     return root;
   };
 
-  const readCodexLoginStatus = async (): Promise<{
-    codexLoggedIn: boolean;
-    codexLoginStatus: string;
-  }> => {
-    const env = Deno.env.toObject();
-    const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
-    try {
-      const output = await new Deno.Command(codexBin, {
-        args: ["login", "status"],
-        env,
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
-      const stdout = new TextDecoder().decode(output.stdout).trim();
-      const stderr = new TextDecoder().decode(output.stderr).trim();
-      const detail = stdout || stderr || "Unknown login status";
-      if (output.success) {
-        return { codexLoggedIn: true, codexLoginStatus: detail };
-      }
-      return { codexLoggedIn: false, codexLoginStatus: detail };
-    } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
-        return {
-          codexLoggedIn: false,
-          codexLoginStatus: "Codex CLI not found in PATH.",
-        };
-      }
-      return {
-        codexLoggedIn: false,
-        codexLoginStatus: err instanceof Error ? err.message : String(err),
-      };
-    }
-  };
-
   const readCodexWorkspaceStatus = async (
     workspaceId?: string | null,
+    online?: boolean,
   ): Promise<{
     trustedPath: string;
     writeEnabled: boolean;
     codexLoggedIn: boolean;
     codexLoginStatus: string;
+    check?: CheckReport;
   }> => {
     const trustedPath = await resolveBuildBotRoot(workspaceId);
+    const record = resolveWorkspaceRecord(workspaceId);
+    const deckPath = record?.rootDeckPath ?? resolvedDeckPath;
     const login = await readCodexLoginStatus();
-    return { trustedPath, writeEnabled: true, ...login };
+    let check: CheckReport | undefined;
+    try {
+      check = await handleCheckCommand({
+        deckPath,
+        checkOnline: Boolean(online),
+        openRouterApiKey: Deno.env.get("OPENROUTER_API_KEY")?.trim() ||
+          undefined,
+        googleApiKey: (Deno.env.get("GOOGLE_API_KEY") ??
+          Deno.env.get("GEMINI_API_KEY"))?.trim() || undefined,
+        ollamaBaseURL: Deno.env.get("OLLAMA_BASE_URL") ?? undefined,
+        json: true,
+      });
+    } catch {
+      // Keep status endpoint resilient even if check cannot run.
+      check = undefined;
+    }
+    return { trustedPath, writeEnabled: true, ...login, check };
   };
 
   const logWorkspaceBotRoot = async (
@@ -5585,45 +5572,6 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      if (url.pathname === "/api/codex/trust-workspace") {
-        if (req.method !== "POST" && req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let workspaceId: string | undefined;
-        if (req.method === "POST") {
-          try {
-            const body = await req.json() as { workspaceId?: unknown };
-            if (typeof body.workspaceId === "string") {
-              workspaceId = body.workspaceId;
-            }
-          } catch {
-            // ignore malformed body and fall back to active/default workspace
-          }
-        } else {
-          const queryWorkspaceId = url.searchParams.get("workspaceId");
-          if (queryWorkspaceId && queryWorkspaceId.trim().length > 0) {
-            workspaceId = queryWorkspaceId.trim();
-          }
-        }
-        try {
-          await logWorkspaceBotRoot("/api/codex/trust-workspace", workspaceId);
-          const result = await readCodexWorkspaceStatus(workspaceId);
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              ...result,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(
-            JSON.stringify({ ok: false, error: message }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
       if (url.pathname === "/api/build/file") {
         if (req.method !== "GET") {
           return new Response("Method not allowed", { status: 405 });
@@ -5691,6 +5639,75 @@ export function startWebSocketSimulator(opts: {
             status: 400,
             headers: { "content-type": "application/json" },
           });
+        }
+      }
+
+      if (url.pathname === "/api/codex/trust-workspace") {
+        if (req.method !== "GET" && req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        let workspaceId: string | undefined;
+        let online = true;
+        if (req.method === "POST") {
+          try {
+            const body = await req.json() as {
+              workspaceId?: unknown;
+              online?: unknown;
+            };
+            if (typeof body.workspaceId === "string") {
+              workspaceId = body.workspaceId;
+            }
+            if (
+              body.online === true ||
+              body.online === "true" ||
+              body.online === 1 ||
+              body.online === "1"
+            ) {
+              online = true;
+            } else if (
+              body.online === false ||
+              body.online === "false" ||
+              body.online === 0 ||
+              body.online === "0" ||
+              body.online === "no"
+            ) {
+              online = false;
+            }
+          } catch {
+            // Ignore malformed body and fall back to query/default workspace.
+          }
+        }
+        if (!workspaceId) {
+          workspaceId = getWorkspaceIdFromQuery(url);
+        }
+        const onlineQuery = url.searchParams.get("online");
+        if (
+          onlineQuery === "1" || onlineQuery === "true" ||
+          onlineQuery === "yes"
+        ) {
+          online = true;
+        } else if (
+          onlineQuery === "0" || onlineQuery === "false" ||
+          onlineQuery === "no"
+        ) {
+          online = false;
+        }
+        try {
+          await logWorkspaceBotRoot("/api/codex/trust-workspace", workspaceId);
+          const result = await readCodexWorkspaceStatus(workspaceId, online);
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              ...result,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(
+            JSON.stringify({ ok: false, error: message }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
         }
       }
 

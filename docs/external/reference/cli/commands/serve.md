@@ -1,7 +1,7 @@
 +++
 command = "serve"
 summary = "Run the debug UI server"
-usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]"
+usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec] [--yolo]"
 flags = [
   "--artifact <bundle.tar.gz> Serve from a restored artifact bundle (mutually exclusive with <deck>)",
   "--model <id>            Default model id",
@@ -19,6 +19,7 @@ flags = [
   "--legacy-exec           Alias for --no-worker-sandbox",
   "--sandbox               Deprecated alias for --worker-sandbox",
   "--no-sandbox            Deprecated alias for --no-worker-sandbox",
+  "--yolo                  Skip Codex sandbox -c overrides (uses Codex/user defaults)",
   "--verbose               Print trace events to console",
 ]
 +++

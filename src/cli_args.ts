@@ -65,6 +65,7 @@ type Args = {
   artifactPath?: string;
   verbose?: boolean;
   online?: boolean;
+  json?: boolean;
   port?: number;
   watch?: boolean;
   bundle?: boolean;
@@ -78,6 +79,7 @@ type Args = {
   allowEnv?: true | Array<string>;
   workerSandbox?: boolean;
   legacyExec?: boolean;
+  yolo?: boolean;
   help?: boolean;
   version?: boolean;
 };
@@ -416,6 +418,8 @@ export function parseCliArgs(argv: Array<string>): Args {
       "responses",
       "verbose",
       "online",
+      "json",
+      "yolo",
       "help",
       "version",
       "watch",
@@ -431,6 +435,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     default: {
       stream: false,
       verbose: false,
+      online: true,
     },
   });
 
@@ -511,6 +516,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     artifactPath: parsed.artifact as string | undefined,
     verbose: Boolean(parsed.verbose),
     online: Boolean(parsed.online),
+    json: Boolean(parsed.json),
     port: parsePortValue(parsed.port),
     watch: Boolean(parsed.watch),
     bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
@@ -524,6 +530,7 @@ export function parseCliArgs(argv: Array<string>): Args {
     allowEnv,
     workerSandbox: permissions.workerSandbox,
     legacyExec: permissions.legacyExec ? true : undefined,
+    yolo: Boolean(parsed.yolo),
     help: Boolean(parsed.help),
     version: Boolean(parsed.version),
   };
