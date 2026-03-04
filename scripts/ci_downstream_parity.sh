@@ -5,8 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GAMBIT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${GAMBIT_DIR}"
 
+TMP_PUBLISH_ROOT=""
+
 cleanup() {
   rm -f deno.ci.json deno.entrypoint.lock
+  if [[ -n "${TMP_PUBLISH_ROOT}" ]]; then
+    rm -rf "${TMP_PUBLISH_ROOT}"
+  fi
 }
 trap cleanup EXIT
 
@@ -140,3 +145,74 @@ bash -euo pipefail -c '
   rm -f deno.entrypoint.lock
   deno install --entrypoint --config deno.ci.json --lock=deno.entrypoint.lock --frozen=false --no-prompt src/cli.ts
 '
+
+echo "Publish dry run (gambit, downstream parity)"
+TMP_PUBLISH_ROOT="$(mktemp -d)"
+if command -v rsync >/dev/null 2>&1; then
+  rsync -a --delete --exclude=".git" "${GAMBIT_DIR}/" "${TMP_PUBLISH_ROOT}/"
+else
+  tar -C "${GAMBIT_DIR}" -cf - . | tar -C "${TMP_PUBLISH_ROOT}" -xf -
+fi
+(
+  cd "${TMP_PUBLISH_ROOT}"
+  deno eval --ext=ts -q '
+    import { parse } from "jsr:@std/jsonc@1";
+
+    const configPath = await (async () => {
+      for (const candidate of ["deno.jsonc", "deno.json"]) {
+        try {
+          await Deno.stat(candidate);
+          return candidate;
+        } catch (err) {
+          if (!(err instanceof Deno.errors.NotFound)) {
+            throw err;
+          }
+        }
+      }
+      throw new Error("Unable to find deno config for publish dry-run.");
+    })();
+
+    const config = parse(await Deno.readTextFile(configPath));
+    const lockVersion = await (async () => {
+      try {
+        const lock = JSON.parse(await Deno.readTextFile("deno.lock"));
+        const specifiers = lock?.specifiers;
+        if (specifiers && typeof specifiers === "object") {
+          const key = Object.keys(specifiers).find((entry) =>
+            entry.startsWith("jsr:@bolt-foundry/gambit-core@")
+          );
+          if (key) {
+            return key.slice("jsr:@bolt-foundry/gambit-core@".length);
+          }
+        }
+      } catch (err) {
+        if (!(err instanceof Deno.errors.NotFound)) {
+          throw err;
+        }
+      }
+      return undefined;
+    })();
+    const version = lockVersion ?? String(config.version ?? "").trim().replace(/^v/, "");
+    if (!version) {
+      throw new Error(`${configPath} missing version and no lockfile core version found`);
+    }
+
+    const coreKey = "@bolt-foundry/gambit-core";
+    const jsrPrefix = `jsr:@bolt-foundry/gambit-core@${version}`;
+    const imports = config.imports ?? {};
+    const rewritten = {};
+
+    for (const [key, value] of Object.entries(imports)) {
+      if (key === coreKey || key.startsWith(`${coreKey}/`)) {
+        const suffix = key === coreKey ? "" : key.slice(coreKey.length);
+        rewritten[key] = `${jsrPrefix}${suffix}`;
+        continue;
+      }
+      rewritten[key] = value;
+    }
+
+    config.imports = rewritten;
+    await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2) + "\n");
+  '
+  deno publish --dry-run --allow-dirty
+)
