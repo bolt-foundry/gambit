@@ -35,6 +35,9 @@
     "build_npm": "deno run -A scripts/build_npm.ts"
   },
   "lint": {
+    "plugins": [
+      "../../scripts/lint/examples_remote_imports.ts"
+    ],
     "rules": {
       "tags": [
         "recommended"

@@ -99,6 +99,42 @@ deno check --config deno.ci.json --lock=deno.lock --frozen --all mod.ts
 echo "Test"
 deno test --config deno.ci.json --lock=deno.lock --frozen -A --ignore=simulator-ui/__tests__/e2e
 
+CORE_DIR=""
+for candidate in "packages/gambit-core" "packages/gambit/packages/gambit-core"; do
+  if [[ -f "${candidate}/deno.json" ]]; then
+    CORE_DIR="${candidate}"
+    break
+  fi
+done
+if [[ -z "${CORE_DIR}" ]]; then
+  echo "Unable to find gambit-core directory." >&2
+  exit 1
+fi
+
+echo "Lint (gambit-core)"
+(
+  cd "${CORE_DIR}"
+  deno lint
+)
+
+echo "Format check (gambit-core)"
+(
+  cd "${CORE_DIR}"
+  deno fmt --check
+)
+
+echo "Type check (gambit-core)"
+(
+  cd "${CORE_DIR}"
+  deno check --all mod.ts
+)
+
+echo "Test (gambit-core)"
+(
+  cd "${CORE_DIR}"
+  deno test --allow-all --unstable-worker-options
+)
+
 echo "Install CLI deps (entrypoint only)"
 bash -euo pipefail -c '
   rm -f deno.entrypoint.lock
