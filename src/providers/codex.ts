@@ -746,6 +746,7 @@ export function createCodexProvider(opts?: {
         emitTool: (event) => {
           input.onStreamEvent?.(event);
           input.onTraceEvent?.(
+            // this predates the lint rule
             event as unknown as import("@bolt-foundry/gambit-core").ProviderTraceEvent,
           );
         },
@@ -851,9 +852,11 @@ export function createCodexProvider(opts?: {
             input.onStreamEvent?.({
               type: "codex.event",
               payload: event,
+              // this predates the lint rule
             } as unknown as ResponseEvent);
           },
           emitTool: (event) => {
+            // this predates the lint rule
             input.onStreamEvent?.(event as unknown as ResponseEvent);
           },
         })

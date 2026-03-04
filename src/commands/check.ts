@@ -1,10 +1,15 @@
 import * as path from "@std/path";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import {
+  type ClaudeCodeLoginStatus,
+  readClaudeCodeLoginStatus,
+} from "../claude_code_preflight.ts";
+import {
   type CodexLoginStatus,
   readCodexLoginStatus,
 } from "../codex_preflight.ts";
 import type { ModelAliasResolver } from "../project_config.ts";
+import { CLAUDE_CODE_PREFIX } from "../providers/claude_code.ts";
 import { CODEX_PREFIX } from "../providers/codex.ts";
 import { GOOGLE_PREFIX } from "../providers/google.ts";
 import { fetchOllamaTags, OLLAMA_PREFIX } from "../providers/ollama.ts";
@@ -191,6 +196,7 @@ export async function handleCheckCommand(opts: {
   googleApiKey?: string;
   ollamaBaseURL?: string;
   codexLoginStatusChecker?: () => Promise<CodexLoginStatus>;
+  claudeCodeLoginStatusChecker?: () => Promise<ClaudeCodeLoginStatus>;
   json?: boolean;
 }): Promise<CheckReport> {
   const failures: Array<CheckFailure> = [];
@@ -223,6 +229,7 @@ export async function handleCheckCommand(opts: {
   const skippedRemote = new Set<string>();
   let ollamaTags: Promise<Set<string>> | null = null;
   let codexStatus: Promise<CodexLoginStatus> | null = null;
+  let claudeCodeStatus: Promise<ClaudeCodeLoginStatus> | null = null;
 
   const getCodexLoginStatus = async (): Promise<CodexLoginStatus> => {
     if (!codexStatus) {
@@ -230,6 +237,15 @@ export async function handleCheckCommand(opts: {
       codexStatus = checker();
     }
     return await codexStatus;
+  };
+
+  const getClaudeCodeLoginStatus = async (): Promise<ClaudeCodeLoginStatus> => {
+    if (!claudeCodeStatus) {
+      const checker = opts.claudeCodeLoginStatusChecker ??
+        readClaudeCodeLoginStatus;
+      claudeCodeStatus = checker();
+    }
+    return await claudeCodeStatus;
   };
 
   const getOllamaTags = async (): Promise<Set<string>> => {
@@ -247,6 +263,12 @@ export async function handleCheckCommand(opts: {
     if (model.trim() === "codex-cli") {
       return {
         providerKey: "codex-cli",
+        strippedModel: "default",
+      };
+    }
+    if (model.trim() === "claude-code-cli") {
+      return {
+        providerKey: "claude-code-cli",
         strippedModel: "default",
       };
     }
@@ -272,6 +294,12 @@ export async function handleCheckCommand(opts: {
       return {
         providerKey: "codex-cli",
         strippedModel: model.slice(CODEX_PREFIX.length),
+      };
+    }
+    if (model.startsWith(CLAUDE_CODE_PREFIX)) {
+      return {
+        providerKey: "claude-code-cli",
+        strippedModel: model.slice(CLAUDE_CODE_PREFIX.length),
       };
     }
     if (model === "codex" || model.startsWith("codex/")) {
@@ -414,6 +442,28 @@ export async function handleCheckCommand(opts: {
           "codex-cli",
           "not_logged_in",
           login.codexLoginStatus,
+        );
+      }
+      return;
+    }
+
+    if (providerKey === "claude-code-cli") {
+      if (!resolvedModel.trim()) {
+        addFailure(
+          candidate,
+          "claude-code-cli",
+          "missing_model_name",
+          "Missing model name for claude-code-cli provider.",
+        );
+        return;
+      }
+      const login = await getClaudeCodeLoginStatus();
+      if (!login.claudeCodeLoggedIn) {
+        addFailure(
+          candidate,
+          "claude-code-cli",
+          "not_logged_in",
+          login.claudeCodeLoginStatus,
         );
       }
       return;

@@ -1,12 +1,17 @@
+// deno-lint-ignore-file
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import React from "react";
 import TestRenderer, { act } from "npm:react-test-renderer@19.2.0";
+import {
+  createGraphqlAwareFetch,
+  type MockApiRequest,
+} from "./graphql_test_utils.ts";
 
 const globals = globalThis as unknown as {
   window?: Record<string, unknown>;
-  EventSource?: unknown;
   fetch?: typeof fetch;
   localStorage?: Storage;
+  sessionStorage?: Storage;
 };
 if (!globals.window) globals.window = {};
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
@@ -43,16 +48,29 @@ class MemoryStorage implements Storage {
 if (!globals.localStorage) {
   globals.localStorage = new MemoryStorage();
 }
+if (!globals.sessionStorage) {
+  globals.sessionStorage = new MemoryStorage();
+}
 const windowObj = globals.window as {
   localStorage?: Storage;
-  location?: { pathname: string; search: string };
+  sessionStorage?: Storage;
+  location?: { pathname: string; search: string; origin?: string };
+  setTimeout?: typeof globalThis.setTimeout;
+  clearTimeout?: typeof globalThis.clearTimeout;
 };
 windowObj.localStorage = globals.localStorage;
+windowObj.sessionStorage = globals.sessionStorage;
 if (!windowObj.location) {
-  windowObj.location = { pathname: "/workspaces/ws-1/test", search: "" };
+  windowObj.location = {
+    pathname: "/workspaces/ws-1/test",
+    search: "",
+  };
 }
+windowObj.setTimeout = globalThis.setTimeout.bind(globalThis);
+windowObj.clearTimeout = globalThis.clearTimeout.bind(globalThis);
 
 type WorkspaceSocketMessage = import("./utils.ts").WorkspaceSocketMessage;
+const WORKSPACE_STREAM_ID = "gambit-workspace";
 const {
   WorkspaceProvider,
   useWorkspaceBuild,
@@ -61,49 +79,128 @@ const {
 } = await import(
   "./WorkspaceContext.tsx"
 );
+const { buildChatProvider: defaultBuildChatProvider } = await import(
+  "./utils.ts"
+);
+
+function createDurableStreamHarness() {
+  let nextOffset = 0;
+  const eventsByStreamId = new Map<
+    string,
+    Array<{ offset: number; data: WorkspaceSocketMessage }>
+  >();
+
+  const emit = (streamId: string, message: WorkspaceSocketMessage) => {
+    const events = eventsByStreamId.get(streamId) ?? [];
+    events.push({ offset: nextOffset++, data: message });
+    eventsByStreamId.set(streamId, events);
+  };
+
+  const maybeHandle = (request: MockApiRequest): Response | null => {
+    if (!request.pathname.startsWith("/graphql/streams/")) {
+      return null;
+    }
+    const streamId = decodeURIComponent(
+      request.pathname.slice("/graphql/streams/".length),
+    );
+    const params = new URLSearchParams(request.search);
+    const rawOffset = Number(params.get("offset") ?? "0");
+    const offset = Number.isFinite(rawOffset) ? rawOffset : 0;
+    const events = (eventsByStreamId.get(streamId) ?? [])
+      .filter((event) => event.offset >= offset)
+      .map((event) => ({ offset: event.offset, data: event.data }));
+    return new Response(JSON.stringify({ events }), { status: 200 });
+  };
+
+  return { emit, maybeHandle };
+}
+
+function invokeEventListener(
+  listener: EventListenerOrEventListenerObject,
+  event: MessageEvent<string>,
+): void {
+  if (typeof listener === "function") {
+    listener(event);
+    return;
+  }
+  listener.handleEvent(event);
+}
 
 class FakeEventSource {
-  static instances: FakeEventSource[] = [];
-  onmessage: ((event: MessageEvent<string>) => void) | null = null;
-  #listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
-  url: string;
-  closed = false;
+  static connections = new Set<FakeEventSource>();
+  readonly sessionId: string;
+  readonly startOffset: number;
+  #listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+  #closed = false;
 
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
+  constructor(input: string | URL) {
+    const url = new URL(String(input), "http://localhost");
+    this.sessionId = url.searchParams.get("sessionId") ?? "";
+    const parsedOffset = Number(url.searchParams.get("offset") ?? "0");
+    this.startOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0
+      ? Math.floor(parsedOffset)
+      : 0;
+    FakeEventSource.connections.add(this);
   }
 
-  close() {
-    this.closed = true;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+    const listeners = this.#listeners.get(type) ?? new Set();
+    listeners.add(listener);
+    this.#listeners.set(type, listeners);
   }
 
-  addEventListener(type: string, listener: EventListener) {
-    const existing = this.#listeners.get(type) ?? new Set();
-    existing.add(listener as (event: MessageEvent<string>) => void);
-    this.#listeners.set(type, existing);
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+  ) {
+    this.#listeners.get(type)?.delete(listener);
   }
 
-  removeEventListener(type: string, listener: EventListener) {
-    const existing = this.#listeners.get(type);
-    if (!existing) return;
-    existing.delete(listener as (event: MessageEvent<string>) => void);
-    if (existing.size === 0) {
-      this.#listeners.delete(type);
-    }
+  close(): void {
+    this.#closed = true;
+    FakeEventSource.connections.delete(this);
+    this.#listeners.clear();
   }
 
-  emit(message: WorkspaceSocketMessage, offset = 1) {
-    const nextEvent = new MessageEvent("message", {
-      data: JSON.stringify(message),
-      lastEventId: String(offset),
-    });
-    const listeners = this.#listeners.get(message.type);
-    if (!listeners) return;
+  #emit(eventType: string, sessionOffset: number, data: unknown): void {
+    if (this.#closed) return;
+    if (sessionOffset < this.startOffset) return;
+    const listeners = this.#listeners.get(eventType);
+    if (!listeners || listeners.size === 0) return;
+    const payload = typeof data === "string" ? data : JSON.stringify(data);
+    const messageEvent = {
+      data: payload,
+      lastEventId: String(sessionOffset),
+    } as MessageEvent<string>;
     for (const listener of listeners) {
-      listener(nextEvent);
+      invokeEventListener(listener, messageEvent);
     }
   }
+
+  static emit(args: {
+    sessionId: string;
+    eventType: string;
+    sessionOffset: number;
+    data: unknown;
+  }) {
+    for (const source of FakeEventSource.connections) {
+      if (source.sessionId !== args.sessionId) continue;
+      source.#emit(args.eventType, args.sessionOffset, args.data);
+    }
+  }
+
+  static reset() {
+    for (const source of [...FakeEventSource.connections]) {
+      source.close();
+    }
+    FakeEventSource.connections.clear();
+  }
+}
+
+async function flushPoll() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+  });
 }
 
 function createSnapshot(
@@ -137,20 +234,15 @@ function createSnapshot(
 
 Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
-  const requests: Array<{ url: string; body?: unknown }> = [];
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: unknown;
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body);
-    }
-    requests.push({ url, body: parsedBody });
-
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch(async (request) => {
+    const { url, body } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(JSON.stringify(createSnapshot()), { status: 200 });
     }
@@ -170,8 +262,7 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
       );
     }
     if (url.endsWith("/api/test/message")) {
-      const body = (parsedBody ?? {}) as Record<string, unknown>;
-      if (body.message === "") {
+      if (body?.message === "") {
         return new Response(
           JSON.stringify({
             run: {
@@ -201,7 +292,7 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
       );
     }
     throw new Error(`Unexpected fetch: ${url}`);
-  }) as typeof fetch;
+  }, requests) as typeof fetch;
 
   function Harness() {
     hook = useWorkspaceTest();
@@ -249,10 +340,8 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
     assertEquals(hook.chatDraft, "");
     assertEquals(hook.optimisticUser?.text, "hello");
 
-    const stream = FakeEventSource.instances.at(-1);
-    assert(stream);
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "testBotStream",
         runId: "run-other",
         role: "assistant",
@@ -260,10 +349,11 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant, null);
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "testBotStream",
         runId: "run-1",
         role: "assistant",
@@ -271,20 +361,22 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant?.text, "partial");
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "testBotStreamEnd",
         runId: "run-1",
         role: "assistant",
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant, null);
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "testBotStatus",
         run: {
           id: "run-1",
@@ -296,6 +388,7 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
         },
       });
     });
+    await flushPoll();
     assertEquals(hook.optimisticUser, null);
 
     let hydrated: any = null;
@@ -324,14 +417,11 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop stream chunks", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
@@ -339,16 +429,12 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
     { role: "user", content: "keep me" },
     { role: "assistant", content: "still here" },
   ];
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: Record<string, unknown> | undefined;
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body) as Record<string, unknown>;
-    }
-    requests.push({ url, body: parsedBody });
-
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch(async (request) => {
+    const { url } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(
         JSON.stringify(
@@ -377,7 +463,7 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
       );
     }
     throw new Error(`Unexpected fetch: ${url}`);
-  }) as typeof fetch;
+  }, requests) as typeof fetch;
 
   function Harness() {
     hook = useWorkspaceBuild();
@@ -403,10 +489,8 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
       ],
     );
 
-    const stream = FakeEventSource.instances.at(-1);
-    assert(stream);
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStream",
         runId: "ws-1",
         role: "assistant",
@@ -414,6 +498,7 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant?.text, "before stop");
 
     await act(async () => {
@@ -434,7 +519,7 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
     assertEquals(stopReq.body?.workspaceId, "ws-1");
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStream",
         runId: "ws-1",
         role: "assistant",
@@ -442,6 +527,7 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant, null);
   } finally {
     if (renderer) {
@@ -450,29 +536,23 @@ Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop st
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext build stop fallback payload does not wipe transcript", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   const preservedMessages = [
     { role: "user", content: "keep this" },
     { role: "assistant", content: "and this" },
   ];
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: Record<string, unknown> | undefined;
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body) as Record<string, unknown>;
-    }
-
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url, body } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(
         JSON.stringify(
@@ -495,7 +575,7 @@ Deno.test("WorkspaceContext build stop fallback payload does not wipe transcript
         JSON.stringify({
           stopped: true,
           run: {
-            id: parsedBody?.workspaceId,
+            id: body?.workspaceId,
             status: "idle",
             messages: [],
             traces: [],
@@ -540,22 +620,20 @@ Deno.test("WorkspaceContext build stop fallback payload does not wipe transcript
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext build chat stop failure restores live build updates", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   let workspaceFetchCount = 0;
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url, body } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       workspaceFetchCount += 1;
       return new Response(
@@ -580,7 +658,7 @@ Deno.test("WorkspaceContext build chat stop failure restores live build updates"
     }
 
     if (url.endsWith("/api/build/stop")) {
-      if (typeof init?.body !== "string") {
+      if (!body) {
         throw new Error("Expected JSON body");
       }
       return new Response(
@@ -610,9 +688,6 @@ Deno.test("WorkspaceContext build chat stop failure restores live build updates"
     assertEquals(hook.run.status, "running");
     assertEquals(workspaceFetchCount, 1);
 
-    const stream = FakeEventSource.instances.at(-1);
-    assert(stream);
-
     await assertRejects(
       async () => {
         await act(async () => {
@@ -628,7 +703,7 @@ Deno.test("WorkspaceContext build chat stop failure restores live build updates"
     assertEquals(hook.run.status, "running");
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStream",
         runId: "ws-1",
         role: "assistant",
@@ -636,6 +711,7 @@ Deno.test("WorkspaceContext build chat stop failure restores live build updates"
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant?.text, "resumed");
   } finally {
     if (renderer) {
@@ -644,25 +720,23 @@ Deno.test("WorkspaceContext build chat stop failure restores live build updates"
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext build stop failure does not refresh stale workspace after navigation", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   let setWorkspaceId: ((value: string) => void) | null = null;
   const stopControl: { resolve?: (response: Response) => void } = {};
   let ws1Fetches = 0;
   let ws2Fetches = 0;
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch(async (request) => {
+    const { url } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       ws1Fetches += 1;
       return new Response(
@@ -769,27 +843,20 @@ Deno.test("WorkspaceContext build stop failure does not refresh stale workspace 
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext runGrader treats error-status calibration runs as failures", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
-  const requests: Array<{ url: string; body?: unknown }> = [];
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: unknown;
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body);
-    }
-    requests.push({ url, body: parsedBody });
-
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(JSON.stringify(createSnapshot()), { status: 200 });
     }
@@ -820,7 +887,7 @@ Deno.test("WorkspaceContext runGrader treats error-status calibration runs as fa
       );
     }
     throw new Error(`Unexpected fetch: ${url}`);
-  }) as typeof fetch;
+  }, requests) as typeof fetch;
 
   function Harness() {
     hook = useWorkspaceGrade();
@@ -862,32 +929,26 @@ Deno.test("WorkspaceContext runGrader treats error-status calibration runs as fa
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
   }
 });
 
 Deno.test("WorkspaceContext feedback save lifecycle updates run messages", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   const feedbackRequests: Array<Record<string, unknown>> = [];
   let requestMode: "save" | "delete" | "error" = "save";
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: Record<string, unknown> = {};
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body) as Record<string, unknown>;
-    }
-
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url, body } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(JSON.stringify(createSnapshot()), { status: 200 });
     }
     if (url.endsWith("/api/workspace/feedback")) {
-      feedbackRequests.push(parsedBody);
+      feedbackRequests.push(body ?? {});
       if (requestMode === "error") {
         return new Response("write failed", { status: 500 });
       }
@@ -993,27 +1054,141 @@ Deno.test("WorkspaceContext feedback save lifecycle updates run messages", async
       });
     }
     globalThis.fetch = originalFetch;
-    globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
+  }
+});
+
+Deno.test("WorkspaceContext eventsource stream resumes build terminal status with stale session offset", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = (globalThis as { EventSource?: unknown })
+    .EventSource;
+
+  let hook: any = null;
+  const previousLocation = windowObj.location
+    ? { ...windowObj.location }
+    : undefined;
+  globals.localStorage?.clear();
+  globals.sessionStorage?.clear();
+  globals.localStorage?.setItem(
+    "gambit.durable-streams.offset.gambit-workspace",
+    "0",
+  );
+  windowObj.location = {
+    pathname: "/workspaces/ws-1/build",
+    search: "",
+    origin: "http://localhost",
+  };
+  FakeEventSource.reset();
+  (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url } = request;
+    if (url.endsWith("/api/workspaces/ws-1")) {
+      return new Response(JSON.stringify(createSnapshot()), { status: 200 });
+    }
+    if (url.endsWith("/api/build/message")) {
+      return new Response(
+        JSON.stringify({
+          run: {
+            id: "ws-1",
+            status: "running",
+            workspaceId: "ws-1",
+            messages: [{ role: "user", content: "hello" }],
+            traces: [],
+            toolInserts: [],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.includes("/graphql/streams/")) {
+      return new Response(JSON.stringify({ events: [] }), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  function Harness() {
+    hook = useWorkspaceBuild();
+    return null;
+  }
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <WorkspaceProvider workspaceId="ws-1">
+          <Harness />
+        </WorkspaceProvider>,
+      );
+    });
+    assert(hook);
+    const source = [...FakeEventSource.connections][0];
+    assert(source);
+    assertEquals(source.startOffset, 0);
+
+    await act(async () => {
+      await hook.sendMessage("hello");
+    });
+    assertEquals(hook.run.status, "running");
+
+    await act(async () => {
+      FakeEventSource.emit({
+        sessionId: "",
+        eventType: "buildBotStatus",
+        sessionOffset: 0,
+        data: {
+          type: "buildBotStatus",
+          run: {
+            id: "ws-1",
+            status: "completed",
+            workspaceId: "ws-1",
+            messages: [
+              { role: "user", content: "hello" },
+              { role: "assistant", content: "done" },
+            ],
+            traces: [],
+            toolInserts: [],
+          },
+        },
+      });
+    });
+    assertEquals(hook.run.status, "completed");
+    assertEquals(hook.run.messages.length, 2);
+    assertEquals(
+      globals.localStorage?.getItem(
+        "gambit.durable-streams.offset.gambit-workspace",
+      ),
+      "1",
+    );
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+    FakeEventSource.reset();
+    if (originalEventSource === undefined) {
+      delete (globalThis as { EventSource?: unknown }).EventSource;
+    } else {
+      (globalThis as { EventSource?: unknown }).EventSource =
+        originalEventSource;
+    }
+    if (previousLocation) {
+      windowObj.location = previousLocation;
+    }
+    globalThis.fetch = originalFetch;
   }
 });
 
 Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
   const originalFetch = globalThis.fetch;
-  const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
-  const requests: Array<{ url: string; body?: unknown }> = [];
-
-  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    let parsedBody: unknown;
-    if (typeof init?.body === "string" && init.body.length > 0) {
-      parsedBody = JSON.parse(init.body);
-    }
-    requests.push({ url, body: parsedBody });
-
+  const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+  const streamHarness = createDurableStreamHarness();
+  globals.localStorage?.clear();
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url } = request;
+    const streamResponse = streamHarness.maybeHandle(request);
+    if (streamResponse) return streamResponse;
     if (url.endsWith("/api/workspaces/ws-1")) {
       return new Response(JSON.stringify(createSnapshot()), { status: 200 });
     }
@@ -1033,7 +1208,7 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
       );
     }
     throw new Error(`Unexpected fetch: ${url}`);
-  }) as typeof fetch;
+  }, requests) as typeof fetch;
 
   function Harness() {
     hook = useWorkspaceBuild();
@@ -1061,11 +1236,8 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
     );
     assert(sendReq);
 
-    const stream = FakeEventSource.instances.at(-1);
-    assert(stream);
-
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStream",
         runId: "ws-1",
         role: "assistant",
@@ -1073,20 +1245,22 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant?.text, "partial");
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStreamEnd",
         runId: "ws-1",
         role: "assistant",
         turn: 0,
       });
     });
+    await flushPoll();
     assertEquals(hook.streamingAssistant, null);
 
     await act(async () => {
-      stream.emit({
+      streamHarness.emit(WORKSPACE_STREAM_ID, {
         type: "buildBotStatus",
         run: {
           id: "ws-1",
@@ -1101,6 +1275,7 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
         },
       });
     });
+    await flushPoll();
     assertEquals(hook.run.status, "completed");
     assertEquals(hook.run.messages.length, 2);
   } finally {
@@ -1110,7 +1285,77 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
       });
     }
     globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("WorkspaceContext build chat provider falls back to default when workspace metadata has none", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+
+  let hook: any = null;
+  let setWorkspaceId: ((value: string) => void) | null = null;
+
+  globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/workspaces/ws-1")) {
+      const payload = createSnapshot();
+      return new Response(
+        JSON.stringify({
+          ...payload,
+          session: {
+            ...(payload.session as Record<string, unknown>),
+            meta: { buildChatProvider: "claude-code-cli" },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.endsWith("/api/workspaces/ws-2")) {
+      return new Response(JSON.stringify(createSnapshot()), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  function RootHarness() {
+    const [workspaceId, setWorkspace] = React.useState("ws-1");
+    setWorkspaceId = setWorkspace;
+    return (
+      <WorkspaceProvider workspaceId={workspaceId}>
+        <InnerHarness />
+      </WorkspaceProvider>
+    );
+  }
+
+  function InnerHarness() {
+    hook = useWorkspaceBuild();
+    return null;
+  }
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <RootHarness />,
+      );
+    });
+    assert(hook);
+    assert(setWorkspaceId);
+    assertEquals(hook.buildChatProvider, "claude-code-cli");
+
+    await act(async () => {
+      setWorkspaceId!("ws-2");
+    });
+
+    assertEquals(hook.buildChatProvider, defaultBuildChatProvider);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+    globalThis.fetch = originalFetch;
     globalThis.EventSource = originalEventSource;
-    FakeEventSource.instances = [];
+    FakeEventSource.connections.clear();
   }
 });

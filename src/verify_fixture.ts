@@ -2,7 +2,7 @@ import * as path from "@std/path";
 import { ensureDir } from "@std/fs";
 import { parse as parseToml } from "@std/toml";
 import { defaultSessionRoot } from "./cli_utils.ts";
-import { WORKSPACE_STATE_SCHEMA_VERSION } from "./workspace_contract.ts";
+import { WORKSPACE_STATE_SCHEMA_VERSION } from "./workspace_routes.ts";
 import type { GradingRunRecord } from "./server_types.ts";
 
 type VerifyFixtureKind = "stable" | "borderline" | "inconsistent";
@@ -31,6 +31,7 @@ export type SeedVerifyFixtureResult = {
   workspaceId: string;
   workspaceDir: string;
   statePath: string;
+  eventsPath: string;
   deckPath: string;
   graderId: string;
   runCount: number;
@@ -286,6 +287,56 @@ const buildFixtureRuns = (
   return runs;
 };
 
+const buildFixtureTestRunEvents = (
+  opts: {
+    workspaceId: string;
+    createdAt: Date;
+  },
+): string => {
+  const lines = FIXTURE_SCENARIOS.map((scenario, index) => {
+    const startedAt = new Date(opts.createdAt.getTime() + index * 60_000)
+      .toISOString();
+    const finishedAt = new Date(opts.createdAt.getTime() + (index + 1) * 60_000)
+      .toISOString();
+    return JSON.stringify({
+      type: "testBotStatus",
+      run: {
+        id: scenario.scenarioRunId,
+        status: "completed",
+        workspaceId: opts.workspaceId,
+        sessionId: opts.workspaceId,
+        startedAt,
+        finishedAt,
+        messages: [
+          {
+            role: "user",
+            content: "Hi, my order has a shipping delay.",
+            messageRefId: `${scenario.scenarioRunId}:user:1`,
+          },
+          {
+            role: "assistant",
+            content: "I can help. Please share your order number.",
+            messageRefId: `${scenario.scenarioRunId}:assistant:1`,
+          },
+          {
+            role: "user",
+            content: "Order 1234 has been stuck for two days.",
+            messageRefId: `${scenario.scenarioRunId}:user:2`,
+          },
+          {
+            role: "assistant",
+            content: "Thanks. I captured the issue and will follow up shortly.",
+            messageRefId: `${scenario.scenarioRunId}:assistant:2`,
+          },
+        ],
+        traces: [],
+        toolInserts: [],
+      },
+    });
+  });
+  return lines.join("\n") + "\n";
+};
+
 const resolveGrader = async (deckPath: string): Promise<ParsedGrader> => {
   const graders = await parseGradersFromDeck(deckPath);
   if (graders.length > 0) return graders[0];
@@ -373,12 +424,16 @@ export async function seedVerifyFixture(
   };
 
   await Deno.writeTextFile(statePath, JSON.stringify(state, null, 2));
-  await Deno.writeTextFile(eventsPath, "");
+  await Deno.writeTextFile(
+    eventsPath,
+    buildFixtureTestRunEvents({ workspaceId, createdAt }),
+  );
 
   return {
     workspaceId,
     workspaceDir,
     statePath,
+    eventsPath,
     deckPath,
     graderId: grader.id,
     runCount: runs.length,

@@ -3,6 +3,10 @@ import { GOOGLE_PREFIX } from "./providers/google.ts";
 import { OLLAMA_PREFIX } from "./providers/ollama.ts";
 import { OPENROUTER_PREFIX } from "./providers/openrouter.ts";
 import { CODEX_PREFIX } from "./providers/codex.ts";
+import {
+  CLAUDE_CODE_ALIAS,
+  CLAUDE_CODE_PREFIX,
+} from "./providers/claude_code.ts";
 
 const LEGACY_CODEX_PREFIX = "codex/";
 const CODEX_PROVIDER_ALIAS = "codex-cli";
@@ -13,6 +17,7 @@ export type ProviderMatchers = {
   matchesOllama: (model: string) => boolean;
   matchesGoogle: (model: string) => boolean;
   matchesCodex: (model: string) => boolean;
+  matchesClaudeCode: (model: string) => boolean;
 };
 
 export function createProviderMatchers(
@@ -20,10 +25,12 @@ export function createProviderMatchers(
 ): ProviderMatchers {
   const isUnprefixedModel = (model: string): boolean =>
     model.trim() !== CODEX_PROVIDER_ALIAS &&
+    model.trim() !== CLAUDE_CODE_ALIAS &&
     !model.startsWith(OPENROUTER_PREFIX) &&
     !model.startsWith(OLLAMA_PREFIX) &&
     !model.startsWith(GOOGLE_PREFIX) &&
     !model.startsWith(CODEX_PREFIX) &&
+    !model.startsWith(CLAUDE_CODE_PREFIX) &&
     !model.startsWith(LEGACY_CODEX_PREFIX);
 
   return {
@@ -41,5 +48,10 @@ export function createProviderMatchers(
       model.trim() === CODEX_PROVIDER_ALIAS ||
       model.startsWith(CODEX_PREFIX) ||
       (isUnprefixedModel(model) && effectiveFallbackProvider === "codex-cli"),
+    matchesClaudeCode: (model: string) =>
+      model.trim() === CLAUDE_CODE_ALIAS ||
+      model.startsWith(CLAUDE_CODE_PREFIX) ||
+      (isUnprefixedModel(model) &&
+        effectiveFallbackProvider === "claude-code-cli"),
   };
 }

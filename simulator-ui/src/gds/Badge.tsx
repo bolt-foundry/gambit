@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import Tooltip from "./Tooltip.tsx";
 import { classNames } from "../utils.ts";
 

@@ -111,6 +111,28 @@ Deno.test({
 });
 
 Deno.test({
+  name: "check accepts claude-code-cli-prefixed models without remote checks",
+  permissions: { read: true, write: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(
+    dir,
+    "root.deck.md",
+    "claude-code-cli/default",
+  );
+
+  await handleCheckCommand({
+    deckPath,
+    checkOnline: false,
+    claudeCodeLoginStatusChecker: () =>
+      Promise.resolve({
+        claudeCodeLoggedIn: true,
+        claudeCodeLoginStatus: "Logged in",
+      }),
+  });
+});
+
+Deno.test({
   name: "check accepts bare codex-cli as default alias",
   permissions: { read: true, write: true },
 }, async () => {

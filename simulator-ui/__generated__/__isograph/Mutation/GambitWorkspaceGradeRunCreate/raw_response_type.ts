@@ -1,0 +1,76 @@
+export type Mutation__GambitWorkspaceGradeRunCreate__raw_response_type = {
+  workspaceGradeRunCreate____input___v_input?: ({
+    run?: ({
+      id?: string,
+      error?: (string | null),
+      graderId?: (string | null),
+      graderLabel?: (string | null),
+      graderPath?: (string | null),
+      runAt?: (string | null),
+      scenarioRunId?: (string | null),
+      status?: (string | null),
+      summary?: ({
+        reason?: (string | null),
+        score?: (number | null),
+      } | null),
+      turns?: (ReadonlyArray<{
+        id?: string,
+        gradedAssistant?: (string | null),
+        priorUser?: (string | null),
+        reason?: (string | null),
+        refId?: (string | null),
+        runId?: (string | null),
+        score?: (number | null),
+        turnIndex?: (number | null),
+        turnNumber?: (number | null),
+      }> | null),
+      workspaceId?: (string | null),
+    } | null),
+    workspace?: ({
+      id?: string,
+      gradeTab?: ({
+        flags?: (ReadonlyArray<{
+          id?: string,
+          createdAt?: (string | null),
+          reason?: (string | null),
+          refId?: (string | null),
+          runId?: (string | null),
+          turnIndex?: (number | null),
+        }> | null),
+        graderDecks?: (ReadonlyArray<{
+          id?: string,
+          description?: (string | null),
+          label?: (string | null),
+          path?: (string | null),
+        }> | null),
+        runs?: (ReadonlyArray<{
+          id?: string,
+          error?: (string | null),
+          graderId?: (string | null),
+          graderLabel?: (string | null),
+          graderPath?: (string | null),
+          runAt?: (string | null),
+          scenarioRunId?: (string | null),
+          status?: (string | null),
+          summary?: ({
+            reason?: (string | null),
+            score?: (number | null),
+          } | null),
+          turns?: (ReadonlyArray<{
+            id?: string,
+            gradedAssistant?: (string | null),
+            priorUser?: (string | null),
+            reason?: (string | null),
+            refId?: (string | null),
+            runId?: (string | null),
+            score?: (number | null),
+            turnIndex?: (number | null),
+            turnNumber?: (number | null),
+          }> | null),
+          workspaceId?: (string | null),
+        }> | null),
+      } | null),
+    } | null),
+  } | null),
+}
+

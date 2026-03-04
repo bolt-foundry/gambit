@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 import React, {
   useCallback,
   useEffect,
@@ -28,7 +29,7 @@ export type ListboxOption = {
 
 export type ListboxProps = {
   value?: string | null;
-  options: ListboxOption[];
+  options: Array<ListboxOption>;
   placeholder?: string;
   disabled?: boolean;
   onChange: (value: string) => void;
@@ -86,10 +87,23 @@ export default function Listbox(props: ListboxProps) {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
+    const offset = 6;
+    const viewportPadding = 8;
+    const popoverHeight = popoverRef.current?.offsetHeight ?? 0;
     const style: React.CSSProperties = {
       position: "fixed",
-      top: rect.bottom + 6,
+      top: rect.bottom + offset,
     };
+    if (
+      popoverHeight > 0 &&
+      rect.bottom + offset + popoverHeight >
+        window.innerHeight - viewportPadding
+    ) {
+      style.top = Math.max(
+        viewportPadding,
+        rect.top - offset - popoverHeight,
+      );
+    }
     if (popoverMatchTriggerWidth) {
       style.width = rect.width;
     } else if (
@@ -107,13 +121,29 @@ export default function Listbox(props: ListboxProps) {
     } else {
       style.left = rect.left;
     }
-    setPopoverStyle(style);
+    setPopoverStyle((prev) => {
+      if (
+        prev?.top === style.top &&
+        prev?.left === style.left &&
+        prev?.width === style.width &&
+        prev?.minWidth === style.minWidth &&
+        prev?.transform === style.transform
+      ) {
+        return prev;
+      }
+      return style;
+    });
   }, [popoverAlign, popoverMatchTriggerWidth, popoverMinWidth]);
 
   useLayoutEffect(() => {
     if (!open) return;
     updatePopover();
   }, [open, updatePopover]);
+
+  useLayoutEffect(() => {
+    if (!open || !popoverStyle || !popoverRef.current) return;
+    updatePopover();
+  }, [open, popoverStyle, updatePopover]);
 
   useEffect(() => {
     if (!open) return;
@@ -138,13 +168,13 @@ export default function Listbox(props: ListboxProps) {
     const handleReposition = () => updatePopover();
     document.addEventListener("mousedown", handleOutside);
     document.addEventListener("keydown", handleKey);
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
+    globalThis.addEventListener("resize", handleReposition);
+    globalThis.addEventListener("scroll", handleReposition, true);
     return () => {
       document.removeEventListener("mousedown", handleOutside);
       document.removeEventListener("keydown", handleKey);
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
+      globalThis.removeEventListener("resize", handleReposition);
+      globalThis.removeEventListener("scroll", handleReposition, true);
     };
   }, [open, updatePopover]);
 

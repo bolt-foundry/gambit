@@ -182,6 +182,25 @@ The Debug UI shows transcript lanes plus a trace/tools feed. If the deck has an\
 JSON\
 tab. Local-first state is stored under `.gambit/` (sessions, traces, notes).
 
+### Build Chat Provider (Workbench)
+
+Workbench build chat defaults to Codex CLI (`codex-cli/default`). To run build
+chat through Claude Code CLI instead (no OpenRouter path), set:
+
+```bash
+export GAMBIT_SIMULATOR_BUILD_CHAT_PROVIDER=claude-code-cli
+```
+
+Optional overrides:
+
+```bash
+export GAMBIT_SIMULATOR_BUILD_CHAT_MODEL=claude-code-cli/default
+export GAMBIT_SIMULATOR_BUILD_CHAT_MODEL_FORCE=claude-code-cli/sonnet
+```
+
+When the simulator is running, you can also switch providers in the Workbench
+header (left of `New chat`).
+
 ## Using the Library
 
 Use the library when you want TypeScript decks/cards or custom compute steps.

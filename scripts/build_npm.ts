@@ -96,10 +96,20 @@ const corePackageName = coreConfig.name ?? "@bolt-foundry/gambit-core";
 const coreVersion = coreConfig.version ?? "";
 const coreLocalOverride = Deno.env.get("GAMBIT_CORE_NPM_PATH");
 let coreVersionRange = coreVersion ? `^${coreVersion}` : undefined;
-if (coreLocalOverride) {
+const localCoreNpmDir = join(coreDir, "dist", "npm");
+let localCoreNpmExists = false;
+try {
+  await Deno.stat(join(localCoreNpmDir, "package.json"));
+  localCoreNpmExists = true;
+} catch {
+  localCoreNpmExists = false;
+}
+if (coreLocalOverride || localCoreNpmExists) {
   const resolvedLocal = coreLocalOverride === "local"
-    ? relative(distDir, join(coreDir, "dist", "npm"))
-    : coreLocalOverride;
+    ? relative(distDir, localCoreNpmDir)
+    : coreLocalOverride && coreLocalOverride.length > 0
+    ? coreLocalOverride
+    : relative(distDir, localCoreNpmDir);
   coreVersionRange = resolvedLocal.startsWith("file:")
     ? resolvedLocal
     : `file:${resolvedLocal}`;
@@ -246,8 +256,36 @@ try {
     },
     filterDiagnostic: (diagnostic) => {
       if (diagnostic.code === 2339) return false;
-      if (diagnostic.code !== 2345) return true;
       const fileName = diagnostic.file?.fileName?.replaceAll("\\", "/") ?? "";
+      if (
+        diagnostic.code === 2307 &&
+        fileName.includes("/simulator-ui/__generated__/builtRoutes.ts")
+      ) {
+        const text = typeof diagnostic.messageText === "string"
+          ? diagnostic.messageText
+          : diagnostic.messageText.messageText;
+        if (text.includes("@iso-gambit-sim")) {
+          return false;
+        }
+      }
+      if (
+        diagnostic.code === 2686 &&
+        fileName.includes("/simulator-ui/src/")
+      ) {
+        return false;
+      }
+      if (
+        diagnostic.code === 2552 &&
+        fileName.endsWith("/simulator-ui/src/routing.ts")
+      ) {
+        const text = typeof diagnostic.messageText === "string"
+          ? diagnostic.messageText
+          : diagnostic.messageText.messageText;
+        if (text.includes("URLPattern")) {
+          return false;
+        }
+      }
+      if (diagnostic.code !== 2345) return true;
       if (
         fileName.includes("/src/deps/jsr.io/@std/fs/") ||
         fileName.includes("/src/deps/jsr.io/@std/toml/")

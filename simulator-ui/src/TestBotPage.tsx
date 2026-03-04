@@ -1,10 +1,5 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate no-console
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WORKSPACES_API_BASE } from "../../src/workspace_contract.ts";
 import {
   botFilename,
@@ -25,16 +20,11 @@ import type {
 import { useHttpSchema } from "./shared.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
-import Panel from "./gds/Panel.tsx";
-import Button from "./gds/Button.tsx";
-import Tabs from "./gds/Tabs.tsx";
-import List from "./gds/List.tsx";
-import ListItem from "./gds/ListItem.tsx";
-import Listbox from "./gds/Listbox.tsx";
-import ScrollingText from "./gds/ScrollingText.tsx";
 import Callout from "./gds/Callout.tsx";
 import { useWorkspaceTest } from "./WorkspaceContext.tsx";
 import TestBotChatPanel from "./TestBotChatPanel.tsx";
+import { buildTestBotChatDisplay } from "./testBotChatDisplay.ts";
+import TestBotSidebarPanels from "./TestBotSidebarPanels.tsx";
 
 const TEST_STATUS_POLL_INTERVAL_MS = 5000;
 
@@ -103,7 +93,7 @@ export default function TestBotPage(props: {
     onAddErrorToWorkbench,
   } = props;
   const deckStorageKey = "gambit:test:selected-deck";
-  const [testDecks, setTestDecks] = useState<TestDeckMeta[]>([]);
+  const [testDecks, setTestDecks] = useState<Array<TestDeckMeta>>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [botDescription, setBotDescription] = useState<string | null>(null);
   const [botInputSchema, setBotInputSchema] = useState<NormalizedSchema | null>(
@@ -147,7 +137,9 @@ export default function TestBotPage(props: {
   const [assistantDeckTab, setAssistantDeckTab] = useState<
     "input" | "tools" | "schema"
   >("input");
-  const [testRunHistory, setTestRunHistory] = useState<TestRunSummary[]>([]);
+  const [testRunHistory, setTestRunHistory] = useState<Array<TestRunSummary>>(
+    [],
+  );
   const runWorkspaceId = run.workspaceId ?? run.sessionId;
   const deckSchema = useHttpSchema({ workspaceId: activeWorkspaceId });
   const deckInputSchema = deckSchema.schemaResponse?.schema;
@@ -179,7 +171,7 @@ export default function TestBotPage(props: {
       storedDeckId = null;
     }
     const requestedDeckId = opts?.deckId ?? storedDeckId ?? undefined;
-    const fetchTestBotConfig = async (deckId?: string) => {
+    const fetchTestBotConfig = (deckId?: string) => {
       const params = new URLSearchParams();
       if (deckId) params.set("deckPath", deckId);
       if (activeWorkspaceId) params.set("workspaceId", activeWorkspaceId);
@@ -808,6 +800,10 @@ export default function TestBotPage(props: {
     !showStartOverlay &&
     (Boolean(runWorkspaceId) ||
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
+  const testChatDisplay = useMemo(
+    () => buildTestBotChatDisplay(run),
+    [run],
+  );
 
   const handleStartAssistant = useCallback(async () => {
     if (!hasDeckSelection || chatSending) return;
@@ -817,7 +813,6 @@ export default function TestBotPage(props: {
         runId: run.id,
         workspaceId: activeWorkspaceId ?? undefined,
         runWorkspaceId: runWorkspaceId ?? undefined,
-        botDeckPath: selectedDeckId ?? undefined,
         context: !runWorkspaceId ? deckInitValue : undefined,
       });
     } catch {
@@ -829,7 +824,6 @@ export default function TestBotPage(props: {
     hasDeckSelection,
     run.id,
     runWorkspaceId,
-    selectedDeckId,
     activeWorkspaceId,
     startTestAssistantApi,
   ]);
@@ -843,7 +837,6 @@ export default function TestBotPage(props: {
         runId: run.id,
         workspaceId: activeWorkspaceId ?? undefined,
         runWorkspaceId: runWorkspaceId ?? undefined,
-        botDeckPath: selectedDeckId ?? undefined,
         context: !runWorkspaceId ? deckInitValue : undefined,
       });
     } catch {
@@ -854,7 +847,6 @@ export default function TestBotPage(props: {
     deckInitValue,
     run.id,
     runWorkspaceId,
-    selectedDeckId,
     activeWorkspaceId,
     sendTestMessageApi,
   ]);
@@ -946,291 +938,100 @@ export default function TestBotPage(props: {
   return (
     <PageShell>
       <PageGrid as="main" className="editor-main">
-        <div
-          className="flex-column gap-8"
-          style={{
-            height: "100%",
-            overflow: "hidden",
+        <TestBotSidebarPanels
+          selectedRunValue={selectedRunHistoryValue}
+          onRunHistorySelection={handleRunHistorySelection}
+          runHistoryOptions={runHistoryOptions.map((entry) => ({
+            value: entry.runId,
+            label: getScenarioTitle(entry, {
+              labelById: scenarioLabelById,
+              labelByPath: scenarioLabelByPath,
+            }),
+            meta: [
+              entry.updatedAt ? formatTimestampShort(entry.updatedAt) : null,
+              entry.runId,
+            ].filter(Boolean).join(" · "),
+          }))}
+          runHistoryDisabled={run.status === "running" || chatSending ||
+            runHistoryOptions.length === 0}
+          runHistoryPlaceholder={runHistoryOptions.length > 0
+            ? "Select previous run"
+            : "No previous runs"}
+          canStart={canStart}
+          onStartRun={startRun}
+          selectedDeckValue={selectedDeckId}
+          onDeckSelection={handleDeckSelection}
+          deckOptions={testDecks.map((deck) => ({
+            value: deck.id,
+            label: deck.label,
+            meta: botFilename(deck.path),
+          }))}
+          noScenariosCallout={
+            <Callout>
+              No scenarios found in the workspace root deck. Add{" "}
+              <code>[[scenarios]]</code> to <code>PROMPT.md</code>{" "}
+              (prefer the Build tab) to enable Test runs.
+            </Callout>
+          }
+          botDescription={botDescription}
+          scenarioInputSchemaError={botInputSchemaError}
+          hasScenarioInputSchema={Boolean(botInputSchema)}
+          scenarioJsonText={botInputJsonText}
+          onScenarioJsonChange={(text) => {
+            setBotInputJsonText(text);
+            setBotInputDirty(true);
+            const { parsed, error } = parseRootJsonInput(text);
+            setBotInputJsonError(error);
+            if (!error) setBotInputValue(parsed);
           }}
-        >
-          <Panel className="test-bot-sidebar flex-column gap-8 flex-1">
-            <Listbox
-              label="Previous test run"
-              value={selectedRunHistoryValue}
-              onChange={handleRunHistorySelection}
-              disabled={run.status === "running" || chatSending ||
-                runHistoryOptions.length === 0}
-              options={runHistoryOptions.map((entry) => ({
-                value: entry.runId,
-                label: getScenarioTitle(entry, {
-                  labelById: scenarioLabelById,
-                  labelByPath: scenarioLabelByPath,
-                }),
-                meta: [
-                  entry.updatedAt
-                    ? formatTimestampShort(entry.updatedAt)
-                    : null,
-                  entry.runId,
-                ].filter(Boolean).join(" · "),
-              }))}
-              placeholder={runHistoryOptions.length > 0
-                ? "Select previous run"
-                : "No previous runs"}
-            />
-            <div className="flex-row gap-8 items-center">
-              <div className="flex-1">
-                <strong>Scenario deck</strong>
-              </div>
-              <Button
-                variant="primary"
-                onClick={startRun}
-                disabled={!canStart}
-                data-testid="testbot-run"
-              >
-                Run scenario
-              </Button>
-            </div>
-            {testDecks.length > 0 && (
-              <Listbox
-                value={selectedDeckId ?? ""}
-                onChange={handleDeckSelection}
-                options={testDecks.map((deck) => ({
-                  value: deck.id,
-                  label: deck.label,
-                  meta: botFilename(deck.path),
-                }))}
-              />
-            )}
-            {testDecks.length === 0 && (
-              <Callout>
-                No scenarios found in the workspace root deck. Add{" "}
-                <code>[[scenarios]]</code> to <code>PROMPT.md</code>{" "}
-                (prefer the Build tab) to enable Test runs.
-              </Callout>
-            )}
-            {botDescription && <Callout>{botDescription}</Callout>}
-            <strong>Scenario deck input</strong>
-            <div style={{ flex: 1 }}>
-              {botInputSchemaError && (
-                <div className="error">{botInputSchemaError}</div>
-              )}
-              {botInputSchema && (
-                <div className="init-field">
-                  <label>
-                    <span>Scenario JSON</span>
-                  </label>
-                  <textarea
-                    className="json-input"
-                    data-testid="testbot-scenario-json-input"
-                    value={botInputJsonText}
-                    placeholder="Paste full scenario JSON payload"
-                    onChange={(e) => {
-                      const text = e.target.value;
-                      setBotInputJsonText(text);
-                      setBotInputDirty(true);
-                      const { parsed, error } = parseRootJsonInput(text);
-                      setBotInputJsonError(error);
-                      if (!error) setBotInputValue(parsed);
-                    }}
-                    style={{ minHeight: 160 }}
-                  />
-                  {botInputJsonError && (
-                    <div className="error">{botInputJsonError}</div>
-                  )}
-                  {!botInputJsonError && (
-                    <div className="secondary-note">
-                      Paste a complete JSON payload matching the schema.
-                    </div>
-                  )}
-                </div>
-              )}
-              {!botInputSchema && (
-                <Callout>
-                  No scenario input schema configured.
-                </Callout>
-              )}
-            </div>
-          </Panel>
-
-          <Panel className="flex-column gap-10 flex-1">
-            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-              <strong>Assistant deck</strong>
-            </div>
-            <Tabs
-              className="panel-tabs"
-              style={{ marginTop: 6 }}
-              size="small"
-              tabClassName="flex-1"
-              activeId={assistantDeckTab}
-              onChange={(next) =>
-                setAssistantDeckTab(next as typeof assistantDeckTab)}
-              tabs={[
-                { id: "input", label: "Input" },
-                { id: "tools", label: "Tools" },
-                { id: "schema", label: "Schema" },
-              ]}
-            />
-            {assistantDeckTab === "input" && (
-              <>
-                {deckSchema.loading && (
-                  <div className="editor-status">Loading schema…</div>
-                )}
-                {deckSchemaError && (
-                  <div className="error">{deckSchemaError}</div>
-                )}
-                {deckInputSchema && (
-                  <>
-                    <div className="init-field">
-                      <label>
-                        <span>Init JSON</span>
-                      </label>
-                      <textarea
-                        className="json-input"
-                        data-testid="testbot-assistant-init-json-input"
-                        value={deckInitJsonText}
-                        placeholder="Paste full assistant init JSON payload"
-                        onChange={(e) => {
-                          const text = e.target.value;
-                          setDeckInitJsonText(text);
-                          setDeckInitDirty(true);
-                          const { parsed, error } = parseRootJsonInput(text);
-                          setDeckInitJsonError(error);
-                          if (!error) setDeckInitValue(parsed);
-                        }}
-                        style={{ minHeight: 160 }}
-                      />
-                      {deckInitJsonError && (
-                        <div className="error">{deckInitJsonError}</div>
-                      )}
-                      {!deckInitJsonError && (
-                        <div className="secondary-note">
-                          Paste a complete JSON payload matching the schema.
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setDeckInitDirty(false);
-                          const nextInit = deckSchemaDefaults !== undefined
-                            ? cloneValue(deckSchemaDefaults)
-                            : deriveInitialFromSchema(deckInputSchema);
-                          setDeckInitValue(nextInit);
-                          setDeckInitJsonText(formatJson(nextInit));
-                          setDeckInitJsonError(null);
-                        }}
-                      >
-                        Reset init
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => deckSchema.refresh()}
-                      >
-                        Refresh schema
-                      </Button>
-                    </div>
-                  </>
-                )}
-                {!deckInputSchema && !deckSchema.loading && (
-                  <Callout>
-                    No input schema found for this deck.
-                  </Callout>
-                )}
-              </>
-            )}
-            {assistantDeckTab === "tools" && (
-              <>
-                {deckSchema.loading && (
-                  <div className="editor-status">Loading tools…</div>
-                )}
-                {deckSchemaError && (
-                  <div className="error">{deckSchemaError}</div>
-                )}
-                {!deckSchema.loading && !deckSchemaError &&
-                  deckTools.length === 0 && (
-                  <Callout>
-                    No tools declared for this deck.
-                  </Callout>
-                )}
-                {deckTools.length > 0 && (
-                  <List>
-                    {deckTools.map((tool) => (
-                      <ListItem
-                        key={tool.name}
-                        title={tool.label}
-                        meta={tool.fileName
-                          ? <code>{tool.fileName}</code>
-                          : null}
-                        description={tool.description}
-                      />
-                    ))}
-                  </List>
-                )}
-              </>
-            )}
-            {assistantDeckTab === "schema" && (
-              <div className="flex-column gap-6 flex-1">
-                {deckSchema.loading && (
-                  <div className="editor-status">Loading schema…</div>
-                )}
-                {deckSchemaError && (
-                  <div className="error">{deckSchemaError}</div>
-                )}
-                {!deckSchema.loading && !deckSchemaError && (
-                  deckSchema.schemaResponse
-                    ? (
-                      <List className="flex-1">
-                        <ListItem
-                          title="Deck metadata"
-                          description={
-                            <>
-                              <div className="flex-row gap-4">
-                                <span>
-                                  <strong>Path</strong>:
-                                </span>
-                                <ScrollingText
-                                  as="div"
-                                  text={deckSchema.schemaResponse?.deck ??
-                                    "unknown"}
-                                />
-                              </div>
-                              <div>
-                                <strong>Start mode</strong>:{" "}
-                                {deckSchema.schemaResponse?.startMode ??
-                                  "assistant"}
-                              </div>
-                              {deckSchema.schemaResponse?.modelParams &&
-                                (
-                                  <div className="flex-column gap-4">
-                                    <strong>Model params</strong>
-                                    <pre className="trace-json">
-                                      {formatJson(
-                                        deckSchema.schemaResponse?.modelParams,
-                                      )}
-                                    </pre>
-                                  </div>
-                                )}
-                            </>
-                          }
-                        />
-                      </List>
-                    )
-                    : (
-                      <Callout>
-                        No schema available for this deck.
-                      </Callout>
-                    )
-                )}
-              </div>
-            )}
-          </Panel>
-        </div>
+          scenarioJsonError={botInputJsonError}
+          scenarioMissingFields={missingBotInput}
+          assistantDeckTab={assistantDeckTab}
+          onAssistantDeckTabChange={setAssistantDeckTab}
+          assistantInputSchemaError={deckSchemaError}
+          hasAssistantInputSchema={Boolean(deckInputSchema)}
+          assistantInitJsonText={deckInitJsonText}
+          onAssistantInitJsonChange={(text) => {
+            setDeckInitJsonText(text);
+            setDeckInitDirty(true);
+            const { parsed, error } = parseRootJsonInput(text);
+            setDeckInitJsonError(error);
+            if (!error) setDeckInitValue(parsed);
+          }}
+          assistantInitJsonError={deckInitJsonError}
+          assistantMissingFields={missingDeckInit}
+          onAssistantInitReset={() => {
+            setDeckInitDirty(false);
+            const nextInit = deckSchemaDefaults !== undefined
+              ? cloneValue(deckSchemaDefaults)
+              : deriveInitialFromSchema(deckInputSchema);
+            setDeckInitValue(nextInit);
+            setDeckInitJsonText(formatJson(nextInit));
+            setDeckInitJsonError(null);
+          }}
+          onAssistantSchemaRefresh={() => deckSchema.refresh()}
+          toolsLoading={deckSchema.loading}
+          toolsError={deckSchemaError}
+          tools={deckTools.map((tool) => ({
+            key: tool.name,
+            title: tool.label,
+            meta: tool.fileName ?? null,
+            description: tool.description ?? null,
+          }))}
+          schemaLoading={deckSchema.loading}
+          schemaError={deckSchemaError}
+          schemaPath={deckSchema.schemaResponse?.deck ?? null}
+          schemaStartMode={deckSchema.schemaResponse?.startMode ?? "assistant"}
+          schemaModelParamsJson={deckSchema.schemaResponse?.modelParams
+            ? formatJson(deckSchema.schemaResponse.modelParams)
+            : null}
+        />
 
         <TestBotChatPanel
           run={run}
           runWorkspaceId={runWorkspaceId}
           runStatusLabel={runStatusLabel}
+          testChatDisplay={testChatDisplay}
           activeWorkspaceId={activeWorkspaceId}
           requestedRunNotFound={requestedRunNotFound}
           canStart={canStart}

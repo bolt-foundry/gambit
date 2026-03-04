@@ -1,5 +1,6 @@
+// deno-lint-ignore-file
 import { assert, assertEquals } from "@std/assert";
-import React from "react";
+import type React from "react";
 import TestRenderer, { act } from "npm:react-test-renderer@19.2.0";
 
 const globals = globalThis as unknown as {

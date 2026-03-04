@@ -66,5 +66,7 @@ export { createOpenRouterProvider } from "./src/providers/openrouter.ts";
 export { createOllamaProvider } from "./src/providers/ollama.ts";
 /** Provider factory for Google Gemini-backed model calls. */
 export { createGoogleProvider } from "./src/providers/google.ts";
+/** Provider factory for Claude Code CLI-backed model calls. */
+export { createClaudeCodeProvider } from "./src/providers/claude_code.ts";
 /** Start the WebSocket simulator server for the Gambit UI. */
 export { startWebSocketSimulator } from "./src/server.ts";

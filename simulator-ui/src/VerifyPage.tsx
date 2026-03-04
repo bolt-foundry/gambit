@@ -1,10 +1,5 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate no-console
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Listbox from "./gds/Listbox.tsx";
@@ -26,7 +21,6 @@ import {
   buildVerifyConsistencyReport,
   VERIFY_CONSISTENCY_THRESHOLDS,
 } from "./verify_metrics.ts";
-import type { WorkbenchComposerChip } from "./Chat.tsx";
 
 const MAX_BATCH_SIZE = 24;
 const MAX_BATCH_CONCURRENCY = 6;
@@ -60,22 +54,14 @@ type VerifyBatchState = {
   completed: number;
   failed: number;
   active: number;
-  initialRunIds: string[];
-  requests: VerifyBatchRequest[];
+  initialRunIds: Array<string>;
+  requests: Array<VerifyBatchRequest>;
 };
 
 type VerifyRunSampleResponse = {
   run: CalibrationRun;
   error?: string;
 };
-
-type VerifyReportScope = "current_batch" | "all_matching";
-type VerifyExampleSort =
-  | "default"
-  | "delta_desc"
-  | "agreement_asc"
-  | "samples_desc"
-  | "label_asc";
 
 const parseScenarioRunSummary = (value: unknown): ScenarioRunSummary | null => {
   if (!value || typeof value !== "object") return null;
@@ -146,33 +132,15 @@ const clampInt = (value: number, min: number, max: number): number => {
   return Math.max(min, Math.min(max, rounded));
 };
 
-const formatSignedScore = (value: number | null | undefined): string => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `${value > 0 ? "+" : ""}${value}`;
-};
-
-const scoreBadgeVariant = (
-  value: number | null | undefined,
-): "ghost" | "error" | "completed" | "idle" => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "ghost";
-  if (value < 0) return "error";
-  if (value > 0) return "completed";
-  return "idle";
-};
-
 function VerifyPage(
   {
     setNavActions,
     onAppPathChange,
     activeWorkspaceId,
-    composerChips,
-    onComposerChipsChange,
   }: {
     setNavActions?: (actions: React.ReactNode | null) => void;
     onAppPathChange?: (path: string) => void;
     activeWorkspaceId?: string | null;
-    composerChips?: WorkbenchComposerChip[];
-    onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
   },
 ) {
   const {
@@ -207,23 +175,18 @@ function VerifyPage(
     initialRunIds: [],
     requests: [],
   });
-  const [reportScope, setReportScope] = useState<VerifyReportScope>(
-    "all_matching",
-  );
-  const [inconsistentOnly, setInconsistentOnly] = useState(false);
-  const [exampleSort, setExampleSort] = useState<VerifyExampleSort>("default");
   const batchSeqRef = useRef(0);
 
   const updateVerifyPath = useCallback((sessionId: string | null) => {
     const targetPath = buildVerifyPath(sessionId);
-    if (window.location.pathname === targetPath) return;
-    window.history.replaceState({}, "", targetPath);
+    if (globalThis.location.pathname === targetPath) return;
+    globalThis.history.replaceState({}, "", targetPath);
     onAppPathChange?.(targetPath);
   }, [onAppPathChange]);
 
   const navigateToAppPath = useCallback((nextPath: string) => {
-    if (window.location.pathname === nextPath) return;
-    window.history.pushState({}, "", nextPath);
+    if (globalThis.location.pathname === nextPath) return;
+    globalThis.history.pushState({}, "", nextPath);
     onAppPathChange?.(nextPath);
   }, [onAppPathChange]);
 
@@ -374,42 +337,12 @@ function VerifyPage(
   }, [selectedSession?.gradingRuns]);
 
   const filteredRuns = useMemo(() => {
-    const latestScenarioRunIdFromRuns = sessionRuns
-      .map((run) => scenarioRunIdFromCalibrationRun(run))
-      .find((runId): runId is string => Boolean(runId));
-    const hasOption = (runId: string | null | undefined): runId is string =>
-      Boolean(
-        runId &&
-          scenarioRunOptions.some((entry) => entry.scenarioRunId === runId),
-      );
-    const meta = sessionDetail?.meta && typeof sessionDetail.meta === "object"
-      ? sessionDetail.meta as Record<string, unknown>
-      : {};
-    const currentScenarioRunId = typeof meta.scenarioRunId === "string" &&
-        meta.scenarioRunId.trim().length > 0
-      ? meta.scenarioRunId
-      : null;
-    const activeScenarioRunFilterId = hasOption(workspaceRouting.testRunId)
-      ? workspaceRouting.testRunId
-      : hasOption(selectedScenarioRunId)
-      ? selectedScenarioRunId
-      : hasOption(currentScenarioRunId)
-      ? currentScenarioRunId
-      : scenarioRunOptions[0]?.scenarioRunId ?? latestScenarioRunIdFromRuns ??
-        null;
     return sessionRuns.filter((run) => {
       if (selectedGraderId && run.graderId !== selectedGraderId) return false;
-      if (!activeScenarioRunFilterId) return true;
-      return scenarioRunIdFromCalibrationRun(run) === activeScenarioRunFilterId;
+      if (!selectedScenarioRunId) return true;
+      return scenarioRunIdFromCalibrationRun(run) === selectedScenarioRunId;
     });
-  }, [
-    scenarioRunOptions,
-    selectedGraderId,
-    selectedScenarioRunId,
-    sessionDetail?.meta,
-    sessionRuns,
-    workspaceRouting.testRunId,
-  ]);
+  }, [selectedGraderId, selectedScenarioRunId, sessionRuns]);
 
   const runConsistencySample = useCallback(async (payload: {
     workspaceId: string;
@@ -484,7 +417,7 @@ function VerifyPage(
     batchSeqRef.current = batchId;
     const now = new Date().toISOString();
     const initialRunIds = filteredRuns.map((run) => run.id);
-    const initialRequests: VerifyBatchRequest[] = Array.from(
+    const initialRequests: Array<VerifyBatchRequest> = Array.from(
       { length: nextBatchSize },
       (_, index) => ({
         requestId: `${batchId}:${index + 1}`,
@@ -588,10 +521,10 @@ function VerifyPage(
 
   const reportRuns = useMemo(
     () =>
-      reportScope === "current_batch"
+      completedBatchRuns.length > 0
         ? completedBatchRuns
         : historicalCompletedRuns,
-    [completedBatchRuns, historicalCompletedRuns, reportScope],
+    [completedBatchRuns, historicalCompletedRuns],
   );
 
   const consistencyReport = useMemo(
@@ -612,111 +545,7 @@ function VerifyPage(
       batchState.status !== "running",
   );
 
-  const displayedOutliers = useMemo(() => {
-    const filtered = inconsistentOnly
-      ? consistencyReport.outliers.filter((outlier) => outlier.instability)
-      : consistencyReport.outliers;
-    if (exampleSort === "default") return filtered;
-    const next = [...filtered];
-    if (exampleSort === "delta_desc") {
-      next.sort((a, b) => {
-        const aDelta = a.scoreDelta ?? -1;
-        const bDelta = b.scoreDelta ?? -1;
-        if (aDelta !== bDelta) return bDelta - aDelta;
-        return a.label.localeCompare(b.label);
-      });
-      return next;
-    }
-    if (exampleSort === "agreement_asc") {
-      next.sort((a, b) => {
-        const aAgreement = a.agreementRate ?? Number.POSITIVE_INFINITY;
-        const bAgreement = b.agreementRate ?? Number.POSITIVE_INFINITY;
-        if (aAgreement !== bAgreement) return aAgreement - bAgreement;
-        return a.label.localeCompare(b.label);
-      });
-      return next;
-    }
-    if (exampleSort === "samples_desc") {
-      next.sort((a, b) => {
-        if (a.sampleSize !== b.sampleSize) return b.sampleSize - a.sampleSize;
-        return a.label.localeCompare(b.label);
-      });
-      return next;
-    }
-    next.sort((a, b) => a.label.localeCompare(b.label));
-    return next;
-  }, [consistencyReport.outliers, exampleSort, inconsistentOnly]);
-  const reportScopeLabel = reportScope === "current_batch"
-    ? "current batch"
-    : "all matching runs";
-  const resolvedComposerChips = useMemo(
-    () => composerChips ?? [],
-    [composerChips],
-  );
-  const composerChipIds = useMemo(
-    () => new Set(resolvedComposerChips.map((chip) => chip.chipId)),
-    [resolvedComposerChips],
-  );
-
-  const mergeComposerChip = useCallback(
-    (base: WorkbenchComposerChip[], chip: WorkbenchComposerChip) => {
-      const next = [...base];
-      const existingIndex = next.findIndex((entry) =>
-        entry.chipId === chip.chipId
-      );
-      if (existingIndex >= 0) {
-        next[existingIndex] = {
-          ...next[existingIndex],
-          ...chip,
-          enabled: true,
-        };
-        return next;
-      }
-      next.push(chip);
-      return next;
-    },
-    [],
-  );
-
-  const addComposerChip = useCallback((chip: WorkbenchComposerChip) => {
-    if (!onComposerChipsChange) return;
-    onComposerChipsChange(mergeComposerChip(resolvedComposerChips, chip));
-  }, [mergeComposerChip, onComposerChipsChange, resolvedComposerChips]);
-
-  const removeComposerChip = useCallback((chipId: string) => {
-    if (!onComposerChipsChange) return;
-    onComposerChipsChange(
-      resolvedComposerChips.filter((chip) => chip.chipId !== chipId),
-    );
-  }, [onComposerChipsChange, resolvedComposerChips]);
-
-  const buildOutlierChip = useCallback(
-    (outlier: typeof consistencyReport.outliers[number]) => {
-      const chipId = `verify:${selectedSessionId ?? ""}:${outlier.key}`;
-      const runId = outlier.maxRunId ?? outlier.minRunId;
-      const score = outlier.maxScore ?? outlier.minScore ?? undefined;
-      const agreementText = outlier.agreementRate === null
-        ? "agreement unavailable"
-        : `agreement ${Math.round(outlier.agreementRate * 100)}%`;
-      const deltaText = outlier.scoreDelta === null
-        ? "delta unavailable"
-        : `delta ${outlier.scoreDelta}`;
-      return {
-        chipId,
-        source: "verify_outlier" as const,
-        workspaceId: selectedSessionId ?? undefined,
-        runId,
-        capturedAt: new Date().toISOString(),
-        outlierKey: outlier.key,
-        instability: outlier.instability,
-        score,
-        message:
-          `Verify outlier ${outlier.label}: ${agreementText}, ${deltaText}, samples ${outlier.sampleSize}`,
-        enabled: true,
-      };
-    },
-    [selectedSessionId],
-  );
+  const topOutliers = consistencyReport.outliers.slice(0, 8);
 
   useEffect(() => {
     if (!setNavActions) return;
@@ -853,11 +682,23 @@ function VerifyPage(
           {!loading && (
             <>
               <div className="verify-status-row">
-                <div className="verify-status-main flex-row items-center gap-8">
+                <div className="verify-status-main">
                   <strong>Batch status</strong>
-                  <Badge status={batchState.status}>
-                    {batchState.status}
-                  </Badge>
+                  <div className="verify-status-meta">
+                    <Badge status={batchState.status}>
+                      {batchState.status}
+                    </Badge>
+                    {batchState.startedAt
+                      ? ` · started ${
+                        formatTimestampShort(batchState.startedAt)
+                      }`
+                      : ""}
+                    {batchState.finishedAt
+                      ? ` · finished ${
+                        formatTimestampShort(batchState.finishedAt)
+                      }`
+                      : ""}
+                  </div>
                 </div>
                 {consistencyReport.sampleSize > 0 && (
                   <span
@@ -870,6 +711,14 @@ function VerifyPage(
                   </span>
                 )}
               </div>
+              {batchState.requested > 0 && (
+                <div className="verify-progress-row">
+                  <span>Queued: {queuedCount}</span>
+                  <span>Running: {batchState.active}</span>
+                  <span>Completed: {batchState.completed}</span>
+                  <span>Failed: {batchState.failed}</span>
+                </div>
+              )}
               {batchState.status === "idle" &&
                 consistencyReport.sampleSize === 0 && (
                 <Callout>
@@ -877,87 +726,57 @@ function VerifyPage(
                   instability for the selected grader.
                 </Callout>
               )}
-              <div className="verify-metric-grid">
-                <div className="verify-metric-card">
-                  <div className="verify-sample-size-row">
-                    <div className="verify-sample-size-copy">
+              {consistencyReport.sampleSize > 0 && (
+                <>
+                  <div className="verify-metric-grid">
+                    <div className="verify-metric-card">
                       <div className="verify-metric-label">Sample size</div>
                       <div className="verify-metric-value">
                         {consistencyReport.sampleSize}
                       </div>
                     </div>
-                    <div className="verify-sample-scope-select">
-                      <Listbox
-                        value={reportScope}
-                        onChange={(value) =>
-                          setReportScope(value as VerifyReportScope)}
-                        size="small"
-                        popoverMatchTriggerWidth={false}
-                        popoverMinWidth={320}
-                        popoverAlign="right"
-                        options={[
-                          {
-                            value: "current_batch",
-                            label:
-                              `Current batch (${completedBatchRuns.length})`,
-                            triggerLabel: "Current batch",
-                            triggerMeta: null,
-                            meta: "Only runs from the latest batch launch",
-                          },
-                          {
-                            value: "all_matching",
-                            label:
-                              `All matching runs (${historicalCompletedRuns.length})`,
-                            triggerLabel: "All matching runs",
-                            triggerMeta: null,
-                            meta:
-                              "All runs matching selected scenario + grader",
-                          },
-                        ]}
-                      />
+                    <div className="verify-metric-card">
+                      <div className="verify-metric-label">Agreement rate</div>
+                      <div className="verify-metric-value">
+                        {consistencyReport.agreementRate === null
+                          ? "—"
+                          : `${
+                            Math.round(consistencyReport.agreementRate * 100)
+                          }%`}
+                      </div>
+                    </div>
+                    <div className="verify-metric-card">
+                      <div className="verify-metric-label">
+                        Score spread (min/median/max)
+                      </div>
+                      <div className="verify-metric-value verify-metric-value--compact">
+                        {consistencyReport.scoreSpreadMin === null
+                          ? "—"
+                          : `${consistencyReport.scoreSpreadMin} / ${
+                            consistencyReport.scoreSpreadMedian ?? "—"
+                          } / ${consistencyReport.scoreSpreadMax ?? "—"}`}
+                      </div>
+                    </div>
+                    <div className="verify-metric-card">
+                      <div className="verify-metric-label">
+                        Instability count
+                      </div>
+                      <div className="verify-metric-value">
+                        {consistencyReport.instabilityCount}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Agreement rate</div>
-                  <div className="verify-metric-value">
-                    {consistencyReport.agreementRate === null
-                      ? "—"
-                      : `${Math.round(consistencyReport.agreementRate * 100)}%`}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">
-                    Score spread (min/median/max)
-                  </div>
-                  <div className="verify-metric-value verify-metric-value--compact">
-                    {consistencyReport.scoreSpreadMin === null
-                      ? "—"
-                      : `${consistencyReport.scoreSpreadMin} / ${
-                        consistencyReport.scoreSpreadMedian ?? "—"
-                      } / ${consistencyReport.scoreSpreadMax ?? "—"}`}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">
-                    Instability count
-                  </div>
-                  <div className="verify-metric-value">
-                    {consistencyReport.instabilityCount}
-                  </div>
-                </div>
-              </div>
-              {consistencyReport.sampleSize > 0 && (
-                <Callout
-                  variant={consistencyReport.verdict === "FAIL"
-                    ? "danger"
-                    : consistencyReport.verdict === "WARN"
-                    ? "emphasis"
-                    : "muted"}
-                  title={`Verdict: ${consistencyReport.verdict}`}
-                >
-                  {consistencyReport.verdictReason}
-                </Callout>
+                  <Callout
+                    variant={consistencyReport.verdict === "FAIL"
+                      ? "danger"
+                      : consistencyReport.verdict === "WARN"
+                      ? "emphasis"
+                      : "muted"}
+                    title={`Verdict: ${consistencyReport.verdict}`}
+                  >
+                    {consistencyReport.verdictReason}
+                  </Callout>
+                </>
               )}
               <Callout title="Thresholds in code">
                 Min sample size: {VERIFY_CONSISTENCY_THRESHOLDS.minSampleSize}
@@ -978,49 +797,17 @@ function VerifyPage(
                 {VERIFY_CONSISTENCY_THRESHOLDS.warn.maxInstabilityCount}.
               </Callout>
               <div className="verify-section">
-                <div className="verify-section-header">
-                  <strong>Examples</strong>
-                  <div className="verify-section-controls">
-                    <Button
-                      variant={inconsistentOnly
-                        ? "primary-deemph"
-                        : "secondary"}
-                      size="small"
-                      onClick={() => setInconsistentOnly((prev) => !prev)}
-                    >
-                      Inconsistent
-                    </Button>
-                    <div className="verify-section-sort">
-                      <Listbox
-                        value={exampleSort}
-                        onChange={(value) =>
-                          setExampleSort(value as VerifyExampleSort)}
-                        size="small"
-                        options={[
-                          { value: "default", label: "Sort: default" },
-                          { value: "delta_desc", label: "Sort: score delta" },
-                          {
-                            value: "agreement_asc",
-                            label: "Sort: agreement",
-                          },
-                          { value: "samples_desc", label: "Sort: sample size" },
-                          { value: "label_asc", label: "Sort: label" },
-                        ]}
-                      />
-                    </div>
-                  </div>
-                </div>
-                {displayedOutliers.length === 0
+                <strong>Most inconsistent examples</strong>
+                {topOutliers.length === 0
                   ? (
                     <Callout>
-                      {consistencyReport.outliers.length === 0
-                        ? `Examples will appear here as soon as at least one completed run is available in ${reportScopeLabel}.`
-                        : `No examples match the current filters in ${reportScopeLabel}.`}
+                      Inconsistent examples will appear here as soon as at least
+                      one completed run is available in this batch.
                     </Callout>
                   )
                   : (
                     <div className="verify-outlier-list">
-                      {displayedOutliers.map((outlier) => {
+                      {topOutliers.map((outlier) => {
                         const runLinks = (() => {
                           if (!selectedSessionId) return [];
                           const ids = [
@@ -1036,130 +823,47 @@ function VerifyPage(
                           >
                             <div className="verify-outlier-header">
                               <strong>{outlier.label}</strong>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "8px",
-                                }}
+                              <Badge
+                                variant={outlier.instability
+                                  ? "error"
+                                  : "completed"}
                               >
-                                {outlier.minScore === outlier.maxScore
-                                  ? (
-                                    <Badge
-                                      variant={scoreBadgeVariant(
-                                        outlier.minScore,
-                                      )}
-                                    >
-                                      {formatSignedScore(outlier.minScore)}
-                                    </Badge>
-                                  )
-                                  : (
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                      }}
-                                    >
-                                      <Badge
-                                        variant={scoreBadgeVariant(
-                                          outlier.minScore,
-                                        )}
-                                        style={{
-                                          borderTopRightRadius: 0,
-                                          borderBottomRightRadius: 0,
-                                        }}
-                                      >
-                                        {formatSignedScore(outlier.minScore)}
-                                      </Badge>
-                                      <Badge
-                                        variant={scoreBadgeVariant(
-                                          outlier.maxScore,
-                                        )}
-                                        style={{
-                                          marginLeft: "-1px",
-                                          borderTopLeftRadius: 0,
-                                          borderBottomLeftRadius: 0,
-                                        }}
-                                      >
-                                        {formatSignedScore(outlier.maxScore)}
-                                      </Badge>
-                                    </div>
-                                  )}
-                                <Badge
-                                  variant={outlier.instability
-                                    ? "error"
-                                    : "completed"}
-                                >
-                                  {outlier.instability ? "Unstable" : "Stable"}
-                                </Badge>
-                              </div>
+                                {outlier.instability ? "Unstable" : "Stable"}
+                              </Badge>
                             </div>
-                            <div className="flex-row items-center">
-                              <div className="flex-1 flex-column">
-                                <div className="verify-outlier-meta">
-                                  agreement {outlier.agreementRate === null
-                                    ? "—"
-                                    : `${
-                                      Math.round(outlier.agreementRate * 100)
-                                    }%`} · delta {outlier.scoreDelta ?? "—"}
-                                  {" "}
-                                  · samples {outlier.sampleSize}
-                                  {outlier.passFlip ? " · pass/fail flip" : ""}
-                                  {outlier.messageRefId
-                                    ? ` · ref ${outlier.messageRefId}`
-                                    : ""}
-                                </div>
-                                {runLinks.length > 0 && (
-                                  <div className="verify-outlier-links">
-                                    {runLinks.map((runId) => {
-                                      if (!selectedSessionId) return null;
-                                      const href = buildGradePath(
-                                        selectedSessionId,
-                                        runId,
-                                      );
-                                      return (
-                                        <a
-                                          key={runId}
-                                          href={href}
-                                          onClick={(event) =>
-                                            handleInternalLinkClick(
-                                              event,
-                                              href,
-                                            )}
-                                        >
-                                          Open grade run {runId}
-                                        </a>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                              {(() => {
-                                const outlierChip = buildOutlierChip(outlier);
-                                const inChat = composerChipIds.has(
-                                  outlierChip.chipId,
-                                );
-                                return (
-                                  <div className="workbench-summary-actions">
-                                    <Button
-                                      variant="secondary"
-                                      size="small"
-                                      onClick={() =>
-                                        inChat
-                                          ? removeComposerChip(
-                                            outlierChip.chipId,
-                                          )
-                                          : addComposerChip(outlierChip)}
-                                      disabled={!onComposerChipsChange}
-                                    >
-                                      {inChat
-                                        ? "Remove from chat"
-                                        : "Add to chat"}
-                                    </Button>
-                                  </div>
-                                );
-                              })()}
+                            <div className="verify-outlier-meta">
+                              agreement {outlier.agreementRate === null
+                                ? "—"
+                                : `${Math.round(outlier.agreementRate * 100)}%`}
+                              {" "}
+                              · delta {outlier.scoreDelta ?? "—"} · samples{" "}
+                              {outlier.sampleSize}
+                              {outlier.passFlip ? " · pass/fail flip" : ""}
+                              {outlier.messageRefId
+                                ? ` · ref ${outlier.messageRefId}`
+                                : ""}
                             </div>
+                            {runLinks.length > 0 && (
+                              <div className="verify-outlier-links">
+                                {runLinks.map((runId) => {
+                                  if (!selectedSessionId) return null;
+                                  const href = buildGradePath(
+                                    selectedSessionId,
+                                    runId,
+                                  );
+                                  return (
+                                    <a
+                                      key={runId}
+                                      href={href}
+                                      onClick={(event) =>
+                                        handleInternalLinkClick(event, href)}
+                                    >
+                                      Open grade run {runId}
+                                    </a>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -1169,29 +873,6 @@ function VerifyPage(
               {batchState.requests.length > 0 && (
                 <div className="verify-section">
                   <strong>Batch requests</strong>
-                  {(batchState.startedAt ||
-                    batchState.finishedAt) && (
-                    <div className="verify-status-meta">
-                      {batchState.startedAt
-                        ? `started ${
-                          formatTimestampShort(batchState.startedAt)
-                        }`
-                        : ""}
-                      {batchState.finishedAt
-                        ? ` · finished ${
-                          formatTimestampShort(batchState.finishedAt)
-                        }`
-                        : ""}
-                    </div>
-                  )}
-                  {batchState.requested > 0 && (
-                    <div className="verify-progress-row">
-                      <span>Queued: {queuedCount}</span>
-                      <span>Running: {batchState.active}</span>
-                      <span>Completed: {batchState.completed}</span>
-                      <span>Failed: {batchState.failed}</span>
-                    </div>
-                  )}
                   <ul className="verify-request-list">
                     {batchState.requests.map((request, index) => (
                       <li

@@ -10,20 +10,44 @@ const GAMBIT_BOT_SOURCE_DECK_URL = new URL(
   "../decks/gambit-bot/PROMPT.md",
   import.meta.url,
 );
+const BUILD_CHAT_PROVIDER_ENV = "GAMBIT_SIMULATOR_BUILD_CHAT_PROVIDER";
+type BuildChatProvider = "codex-cli" | "claude-code-cli";
 const GAMBIT_BOT_SOURCE_DIR = GAMBIT_BOT_SOURCE_DECK_URL.protocol === "file:"
   ? path.dirname(path.fromFileUrl(GAMBIT_BOT_SOURCE_DECK_URL))
   : "";
-const SIMPLE_PROMPT_TEMPLATE = `+++
+function defaultModelForBuildChatProvider(provider: BuildChatProvider): string {
+  return provider === "claude-code-cli"
+    ? "claude-code-cli/default"
+    : "codex-cli/default";
+}
+
+function simplePromptTemplate(model: string): string {
+  return `+++
 label = "Local Prompt"
 description = "Minimal starter deck created by gambit serve."
 
 [modelParams]
-model = ["codex-cli/default"]
+model = ["${model}"]
 +++
 
 You are a helpful assistant.
 
 Keep responses concise and directly answer the user.`;
+}
+
+function normalizeBuildChatProvider(
+  value?: string,
+): BuildChatProvider | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized === "codex-cli" || normalized === "claude-code-cli") {
+    return normalized;
+  }
+  throw new Error(
+    `Invalid --build-assistant-provider "${value}". Expected codex-cli or claude-code-cli.`,
+  );
+}
 
 async function ensureGambitBotPolicyMirror(baseRoot: string) {
   if (!GAMBIT_BOT_SOURCE_DIR) return;
@@ -47,6 +71,7 @@ export function resolveServeWorkspaceRoot(cwd: string): string {
 export async function handleServeCommand(opts: {
   deckPath?: string;
   artifactPath?: string;
+  buildAssistantProvider?: string;
   model?: string;
   modelForce?: string;
   modelProvider: ModelProvider;
@@ -70,6 +95,15 @@ export async function handleServeCommand(opts: {
   const baseRoot = resolveServeWorkspaceRoot(cwd);
   await ensureGambitBotPolicyMirror(baseRoot);
   let resolvedDeckPath = opts.deckPath?.trim();
+  const buildChatProvider = normalizeBuildChatProvider(
+    opts.buildAssistantProvider,
+  );
+  if (buildChatProvider) {
+    Deno.env.set(BUILD_CHAT_PROVIDER_ENV, buildChatProvider);
+  }
+  const serveDefaultModel = buildChatProvider
+    ? defaultModelForBuildChatProvider(buildChatProvider)
+    : undefined;
   let restoredWorkspace:
     | {
       id: string;
@@ -101,7 +135,10 @@ export async function handleServeCommand(opts: {
     if (existsSync(localPrompt)) {
       resolvedDeckPath = localPrompt;
     } else {
-      await Deno.writeTextFile(localPrompt, SIMPLE_PROMPT_TEMPLATE);
+      await Deno.writeTextFile(
+        localPrompt,
+        simplePromptTemplate(serveDefaultModel ?? "codex-cli/default"),
+      );
       logger.log(`[serve] created ${localPrompt}`);
       resolvedDeckPath = localPrompt;
     }
@@ -132,7 +169,7 @@ export async function handleServeCommand(opts: {
     startWebSocketSimulator({
       deckPath: resolvedDeckPath ?? opts.deckPath ?? "",
       sessionDir: path.join(baseRoot, ".gambit", "workspaces"),
-      model: opts.model,
+      model: opts.model ?? serveDefaultModel,
       modelForce: opts.modelForce,
       modelProvider: opts.modelProvider,
       initialContext: opts.context,

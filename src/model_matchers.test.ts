@@ -6,6 +6,7 @@ const OPENROUTER = "openrouter/anthropic/claude-3-haiku";
 const OLLAMA = "ollama/llama3";
 const GOOGLE = "google/gemini-1.5-pro";
 const CODEX = "codex-cli/default";
+const CLAUDE_CODE = "claude-code-cli/default";
 
 Deno.test("provider matchers respect fallback for unprefixed models", () => {
   const ollama = createProviderMatchers("ollama");
@@ -28,6 +29,12 @@ Deno.test("provider matchers respect fallback for unprefixed models", () => {
   assertEquals(codex.matchesOpenRouter(UNPREFIXED), false);
   assertEquals(codex.matchesOllama(UNPREFIXED), false);
   assertEquals(codex.matchesGoogle(UNPREFIXED), false);
+
+  const claude = createProviderMatchers("claude-code-cli");
+  assertEquals(claude.matchesClaudeCode(UNPREFIXED), true);
+  assertEquals(claude.matchesOpenRouter(UNPREFIXED), false);
+  assertEquals(claude.matchesOllama(UNPREFIXED), false);
+  assertEquals(claude.matchesGoogle(UNPREFIXED), false);
 });
 
 Deno.test("provider matchers always honor explicit prefixes", () => {
@@ -36,6 +43,7 @@ Deno.test("provider matchers always honor explicit prefixes", () => {
   assertEquals(matcher.matchesOllama(OLLAMA), true);
   assertEquals(matcher.matchesGoogle(GOOGLE), true);
   assertEquals(matcher.matchesCodex(CODEX), true);
+  assertEquals(matcher.matchesClaudeCode(CLAUDE_CODE), true);
 });
 
 Deno.test("provider matchers do not claim unprefixed models when fallback is null", () => {
@@ -44,6 +52,7 @@ Deno.test("provider matchers do not claim unprefixed models when fallback is nul
   assertEquals(matcher.matchesOllama(UNPREFIXED), false);
   assertEquals(matcher.matchesGoogle(UNPREFIXED), false);
   assertEquals(matcher.matchesCodex(UNPREFIXED), false);
+  assertEquals(matcher.matchesClaudeCode(UNPREFIXED), false);
 });
 
 Deno.test("provider matchers do not treat legacy codex prefix as unprefixed", () => {
@@ -59,3 +68,13 @@ Deno.test("provider matchers treat bare codex-cli as codex provider", () => {
   assertEquals(matcher.matchesOpenRouter("codex-cli"), false);
   assertEquals(matcher.matchesCodex("codex-cli"), true);
 });
+
+Deno.test(
+  "provider matchers treat bare claude-code-cli as claude provider",
+  () => {
+    const matcher = createProviderMatchers("openrouter");
+    assertEquals(matcher.isUnprefixedModel("claude-code-cli"), false);
+    assertEquals(matcher.matchesOpenRouter("claude-code-cli"), false);
+    assertEquals(matcher.matchesClaudeCode("claude-code-cli"), true);
+  },
+);

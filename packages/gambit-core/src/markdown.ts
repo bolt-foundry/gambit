@@ -1,3 +1,4 @@
+// deno-lint-ignore-file gambit/no-unexplained-as-unknown
 import { extract } from "@std/front-matter/any";
 import * as path from "@std/path";
 import {

@@ -1,11 +1,5 @@
-import {
-  WORKSPACE_API_BASE,
-  WORKSPACES_API_BASE,
-} from "./workspace_contract.ts";
-
 type HandleUiRoutesDeps = {
   url: URL;
-  req: Request;
   workspaceRouteBase: string;
   activeWorkspaceId: string | null;
   activeWorkspaceOnboarding: boolean;
@@ -19,20 +13,16 @@ type HandleUiRoutesDeps = {
   simulatorReactHtml: (
     deckPath: string,
     deckLabel?: string,
-    opts?: { workspaceId?: string | null; onboarding?: boolean },
-  ) => string;
+    opts?: {
+      workspaceId?: string | null;
+      onboarding?: boolean;
+      currentPath?: string;
+    },
+  ) => Promise<string>;
   toDeckLabel: (deckPath: string) => string;
   readReactBundle: () => Promise<Uint8Array | null>;
   shouldAdvertiseSourceMap: () => boolean;
   readReactBundleSourceMap: () => Promise<Uint8Array | null>;
-  listSessions: () => unknown;
-  createWorkspaceSession: () => Promise<{
-    id: string;
-    rootDeckPath: string;
-    rootDir: string;
-    createdAt: string;
-  }>;
-  workspaceStateSchemaVersion: string;
 };
 
 export const handleUiRoutes = async (
@@ -40,7 +30,6 @@ export const handleUiRoutes = async (
 ): Promise<Response | null> => {
   const {
     url,
-    req,
     workspaceRouteBase,
     activeWorkspaceId,
     activeWorkspaceOnboarding,
@@ -56,13 +45,12 @@ export const handleUiRoutes = async (
     readReactBundle,
     shouldAdvertiseSourceMap,
     readReactBundleSourceMap,
-    listSessions,
-    createWorkspaceSession,
-    workspaceStateSchemaVersion,
   } = deps;
 
   if (
     url.pathname === "/" ||
+    url.pathname === "/isograph" ||
+    url.pathname.startsWith("/isograph/") ||
     url.pathname === workspaceRouteBase ||
     url.pathname.startsWith(`${workspaceRouteBase}/`) ||
     url.pathname.startsWith("/simulate") ||
@@ -84,9 +72,10 @@ export const handleUiRoutes = async (
     await deckLoadPromise.catch(() => null);
     const resolvedLabel = deckLabel ?? toDeckLabel(resolvedDeckPath);
     return new Response(
-      simulatorReactHtml(resolvedDeckPath, resolvedLabel, {
+      await simulatorReactHtml(resolvedDeckPath, resolvedLabel, {
         workspaceId: activeWorkspaceId ?? null,
         onboarding: activeWorkspaceOnboarding,
+        currentPath: url.pathname,
       }),
       {
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -127,34 +116,6 @@ export const handleUiRoutes = async (
     );
   }
 
-  if (url.pathname === "/api/deck-source") {
-    if (req.method !== "GET") {
-      return new Response("Method not allowed", { status: 405 });
-    }
-    try {
-      const content = await Deno.readTextFile(resolvedDeckPath);
-      return new Response(
-        JSON.stringify({
-          path: resolvedDeckPath,
-          content,
-        }),
-        { headers: { "content-type": "application/json; charset=utf-8" } },
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return new Response(
-        JSON.stringify({
-          path: resolvedDeckPath,
-          error: message,
-        }),
-        {
-          status: 500,
-          headers: { "content-type": "application/json; charset=utf-8" },
-        },
-      );
-    }
-  }
-
   if (url.pathname === "/ui/bundle.js") {
     const data = await readReactBundle();
     if (!data) {
@@ -170,6 +131,7 @@ export const handleUiRoutes = async (
       if (shouldAdvertiseSourceMap()) {
         headers.set("SourceMap", "/ui/bundle.js.map");
       }
+      // this predates the lint rule
       return new Response(data as unknown as BodyInit, { headers });
     } catch (err) {
       return new Response(
@@ -190,6 +152,7 @@ export const handleUiRoutes = async (
       );
     }
     try {
+      // this predates the lint rule
       return new Response(data as unknown as BodyInit, {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -201,40 +164,6 @@ export const handleUiRoutes = async (
           err instanceof Error ? err.message : String(err)
         }`,
         { status: 500 },
-      );
-    }
-  }
-
-  if (url.pathname === WORKSPACES_API_BASE) {
-    const workspaces = listSessions();
-    return new Response(JSON.stringify({ workspaces }), {
-      headers: { "content-type": "application/json; charset=utf-8" },
-    });
-  }
-
-  if (url.pathname === `${WORKSPACE_API_BASE}/new`) {
-    if (req.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
-    }
-    try {
-      const workspace = await createWorkspaceSession();
-      await activateWorkspaceDeck(workspace.id);
-      return new Response(
-        JSON.stringify({
-          workspaceId: workspace.id,
-          deckPath: workspace.rootDeckPath,
-          workspaceDir: workspace.rootDir,
-          createdAt: workspace.createdAt,
-          workspaceSchemaVersion: workspaceStateSchemaVersion,
-        }),
-        { headers: { "content-type": "application/json" } },
-      );
-    } catch (err) {
-      return new Response(
-        JSON.stringify({
-          error: err instanceof Error ? err.message : String(err),
-        }),
-        { status: 500, headers: { "content-type": "application/json" } },
       );
     }
   }

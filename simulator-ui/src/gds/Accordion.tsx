@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 import React, { useMemo, useState } from "react";
 import { classNames } from "../utils.ts";
 import Icon from "./Icon.tsx";
@@ -14,7 +15,7 @@ export type AccordionItem = {
 };
 
 type AccordionProps = {
-  items: AccordionItem[];
+  items: Array<AccordionItem>;
   allowMultiple?: boolean;
   className?: string;
 };

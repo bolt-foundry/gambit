@@ -2,7 +2,7 @@ import {
   buildWorkspacePath,
   parseWorkspaceRoute,
   WORKSPACE_ROUTE_BASE,
-} from "../../src/workspace_contract.ts";
+} from "../../src/workspace_routes.ts";
 
 export type NormalizedSchema = {
   kind:
@@ -66,10 +66,10 @@ export type FeedbackEntry = {
 
 export type SavedState = {
   runId: string;
-  messages: ModelMessage[];
-  messageRefs?: MessageRef[];
-  feedback?: FeedbackEntry[];
-  traces?: TraceEvent[];
+  messages: Array<ModelMessage>;
+  messageRefs?: Array<MessageRef>;
+  feedback?: Array<FeedbackEntry>;
+  traces?: Array<TraceEvent>;
   notes?: SessionNotes;
   conversationScore?: SessionRating;
   meta?: Record<string, unknown>;
@@ -120,7 +120,7 @@ export type CalibrationRun = {
   referenceSample?: {
     score: number;
     reason: string;
-    evidence?: string[];
+    evidence?: Array<string>;
   };
   input?: unknown;
   result?: unknown;
@@ -138,9 +138,9 @@ export type GradingFlag = {
 
 export type SessionDetailResponse = {
   workspaceId: string;
-  messages: ModelMessage[];
-  messageRefs?: MessageRef[];
-  feedback?: FeedbackEntry[];
+  messages: Array<ModelMessage>;
+  messageRefs?: Array<MessageRef>;
+  feedback?: Array<FeedbackEntry>;
   meta?: Record<string, unknown>;
 };
 
@@ -173,7 +173,7 @@ export type TestBotRun = {
   sessionId?: string;
   error?: string;
   initFill?: {
-    requested: string[];
+    requested: Array<string>;
     applied?: unknown;
     provided?: unknown;
     error?: string;
@@ -193,7 +193,7 @@ export type TestBotRun = {
     respondPayload?: unknown;
     respondMeta?: Record<string, unknown>;
   }>;
-  traces?: TraceEvent[];
+  traces?: Array<TraceEvent>;
   toolInserts?: Array<{
     actionCallId?: string;
     parentActionCallId?: string;
@@ -286,6 +286,7 @@ export type BuildDisplayMessage = {
   toolCallId?: string;
   toolSummary?: ToolCallSummary;
   reasoningId?: string;
+  reasoningType?: string;
   reasoningRaw?: Record<string, unknown>;
 };
 
@@ -293,7 +294,9 @@ export const SCORE_VALUES = [-3, -2, -1, 0, 1, 2, 3];
 
 export const WORKSPACES_BASE_PATH = WORKSPACE_ROUTE_BASE;
 export const DOCS_PATH = "/docs";
-export const DEFAULT_WORKSPACE_DEBUG_PATH = buildWorkspacePath("debug");
+export const DEFAULT_WORKSPACE_BUILD_PATH = buildWorkspacePath("build");
+// Legacy alias retained while docs/debug copy still references "debug".
+export const DEFAULT_WORKSPACE_DEBUG_PATH = DEFAULT_WORKSPACE_BUILD_PATH;
 export const DEFAULT_TEST_PATH = buildWorkspacePath("test");
 export const DEFAULT_BUILD_PATH = buildWorkspacePath("build");
 export const DEFAULT_GRADE_PATH = buildWorkspacePath("grade");
@@ -305,32 +308,45 @@ export const buildTestPath = (workspaceId?: string | null, runId?: string) =>
   buildWorkspacePath("test", workspaceId, { runId });
 export const buildVerifyPath = (workspaceId?: string | null) =>
   buildWorkspacePath("verify", workspaceId);
-export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
-export const SIMULATOR_STREAM_ID = "gambit-simulator";
+export const DURABLE_STREAM_PREFIX = "/graphql/streams/";
 export const WORKSPACE_STREAM_ID = "gambit-workspace";
 export const GRADE_STREAM_ID = "gambit-grade";
 export const TEST_STREAM_ID = "gambit-test";
 export const BUILD_STREAM_ID = "gambit-build";
+// Legacy alias used by pre-Isograph simulator UI stream wiring.
+export const SIMULATOR_STREAM_ID = WORKSPACE_STREAM_ID;
+
+const gambitGlobals = globalThis as typeof globalThis & {
+  __GAMBIT_BUILD_TAB_ENABLED__?: boolean;
+  __GAMBIT_BUILD_CHAT_PROVIDER__?: string | null;
+  __GAMBIT_VERIFY_TAB_ENABLED__?: boolean;
+  __GAMBIT_WORKSPACE_ONBOARDING__?: boolean;
+  __GAMBIT_WORKSPACE_ID__?: string | null;
+  __GAMBIT_CHAT_ACCORDION_ENABLED__?: boolean;
+  __GAMBIT_DECK_PATH__?: string;
+  __GAMBIT_DECK_LABEL__?: string | null;
+  __GAMBIT_VERSION__?: string | null;
+};
 
 export const buildTabEnabled = Boolean(
-  (window as unknown as { __GAMBIT_BUILD_TAB_ENABLED__?: boolean })
-    .__GAMBIT_BUILD_TAB_ENABLED__,
+  gambitGlobals.__GAMBIT_BUILD_TAB_ENABLED__,
 );
 export const verifyTabEnabled = Boolean(
-  (window as unknown as { __GAMBIT_VERIFY_TAB_ENABLED__?: boolean })
-    .__GAMBIT_VERIFY_TAB_ENABLED__,
+  gambitGlobals.__GAMBIT_VERIFY_TAB_ENABLED__,
 );
 export const workspaceOnboardingEnabled = Boolean(
-  (window as unknown as { __GAMBIT_WORKSPACE_ONBOARDING__?: boolean })
-    .__GAMBIT_WORKSPACE_ONBOARDING__,
+  gambitGlobals.__GAMBIT_WORKSPACE_ONBOARDING__,
 );
-export const workspaceIdFromWindow = (
-  window as unknown as { __GAMBIT_WORKSPACE_ID__?: string | null }
-).__GAMBIT_WORKSPACE_ID__ ?? null;
+export const workspaceIdFromWindow = gambitGlobals.__GAMBIT_WORKSPACE_ID__ ??
+  null;
 export const chatAccordionEnabled = Boolean(
-  (window as unknown as { __GAMBIT_CHAT_ACCORDION_ENABLED__?: boolean })
-    .__GAMBIT_CHAT_ACCORDION_ENABLED__,
+  gambitGlobals.__GAMBIT_CHAT_ACCORDION_ENABLED__,
 );
+export type BuildChatProvider = "codex-cli" | "claude-code-cli";
+export const buildChatProvider = ((() => {
+  const raw = gambitGlobals.__GAMBIT_BUILD_CHAT_PROVIDER__;
+  return raw === "claude-code-cli" ? "claude-code-cli" : "codex-cli";
+})()) satisfies BuildChatProvider;
 
 export type BuildBotStreamEvent = {
   type: "buildBotStream";
@@ -371,14 +387,9 @@ export type WorkspaceSocketMessage =
   | TestBotSocketMessage
   | CalibrateStreamMessage;
 
-export const deckPath = (window as unknown as { __GAMBIT_DECK_PATH__?: string })
-  .__GAMBIT_DECK_PATH__ ?? "Unknown deck";
-const deckLabelFromWindow = (
-  window as unknown as { __GAMBIT_DECK_LABEL__?: string | null }
-).__GAMBIT_DECK_LABEL__ ?? null;
-export const gambitVersion = (
-  window as unknown as { __GAMBIT_VERSION__?: string | null }
-).__GAMBIT_VERSION__ ?? null;
+export const deckPath = gambitGlobals.__GAMBIT_DECK_PATH__ ?? "Unknown deck";
+const deckLabelFromWindow = gambitGlobals.__GAMBIT_DECK_LABEL__ ?? null;
+export const gambitVersion = gambitGlobals.__GAMBIT_VERSION__ ?? null;
 const fallbackDeckLabel = (() => {
   const base = deckPath.split(/[\\/]/).pop() ?? deckPath;
   const cleaned = base.replace(/\.deck\.(md|ts)$/i, "")
@@ -495,7 +506,7 @@ export function extractScoreAndReason(result: unknown): {
 
 export function extractGradingFlags(
   meta?: Record<string, unknown>,
-): GradingFlag[] {
+): Array<GradingFlag> {
   if (!meta) return [];
   const flags = (meta as { gradingFlags?: unknown }).gradingFlags;
   if (!Array.isArray(flags)) return [];
@@ -626,7 +637,7 @@ export function extractConversationContext(input?: unknown): {
 
 export function getDurableStreamOffset(streamId: string): number {
   try {
-    const raw = window.localStorage.getItem(
+    const raw = globalThis.localStorage.getItem(
       `gambit.durable-streams.offset.${streamId}`,
     );
     const parsed = raw ? Number(raw) : 0;
@@ -638,7 +649,7 @@ export function getDurableStreamOffset(streamId: string): number {
 
 export function setDurableStreamOffset(streamId: string, offset: number) {
   try {
-    window.localStorage.setItem(
+    globalThis.localStorage.setItem(
       `gambit.durable-streams.offset.${streamId}`,
       String(offset),
     );
@@ -649,9 +660,21 @@ export function setDurableStreamOffset(streamId: string, offset: number) {
 
 export function buildDurableStreamUrl(streamId: string, offset: number) {
   const params = new URLSearchParams({ live: "sse", offset: String(offset) });
-  return `${DURABLE_STREAM_PREFIX}${
+  const relative = `${DURABLE_STREAM_PREFIX}${
     encodeURIComponent(streamId)
   }?${params.toString()}`;
+  try {
+    const origin = globalThis.location?.origin ??
+      (
+        globalThis as {
+          window?: { location?: { origin?: string } };
+        }
+      ).window?.location?.origin ??
+      "http://localhost";
+    return new URL(relative, origin).toString();
+  } catch {
+    return relative;
+  }
 }
 
 export function toDeckSlug(input: string): string {
@@ -675,7 +698,7 @@ export function getWorkspaceIdFromPath(
 ): string | null {
   const target = typeof pathname === "string"
     ? pathname
-    : window.location.pathname;
+    : globalThis.location.pathname;
   const normalizedTarget = target.replace(/\/+$/, "") || "/";
   const canonical = parseWorkspaceRoute(normalizedTarget);
   if (canonical) return canonical.workspaceId;
@@ -703,7 +726,7 @@ export function getWorkspaceIdFromPath(
 export function getWorkspaceRouteFromPath(pathname?: string) {
   const target = typeof pathname === "string"
     ? pathname
-    : window.location.pathname;
+    : globalThis.location.pathname;
   const normalizedTarget = target.replace(/\/+$/, "") || "/";
   return parseWorkspaceRoute(normalizedTarget);
 }
@@ -751,13 +774,13 @@ export function toRelativePath(
 }
 
 export function getGradeWorkspaceIdFromLocation(): string | null {
-  const route = getWorkspaceRouteFromPath(window.location.pathname);
+  const route = getWorkspaceRouteFromPath(globalThis.location.pathname);
   if (!route || route.tab !== "grade") return null;
   return route.workspaceId ?? null;
 }
 
 export function getGradeRunIdFromLocation(): string | null {
-  const route = getWorkspaceRouteFromPath(window.location.pathname);
+  const route = getWorkspaceRouteFromPath(globalThis.location.pathname);
   if (!route || route.tab !== "grade") return null;
   return route.gradeRunId ?? null;
 }
@@ -778,7 +801,7 @@ export function parseGradingRef(ref: string): {
   };
 }
 
-export function getPathValue(value: unknown, path: string[]): unknown {
+export function getPathValue(value: unknown, path: Array<string>): unknown {
   let current: unknown = value;
   for (const segment of path) {
     if (
@@ -794,19 +817,17 @@ export function getPathValue(value: unknown, path: string[]): unknown {
 
 export function setPathValue(
   value: unknown,
-  path: string[],
+  path: Array<string>,
   nextValue: unknown,
 ): unknown {
   if (path.length === 0) return nextValue;
-  const root = value && typeof value === "object"
-    ? cloneValue(value as unknown)
-    : {};
+  const root = value && typeof value === "object" ? cloneValue(value) : {};
   let cursor = root as Record<string, unknown>;
   for (let i = 0; i < path.length - 1; i++) {
     const segment = path[i];
     const existing = cursor[segment];
     const next = existing && typeof existing === "object"
-      ? cloneValue(existing as unknown)
+      ? cloneValue(existing)
       : {};
     cursor[segment] = next;
     cursor = next as Record<string, unknown>;
@@ -853,11 +874,11 @@ export function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
 
 export function flattenSchemaLeaves(
   schema?: NormalizedSchema,
-  prefix: string[] = [],
-): Array<{ path: string[]; schema: NormalizedSchema }> {
+  prefix: Array<string> = [],
+): Array<{ path: Array<string>; schema: NormalizedSchema }> {
   if (!schema) return [];
   if (schema.kind === "object" && schema.fields) {
-    const out: Array<{ path: string[]; schema: NormalizedSchema }> = [];
+    const out: Array<{ path: Array<string>; schema: NormalizedSchema }> = [];
     for (const [key, child] of Object.entries(schema.fields)) {
       out.push(...flattenSchemaLeaves(child, [...prefix, key]));
     }
@@ -869,13 +890,13 @@ export function flattenSchemaLeaves(
 export function findMissingRequiredFields(
   schema: NormalizedSchema | undefined,
   value: unknown,
-  prefix: string[] = [],
-): string[] {
+  prefix: Array<string> = [],
+): Array<string> {
   if (!schema) return [];
   if (schema.optional) return [];
 
   if (schema.kind === "object" && schema.fields) {
-    const missing: string[] = [];
+    const missing: Array<string> = [];
     const asObj = value && typeof value === "object"
       ? (value as Record<string, unknown>)
       : undefined;
@@ -916,7 +937,7 @@ export function findMissingRequiredFields(
 }
 
 export function extractInitFromTraces(
-  traces?: TraceEvent[],
+  traces?: Array<TraceEvent>,
 ): unknown | undefined {
   if (!Array.isArray(traces)) return undefined;
   for (const event of traces) {
@@ -939,7 +960,9 @@ export function renderMarkdown(text: string) {
     .replace(/\n/g, "<br />");
 }
 
-export function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
+export function findHandledErrors(
+  traces: Array<TraceEvent>,
+): Map<string, string> {
   const handled = new Map<string, string>();
   for (const trace of traces) {
     if (!trace || typeof trace !== "object") continue;
@@ -967,8 +990,10 @@ export function findHandledErrors(traces: TraceEvent[]): Map<string, string> {
   return handled;
 }
 
-export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
-  const order: ToolCallSummary[] = [];
+export function summarizeToolCalls(
+  traces: Array<TraceEvent>,
+): Array<ToolCallSummary> {
+  const order: Array<ToolCallSummary> = [];
   const byKey = new Map<string, ToolCallSummary>();
   const depthMap = new Map<string, number>();
   const traceCallKey = (trace: TraceEvent, actionCallId: string) =>
@@ -1047,8 +1072,8 @@ export function summarizeToolCalls(traces: TraceEvent[]): ToolCallSummary[] {
 
 export function deriveBuildDisplayMessages(
   messages: Array<{ role: string; content: string }> = [],
-  traces?: TraceEvent[] | null,
-): BuildDisplayMessage[] {
+  traces?: Array<TraceEvent> | null,
+): Array<BuildDisplayMessage> {
   const safeMessages = Array.isArray(messages) ? messages : [];
   const safeTraces = Array.isArray(traces) ? traces : [];
   if (safeTraces.length === 0) {
@@ -1060,7 +1085,7 @@ export function deriveBuildDisplayMessages(
     }));
   }
 
-  const entries: BuildDisplayMessage[] = [];
+  const entries: Array<BuildDisplayMessage> = [];
   const toolSummaries = new Map<string, ToolCallSummary>();
   const toolEntryIds = new Set<string>();
   const toolDepthMap = new Map<string, number>();
@@ -1207,6 +1232,7 @@ export function deriveBuildDisplayMessages(
       entries.push({
         kind: "reasoning",
         reasoningId,
+        reasoningType: asString(input.raw.type) || undefined,
         content: normalizedText,
         reasoningRaw: input.raw,
       });
@@ -1241,6 +1267,7 @@ export function deriveBuildDisplayMessages(
     if (nextText === previousText) return;
     entries[existingIndex] = {
       ...existing,
+      reasoningType: asString(input.raw.type) || existing.reasoningType,
       content: nextText,
       reasoningRaw: input.raw,
     };
@@ -1425,11 +1452,11 @@ export function deriveBuildDisplayMessages(
 }
 
 export function deriveReasoningByAssistant(
-  traces?: TraceEvent[] | null,
-): Map<number, ReasoningDetail[]> {
-  const buckets = new Map<number, ReasoningDetail[]>();
+  traces?: Array<TraceEvent> | null,
+): Map<number, Array<ReasoningDetail>> {
+  const buckets = new Map<number, Array<ReasoningDetail>>();
   if (!Array.isArray(traces) || traces.length === 0) return buckets;
-  const pending: ReasoningDetail[] = [];
+  const pending: Array<ReasoningDetail> = [];
   const pendingById = new Map<string, ReasoningDetail>();
   let assistantIndex = -1;
 
@@ -1644,9 +1671,9 @@ export type ConversationEntry = {
 
 export function buildConversationEntries(
   state?: SavedState | null,
-): ConversationEntry[] {
+): Array<ConversationEntry> {
   if (!state) return [];
-  const entries: ConversationEntry[] = [];
+  const entries: Array<ConversationEntry> = [];
   const rawMessages = state.messages ?? [];
   const refs = state.messageRefs ?? [];
   const feedbackByRef = new Map(
@@ -1697,38 +1724,38 @@ export function buildConversationEntries(
 export function normalizeAppPath(input: string): string {
   const trimmed = input.replace(/\/+$/, "") || "/";
   if (trimmed === "/" || trimmed === "") {
-    if (window.location.pathname !== DOCS_PATH) {
-      window.history.replaceState({}, "", DOCS_PATH);
+    if (globalThis.location.pathname !== DOCS_PATH) {
+      globalThis.history.replaceState({}, "", DOCS_PATH);
     }
     return DOCS_PATH;
   }
   if (trimmed === DOCS_PATH) {
-    if (window.location.pathname !== DOCS_PATH) {
-      window.history.replaceState({}, "", DOCS_PATH);
+    if (globalThis.location.pathname !== DOCS_PATH) {
+      globalThis.history.replaceState({}, "", DOCS_PATH);
     }
     return DOCS_PATH;
   }
   if (trimmed === "/test") {
-    if (window.location.pathname !== DEFAULT_TEST_PATH) {
-      window.history.replaceState({}, "", DEFAULT_TEST_PATH);
+    if (globalThis.location.pathname !== DEFAULT_TEST_PATH) {
+      globalThis.history.replaceState({}, "", DEFAULT_TEST_PATH);
     }
     return DEFAULT_TEST_PATH;
   }
   if (trimmed === "/grade") {
-    if (window.location.pathname !== DEFAULT_GRADE_PATH) {
-      window.history.replaceState({}, "", DEFAULT_GRADE_PATH);
+    if (globalThis.location.pathname !== DEFAULT_GRADE_PATH) {
+      globalThis.history.replaceState({}, "", DEFAULT_GRADE_PATH);
     }
     return DEFAULT_GRADE_PATH;
   }
   if (trimmed === "/verify") {
-    if (window.location.pathname !== DEFAULT_VERIFY_PATH) {
-      window.history.replaceState({}, "", DEFAULT_VERIFY_PATH);
+    if (globalThis.location.pathname !== DEFAULT_VERIFY_PATH) {
+      globalThis.history.replaceState({}, "", DEFAULT_VERIFY_PATH);
     }
     return DEFAULT_VERIFY_PATH;
   }
   if (trimmed === "/build") {
-    if (window.location.pathname !== DEFAULT_BUILD_PATH) {
-      window.history.replaceState({}, "", DEFAULT_BUILD_PATH);
+    if (globalThis.location.pathname !== DEFAULT_BUILD_PATH) {
+      globalThis.history.replaceState({}, "", DEFAULT_BUILD_PATH);
     }
     return DEFAULT_BUILD_PATH;
   }
@@ -1736,13 +1763,13 @@ export function normalizeAppPath(input: string): string {
     trimmed === "/debug" || trimmed === "/simulate" ||
     trimmed === WORKSPACES_BASE_PATH
   ) {
-    if (window.location.pathname !== DEFAULT_WORKSPACE_DEBUG_PATH) {
-      window.history.replaceState({}, "", DEFAULT_WORKSPACE_DEBUG_PATH);
+    if (globalThis.location.pathname !== DEFAULT_WORKSPACE_BUILD_PATH) {
+      globalThis.history.replaceState({}, "", DEFAULT_WORKSPACE_BUILD_PATH);
     }
-    return DEFAULT_WORKSPACE_DEBUG_PATH;
+    return DEFAULT_WORKSPACE_BUILD_PATH;
   }
   if (
-    /^\/workspaces\/[^/]+\/(debug|build|verify)$/.test(trimmed) ||
+    /^\/workspaces\/[^/]+\/(build|verify)$/.test(trimmed) ||
     /^\/workspaces\/[^/]+\/(test|grade)(?:\/[^/]+)?$/.test(trimmed)
   ) {
     return trimmed;
@@ -1750,25 +1777,25 @@ export function normalizeAppPath(input: string): string {
   if (trimmed.startsWith("/debug/workspaces/")) {
     const raw = trimmed.slice("/debug/workspaces/".length);
     const decoded = decodeURIComponent(raw);
-    const next = `${WORKSPACES_BASE_PATH}/${encodeURIComponent(decoded)}/debug`;
-    window.history.replaceState({}, "", next);
+    const next = `${WORKSPACES_BASE_PATH}/${encodeURIComponent(decoded)}/build`;
+    globalThis.history.replaceState({}, "", next);
     return next;
   }
   if (
     trimmed.startsWith("/workspaces/") && !trimmed.includes("/debug") &&
     !trimmed.includes("/test") && !trimmed.includes("/grade") &&
     !trimmed.includes("/build") && !trimmed.includes("/verify") &&
-    trimmed !== DEFAULT_WORKSPACE_DEBUG_PATH
+    trimmed !== DEFAULT_WORKSPACE_BUILD_PATH
   ) {
     const remainder = trimmed.slice("/workspaces/".length);
     if (remainder && remainder !== "new") {
       const decoded = decodeURIComponent(remainder);
       const next = `${WORKSPACES_BASE_PATH}/${
         encodeURIComponent(decoded)
-      }/debug`;
-      window.history.replaceState({}, "", next);
+      }/build`;
+      globalThis.history.replaceState({}, "", next);
       return next;
     }
   }
-  return trimmed || DEFAULT_WORKSPACE_DEBUG_PATH;
+  return trimmed || DEFAULT_WORKSPACE_BUILD_PATH;
 }

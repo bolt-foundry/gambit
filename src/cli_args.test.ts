@@ -82,6 +82,16 @@ Deno.test("parseCliArgs parses serve artifact flag", () => {
   assertEquals(args.artifactPath, "./artifacts/session.tar.gz");
 });
 
+Deno.test("parseCliArgs parses serve build assistant provider flag", () => {
+  const args = parseCliArgs([
+    "serve",
+    "--build-assistant-provider",
+    "claude-code-cli",
+  ]);
+  assertEquals(args.cmd, "serve");
+  assertEquals(args.buildAssistantProvider, "claude-code-cli");
+});
+
 Deno.test("parseCliArgs parses yolo flag", () => {
   const args = parseCliArgs(["serve", ".", "--yolo"]);
   assertEquals(args.cmd, "serve");

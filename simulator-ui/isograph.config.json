@@ -1,0 +1,10 @@
+{
+  "project_root": ".",
+  "artifact_directory": "./__generated__",
+  "schema": "./__generated__/schema.graphql",
+  "options": {
+    "on_invalid_id_type": "ignore",
+    "include_file_extensions_in_import_statements": true,
+    "no_babel_transform": true
+  }
+}

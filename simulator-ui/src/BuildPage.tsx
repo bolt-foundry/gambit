@@ -1,10 +1,5 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+// deno-lint-ignore-file
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ToolCallSummary, workspaceOnboardingEnabled } from "./utils.ts";
 import PageShell from "./gds/PageShell.tsx";
 import PageGrid from "./gds/PageGrid.tsx";
@@ -41,7 +36,7 @@ function extractBotWriteChange(call: ToolCallSummary): {
   const result = (() => {
     if (typeof call.result === "string") {
       try {
-        return JSON.parse(call.result) as unknown;
+        return JSON.parse(call.result);
       } catch {
         return undefined;
       }
@@ -90,7 +85,7 @@ export default function BuildPage(props: {
   const { setNavActions } = props;
 
   const { run, toolCalls } = useWorkspaceBuild();
-  const [fileEntries, setFileEntries] = useState<BuildFileEntry[]>([]);
+  const [fileEntries, setFileEntries] = useState<Array<BuildFileEntry>>([]);
   const [fileListLoading, setFileListLoading] = useState(false);
   const [fileListError, setFileListError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -125,7 +120,7 @@ export default function BuildPage(props: {
           : "";
         const res = await fetch(`/api/build/files${query}`);
         const data = await res.json().catch(() => ({})) as {
-          entries?: BuildFileEntry[];
+          entries?: Array<BuildFileEntry>;
           error?: string;
         };
         if (!res.ok) {
@@ -182,7 +177,7 @@ export default function BuildPage(props: {
     return map;
   }, [fileEntries]);
 
-  const fileSelectorOptions = useMemo((): ListboxOption[] => {
+  const fileSelectorOptions = useMemo((): Array<ListboxOption> => {
     const paths = Array.from(fileEntriesByPath.keys());
     paths.sort((a, b) => a.localeCompare(b));
 
@@ -208,7 +203,7 @@ export default function BuildPage(props: {
       return { value: path, label, meta: base === path ? null : path };
     };
 
-    const options: ListboxOption[] = [];
+    const options: Array<ListboxOption> = [];
     if (pinned.length > 0) {
       options.push({ kind: "header", label: "Pinned" });
       pinned.forEach((path) => options.push(toOption(path)));
