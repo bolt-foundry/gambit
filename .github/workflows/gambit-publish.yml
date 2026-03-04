@@ -407,7 +407,7 @@ jobs:
           git push origin "v${version}"
 
       - name: Dispatch release-binaries
-        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
+        if: (steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true') && steps.release.outputs.tag_exists != 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           curl -sSf -X POST \
@@ -419,7 +419,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Wait for release binaries
-        if: steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true'
+        if: (steps.release.outputs.is_release == 'true' || steps.release.outputs.is_rc_prerelease == 'true') && steps.release.outputs.tag_exists != 'true'
         run: |
           version="${{ steps.release.outputs.version }}"
           tag="v${version}"
