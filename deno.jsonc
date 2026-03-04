@@ -114,6 +114,7 @@
   "publish": {
     "include": [
       "src",
+      "simulator-ui",
       "scaffolds",
       "docs",
       "mod.ts",
