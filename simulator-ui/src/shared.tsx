@@ -1,10 +1,5 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   classNames,
   flattenSchemaLeaves,
@@ -103,7 +98,7 @@ export function CopyBadge(props: {
       }
       setCopied(true);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
+      timeoutRef.current = globalThis.setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignore copy failures silently
     }
@@ -124,7 +119,7 @@ export function CopyBadge(props: {
 }
 
 export function ConversationView(props: {
-  messages: ConversationMessage[];
+  messages: Array<ConversationMessage>;
   header?: React.ReactNode;
   onScore: (
     messageRefId: string,
@@ -274,7 +269,7 @@ export function MessageBubble(props: {
 
 export function ReasoningBubble(props: { detail: ReasoningDetail }) {
   const { detail } = props;
-  const meta: string[] = [];
+  const meta: Array<string> = [];
   if (detail.model) meta.push(detail.model);
   if (detail.actionCallId) meta.push(`call ${detail.actionCallId}`);
   return (
@@ -320,23 +315,15 @@ export function FeedbackControls(props: {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
 
-  // Keep local draft in sync with persisted feedback, but never while the user
-  // is actively typing or a save is in flight, otherwise server echoes can
-  // clobber in-progress text and make the textarea feel flaky.
   useEffect(() => {
-    const isEditing = status === "unsaved" || status === "saving";
-    if (!isEditing) {
-      setReason(feedback?.reason ?? "");
-      if (
-        typeof feedback?.score === "number" || feedback?.reason !== undefined
-      ) {
-        setStatus("saved");
-      } else {
-        setStatus("idle");
-      }
-      setErrorMessage(null);
+    setReason(feedback?.reason ?? "");
+    if (typeof feedback?.score === "number" || feedback?.reason !== undefined) {
+      setStatus("saved");
+    } else {
+      setStatus("idle");
     }
-  }, [feedback?.reason, feedback?.score, status]);
+    setErrorMessage(null);
+  }, [feedback?.reason, feedback?.score]);
 
   useEffect(() => {
     if (typeof feedback?.score === "number") {
@@ -390,10 +377,10 @@ export function FeedbackControls(props: {
   useEffect(() => {
     if (typeof effectiveScore !== "number") return;
     if (status !== "unsaved") return;
-    const handle = window.setTimeout(() => {
+    const handle = globalThis.setTimeout(() => {
       persistReason(effectiveScore, reason);
     }, 650);
-    return () => window.clearTimeout(handle);
+    return () => globalThis.clearTimeout(handle);
   }, [effectiveScore, persistReason, reason, status]);
 
   const showReason = opened ||
@@ -484,7 +471,7 @@ export function FeedbackControls(props: {
   );
 }
 
-export function TraceList(props: { traces: TraceEvent[] }) {
+export function TraceList(props: { traces: Array<TraceEvent> }) {
   const { traces } = props;
   const ordered = traces;
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -780,7 +767,7 @@ export function JsonInputField(props: {
 
   useEffect(() => {
     if (!dirty) return;
-    const handle = window.setTimeout(() => {
+    const handle = globalThis.setTimeout(() => {
       const trimmed = text.trim();
       if (trimmed === "") {
         if (optional) {
@@ -799,7 +786,7 @@ export function JsonInputField(props: {
         setError(err instanceof Error ? err.message : "Invalid JSON");
       }
     }, 500);
-    return () => window.clearTimeout(handle);
+    return () => globalThis.clearTimeout(handle);
   }, [dirty, text, optional]);
 
   return (
@@ -883,7 +870,7 @@ export function InitForm(props: {
                   onChange={(e) =>
                     setFieldValue(e.target.checked)}
                 />
-                <span>{Boolean(fieldValue) ? "true" : "false"}</span>
+                <span>{fieldValue ? "true" : "false"}</span>
               </label>
             )}
             {fieldSchema.kind === "enum" && (
@@ -938,7 +925,7 @@ export function InitPanel(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onModeChange: (mode: "form" | "json") => void;
-  missingRequired: string[];
+  missingRequired: Array<string>;
   jsonErrorCount: number;
   rootJsonText: string;
   rootJsonError: string | null;

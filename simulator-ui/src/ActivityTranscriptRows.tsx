@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate
+import { useCallback, useEffect, useRef, useState } from "react";
+import type React from "react";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
 import ActivityReasoningBubble from "./ActivityReasoningBubble.tsx";
@@ -18,7 +20,7 @@ export type BuildChatTranscriptBucket =
   | {
     kind: "activity";
     key: string;
-    entries: BuildDisplayMessage[];
+    entries: Array<BuildDisplayMessage>;
     latestContent: string;
     latestToolLabel: string | null;
     currentToolLabel: string | null;
@@ -49,9 +51,9 @@ function findScrollableAncestor(
 }
 
 export function bucketBuildChatDisplay(
-  display: BuildDisplayMessage[],
-): BuildChatTranscriptBucket[] {
-  const buckets: BuildChatTranscriptBucket[] = [];
+  display: Array<BuildDisplayMessage>,
+): Array<BuildChatTranscriptBucket> {
+  const buckets: Array<BuildChatTranscriptBucket> = [];
   let index = 0;
   while (index < display.length) {
     const entry = display[index];
@@ -65,7 +67,7 @@ export function bucketBuildChatDisplay(
       continue;
     }
     if (entry.kind === "tool" || entry.kind === "reasoning") {
-      const grouped: BuildDisplayMessage[] = [];
+      const grouped: Array<BuildDisplayMessage> = [];
       let cursor = index;
       let reasoningCount = 0;
       let toolCount = 0;
@@ -140,7 +142,7 @@ export function bucketBuildChatDisplay(
 }
 
 export function ActivityTranscriptRows(props: {
-  display: BuildDisplayMessage[];
+  display: Array<BuildDisplayMessage>;
   renderMessage: (
     entry: BuildDisplayMessage & { kind: "message" },
     messageOrdinal: number,
@@ -166,7 +168,7 @@ export function ActivityTranscriptRows(props: {
   >(
     {},
   );
-  const rows: React.ReactNode[] = [];
+  const rows: Array<React.ReactNode> = [];
   const buckets = bucketBuildChatDisplay(display);
 
   const clearActivityBadgeFlashTimer = useCallback(
@@ -420,7 +422,7 @@ export function ActivityTranscriptRows(props: {
                     key={`reasoning-${bucket.key}-${activityIdx}-${
                       entry.reasoningId ?? "r"
                     }`}
-                    entry={entry}
+                    entry={entry as BuildDisplayMessage & { kind: "reasoning" }}
                   />
                 );
               })}

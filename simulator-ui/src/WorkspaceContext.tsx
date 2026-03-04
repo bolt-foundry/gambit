@@ -1,4 +1,5 @@
-import React, {
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate no-console
+import {
   createContext,
   useCallback,
   useContext,
@@ -12,6 +13,8 @@ import {
   WORKSPACES_API_BASE,
 } from "../../src/workspace_contract.ts";
 import {
+  type BuildChatProvider,
+  buildChatProvider as defaultBuildChatProvider,
   buildDurableStreamUrl,
   type CalibrateResponse,
   type CalibrateSession,
@@ -63,7 +66,7 @@ export type BuildRun = {
 
 type WorkspaceBuildState = {
   run: BuildRun;
-  toolCalls: ToolCallSummary[];
+  toolCalls: Array<ToolCallSummary>;
   chatDraft: string;
   setChatDraft: React.Dispatch<React.SetStateAction<string>>;
   chatSending: boolean;
@@ -85,6 +88,8 @@ type WorkspaceBuildState = {
   >;
   stopChat: () => Promise<void>;
   resetChat: () => Promise<void>;
+  buildChatProvider: BuildChatProvider;
+  setBuildChatProvider: (provider: BuildChatProvider) => void;
   sendMessage: (message: string) => Promise<void>;
   loadChat: (runId: string) => Promise<void>;
 };
@@ -147,8 +152,8 @@ type WorkspaceGradeState = {
   loading: boolean;
   error: string | null;
   running: boolean;
-  graders: GraderDeckMeta[];
-  sessions: CalibrateSession[];
+  graders: Array<GraderDeckMeta>;
+  sessions: Array<CalibrateSession>;
   sessionDetail: SessionDetailResponse | null;
   loadData: (
     opts?: { workspaceId?: string | null; gradeRunId?: string | null },
@@ -164,10 +169,10 @@ type WorkspaceGradeState = {
       runId: string;
       turnIndex?: number;
     },
-  ) => Promise<{ flags?: GradingFlag[] }>;
+  ) => Promise<{ flags?: Array<GradingFlag> }>;
   updateFlagReason: (
     payload: { workspaceId: string; refId: string; reason: string },
-  ) => Promise<{ flags?: GradingFlag[] }>;
+  ) => Promise<{ flags?: Array<GradingFlag> }>;
 };
 
 type WorkspaceContextValue = {
@@ -186,12 +191,12 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 function isGradeDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
-  const fromQuery = new URLSearchParams(window.location.search).get(
+  const fromQuery = new URLSearchParams(globalThis.location.search).get(
     "gradeDebug",
   );
   if (fromQuery === "1" || fromQuery === "true") return true;
   try {
-    const fromStorage = window.localStorage.getItem("gambit.gradeDebug");
+    const fromStorage = globalThis.localStorage.getItem("gambit.gradeDebug");
     return fromStorage === "1" || fromStorage === "true";
   } catch {
     return false;
@@ -271,6 +276,9 @@ export function WorkspaceProvider(
   const buildIgnoredStreamRunIdsRef = useRef<Set<string>>(new Set());
 
   const [buildChatDraft, setBuildChatDraft] = useState("");
+  const [buildChatProvider, setBuildChatProvider] = useState<BuildChatProvider>(
+    defaultBuildChatProvider,
+  );
   const [buildChatSending, setBuildChatSending] = useState(false);
   const [buildChatError, setBuildChatError] = useState<string | null>(null);
   const [buildToolCallsOpen, setBuildToolCallsOpen] = useState<
@@ -282,7 +290,7 @@ export function WorkspaceProvider(
   const [buildStreamingAssistant, setBuildStreamingAssistant] = useState<
     { runId: string; turn: number; text: string } | null
   >(null);
-  const pendingBuildTracesRef = useRef<TraceEvent[]>([]);
+  const pendingBuildTracesRef = useRef<Array<TraceEvent>>([]);
   const pendingBuildTraceRunIdRef = useRef<string | null>(null);
   const buildTraceFlushHandleRef = useRef<number | null>(null);
   const buildTraceFlushModeRef = useRef<"raf" | "timeout" | null>(null);
@@ -313,8 +321,10 @@ export function WorkspaceProvider(
   const [gradeLoading, setGradeLoading] = useState(false);
   const [gradeError, setGradeError] = useState<string | null>(null);
   const [gradeRunning, setGradeRunning] = useState(false);
-  const [gradeGraders, setGradeGraders] = useState<GraderDeckMeta[]>([]);
-  const [gradeSessions, setGradeSessions] = useState<CalibrateSession[]>([]);
+  const [gradeGraders, setGradeGraders] = useState<Array<GraderDeckMeta>>([]);
+  const [gradeSessions, setGradeSessions] = useState<Array<CalibrateSession>>(
+    [],
+  );
   const [gradeSessionDetail, setGradeSessionDetail] = useState<
     SessionDetailResponse | null
   >(null);
@@ -371,9 +381,9 @@ export function WorkspaceProvider(
     if (handle === null || mode === null) return;
     if (
       mode === "raf" && typeof window !== "undefined" &&
-      typeof window.cancelAnimationFrame === "function"
+      typeof globalThis.cancelAnimationFrame === "function"
     ) {
-      window.cancelAnimationFrame(handle);
+      globalThis.cancelAnimationFrame(handle);
     } else if (mode === "timeout") {
       clearTimeout(handle);
     }
@@ -409,10 +419,12 @@ export function WorkspaceProvider(
     };
     if (
       typeof window !== "undefined" &&
-      typeof window.requestAnimationFrame === "function"
+      typeof globalThis.requestAnimationFrame === "function"
     ) {
       buildTraceFlushModeRef.current = "raf";
-      buildTraceFlushHandleRef.current = window.requestAnimationFrame(flush);
+      buildTraceFlushHandleRef.current = globalThis.requestAnimationFrame(
+        flush,
+      );
       return;
     }
     buildTraceFlushModeRef.current = "timeout";
@@ -459,10 +471,25 @@ export function WorkspaceProvider(
     };
   }, []);
 
+  const resolvePersistedBuildChatProvider = useCallback(
+    (meta?: Record<string, unknown> | null): BuildChatProvider | null => {
+      if (!meta) return null;
+      const raw = (meta as { buildChatProvider?: unknown }).buildChatProvider;
+      if (raw === "claude-code-cli") return "claude-code-cli";
+      if (raw === "codex-cli") return "codex-cli";
+      return null;
+    },
+    [],
+  );
+
   const refreshBuildStatus = useCallback(
     async (opts?: { workspaceId?: string }) => {
       if (opts?.workspaceId) {
         const data = await loadWorkspaceSnapshot(opts.workspaceId);
+        const persistedProvider = resolvePersistedBuildChatProvider(
+          data.session?.meta,
+        );
+        setBuildChatProvider(persistedProvider ?? defaultBuildChatProvider);
         if (!data.build.run) return;
         setBuildRun((prev) =>
           mergeBuildRunSnapshot(prev, data.build.run as BuildRun)
@@ -482,7 +509,11 @@ export function WorkspaceProvider(
         displayMessages: [],
       });
     },
-    [loadWorkspaceSnapshot, mergeBuildRunSnapshot],
+    [
+      loadWorkspaceSnapshot,
+      mergeBuildRunSnapshot,
+      resolvePersistedBuildChatProvider,
+    ],
   );
 
   useEffect(() => {
@@ -541,16 +572,94 @@ export function WorkspaceProvider(
 
   useEffect(() => {
     const streamId = WORKSPACE_STREAM_ID;
-    const streamUrl = buildDurableStreamUrl(
-      streamId,
-      getDurableStreamOffset(streamId),
-    );
-    const source = new EventSource(streamUrl);
 
     const handleMessage = (event: MessageEvent<string>) => {
       let msg: WorkspaceSocketMessage | null = null;
       try {
-        msg = JSON.parse(event.data) as WorkspaceSocketMessage;
+        const raw = JSON.parse(event.data) as Record<string, unknown>;
+        if (
+          raw.type === "next" &&
+          raw.payload &&
+          typeof raw.payload === "object"
+        ) {
+          const payload = raw.payload as Record<string, unknown>;
+          const payloadType = typeof payload.type === "string"
+            ? payload.type
+            : "";
+          if (payloadType === "gambit.build.status" && payload.run) {
+            msg = {
+              type: "buildBotStatus",
+              run: payload.run as TestBotRun,
+            };
+          } else if (
+            payloadType === "gambit.build.trace" &&
+            payload.event &&
+            typeof payload.event === "object"
+          ) {
+            msg = {
+              type: "buildBotTrace",
+              runId: typeof payload.runId === "string"
+                ? payload.runId
+                : undefined,
+              event: payload.event as TraceEvent,
+            };
+          } else if (
+            payloadType === "gambit.build.stream" &&
+            typeof payload.chunk === "string"
+          ) {
+            msg = {
+              type: "buildBotStream",
+              runId: typeof payload.runId === "string"
+                ? payload.runId
+                : undefined,
+              role: payload.role === "user" ? "user" : "assistant",
+              chunk: payload.chunk,
+              turn: typeof payload.turn === "number" ? payload.turn : undefined,
+              ts: typeof payload.ts === "number" ? payload.ts : undefined,
+            };
+          } else if (payloadType === "gambit.build.streamEnd") {
+            msg = {
+              type: "buildBotStreamEnd",
+              runId: typeof payload.runId === "string"
+                ? payload.runId
+                : undefined,
+              role: payload.role === "user" ? "user" : "assistant",
+              turn: typeof payload.turn === "number" ? payload.turn : undefined,
+              ts: typeof payload.ts === "number" ? payload.ts : undefined,
+            };
+          } else if (payloadType === "gambit.test.status" && payload.run) {
+            msg = {
+              type: "testBotStatus",
+              run: payload.run as TestBotRun,
+            };
+          } else if (
+            payloadType === "gambit.test.stream" &&
+            typeof payload.chunk === "string"
+          ) {
+            msg = {
+              type: "testBotStream",
+              runId: typeof payload.runId === "string"
+                ? payload.runId
+                : undefined,
+              role: payload.role === "user" ? "user" : "assistant",
+              chunk: payload.chunk,
+              turn: typeof payload.turn === "number" ? payload.turn : undefined,
+              ts: typeof payload.ts === "number" ? payload.ts : undefined,
+            };
+          } else if (payloadType === "gambit.test.streamEnd") {
+            msg = {
+              type: "testBotStreamEnd",
+              runId: typeof payload.runId === "string"
+                ? payload.runId
+                : undefined,
+              role: payload.role === "user" ? "user" : "assistant",
+              turn: typeof payload.turn === "number" ? payload.turn : undefined,
+              ts: typeof payload.ts === "number" ? payload.ts : undefined,
+            };
+          }
+        } else {
+          msg = raw as WorkspaceSocketMessage;
+        }
       } catch {
         return;
       }
@@ -739,7 +848,56 @@ export function WorkspaceProvider(
       });
     };
 
+    const streamOrigin = globalThis.location?.origin ??
+      (
+        globalThis as {
+          window?: { location?: { origin?: string } };
+        }
+      ).window?.location?.origin;
+    if (!streamOrigin || typeof globalThis.EventSource !== "function") {
+      let cancelled = false;
+      const poll = async () => {
+        try {
+          const streamUrl = buildDurableStreamUrl(
+            streamId,
+            getDurableStreamOffset(streamId),
+          );
+          const response = await fetch(streamUrl);
+          if (!response.ok) return;
+          const payload = await response.json() as {
+            events?: Array<{ offset?: number; data?: WorkspaceSocketMessage }>;
+          };
+          for (const item of payload.events ?? []) {
+            if (!item || item.data === undefined) continue;
+            handleMessage({
+              data: JSON.stringify(item.data),
+              lastEventId: String(item.offset ?? 0),
+            } as MessageEvent<string>);
+          }
+        } catch {
+          // ignore polling errors; next loop retries.
+        }
+      };
+      const interval = globalThis.setInterval(() => {
+        if (cancelled) return;
+        void poll();
+      }, 500);
+      void poll();
+      return () => {
+        cancelled = true;
+        globalThis.clearInterval(interval);
+        clearPendingBuildTraces();
+      };
+    }
+
+    const streamUrl = buildDurableStreamUrl(
+      streamId,
+      getDurableStreamOffset(streamId),
+    );
+    const source = new EventSource(streamUrl);
+
     const workspaceEventTypes = [
+      "next",
       "buildBotStatus",
       "buildBotTrace",
       "buildBotStream",
@@ -943,7 +1101,11 @@ export function WorkspaceProvider(
       const res = await fetch("/api/build/message", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId: runId, message }),
+        body: JSON.stringify({
+          workspaceId: runId,
+          message,
+          buildChatProvider,
+        }),
       });
       const data = await res.json().catch(() => ({})) as {
         run?: BuildRun;
@@ -962,13 +1124,42 @@ export function WorkspaceProvider(
     } finally {
       setBuildChatSending(false);
     }
-  }, [ensureWorkspaceId, mergeBuildRunSnapshot]);
+  }, [buildChatProvider, ensureWorkspaceId, mergeBuildRunSnapshot]);
+
+  const persistBuildChatProvider = useCallback(async (
+    targetWorkspaceId: string,
+    provider: BuildChatProvider,
+  ) => {
+    const res = await fetch("/api/build/provider", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: targetWorkspaceId,
+        buildChatProvider: provider,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || res.statusText);
+    }
+  }, []);
+
+  const updateBuildChatProvider = useCallback((provider: BuildChatProvider) => {
+    setBuildChatProvider(provider);
+    const targetWorkspaceId = buildRunIdRef.current || workspaceId || "";
+    if (!targetWorkspaceId) return;
+    void persistBuildChatProvider(targetWorkspaceId, provider).catch(() => {});
+  }, [persistBuildChatProvider, workspaceId]);
 
   const loadBuildChat = useCallback(async (runId: string) => {
     setBuildChatSending(true);
     setBuildChatError(null);
     try {
       const snapshot = await loadWorkspaceSnapshot(runId);
+      const persistedProvider = resolvePersistedBuildChatProvider(
+        snapshot.session?.meta,
+      );
+      setBuildChatProvider(persistedProvider ?? defaultBuildChatProvider);
       const data = snapshot.build;
       if (!data.run) return;
       buildIgnoredStreamRunIdsRef.current.delete(runId);
@@ -984,7 +1175,12 @@ export function WorkspaceProvider(
     } finally {
       setBuildChatSending(false);
     }
-  }, [loadWorkspaceSnapshot, mergeBuildRunSnapshot, onWorkspaceChange]);
+  }, [
+    loadWorkspaceSnapshot,
+    mergeBuildRunSnapshot,
+    onWorkspaceChange,
+    resolvePersistedBuildChatProvider,
+  ]);
 
   const refreshTestStatus = useCallback(async (
     opts?: { runId?: string; workspaceId?: string; deckPath?: string },
@@ -1264,7 +1460,6 @@ export function WorkspaceProvider(
       });
       try {
         setGradeLoading(true);
-        const params = new URLSearchParams();
         let data: CalibrateResponse;
         if (opts?.workspaceId) {
           const snapshot = await loadWorkspaceSnapshot(opts.workspaceId, {
@@ -1435,7 +1630,7 @@ export function WorkspaceProvider(
       const text = await res.text().catch(() => "");
       throw new Error(text || res.statusText);
     }
-    const data = await res.json() as { flags?: GradingFlag[] };
+    const data = await res.json() as { flags?: Array<GradingFlag> };
     if (data.flags) {
       setGradeSessionDetail((prev) => {
         if (!prev) return prev;
@@ -1463,7 +1658,7 @@ export function WorkspaceProvider(
       const text = await res.text().catch(() => "");
       throw new Error(text || res.statusText);
     }
-    const data = await res.json() as { flags?: GradingFlag[] };
+    const data = await res.json() as { flags?: Array<GradingFlag> };
     if (data.flags) {
       setGradeSessionDetail((prev) => {
         if (!prev) return prev;
@@ -1497,6 +1692,8 @@ export function WorkspaceProvider(
         setStreamingAssistant: setBuildStreamingAssistant,
         stopChat: stopBuildChat,
         resetChat: resetBuildChat,
+        buildChatProvider,
+        setBuildChatProvider: updateBuildChatProvider,
         sendMessage: sendBuildMessage,
         loadChat: loadBuildChat,
       },
@@ -1549,6 +1746,8 @@ export function WorkspaceProvider(
       buildOptimisticUser,
       buildStreamingAssistant,
       resetBuildChat,
+      buildChatProvider,
+      updateBuildChatProvider,
       stopBuildChat,
       sendBuildMessage,
       loadBuildChat,

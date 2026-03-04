@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import Icon from "./gds/Icon.tsx";
 import {
   type BuildDisplayMessage,
@@ -7,7 +7,7 @@ import {
 } from "./utils.ts";
 
 export default function ActivityReasoningBubble(
-  props: { entry: BuildDisplayMessage },
+  props: { entry: BuildDisplayMessage & { kind: "reasoning" } },
 ) {
   const { entry } = props;
   const [open, setOpen] = useState(false);
@@ -16,6 +16,11 @@ export default function ActivityReasoningBubble(
     ? entry.content
     : "No reasoning content";
   const reasoningSummaryHtml = renderMarkdown(reasoningSummaryText);
+
+  const reasoningType = typeof entry.reasoningType === "string" &&
+      entry.reasoningType.length > 0
+    ? entry.reasoningType
+    : undefined;
 
   return (
     <div className="imessage-row tool-call-row reasoning-row">
@@ -46,11 +51,11 @@ export default function ActivityReasoningBubble(
         </button>
         {open && (
           <div className="tool-call-detail">
-            {entry.reasoningRaw
+            {reasoningType
               ? (
-                <pre className="trace-json reasoning-json">
-                  {JSON.stringify(entry.reasoningRaw, null, 2)}
-                </pre>
+                <div className="reasoning-details-empty">
+                  Type: {reasoningType}
+                </div>
               )
               : <div className="reasoning-details-empty">No details</div>}
           </div>

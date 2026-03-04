@@ -97,6 +97,9 @@ Deno.test({
       const codex = await resolver({ model: "codex-cli/default" });
       assertEquals(codex.model, "codex-cli/default");
 
+      const claude = await resolver({ model: "claude-code-cli/default" });
+      assertEquals(claude.model, "claude-code-cli/default");
+
       const prefixed = await resolver({ model: "openrouter/openai/gpt-5.1" });
       assertEquals(prefixed.model, "openrouter/openai/gpt-5.1");
 

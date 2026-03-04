@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { classNames } from "../utils.ts";
 
 export default function ListItem(

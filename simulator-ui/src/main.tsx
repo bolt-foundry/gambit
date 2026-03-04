@@ -1,10 +1,5 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate no-console jsx-no-useless-fragment
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import DocsPage from "./DocsPage.tsx";
 import { globalStyles } from "./styles.ts";
@@ -76,6 +71,40 @@ import PageGrid from "./gds/PageGrid.tsx";
 import PageShell from "./gds/PageShell.tsx";
 import Icon from "./gds/Icon.tsx";
 import Tabs from "./gds/Tabs.tsx";
+import { AppRoot } from "./AppRoot.tsx";
+
+const THEME_STORAGE_KEY = "gambit-simulator-theme";
+type AppearanceSetting = "light" | "dark" | "system";
+
+function readStoredAppearance(): AppearanceSetting {
+  try {
+    const savedTheme = globalThis.localStorage.getItem(THEME_STORAGE_KEY);
+    if (
+      savedTheme === "light" || savedTheme === "dark" || savedTheme === "system"
+    ) {
+      return savedTheme;
+    }
+  } catch {
+    // ignore storage read errors and fall back to system
+  }
+  return "system";
+}
+
+function persistAppearance(appearance: AppearanceSetting) {
+  try {
+    globalThis.localStorage.setItem(THEME_STORAGE_KEY, appearance);
+  } catch {
+    // ignore storage write errors; theme still applies in-memory
+  }
+}
+
+function getSystemPrefersDark(): boolean {
+  try {
+    return globalThis.matchMedia("(prefers-color-scheme: dark)").matches;
+  } catch {
+    return false;
+  }
+}
 
 const globalStyleEl = document.createElement("style");
 globalStyleEl.textContent = globalStyles;
@@ -86,8 +115,8 @@ function useSimulator() {
     "connecting" | "connected" | "closed" | "error"
   >("connecting");
   const [savedState, setSavedState] = useState<SavedState | null>(null);
-  const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [traceEvents, setTraceEvents] = useState<Array<TraceEvent>>([]);
+  const [errors, setErrors] = useState<Array<string>>([]);
   const [streamText, setStreamText] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [connectSeq, setConnectSeq] = useState(0);
@@ -133,7 +162,7 @@ function useSimulator() {
       if (msg.type === "state") {
         setSavedState(msg.state);
         if (Array.isArray(msg.state.traces)) {
-          setTraceEvents(msg.state.traces as TraceEvent[]);
+          setTraceEvents(msg.state.traces as Array<TraceEvent>);
         }
       } else if (msg.type === "stream") {
         if (typeof msg.chunk === "string" && msg.chunk.length > 0) {
@@ -259,7 +288,7 @@ function useSimulator() {
       if (payload?.state) {
         setSavedState(payload.state as SavedState);
         if (Array.isArray(payload.state.traces)) {
-          setTraceEvents(payload.state.traces as TraceEvent[]);
+          setTraceEvents(payload.state.traces as Array<TraceEvent>);
         }
       }
     } catch (err) {
@@ -335,10 +364,10 @@ function useSimulator() {
 }
 
 function useWorkspaces() {
-  const [workspaces, setWorkspaces] = useState<SessionMeta[]>([]);
+  const [workspaces, setWorkspaces] = useState<Array<SessionMeta>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const byNewest = useCallback((items: SessionMeta[]) => {
+  const byNewest = useCallback((items: Array<SessionMeta>) => {
     return [...items].sort((a, b) => {
       const aTime = a.createdAt ? Date.parse(a.createdAt) : 0;
       const bTime = b.createdAt ? Date.parse(b.createdAt) : 0;
@@ -354,7 +383,7 @@ function useWorkspaces() {
     try {
       const res = await fetch(WORKSPACES_API_BASE);
       if (!res.ok) throw new Error(res.statusText);
-      const body = await res.json() as { workspaces?: SessionMeta[] };
+      const body = await res.json() as { workspaces?: Array<SessionMeta> };
       setWorkspaces(byNewest(body.workspaces ?? []));
     } catch (err) {
       setError(
@@ -385,7 +414,7 @@ function useWorkspaces() {
     }
   }, [refresh]);
 
-  const deleteAll = useCallback(async (scope?: SessionMeta[]) => {
+  const deleteAll = useCallback(async (scope?: Array<SessionMeta>) => {
     setLoading(true);
     setError(null);
     try {
@@ -393,7 +422,7 @@ function useWorkspaces() {
       if (!targetWorkspaces) {
         const res = await fetch(WORKSPACES_API_BASE);
         if (!res.ok) throw new Error(res.statusText);
-        const body = await res.json() as { workspaces?: SessionMeta[] };
+        const body = await res.json() as { workspaces?: Array<SessionMeta> };
         targetWorkspaces = body.workspaces ?? [];
       }
       await Promise.allSettled(
@@ -421,7 +450,7 @@ function useWorkspaces() {
 type WorkspacesApi = ReturnType<typeof useWorkspaces>;
 
 function RecentSessionsEmptyState(props: {
-  sessions: SessionMeta[];
+  sessions: Array<SessionMeta>;
   loading: boolean;
   error: string | null;
   onSelect: (sessionId: string) => void;
@@ -624,9 +653,9 @@ function SimulatorApp(
       const shouldPush = opts?.pushHistory ?? true;
       if (shouldPush) {
         if (opts?.replace) {
-          window.history.replaceState({}, "", newSessionPath);
+          globalThis.history.replaceState({}, "", newSessionPath);
         } else {
-          window.history.pushState({}, "", newSessionPath);
+          globalThis.history.pushState({}, "", newSessionPath);
         }
       }
       setPendingSessionId(null);
@@ -660,9 +689,9 @@ function SimulatorApp(
     (sessionId: string, opts?: { replace?: boolean }) => {
       const url = buildSessionUrl(sessionId);
       if (opts?.replace) {
-        window.history.replaceState({}, "", url);
+        globalThis.history.replaceState({}, "", url);
       } else {
-        window.history.pushState({}, "", url);
+        globalThis.history.pushState({}, "", url);
       }
       adoptSessionFromPath(sessionId);
     },
@@ -702,8 +731,8 @@ function SimulatorApp(
         startNewChat({ pushHistory: false });
       }
     };
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
+    globalThis.addEventListener("popstate", handler);
+    return () => globalThis.removeEventListener("popstate", handler);
   }, [adoptSessionFromPath, startNewChat, sessionBasePath]);
 
   useEffect(() => {
@@ -738,12 +767,12 @@ function SimulatorApp(
 
   useEffect(() => {
     if (noteStatus !== "dirty") return;
-    const handle = window.setTimeout(() => {
+    const handle = globalThis.setTimeout(() => {
       setNoteStatus("saving");
       pendingNoteRef.current = noteDraft;
       simulator.saveNotes(noteDraft);
     }, 700);
-    return () => window.clearTimeout(handle);
+    return () => globalThis.clearTimeout(handle);
   }, [noteStatus, noteDraft, simulator]);
 
   useEffect(() => {
@@ -1077,14 +1106,20 @@ function SimulatorApp(
 function App() {
   const simulatorBasePath = WORKSPACES_BASE_PATH;
   const [path, setPath] = useState(() =>
-    normalizeAppPath(window.location.pathname)
+    normalizeAppPath(globalThis.location.pathname)
+  );
+  const [appearance, setAppearance] = useState<AppearanceSetting>(
+    readStoredAppearance,
+  );
+  const [systemPrefersDark, setSystemPrefersDark] = useState(
+    getSystemPrefersDark,
   );
   const [bundleStamp, setBundleStamp] = useState<string | null>(null);
   const [navActions, setNavActions] = useState<React.ReactNode>(null);
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
   const [workbenchDrawerOpen, setWorkbenchDrawerOpen] = useState(true);
   const [workbenchComposerChips, setWorkbenchComposerChips] = useState<
-    WorkbenchComposerChip[]
+    Array<WorkbenchComposerChip>
   >([]);
   const [workspaceRunIds, setWorkspaceRunIds] = useState<{
     testRunId: string | null;
@@ -1096,7 +1131,7 @@ function App() {
   const workspacesApi = useWorkspaces();
   const [testBotResetToken, setTestBotResetToken] = useState(0);
   const pathRoute = getWorkspaceRouteFromPath(path);
-  const livePath = window.location.pathname.replace(/\/+$/, "") || "/";
+  const livePath = globalThis.location.pathname.replace(/\/+$/, "") || "/";
   const liveRoute = getWorkspaceRouteFromPath(livePath);
   const routeState = liveRoute ?? pathRoute;
   const routeRequestsNewWorkspace = Boolean(routeState?.isNew);
@@ -1122,6 +1157,37 @@ function App() {
   const workbenchRefreshTimeoutRef = useRef<number | null>(null);
   const activeWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
   const workspaceInitRef = useRef(false);
+  const theme = appearance === "system"
+    ? (systemPrefersDark ? "dark" : "light")
+    : appearance;
+
+  useEffect(() => {
+    const media = globalThis.matchMedia("(prefers-color-scheme: dark)");
+    const legacyMedia = media as MediaQueryList & {
+      addListener?: (
+        listener: (event: MediaQueryListEvent | MediaQueryList) => void,
+      ) => void;
+      removeListener?: (
+        listener: (event: MediaQueryListEvent | MediaQueryList) => void,
+      ) => void;
+    };
+    const handleChange = (event: MediaQueryListEvent | MediaQueryList) =>
+      setSystemPrefersDark(event.matches);
+    if (typeof legacyMedia.addEventListener === "function") {
+      media.addEventListener("change", handleChange);
+      return () => media.removeEventListener("change", handleChange);
+    }
+    if (typeof legacyMedia.addListener === "function") {
+      legacyMedia.addListener(handleChange);
+      return () => legacyMedia.removeListener?.(handleChange);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.style.colorScheme = theme;
+    persistAppearance(appearance);
+  }, [appearance, theme]);
 
   useEffect(() => {
     if (activeWorkspaceId) {
@@ -1142,8 +1208,9 @@ function App() {
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    const syncPath = () => setPath(normalizeAppPath(window.location.pathname));
-    const historyObj = window.history as History & {
+    const syncPath = () =>
+      setPath(normalizeAppPath(globalThis.location.pathname));
+    const historyObj = globalThis.history as History & {
       pushState: History["pushState"];
       replaceState: History["replaceState"];
     };
@@ -1151,19 +1218,19 @@ function App() {
     const originalReplaceState = historyObj.replaceState.bind(historyObj);
     historyObj.pushState = (...args) => {
       originalPushState(...args);
-      window.dispatchEvent(new Event("locationchange"));
+      globalThis.dispatchEvent(new Event("locationchange"));
     };
     historyObj.replaceState = (...args) => {
       originalReplaceState(...args);
-      window.dispatchEvent(new Event("locationchange"));
+      globalThis.dispatchEvent(new Event("locationchange"));
     };
-    window.addEventListener("popstate", syncPath);
-    window.addEventListener("locationchange", syncPath);
+    globalThis.addEventListener("popstate", syncPath);
+    globalThis.addEventListener("locationchange", syncPath);
     return () => {
       historyObj.pushState = originalPushState;
       historyObj.replaceState = originalReplaceState;
-      window.removeEventListener("popstate", syncPath);
-      window.removeEventListener("locationchange", syncPath);
+      globalThis.removeEventListener("popstate", syncPath);
+      globalThis.removeEventListener("locationchange", syncPath);
     };
   }, []);
 
@@ -1186,7 +1253,7 @@ function App() {
             workbenchSessionRetryRef.current[sessionId] = attempts + 1;
             setWorkbenchSessionDetailLoading(false);
             setWorkbenchSessionDetailError(null);
-            window.setTimeout(() => {
+            globalThis.setTimeout(() => {
               if (
                 workbenchSessionDetailRequestRef.current === requestId &&
                 activeWorkspaceIdRef.current === sessionId
@@ -1229,10 +1296,10 @@ function App() {
   const scheduleWorkbenchRefresh = useCallback(() => {
     if (!activeWorkspaceId) return;
     if (workbenchRefreshTimeoutRef.current) {
-      window.clearTimeout(workbenchRefreshTimeoutRef.current);
+      globalThis.clearTimeout(workbenchRefreshTimeoutRef.current);
     }
     const sessionId = activeWorkspaceId;
-    workbenchRefreshTimeoutRef.current = window.setTimeout(() => {
+    workbenchRefreshTimeoutRef.current = globalThis.setTimeout(() => {
       if (activeWorkspaceIdRef.current !== sessionId) return;
       loadWorkbenchSessionDetail(sessionId).catch(() => {});
     }, 900);
@@ -1241,7 +1308,7 @@ function App() {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
     if (workbenchRefreshTimeoutRef.current) {
-      window.clearTimeout(workbenchRefreshTimeoutRef.current);
+      globalThis.clearTimeout(workbenchRefreshTimeoutRef.current);
       workbenchRefreshTimeoutRef.current = null;
     }
   }, [activeWorkspaceId]);
@@ -1249,7 +1316,7 @@ function App() {
   useEffect(() => {
     return () => {
       if (workbenchRefreshTimeoutRef.current) {
-        window.clearTimeout(workbenchRefreshTimeoutRef.current);
+        globalThis.clearTimeout(workbenchRefreshTimeoutRef.current);
       }
     };
   }, []);
@@ -1270,7 +1337,7 @@ function App() {
     scheduleWorkbenchRefresh();
   }, [scheduleWorkbenchRefresh]);
 
-  const applyFlagsUpdate = useCallback((flags: GradingFlag[]) => {
+  const applyFlagsUpdate = useCallback((flags: Array<GradingFlag>) => {
     setWorkbenchSessionDetail((prev) => {
       if (!prev) return prev;
       return {
@@ -1296,7 +1363,9 @@ function App() {
           (meta as { gradingFlags?: unknown })
             .gradingFlags,
         )
-        ? ((meta as { gradingFlags?: unknown }).gradingFlags as GradingFlag[])
+        ? ((meta as { gradingFlags?: unknown }).gradingFlags as Array<
+          GradingFlag
+        >)
         : [];
       const isFlagged = existing.some((flag) => flag.refId === item.refId);
       const nextFlags = isFlagged
@@ -1329,7 +1398,9 @@ function App() {
           (meta as { gradingFlags?: unknown })
             .gradingFlags,
         )
-        ? ((meta as { gradingFlags?: unknown }).gradingFlags as GradingFlag[])
+        ? ((meta as { gradingFlags?: unknown }).gradingFlags as Array<
+          GradingFlag
+        >)
         : [];
       if (!existing.length) return prev;
       return {
@@ -1364,13 +1435,13 @@ function App() {
 
   const navigate = useCallback((next: string) => {
     if (next === path) return;
-    window.history.pushState({}, "", next);
+    globalThis.history.pushState({}, "", next);
     setPath(next);
   }, [path]);
 
   const replacePath = useCallback((next: string) => {
     if (next === path) return;
-    window.history.replaceState({}, "", next);
+    globalThis.history.replaceState({}, "", next);
     setPath(next);
   }, [path]);
   const handleAppPathChange = useCallback((next: string) => {
@@ -1418,26 +1489,17 @@ function App() {
   const isGrade = !isDocs &&
     routeTab === "grade";
   const isVerify = !isDocs && verifyTabEnabled && routeTab === "verify";
-  let currentPage:
-    | "docs"
-    | "build"
-    | "test"
-    | "grade"
-    | "verify"
-    | "debug";
-  if (isDocs) {
-    currentPage = "docs";
-  } else if (isBuild) {
-    currentPage = "build";
-  } else if (isTestBot) {
-    currentPage = "test";
-  } else if (isGrade) {
-    currentPage = "grade";
-  } else if (isVerify) {
-    currentPage = "verify";
-  } else {
-    currentPage = "debug";
-  }
+  const currentPage = isDocs
+    ? "docs"
+    : isBuild
+    ? "build"
+    : isTestBot
+    ? "test"
+    : isGrade
+    ? "grade"
+    : isVerify
+    ? "verify"
+    : "debug";
 
   useEffect(() => {
     if (activeWorkspaceId || lastWorkspaceIdRef.current) return;
@@ -1456,22 +1518,13 @@ function App() {
           workspaceId?: string;
         };
         if (!res.ok || typeof data.workspaceId !== "string") return;
-        let nextPath: string;
-        switch (currentPage) {
-          case "test":
-            nextPath = buildWorkspacePath("test", data.workspaceId);
-            break;
-          case "grade":
-            nextPath = buildGradePath(data.workspaceId);
-            break;
-          case "verify":
-            nextPath = buildWorkspacePath("verify", data.workspaceId);
-            break;
-          case "build":
-          default:
-            nextPath = buildWorkspacePath("build", data.workspaceId);
-            break;
-        }
+        const nextPath = currentPage === "test"
+          ? buildWorkspacePath("test", data.workspaceId)
+          : currentPage === "grade"
+          ? buildGradePath(data.workspaceId)
+          : currentPage === "verify"
+          ? buildWorkspacePath("verify", data.workspaceId)
+          : buildWorkspacePath("build", data.workspaceId);
         replacePath(nextPath);
       })
       .finally(() => {
@@ -1479,7 +1532,7 @@ function App() {
       });
   }, [activeWorkspaceId, currentPage, replacePath, routeRequestsNewWorkspace]);
   const resolveNavWorkspaceId = useCallback(() => {
-    const normalizedPath = (window.location.pathname || "/").replace(
+    const normalizedPath = (globalThis.location.pathname || "/").replace(
       /\/+$/,
       "",
     ) || "/";
@@ -1490,7 +1543,7 @@ function App() {
       return decodeURIComponent(directMatch[1]);
     }
     return getWorkspaceRouteFromPath(normalizedPath)?.workspaceId ??
-      getWorkspaceIdFromPath(window.location.pathname) ??
+      getWorkspaceIdFromPath(globalThis.location.pathname) ??
       activeWorkspaceId ??
       lastWorkspaceIdRef.current;
   }, [activeWorkspaceId]);
@@ -1518,26 +1571,15 @@ function App() {
   ]);
   const handleSelectSession = useCallback(
     (sessionId: string) => {
-      let nextPath: string;
-      switch (currentPage) {
-        case "docs":
-        case "test":
-          nextPath = buildWorkspacePath("test", sessionId);
-          break;
-        case "grade":
-          nextPath = buildGradePath(sessionId);
-          break;
-        case "verify":
-          nextPath = buildVerifyPath(sessionId);
-          break;
-        case "build":
-          nextPath = buildWorkspacePath("build", sessionId);
-          break;
-        case "debug":
-        default:
-          nextPath = buildWorkspacePath("debug", sessionId);
-          break;
-      }
+      const nextPath = currentPage === "test" || currentPage === "docs"
+        ? buildWorkspacePath("test", sessionId)
+        : currentPage === "grade"
+        ? buildGradePath(sessionId)
+        : currentPage === "verify"
+        ? buildVerifyPath(sessionId)
+        : currentPage === "build"
+        ? buildWorkspacePath("build", sessionId)
+        : buildWorkspacePath("debug", sessionId);
       navigate(nextPath);
       setSessionsDrawerOpen(false);
     },
@@ -1581,34 +1623,28 @@ function App() {
     await workspacesApi.deleteAll(deckSessions);
     setTestBotResetToken((prev) => prev + 1);
     setSessionsDrawerOpen(false);
-    window.location.assign(DEFAULT_TEST_PATH);
+    globalThis.location.assign(DEFAULT_TEST_PATH);
   }, [deckSessions, workspacesApi.deleteAll]);
 
   const handleDeleteSession = useCallback(
     async (sessionId: string) => {
       await workspacesApi.deleteWorkspace(sessionId);
       if (sessionId === activeWorkspaceId) {
-        window.location.assign(DEFAULT_TEST_PATH);
+        globalThis.location.assign(DEFAULT_TEST_PATH);
       }
     },
     [activeWorkspaceId, workspacesApi.deleteWorkspace],
   );
-  const handleAddErrorToWorkbench = useCallback((
-    payload: {
-      source?: "scenario_run_error" | "grader_run_error";
-      workspaceId?: string;
-      runId?: string;
-      error: string;
-    },
+  const handleAddScenarioErrorToWorkbench = useCallback((
+    payload: { workspaceId?: string; runId?: string; error: string },
   ) => {
     const resolvedWorkspaceId = payload.workspaceId ?? activeWorkspaceId ??
       undefined;
-    const source = payload.source ?? "scenario_run_error";
     const nextChip: WorkbenchComposerChip = {
-      chipId: `error:${source}:${resolvedWorkspaceId ?? ""}:${
+      chipId: `error:${resolvedWorkspaceId ?? ""}:${
         payload.runId ?? ""
       }:${payload.error}`,
-      source,
+      source: "scenario_run_error",
       workspaceId: resolvedWorkspaceId,
       runId: payload.runId,
       error: payload.error,
@@ -1633,80 +1669,6 @@ function App() {
     });
     setWorkbenchDrawerOpen(true);
   }, [activeWorkspaceId]);
-
-  const pageContent = useMemo(() => {
-    switch (currentPage) {
-      case "docs":
-        return <DocsPage />;
-      case "build":
-        return <BuildPage setNavActions={setNavActions} />;
-      case "debug":
-        return (
-          <SimulatorApp
-            basePath={simulatorBasePath}
-            setNavActions={setNavActions}
-            workspacesApi={workspacesApi}
-            onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
-            activeWorkspaceId={activeWorkspaceId}
-          />
-        );
-      case "test":
-        return (
-          <TestBotPage
-            onReplaceTestBotSession={handleReplaceTestBotSession}
-            onResetTestBotSession={handleResetTestBotSession}
-            activeWorkspaceId={activeWorkspaceId}
-            requestedRunId={requestedTestRunId}
-            resetToken={testBotResetToken}
-            setNavActions={setNavActions}
-            onFeedbackPersisted={handleFeedbackPersisted}
-            onAddErrorToWorkbench={handleAddErrorToWorkbench}
-          />
-        );
-      case "verify":
-        return (
-          <VerifyPage
-            setNavActions={setNavActions}
-            onAppPathChange={handleAppPathChange}
-            activeWorkspaceId={activeWorkspaceId}
-            composerChips={workbenchComposerChips}
-            onComposerChipsChange={setWorkbenchComposerChips}
-          />
-        );
-      case "grade":
-      default:
-        return (
-          <GradePage
-            setNavActions={setNavActions}
-            onAppPathChange={handleAppPathChange}
-            activeWorkspaceId={activeWorkspaceId}
-            requestedGradeRunId={requestedGradeRunId}
-            onFlagsUpdate={applyFlagsUpdate}
-            onOptimisticToggleFlag={optimisticToggleFlag}
-            onOptimisticFlagReason={optimisticFlagReason}
-            onAddErrorToWorkbench={handleAddErrorToWorkbench}
-          />
-        );
-    }
-  }, [
-    activeWorkspaceId,
-    applyFlagsUpdate,
-    currentPage,
-    handleAddErrorToWorkbench,
-    handleAppPathChange,
-    handleFeedbackPersisted,
-    handleReplaceTestBotSession,
-    handleResetTestBotSession,
-    optimisticFlagReason,
-    optimisticToggleFlag,
-    requestedGradeRunId,
-    requestedTestRunId,
-    setNavActions,
-    simulatorBasePath,
-    testBotResetToken,
-    workbenchComposerChips,
-    workspacesApi,
-  ]);
 
   return (
     <WorkspaceProvider
@@ -1819,7 +1781,52 @@ function App() {
             </div>
             <div className="app-content-frame">
               <div className="page-shell">
-                {pageContent}
+                {currentPage === "docs"
+                  ? <DocsPage />
+                  : currentPage === "build"
+                  ? <BuildPage setNavActions={setNavActions} />
+                  : currentPage === "debug"
+                  ? (
+                    <SimulatorApp
+                      basePath={simulatorBasePath}
+                      setNavActions={setNavActions}
+                      workspacesApi={workspacesApi}
+                      onOpenSessionsDrawer={() => setSessionsDrawerOpen(true)}
+                      activeWorkspaceId={activeWorkspaceId}
+                    />
+                  )
+                  : currentPage === "test"
+                  ? (
+                    <TestBotPage
+                      onReplaceTestBotSession={handleReplaceTestBotSession}
+                      onResetTestBotSession={handleResetTestBotSession}
+                      activeWorkspaceId={activeWorkspaceId}
+                      requestedRunId={requestedTestRunId}
+                      resetToken={testBotResetToken}
+                      setNavActions={setNavActions}
+                      onFeedbackPersisted={handleFeedbackPersisted}
+                      onAddErrorToWorkbench={handleAddScenarioErrorToWorkbench}
+                    />
+                  )
+                  : currentPage === "verify"
+                  ? (
+                    <VerifyPage
+                      setNavActions={setNavActions}
+                      onAppPathChange={handleAppPathChange}
+                      activeWorkspaceId={activeWorkspaceId}
+                    />
+                  )
+                  : (
+                    <GradePage
+                      setNavActions={setNavActions}
+                      onAppPathChange={handleAppPathChange}
+                      activeWorkspaceId={activeWorkspaceId}
+                      requestedGradeRunId={requestedGradeRunId}
+                      onFlagsUpdate={applyFlagsUpdate}
+                      onOptimisticToggleFlag={optimisticToggleFlag}
+                      onOptimisticFlagReason={optimisticFlagReason}
+                    />
+                  )}
               </div>
               {workbenchDrawerOpen && (
                 <WorkbenchDrawer
@@ -1848,6 +1855,8 @@ function App() {
           onClose={() => setSessionsDrawerOpen(false)}
           activeWorkspaceId={activeWorkspaceId}
           bundleStamp={bundleStamp}
+          appearance={appearance}
+          onAppearanceChange={setAppearance}
         />
       </>
     </WorkspaceProvider>
@@ -1855,7 +1864,13 @@ function App() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  (() => {
+    const path = globalThis.location?.pathname ?? "/";
+    const search = globalThis.location?.search ?? "";
+    const hash = globalThis.location?.hash ?? "";
+    if (path === "/isograph" || path.startsWith("/isograph/")) {
+      return <AppRoot initialPath={`${path}${search}${hash}`} />;
+    }
+    return <App />;
+  })(),
 );

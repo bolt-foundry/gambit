@@ -63,7 +63,6 @@ export type BuildProjectionState = {
 
 type SessionStoreDeps = {
   sessionsRoot: string;
-  ensureDir: (dir: string) => void;
   randomId: (prefix: string) => string;
   logger: { warn: (...args: Array<unknown>) => void };
   enrichStateWithSession: (state: SavedState) => {
@@ -219,7 +218,6 @@ const safeStringify = (value: unknown, space?: number): string => {
 export const createSessionStore = (deps: SessionStoreDeps) => {
   const {
     sessionsRoot,
-    ensureDir,
     randomId,
     logger,
     enrichStateWithSession,
@@ -228,31 +226,58 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   } = deps;
 
   const sessionStateCache = new Map<string, SavedState>();
-  const sessionWriteQueues = new Map<string, Array<() => void>>();
+  const sessionWriteQueues = new Map<
+    string,
+    Array<() => Promise<void> | void>
+  >();
   const sessionWriteActive = new Set<string>();
   const sessionOffsetById = new Map<string, number>();
   const buildProjectionCache = new Map<string, BuildProjectionState>();
+  const buildProjectionRefreshInFlight = new Map<string, Promise<void>>();
 
-  const enqueueSessionWrite = (sessionId: string, task: () => void) => {
+  const drainSessionWriteQueue = async (sessionId: string) => {
+    let shouldContinueDrain = false;
+    try {
+      const queue = sessionWriteQueues.get(sessionId);
+      if (!queue) return;
+      while (queue.length) {
+        const next = queue.shift();
+        if (!next) continue;
+        try {
+          await next();
+        } catch (err) {
+          logger.warn(
+            `[sim] session write failed: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }
+      }
+    } finally {
+      sessionWriteActive.delete(sessionId);
+      const queue = sessionWriteQueues.get(sessionId);
+      if (queue && queue.length > 0) {
+        sessionWriteActive.add(sessionId);
+        shouldContinueDrain = true;
+      } else {
+        sessionWriteQueues.delete(sessionId);
+      }
+    }
+    if (shouldContinueDrain) {
+      void drainSessionWriteQueue(sessionId);
+    }
+  };
+
+  const enqueueSessionWrite = (
+    sessionId: string,
+    task: () => Promise<void> | void,
+  ) => {
     const queue = sessionWriteQueues.get(sessionId) ?? [];
     queue.push(task);
     sessionWriteQueues.set(sessionId, queue);
     if (sessionWriteActive.has(sessionId)) return;
     sessionWriteActive.add(sessionId);
-    while (queue.length) {
-      const next = queue.shift();
-      if (!next) continue;
-      try {
-        next();
-      } catch (err) {
-        logger.warn(
-          `[sim] session write failed: ${
-            err instanceof Error ? err.message : err
-          }`,
-        );
-      }
-    }
-    sessionWriteActive.delete(sessionId);
+    void drainSessionWriteQueue(sessionId);
   };
 
   const mergeSessionState = (
@@ -351,6 +376,75 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     };
   };
 
+  const parseEnvelopeRecords = (
+    text: string,
+  ): {
+    records: Array<WorkspaceEventEnvelope>;
+    maxOffset: number;
+  } => {
+    const records: Array<WorkspaceEventEnvelope> = [];
+    let maxOffset = -1;
+    for (const line of text.split("\n")) {
+      if (!line.trim()) continue;
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      const offset = parseFiniteInteger(parsed.offset) ??
+        parseFiniteInteger(
+          (parsed._gambit as { offset?: unknown } | undefined)?.offset,
+        );
+      if (offset === undefined) continue;
+      const envelopeType = typeof parsed.type === "string" ? parsed.type : "";
+      const nestedData = parsed.data;
+      const payload = isWorkspaceEventDomain(envelopeType) &&
+          nestedData && typeof nestedData === "object" &&
+          !Array.isArray(nestedData)
+        ? nestedData as Record<string, unknown>
+        : parsed;
+      const payloadType = typeof payload.type === "string" ? payload.type : "";
+      if (!payloadType) continue;
+      const meta = parsed._gambit &&
+          typeof parsed._gambit === "object" &&
+          !Array.isArray(parsed._gambit)
+        ? parsed._gambit as Record<string, unknown>
+        : null;
+      const domain = (() => {
+        const explicit = meta?.domain;
+        if (
+          explicit === "build" || explicit === "test" ||
+          explicit === "grade" || explicit === "session"
+        ) {
+          return explicit;
+        }
+        if (isWorkspaceEventDomain(envelopeType)) {
+          return envelopeType;
+        }
+        return inferWorkspaceDomain(payloadType);
+      })();
+      if (!domain) continue;
+      const createdAt = typeof parsed.createdAt === "string"
+        ? parsed.createdAt
+        : typeof parsed.created_at === "string"
+        ? parsed.created_at
+        : typeof payload.createdAt === "string"
+        ? payload.createdAt
+        : typeof payload.created_at === "string"
+        ? payload.created_at
+        : typeof meta?.created_at === "string"
+        ? meta.created_at
+        : new Date(0).toISOString();
+      const envelope: WorkspaceEventEnvelope = {
+        offset,
+        type: domain,
+        createdAt,
+        data: payload,
+      };
+      records.push(envelope);
+      if (offset > maxOffset) {
+        maxOffset = offset;
+      }
+    }
+    return { records, maxOffset };
+  };
+
   const readEnvelopeRecords = (
     eventsPath: string,
   ): {
@@ -359,69 +453,21 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   } => {
     try {
       const text = Deno.readTextFileSync(eventsPath);
-      const records: Array<WorkspaceEventEnvelope> = [];
-      let maxOffset = -1;
-      for (const line of text.split("\n")) {
-        if (!line.trim()) continue;
-        const parsed = JSON.parse(line) as Record<string, unknown>;
-        const offset = parseFiniteInteger(parsed.offset) ??
-          parseFiniteInteger(
-            (parsed._gambit as { offset?: unknown } | undefined)?.offset,
-          );
-        if (offset === undefined) continue;
-        const envelopeType = typeof parsed.type === "string" ? parsed.type : "";
-        const nestedData = parsed.data;
-        const payload = isWorkspaceEventDomain(envelopeType) &&
-            nestedData && typeof nestedData === "object" &&
-            !Array.isArray(nestedData)
-          ? nestedData as Record<string, unknown>
-          : parsed;
-        const payloadType = typeof payload.type === "string"
-          ? payload.type
-          : "";
-        if (!payloadType) continue;
-        const meta = parsed._gambit &&
-            typeof parsed._gambit === "object" &&
-            !Array.isArray(parsed._gambit)
-          ? parsed._gambit as Record<string, unknown>
-          : null;
-        const domain = (() => {
-          const explicit = meta?.domain;
-          if (
-            explicit === "build" || explicit === "test" ||
-            explicit === "grade" || explicit === "session"
-          ) {
-            return explicit;
-          }
-          if (isWorkspaceEventDomain(envelopeType)) {
-            return envelopeType;
-          }
-          return inferWorkspaceDomain(payloadType);
-        })();
-        if (!domain) continue;
-        const createdAt = typeof parsed.createdAt === "string"
-          ? parsed.createdAt
-          : typeof parsed.created_at === "string"
-          ? parsed.created_at
-          : typeof payload.createdAt === "string"
-          ? payload.createdAt
-          : typeof payload.created_at === "string"
-          ? payload.created_at
-          : typeof meta?.created_at === "string"
-          ? meta.created_at
-          : new Date(0).toISOString();
-        const envelope: WorkspaceEventEnvelope = {
-          offset,
-          type: domain,
-          createdAt,
-          data: payload,
-        };
-        records.push(envelope);
-        if (offset > maxOffset) {
-          maxOffset = offset;
-        }
-      }
-      return { records, maxOffset };
+      return parseEnvelopeRecords(text);
+    } catch {
+      return { records: [], maxOffset: -1 };
+    }
+  };
+
+  const readEnvelopeRecordsAsync = async (
+    eventsPath: string,
+  ): Promise<{
+    records: Array<WorkspaceEventEnvelope>;
+    maxOffset: number;
+  }> => {
+    try {
+      const text = await Deno.readTextFile(eventsPath);
+      return parseEnvelopeRecords(text);
     } catch {
       return { records: [], maxOffset: -1 };
     }
@@ -612,22 +658,30 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     return snapshot;
   };
 
-  const writeJsonAtomic = (filePath: string, payload: unknown) => {
+  const ensureDirAsync = async (dir: string) => {
+    try {
+      await Deno.mkdir(dir, { recursive: true });
+    } catch {
+      // ignore
+    }
+  };
+
+  const writeJsonAtomic = async (filePath: string, payload: unknown) => {
     const dir = path.dirname(filePath);
-    ensureDir(dir);
+    await ensureDirAsync(dir);
     const tmpPath = path.join(
       dir,
       `.tmp-${path.basename(filePath)}-${randomId("tmp")}`,
     );
-    Deno.writeTextFileSync(tmpPath, safeStringify(payload, 2));
-    Deno.renameSync(tmpPath, filePath);
+    await Deno.writeTextFile(tmpPath, safeStringify(payload, 2));
+    await Deno.rename(tmpPath, filePath);
   };
 
-  const appendJsonl = (filePath: string, payload: unknown) => {
+  const appendJsonl = async (filePath: string, payload: unknown) => {
     const dir = path.dirname(filePath);
-    ensureDir(dir);
+    await ensureDirAsync(dir);
     const line = safeStringify(payload);
-    Deno.writeTextFileSync(filePath, `${line}\n`, { append: true });
+    await Deno.writeTextFile(filePath, `${line}\n`, { append: true });
   };
 
   const readBuildProjection = (workspaceId: string): BuildProjectionState => {
@@ -698,7 +752,17 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         payloadType === "gambit.build.status"
       ) {
         const run = normalizeBuildProjectionRun(workspaceId, envelope.data.run);
+        const existingTraces = Array.isArray(state.run.traces)
+          ? state.run.traces
+          : [];
+        const nextTraces = Array.isArray(run.traces) ? run.traces : [];
         state.run = run;
+        if (nextTraces.length === 0 && existingTraces.length > 0) {
+          state.run = {
+            ...state.run,
+            traces: existingTraces,
+          };
+        }
         const buildStateSnapshot = envelope.data.state;
         if (buildStateSnapshot && typeof buildStateSnapshot === "object") {
           state.state = buildStateSnapshot as SavedState;
@@ -723,28 +787,28 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     return state;
   };
 
-  const rebuildBuildProjectionFromEvents = (
+  const rebuildBuildProjectionFromEvents = async (
     workspaceId: string,
     eventsPath: string,
   ) => {
-    const { records } = readEnvelopeRecords(eventsPath);
+    const { records } = await readEnvelopeRecordsAsync(eventsPath);
     if (records.length > 0) {
       ensureMonotonicOffsets(records, eventsPath);
     }
     const projection = replayBuildProjection(workspaceId, records);
     const buildPath = path.join(sessionsRoot, workspaceId, "build_state.json");
-    writeJsonAtomic(buildPath, projection);
+    await writeJsonAtomic(buildPath, projection);
     buildProjectionCache.set(workspaceId, projection);
   };
 
-  const updateSnapshotBoundary = (
+  const updateSnapshotBoundary = async (
     sessionId: string,
     statePath: string | undefined,
     offset: number,
   ) => {
-    if (!statePath || !existsSync(statePath)) return;
+    if (!statePath) return;
     try {
-      const text = Deno.readTextFileSync(statePath);
+      const text = await Deno.readTextFile(statePath);
       const parsed = JSON.parse(text) as SavedState;
       const parsedMeta = parsed.meta && typeof parsed.meta === "object"
         ? parsed.meta as Record<string, unknown>
@@ -759,7 +823,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       parsedMeta.sessionUpdatedAt = new Date().toISOString();
       upsertScenarioRunSummary(parsedMeta);
       const nextState = { ...parsed, meta: parsedMeta };
-      writeJsonAtomic(statePath, nextState);
+      await writeJsonAtomic(statePath, nextState);
       sessionStateCache.set(sessionId, nextState);
     } catch {
       // Keep append-only logging best-effort even if snapshot boundary update fails.
@@ -814,9 +878,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       type: eventType,
       data: normalizedData,
     };
-    enqueueSessionWrite(sessionId, () => {
+    enqueueSessionWrite(sessionId, async () => {
       const offset = nextSessionOffsetCandidate(sessionId, state);
-      appendJsonl(
+      await appendJsonl(
         eventsPath,
         toCanonicalEventRecord({
           eventType,
@@ -830,9 +894,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         (state.meta as Record<string, unknown>).lastAppliedOffset = offset;
         (state.meta as Record<string, unknown>).lastAppliedEventSeq = offset;
       }
-      updateSnapshotBoundary(sessionId, statePath, offset);
+      await updateSnapshotBoundary(sessionId, statePath, offset);
       if (eventType === "build") {
-        rebuildBuildProjectionFromEvents(sessionId, eventsPath);
+        await rebuildBuildProjectionFromEvents(sessionId, eventsPath);
       }
     });
     return envelope;
@@ -929,13 +993,22 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       const statePath = typeof snapshot.meta?.sessionStatePath === "string"
         ? snapshot.meta.sessionStatePath
         : path.join(dir, "state.json");
-      enqueueSessionWrite(sessionId, () => {
+      enqueueSessionWrite(sessionId, async () => {
         try {
-          ensureDir(dir);
-          const firstWrite = !existsSync(eventsPath);
+          await ensureDirAsync(dir);
+          let firstWrite = false;
+          try {
+            await Deno.stat(eventsPath);
+          } catch (err) {
+            if (err instanceof Deno.errors.NotFound) {
+              firstWrite = true;
+            } else {
+              throw err;
+            }
+          }
           if (firstWrite) {
             const startOffset = nextSessionOffsetCandidate(sessionId, snapshot);
-            appendJsonl(
+            await appendJsonl(
               eventsPath,
               toCanonicalEventRecord({
                 eventType: "session",
@@ -969,7 +1042,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
               lastAppliedEventSeq: snapshotOffset,
             },
           };
-          appendJsonl(
+          await appendJsonl(
             eventsPath,
             toCanonicalEventRecord({
               eventType: "session",
@@ -987,8 +1060,8 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
           // Advance in-memory offset immediately after append so a later
           // snapshot write failure cannot cause duplicate offsets on retry.
           sessionOffsetById.set(sessionId, snapshotOffset);
-          writeJsonAtomic(statePath, snapshotToWrite);
-          rebuildBuildProjectionFromEvents(sessionId, eventsPath);
+          await writeJsonAtomic(statePath, snapshotToWrite);
+          await rebuildBuildProjectionFromEvents(sessionId, eventsPath);
         } catch (err) {
           logger.warn(
             `[sim] failed to persist session state: ${
@@ -1005,6 +1078,17 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     sessionId: string,
     opts?: { withTraces?: boolean },
   ): SavedState | undefined => {
+    const cached = sessionStateCache.get(sessionId);
+    if (cached) {
+      if (!opts?.withTraces) return cached;
+      const cachedTraces = Array.isArray(cached.traces) ? cached.traces : [];
+      if (cachedTraces.length > 0) return cached;
+      const loadedTraces = loadSessionTraces(cached);
+      if (loadedTraces.length === 0) return cached;
+      const withTraces = { ...cached, traces: loadedTraces };
+      sessionStateCache.set(sessionId, withTraces);
+      return withTraces;
+    }
     const dir = path.join(sessionsRoot, sessionId);
     const filePath = path.join(dir, "state.json");
     const text = Deno.readTextFileSync(filePath);
@@ -1100,10 +1184,35 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     const eventsPath = typeof state.meta?.sessionEventsPath === "string"
       ? state.meta.sessionEventsPath
       : path.join(sessionsRoot, workspaceId, "events.jsonl");
+    const projection = readBuildProjection(workspaceId);
     if (existsSync(eventsPath)) {
-      rebuildBuildProjectionFromEvents(workspaceId, eventsPath);
+      const targetOffset = parseFiniteInteger(
+        (state.meta as { lastAppliedOffset?: unknown } | undefined)
+          ?.lastAppliedOffset,
+      ) ??
+        parseFiniteInteger(
+          (state.meta as { lastAppliedEventSeq?: unknown } | undefined)
+            ?.lastAppliedEventSeq,
+        ) ??
+        -1;
+      if (projection.lastAppliedOffset < targetOffset) {
+        if (!buildProjectionRefreshInFlight.has(workspaceId)) {
+          const task = rebuildBuildProjectionFromEvents(workspaceId, eventsPath)
+            .catch((err) => {
+              logger.warn(
+                `[sim] failed to refresh build projection for ${workspaceId}: ${
+                  err instanceof Error ? err.message : err
+                }`,
+              );
+            })
+            .finally(() => {
+              buildProjectionRefreshInFlight.delete(workspaceId);
+            });
+          buildProjectionRefreshInFlight.set(workspaceId, task);
+        }
+      }
     }
-    return readBuildProjection(workspaceId);
+    return projection;
   };
 
   return {

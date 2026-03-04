@@ -50,6 +50,7 @@ export type SchemaDescription = {
 export type GradingRunRecord = {
   id: string;
   workspaceId?: string;
+  scenarioRunId?: string;
   gradingRunId?: string;
   graderId: string;
   graderPath: string;

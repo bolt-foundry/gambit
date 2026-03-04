@@ -1,6 +1,11 @@
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 
-export type ProviderKey = "openrouter" | "ollama" | "google" | "codex-cli";
+export type ProviderKey =
+  | "openrouter"
+  | "ollama"
+  | "google"
+  | "codex-cli"
+  | "claude-code-cli";
 
 export type ProviderRouter = {
   resolve: (input: { model: string }) => {
@@ -17,6 +22,7 @@ const PROVIDER_PREFIXES: Record<ProviderKey, string> = {
   ollama: "ollama/",
   google: "google/",
   "codex-cli": "codex-cli/",
+  "claude-code-cli": "claude-code-cli/",
 };
 
 function parsePrefixedModel(model: string): {
@@ -28,6 +34,13 @@ function parsePrefixedModel(model: string): {
   if (model.trim() === "codex-cli") {
     return {
       providerKey: "codex-cli",
+      strippedModel: "default",
+      rawModel: model,
+    };
+  }
+  if (model.trim() === "claude-code-cli") {
+    return {
+      providerKey: "claude-code-cli",
       strippedModel: "default",
       rawModel: model,
     };
@@ -61,6 +74,8 @@ function missingProviderMessage(providerKey: ProviderKey): string {
       return "Google provider is not configured. Set GOOGLE_API_KEY or GEMINI_API_KEY.";
     case "codex-cli":
       return "Codex CLI provider is not configured.";
+    case "claude-code-cli":
+      return "Claude Code CLI provider is not configured.";
   }
 }
 

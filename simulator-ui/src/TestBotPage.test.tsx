@@ -59,7 +59,7 @@ windowObj.setInterval = globalThis.setInterval.bind(globalThis);
 windowObj.clearInterval = globalThis.clearInterval.bind(globalThis);
 
 class FakeEventSource {
-  static instances: FakeEventSource[] = [];
+  static instances: Array<FakeEventSource> = [];
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   #listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
   url: string;
@@ -135,13 +135,14 @@ async function flushEffects() {
 Deno.test("TestBotPage uses JSON-only input with parse and required-field gating", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
-  const requests: RequestEntry[] = [];
+  const requests: Array<RequestEntry> = [];
   let renderer: TestRenderer.ReactTestRenderer | null = null;
 
   try {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch =
       (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
         const url = String(input);
         const pathname = new URL(url, "http://localhost").pathname;
         const search = new URL(url, "http://localhost").search;
@@ -215,7 +216,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch;
 
-    await act(async () => {
+    await act(() => {
       renderer = TestRenderer.create(
         <WorkspaceProvider workspaceId="ws-1">
           <TestBotPage
@@ -248,7 +249,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
     assertEquals(Boolean(runButton.props.disabled), false);
     assertEquals(Boolean(startAssistantButton.props.disabled), false);
 
-    await act(async () => {
+    await act(() => {
       scenarioInput.props.onChange({ target: { value: "{" } });
     });
     const jsonErrorsAfterInvalid = renderer.root.findAll(
@@ -262,7 +263,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
       true,
     );
 
-    await act(async () => {
+    await act(() => {
       scenarioInput.props.onChange({ target: { value: "{}" } });
     });
     assertEquals(
@@ -270,7 +271,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
       true,
     );
 
-    await act(async () => {
+    await act(() => {
       scenarioInput.props.onChange({
         target: { value: JSON.stringify({ foo: "ready" }, null, 2) },
       });
@@ -280,7 +281,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
       false,
     );
 
-    await act(async () => {
+    await act(() => {
       assistantInput.props.onChange({ target: { value: "{" } });
     });
     assertEquals(
@@ -296,7 +297,7 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
     assertEquals(messageRequests.length, 0);
   } finally {
     if (renderer) {
-      await act(async () => {
+      await act(() => {
         renderer.unmount();
       });
     }
@@ -308,13 +309,14 @@ Deno.test("TestBotPage uses JSON-only input with parse and required-field gating
 Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
-  const requests: RequestEntry[] = [];
+  const requests: Array<RequestEntry> = [];
   let renderer: TestRenderer.ReactTestRenderer | null = null;
 
   try {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch =
       (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
         const url = String(input);
         const pathname = new URL(url, "http://localhost").pathname;
         let body: Record<string, unknown> | undefined;
@@ -416,7 +418,7 @@ Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () 
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch;
 
-    await act(async () => {
+    await act(() => {
       renderer = TestRenderer.create(
         <WorkspaceProvider workspaceId="ws-1">
           <TestBotPage
@@ -441,7 +443,7 @@ Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () 
       "testbot-assistant-init-json-input",
     );
 
-    await act(async () => {
+    await act(() => {
       scenarioInput.props.onChange({
         target: { value: JSON.stringify({ foo: "scenario-json" }, null, 2) },
       });
@@ -452,7 +454,7 @@ Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () 
       });
     });
 
-    await act(async () => {
+    await act(() => {
       findByTestId(renderer.root, "testbot-run").props.onClick();
     });
 
@@ -464,7 +466,7 @@ Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () 
     assertEquals(runRequest.body.context, { contextId: "assistant-json" });
   } finally {
     if (renderer) {
-      await act(async () => {
+      await act(() => {
         renderer.unmount();
       });
     }
@@ -476,13 +478,14 @@ Deno.test("TestBotPage submits parsed JSON payload for scenario runs", async () 
 Deno.test("TestBotPage submits parsed JSON payload for assistant start", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
-  const requests: RequestEntry[] = [];
+  const requests: Array<RequestEntry> = [];
   let renderer: TestRenderer.ReactTestRenderer | null = null;
 
   try {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch =
       (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
         const url = String(input);
         const pathname = new URL(url, "http://localhost").pathname;
         let body: Record<string, unknown> | undefined;
@@ -569,7 +572,7 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch;
 
-    await act(async () => {
+    await act(() => {
       renderer = TestRenderer.create(
         <WorkspaceProvider workspaceId="ws-1">
           <TestBotPage
@@ -589,7 +592,7 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
       renderer.root,
       "testbot-assistant-init-json-input",
     );
-    await act(async () => {
+    await act(() => {
       assistantInput.props.onChange({
         target: {
           value: JSON.stringify({ contextId: "assistant-json" }, null, 2),
@@ -597,7 +600,7 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
       });
     });
 
-    await act(async () => {
+    await act(() => {
       findByTestId(renderer.root, "testbot-start-assistant").props.onClick();
     });
 
@@ -611,7 +614,7 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
     assertEquals(startRequest.body.context, { contextId: "assistant-json" });
   } finally {
     if (renderer) {
-      await act(async () => {
+      await act(() => {
         renderer.unmount();
       });
     }
@@ -623,13 +626,14 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
 Deno.test("TestBotPage New chat clears current run without rehydrating latest workspace run", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
-  const requests: RequestEntry[] = [];
+  const requests: Array<RequestEntry> = [];
   let renderer: TestRenderer.ReactTestRenderer | null = null;
 
   try {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch =
       (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
         const url = String(input);
         const pathname = new URL(url, "http://localhost").pathname;
         let body: Record<string, unknown> | undefined;
@@ -720,7 +724,7 @@ Deno.test("TestBotPage New chat clears current run without rehydrating latest wo
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch;
 
-    function Harness() {
+    const Harness = () => {
       const [requestedRunId, setRequestedRunId] = React.useState<string | null>(
         "run-1",
       );
@@ -734,9 +738,9 @@ Deno.test("TestBotPage New chat clears current run without rehydrating latest wo
           />
         </WorkspaceProvider>
       );
-    }
+    };
 
-    await act(async () => {
+    await act(() => {
       renderer = TestRenderer.create(<Harness />);
     });
 
@@ -769,7 +773,7 @@ Deno.test("TestBotPage New chat clears current run without rehydrating latest wo
     assert(emptyState.length > 0);
   } finally {
     if (renderer) {
-      await act(async () => {
+      await act(() => {
         renderer.unmount();
       });
     }
@@ -790,6 +794,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch =
       (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
         const url = String(input);
         const pathname = new URL(url, "http://localhost").pathname;
         if (pathname === "/api/workspaces/ws-1") {
@@ -849,7 +854,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
         throw new Error(`Unexpected fetch: ${url}`);
       }) as typeof fetch;
 
-    await act(async () => {
+    await act(() => {
       renderer = TestRenderer.create(
         <WorkspaceProvider workspaceId="ws-1">
           <TestBotPage
@@ -868,7 +873,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
     await flushEffects();
     await flushEffects();
 
-    await act(async () => {
+    await act(() => {
       findByTestId(renderer.root, "testbot-run").props.onClick();
     });
     await flushEffects();
@@ -876,7 +881,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
     const callout = findByTestId(renderer.root, "testbot-error-callout");
     assert(callout);
     const addButton = findByTestId(renderer.root, "testbot-add-error-to-chat");
-    await act(async () => {
+    await act(() => {
       addButton.props.onClick();
     });
 
@@ -892,7 +897,7 @@ Deno.test("TestBotPage exposes scenario error callout action for workbench chat"
     assertEquals(payload.runId, undefined);
   } finally {
     if (renderer) {
-      await act(async () => {
+      await act(() => {
         renderer.unmount();
       });
     }

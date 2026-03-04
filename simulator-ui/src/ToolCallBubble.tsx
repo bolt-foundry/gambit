@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
 import { classNames, formatJson, type ToolCallSummary } from "./utils.ts";

@@ -1,6 +1,6 @@
 +++
 [release]
-since = "175e4900662b374cedd1ebe648e7c25b070ef600"
+since = "37ab29d3ed052117994458704a77b5b0651daf24"
 +++
 
 # Changelog
@@ -8,6 +8,22 @@ since = "175e4900662b374cedd1ebe648e7c25b070ef600"
 ## Unreleased (v0.8.6)
 
 - TBD
+
+## v0.8.6-rc.1
+
+- fix(gambit): replace dynamic import.meta.resolve at runtime
+- fix(gambit): handle non-file import.meta.url in jsr runtime paths
+- feat(gambit): simplify Codex login flow and auto-configure sandbox
+- feat(gambit): add codex preflight checks and yolo/json CLI paths
+- docs(gambit): refresh command docs and codex env guidance
+- fix(simulator-ui): improve listbox viewport positioning
+- feat(simulator-ui): add dark mode toggle and cooler dark inputs
+- feat(gambit): add claude code provider support for build chat runtime
+- feat(gambit-serve): add --build-assistant-provider flag to set Claude or Codex
+  defaults
+- feat(gambit-ui): add selectable persisted build chat provider in workbench
+- feat(gambit): stream Claude CLI events and enforce provider-model
+  compatibility
 
 ## v0.8.5
 

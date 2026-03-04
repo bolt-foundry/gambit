@@ -466,6 +466,7 @@ async function main() {
       await handleServeCommand({
         deckPath: deckPath || undefined,
         artifactPath: args.artifactPath,
+        buildAssistantProvider: args.buildAssistantProvider,
         model: args.model,
         modelForce: args.modelForce,
         modelProvider: provider,
@@ -581,4 +582,5 @@ async function main() {
 
 if (import.meta.main) {
   await main();
+  Deno.exit(0);
 }

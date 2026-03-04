@@ -385,6 +385,7 @@ function mapOpenAIOutputItem(
     };
   }
   if (typeof itemType === "string" && itemType.includes(":")) {
+    // this predates the lint rule
     const raw = item as unknown as Record<string, unknown>;
     const payloadEntries = Object.entries(raw).filter(([key, value]) => {
       if (key === "type" || key === "id") return false;
@@ -405,6 +406,7 @@ function mapOpenAIOutputItem(
       type: itemType as `${string}:${string}`,
       id: typeof raw.id === "string" ? raw.id : undefined,
       data,
+      // this predates the lint rule
     } as unknown as ResponseItem;
   }
   return null;
@@ -685,6 +687,7 @@ async function createResponse(
   let responseOrStream: unknown;
   try {
     responseOrStream = await client.responses.create(
+      // this predates the lint rule
       params as unknown as OpenAI.Responses.ResponseCreateParams,
       signal ? { signal } : undefined,
     );

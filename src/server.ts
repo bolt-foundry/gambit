@@ -1,7 +1,8 @@
 import * as path from "@std/path";
 import { copy, ensureDir, existsSync } from "@std/fs";
 import { parse } from "@std/jsonc";
-import { parse as parseToml } from "@std/toml";
+import { createElement } from "react";
+import { renderToReadableStream } from "react-dom/server";
 import {
   isGambitEndSignal,
   isRunCanceledError,
@@ -24,31 +25,49 @@ import type {
   GradingFlag,
   GradingRunRecord,
   NormalizedSchema,
-  OutgoingMessage,
   SchemaDescription,
   SessionMeta,
 } from "./server_types.ts";
 import { createSessionStore } from "./server_session_store.ts";
-import {
-  handleFeedbackRoutes,
-  handleGradingReferenceRoute,
-} from "./server_feedback_grading_routes.ts";
 import { handleUiRoutes } from "./server_ui_routes.ts";
 import {
   resolveWorkspaceIdFromRecord,
   resolveWorkspaceIdFromSearchParams,
-  WORKSPACE_API_BASE,
   WORKSPACE_ROUTE_BASE,
   WORKSPACE_STATE_SCHEMA_VERSION,
-  WORKSPACES_API_BASE,
   workspaceSchemaError,
-} from "./workspace_contract.ts";
+} from "./workspace_routes.ts";
 import {
   appendDurableStreamEvent,
+  GRAPHQL_STREAMS_PREFIX,
   handleDurableStreamRequest,
 } from "./durable_streams.ts";
 import { type CheckReport, handleCheckCommand } from "./commands/check.ts";
 import { readCodexLoginStatus } from "./codex_preflight.ts";
+import { handleGraphqlStreamMultiplexRequest } from "./graphql_stream_multiplex.ts";
+import { handleGraphqlSubscriptionStreamRequest } from "./graphql_subscription_stream.ts";
+import type { GambitID } from "./gambit_id.ts";
+import { asGambitID } from "./gambit_id.ts";
+import {
+  asGambitWorkspaceRelativePath,
+  type GambitWorkspaceRelativePath,
+} from "./gambit_path.ts";
+import { asGambitISODateTime } from "./gambit_time.ts";
+import { gambitYoga } from "./simulator_graphql.ts";
+import {
+  getSimulatorIsographEnvironment,
+  type SimulatorGraphqlOperations,
+} from "./server_isograph_environment.ts";
+import {
+  createServerRedirectResponse,
+  getRedirectFromEntrypoint,
+} from "./simulator_redirect_handler.ts";
+import { AppRoot } from "../simulator-ui/src/AppRoot.tsx";
+import { globalStyles } from "../simulator-ui/src/styles.ts";
+import {
+  isographAppRoutes as simulatorIsographAppRoutes,
+  matchRouteWithParams as matchSimulatorRouteWithParams,
+} from "../simulator-ui/src/routing.ts";
 import type { FeedbackEntry, SavedState } from "@bolt-foundry/gambit-core";
 import type {
   CreateResponseRequest,
@@ -65,6 +84,24 @@ import type {
   TraceEvent,
 } from "@bolt-foundry/gambit-core";
 import type { ZodTypeAny } from "zod";
+
+type WorkspaceFileReadRecord = {
+  id: GambitID;
+  path: GambitWorkspaceRelativePath;
+  size: number | null;
+  modifiedAt: ReturnType<typeof asGambitISODateTime> | null;
+  content: string | null;
+};
+
+type ReadWorkspaceFilesArgs = {
+  workspaceId: GambitID;
+  id?: GambitID | null;
+  pathPrefix?: GambitWorkspaceRelativePath | null;
+};
+
+type ReadWorkspaceFiles = (
+  args: ReadWorkspaceFilesArgs,
+) => Promise<Array<WorkspaceFileReadRecord>>;
 
 const GAMBIT_TOOL_RESPOND = "gambit_respond";
 
@@ -156,11 +193,32 @@ const gambitVersion = (() => {
   }
   return "unknown";
 })();
-const SIMULATOR_STREAM_ID = "gambit-simulator";
 const WORKSPACE_STREAM_ID = "gambit-workspace";
-const GRADE_STREAM_ID = "gambit-grade";
+const _GRADE_STREAM_ID = "gambit-grade";
 const TEST_STREAM_ID = "gambit-test";
-const BUILD_STREAM_ID = "gambit-build";
+const WORKSPACE_API_BASE = "/api/workspace";
+const WORKSPACES_API_BASE = "/api/workspaces";
+const VERIFY_BATCH_SIZE_MAX = 24;
+const VERIFY_BATCH_CONCURRENCY_MAX = 6;
+const WORKSPACE_REFRESH_DEBUG = (() => {
+  const value = (Deno.env.get("GAMBIT_WORKSPACE_REFRESH_DEBUG") ?? "")
+    .toLowerCase()
+    .trim();
+  return value === "1" || value === "true" || value === "yes";
+})();
+const logWorkspaceRefreshDebug = (
+  event: string,
+  payload: Record<string, unknown>,
+): void => {
+  if (!WORKSPACE_REFRESH_DEBUG) return;
+  logger.info(
+    `[gambit-workspace-refresh-debug] ${event} ${JSON.stringify(payload)}`,
+  );
+};
+const extractMissingReadfilePath = (message: string): string | null => {
+  const match = message.match(/readfile ['"]([^'"]+)['"]/);
+  return match?.[1] ?? null;
+};
 const DEFAULT_TEST_BOT_SEED_PROMPT =
   "Start the conversation as the user. Do not wait for the assistant to speak first.";
 const isWorkspaceEventDomain = (value: unknown): boolean =>
@@ -176,7 +234,7 @@ const extractPersistedWorkspacePayload = (
   }
   return nested as Record<string, unknown>;
 };
-const safeJsonStringify = (value: unknown): string => {
+const _safeJsonStringify = (value: unknown): string => {
   const stack: Array<unknown> = [];
   return JSON.stringify(value, function (_key, candidate) {
     if (!candidate || typeof candidate !== "object") return candidate;
@@ -192,6 +250,10 @@ const GAMBIT_BOT_SOURCE_DECK_URL = new URL(
   "./decks/gambit-bot/PROMPT.md",
   import.meta.url,
 );
+const GAMBIT_BOT_SOURCE_DECK_PATH =
+  GAMBIT_BOT_SOURCE_DECK_URL.protocol === "file:"
+    ? path.fromFileUrl(GAMBIT_BOT_SOURCE_DECK_URL)
+    : "";
 const GAMBIT_BOT_SOURCE_DIR = GAMBIT_BOT_SOURCE_DECK_URL.protocol === "file:"
   ? path.dirname(path.fromFileUrl(GAMBIT_BOT_SOURCE_DECK_URL))
   : "";
@@ -210,7 +272,15 @@ async function ensureGambitPolicyInBotRoot(root: string) {
   const dest = path.join(root, ".gambit", "policy");
   if (existsSync(dest)) return;
   await ensureDir(path.dirname(dest));
-  await copy(GAMBIT_BOT_POLICY_DIR, dest, { overwrite: false });
+  try {
+    await copy(GAMBIT_BOT_POLICY_DIR, dest, { overwrite: false });
+  } catch (err) {
+    // Concurrent workspace bootstraps can race this copy; if destination exists,
+    // treat it as successfully initialized.
+    if (!(err instanceof Deno.errors.AlreadyExists)) {
+      throw err;
+    }
+  }
 }
 async function describeDeckInputSchemaFromPath(
   deckPath: string,
@@ -224,6 +294,46 @@ async function describeDeckInputSchemaFromPath(
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(`[sim] failed to load deck schema: ${message}`);
     return { error: message };
+  }
+}
+
+async function describeDeckGraphqlConfigFromPath(
+  deckPath: string,
+): Promise<{
+  deck?: string;
+  startMode?: "assistant" | "user";
+  modelParams?: Record<string, unknown>;
+  inputSchema?: unknown;
+  defaults?: unknown;
+  tools?: Array<DeckToolDescription>;
+  inputSchemaError?: string;
+}> {
+  const desc = await describeDeckInputSchemaFromPath(deckPath);
+  try {
+    const deck = await loadDeck(deckPath);
+    const startMode =
+      deck.startMode === "assistant" || deck.startMode === "user"
+        ? deck.startMode
+        : "assistant";
+    return {
+      deck: deck.path,
+      startMode,
+      modelParams: deck.modelParams ?? undefined,
+      inputSchema: desc.schema,
+      defaults: desc.defaults,
+      tools: desc.tools,
+      inputSchemaError: desc.error,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      deck: deckPath,
+      startMode: "assistant",
+      inputSchema: desc.schema,
+      defaults: desc.defaults,
+      tools: desc.tools,
+      inputSchemaError: desc.error ?? message,
+    };
   }
 }
 
@@ -267,7 +377,7 @@ function describeZodSchema(schema?: ZodTypeAny): SchemaDescription {
   }
 }
 
-function schemaHasField(
+function _schemaHasField(
   schema: NormalizedSchema | undefined,
   field: string,
 ): boolean {
@@ -420,14 +530,14 @@ function cloneValue<T>(value: T): T {
 }
 
 function resolveDeckPath(p: string): string {
-  if (p.startsWith("file:")) {
-    try {
-      return path.fromFileUrl(p);
-    } catch {
-      return p;
-    }
+  const absolutePath = path.isAbsolute(p) ? p : path.resolve(p);
+  try {
+    const url = import.meta.resolve(path.toFileUrl(absolutePath).href);
+    if (url.startsWith("file:")) return path.fromFileUrl(url);
+    return url;
+  } catch {
+    return absolutePath;
   }
-  return path.isAbsolute(p) ? p : path.resolve(p);
 }
 
 function materializeDefaults(schema?: NormalizedSchema): unknown {
@@ -456,7 +566,7 @@ function materializeDefaults(schema?: NormalizedSchema): unknown {
   }
 }
 
-function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
+function _deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
   if (!schema) return undefined;
   if (schema.defaultValue !== undefined) return cloneValue(schema.defaultValue);
   if (schema.example !== undefined) return cloneValue(schema.example);
@@ -465,14 +575,14 @@ function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
     case "object": {
       const out: Record<string, unknown> = {};
       for (const [key, child] of Object.entries(schema.fields ?? {})) {
-        const value = deriveInitialFromSchema(child);
+        const value = _deriveInitialFromSchema(child);
         if (value !== undefined) out[key] = value;
       }
       return out;
     }
     case "array": {
       if (schema.items) {
-        const item = deriveInitialFromSchema(schema.items);
+        const item = _deriveInitialFromSchema(schema.items);
         if (item !== undefined) return [item];
       }
       return [];
@@ -484,7 +594,7 @@ function deriveInitialFromSchema(schema?: NormalizedSchema): unknown {
   }
 }
 
-function getPathValue(value: unknown, path: Array<string>): unknown {
+function _getPathValue(value: unknown, path: Array<string>): unknown {
   let current: unknown = value;
   for (const segment of path) {
     if (
@@ -498,13 +608,14 @@ function getPathValue(value: unknown, path: Array<string>): unknown {
   return current;
 }
 
-function setPathValue(
+function _setPathValue(
   value: unknown,
   path: Array<string>,
   nextValue: unknown,
 ): unknown {
   if (path.length === 0) return nextValue;
   const root = value && typeof value === "object"
+    // this predates the lint rule
     ? cloneValue(value as unknown)
     : {};
   let cursor = root as Record<string, unknown>;
@@ -512,6 +623,7 @@ function setPathValue(
     const segment = path[i];
     const existing = cursor[segment];
     const next = existing && typeof existing === "object"
+      // this predates the lint rule
       ? cloneValue(existing as unknown)
       : {};
     cursor[segment] = next;
@@ -589,7 +701,7 @@ function getSchemaAtPath(
   return current;
 }
 
-function buildInitFillPrompt(args: {
+function _buildInitFillPrompt(args: {
   missing: Array<string>;
   current: unknown;
   schema: NormalizedSchema | undefined;
@@ -629,7 +741,7 @@ function unwrapRespondPayload(output: unknown): unknown {
   return output;
 }
 
-function parseInitFillOutput(
+function _parseInitFillOutput(
   output: unknown,
 ): { data?: unknown; error?: string } {
   if (output === null || output === undefined) {
@@ -655,7 +767,7 @@ function parseInitFillOutput(
   return { error: "Persona returned unsupported init fill output." };
 }
 
-function validateInitInput(schema: ZodTypeAny | undefined, value: unknown) {
+function _validateInitInput(schema: ZodTypeAny | undefined, value: unknown) {
   if (!schema) return value;
   if (typeof schema.safeParse !== "function") {
     throw new Error("Init schema missing safeParse");
@@ -809,6 +921,7 @@ function normalizeInputItems(input: unknown): Array<ResponseItem> {
         type: type as `${string}:${string}`,
         id: typeof item.id === "string" ? item.id : undefined,
         data,
+        // this predates the lint rule
       } as unknown as ResponseItem);
       continue;
     }
@@ -1158,15 +1271,26 @@ export function startWebSocketSimulator(opts: {
   const initialContext = opts.initialContext;
   const hasInitialContext = opts.contextProvided ??
     (initialContext !== undefined);
+  const buildAssistantDeckPath = GAMBIT_BOT_SOURCE_DECK_PATH
+    ? resolveDeckPath(GAMBIT_BOT_SOURCE_DECK_PATH)
+    : resolveDeckPath(opts.deckPath);
   const consoleTracer = opts.verbose ? makeConsoleTracer() : undefined;
   let resolvedDeckPath = resolveDeckPath(opts.deckPath);
   const buildBotRootCache = new Map<string, string>();
+  const deckGraphqlConfigCache = new Map<
+    string,
+    Awaited<ReturnType<typeof describeDeckGraphqlConfigFromPath>>
+  >();
   let availableTestDecks: Array<AvailableTestDeck> = [];
   const testDeckByPath = new Map<string, AvailableTestDeck>();
   const testDeckById = new Map<string, AvailableTestDeck>();
   let availableGraderDecks: Array<AvailableGraderDeck> = [];
   const graderDeckByPath = new Map<string, AvailableGraderDeck>();
   const graderDeckById = new Map<string, AvailableGraderDeck>();
+  const summarizeScenarioDeckRegistry = () => ({
+    scenarioDeckCount: availableTestDecks.length,
+    scenarioDeckPaths: availableTestDecks.slice(0, 12).map((deck) => deck.path),
+  });
   const activeWorkspaceId = opts.workspace?.id ?? null;
   const activeWorkspaceOnboarding = Boolean(opts.workspace?.onboarding);
   const workspaceScaffoldEnabled = Boolean(opts.workspace?.scaffoldEnabled);
@@ -1207,12 +1331,200 @@ export function startWebSocketSimulator(opts: {
     string,
     { id: string; rootDir: string; rootDeckPath: string; createdAt: string }
   >();
-  const ensureDir = (dir: string) => {
-    try {
-      Deno.mkdirSync(dir, { recursive: true });
-    } catch {
-      // ignore
+  type WorkspaceFsWatcher = {
+    abortController: AbortController;
+    pendingPaths: Set<string>;
+    pendingKinds: Set<string>;
+    debounceTimer: ReturnType<typeof setTimeout> | null;
+    task: Promise<void>;
+  };
+  const workspaceFsWatchers = new Map<string, WorkspaceFsWatcher>();
+  const normalizeWorkspaceFsPath = (value: string): string =>
+    value.split(/\\|\//g).filter(Boolean).join("/");
+  const isInternalWorkspacePath = (value: string): boolean => {
+    const normalized = normalizeWorkspaceFsPath(value);
+    return normalized === ".gambit" || normalized.startsWith(".gambit/");
+  };
+  const isWorkspaceGraphRelevantPath = (value: string): boolean => {
+    const normalized = normalizeWorkspaceFsPath(value);
+    if (normalized.length === 0) return false;
+    if (isInternalWorkspacePath(normalized)) return false;
+    return true;
+  };
+  const toWorkspaceRelativePath = (
+    rootDir: string,
+    absoluteOrRelativePath: string,
+  ): string | null => {
+    const resolvedRoot = path.resolve(rootDir);
+    const resolvedCandidate = path.resolve(absoluteOrRelativePath);
+    const relative = normalizeWorkspaceFsPath(
+      path.relative(resolvedRoot, resolvedCandidate),
+    );
+    if (!relative || relative.startsWith("..")) return null;
+    return relative;
+  };
+  const flushWorkspaceFsWatcher = (workspaceId: string) => {
+    const watcher = workspaceFsWatchers.get(workspaceId);
+    if (!watcher || watcher.pendingPaths.size === 0) return;
+    const changedPaths = [...watcher.pendingPaths].sort();
+    const kinds = [...watcher.pendingKinds].sort();
+    logWorkspaceRefreshDebug("fs.flush", {
+      workspaceId,
+      kinds,
+      paths: changedPaths,
+      pathCount: changedPaths.length,
+    });
+    watcher.pendingPaths.clear();
+    watcher.pendingKinds.clear();
+    watcher.debounceTimer = null;
+    if (opts.verbose) {
+      logger.info(
+        `[sim] workspace fs change detected workspaceId=${workspaceId} kinds=${
+          kinds.join(",")
+        } paths=${changedPaths.join(",")}`,
+      );
     }
+    const reloadAttemptId = randomId("wsrefresh");
+    logWorkspaceRefreshDebug("fs.reload.start", {
+      workspaceId,
+      reloadAttemptId,
+      changedPaths,
+      kinds,
+      resolvedDeckPath,
+      ...summarizeScenarioDeckRegistry(),
+    });
+    // Keep deck-derived registries (scenario/grader decks) in sync with edits.
+    // Only emit refresh events after reload succeeds so subscriptions always
+    // imply a readable, coherent workspace graph.
+    void activateWorkspaceDeck(workspaceId, {
+      forceReload: true,
+      source: "fs-watcher",
+      reloadAttemptId,
+    })
+      .then(() => {
+        logWorkspaceRefreshDebug("fs.reload.success", {
+          workspaceId,
+          reloadAttemptId,
+          changedPaths,
+          kinds,
+          resolvedDeckPath,
+          ...summarizeScenarioDeckRegistry(),
+        });
+        appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
+          type: "workspaceGraphRefresh",
+          workspaceId,
+          reason: "fs-change",
+          paths: changedPaths,
+          kinds,
+        });
+        logWorkspaceRefreshDebug("fs.graphRefresh.emit", {
+          workspaceId,
+          reloadAttemptId,
+          reason: "fs-change",
+          pathCount: changedPaths.length,
+          kindCount: kinds.length,
+        });
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        logWorkspaceRefreshDebug("fs.reload.fail", {
+          workspaceId,
+          reloadAttemptId,
+          resolvedDeckPath,
+          error: message,
+          missingPath: extractMissingReadfilePath(message),
+          ...summarizeScenarioDeckRegistry(),
+        });
+        logger.warn(
+          `[sim] workspace deck reload failed after fs change workspaceId=${workspaceId} error=${message}`,
+        );
+      });
+  };
+  const stopWorkspaceFsWatcher = (workspaceId: string) => {
+    const watcher = workspaceFsWatchers.get(workspaceId);
+    if (!watcher) return;
+    logWorkspaceRefreshDebug("fs.stop", { workspaceId });
+    if (watcher.debounceTimer !== null) {
+      clearTimeout(watcher.debounceTimer);
+      watcher.debounceTimer = null;
+    }
+    watcher.abortController.abort();
+    workspaceFsWatchers.delete(workspaceId);
+  };
+  const startWorkspaceFsWatcher = (record: {
+    id: string;
+    rootDir: string;
+  }) => {
+    if (workspaceFsWatchers.has(record.id)) return;
+    logWorkspaceRefreshDebug("fs.start", {
+      workspaceId: record.id,
+      rootDir: record.rootDir,
+    });
+    const abortController = new AbortController();
+    const pendingPaths = new Set<string>();
+    const pendingKinds = new Set<string>();
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const watcher = Deno.watchFs(record.rootDir, { recursive: true });
+    abortController.signal.addEventListener("abort", () => {
+      try {
+        watcher.close();
+      } catch {
+        // ignore close errors while shutting down
+      }
+    });
+    const task = (async () => {
+      try {
+        for await (const event of watcher) {
+          if (abortController.signal.aborted) break;
+          const kind = typeof event.kind === "string" ? event.kind : "unknown";
+          let sawRelevantPath = false;
+          for (const candidatePath of event.paths) {
+            const relativePath = toWorkspaceRelativePath(
+              record.rootDir,
+              candidatePath,
+            );
+            if (!relativePath || !isWorkspaceGraphRelevantPath(relativePath)) {
+              continue;
+            }
+            pendingPaths.add(relativePath);
+            sawRelevantPath = true;
+          }
+          if (!sawRelevantPath) continue;
+          pendingKinds.add(kind);
+          if (debounceTimer !== null) continue;
+          debounceTimer = setTimeout(() => {
+            const existing = workspaceFsWatchers.get(record.id);
+            if (!existing) return;
+            existing.debounceTimer = null;
+            flushWorkspaceFsWatcher(record.id);
+          }, 120);
+          const existing = workspaceFsWatchers.get(record.id);
+          if (existing) {
+            existing.debounceTimer = debounceTimer;
+          }
+        }
+      } catch (err) {
+        if (!abortController.signal.aborted) {
+          logger.warn(
+            `[sim] workspace fs watcher stopped for ${record.id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      } finally {
+        if (debounceTimer !== null) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+      }
+    })();
+    workspaceFsWatchers.set(record.id, {
+      abortController,
+      pendingPaths,
+      pendingKinds,
+      debounceTimer,
+      task,
+    });
   };
   const deckSlugFromPath = (p: string) => {
     const baseName = path.basename(p || "deck");
@@ -1262,18 +1574,28 @@ export function startWebSocketSimulator(opts: {
   };
   type TestBotRunEntry = {
     run: TestBotRunStatus;
+    state: SavedState | null;
     promise: Promise<void> | null;
     abort: AbortController | null;
   };
   const testBotRuns = new Map<string, TestBotRunEntry>();
+  const shouldPersistTestWorkspaceEvent = (
+    payload: unknown,
+  ): payload is Record<string, unknown> => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return false;
+    }
+    const type = (payload as { type?: unknown }).type;
+    return type === "testBotStatus" || type === "gambit.test.status";
+  };
   const broadcastTestBot = (payload: unknown, workspaceId?: string) => {
-    if (workspaceId) {
+    if (workspaceId && shouldPersistTestWorkspaceEvent(payload)) {
       const state = readSessionState(workspaceId);
       if (state) {
         appendWorkspaceEnvelope(
           state,
           "test",
-          payload as Record<string, unknown>,
+          payload,
         );
       }
     }
@@ -1305,6 +1627,7 @@ export function startWebSocketSimulator(opts: {
     createdAt: string;
   }) => {
     workspaceById.set(record.id, record);
+    startWorkspaceFsWatcher(record);
     return record;
   };
 
@@ -1443,113 +1766,6 @@ export function startWebSocketSimulator(opts: {
     });
   }
 
-  const MAX_FILE_PREVIEW_BYTES = 250_000;
-
-  type BuildBotFileEntry = {
-    path: string;
-    type: "file" | "dir";
-    size?: number;
-    modifiedAt?: string;
-    label?: string;
-  };
-
-  const shouldReadBuildDeckLabel = (relativePath: string): boolean => {
-    const lower = path.basename(relativePath).toLowerCase();
-    return lower === "prompt.md" || lower.endsWith(".deck.md");
-  };
-
-  type BuildDeckLabelCacheEntry = {
-    frontmatterRaw: string | null;
-    label: string | undefined;
-  };
-
-  const buildDeckLabelCache = new Map<string, BuildDeckLabelCacheEntry>();
-
-  const readBuildDeckLabel = async (
-    fullPath: string,
-  ): Promise<string | undefined> => {
-    try {
-      const text = await Deno.readTextFile(fullPath);
-      const lines = text.split(/\r?\n/);
-      if (lines[0] !== "+++") {
-        const cached = buildDeckLabelCache.get(fullPath);
-        if (cached?.frontmatterRaw === null) return cached.label;
-        buildDeckLabelCache.set(fullPath, {
-          frontmatterRaw: null,
-          label: undefined,
-        });
-        return undefined;
-      }
-      const endIndex = lines.indexOf("+++", 1);
-      if (endIndex === -1) {
-        const cached = buildDeckLabelCache.get(fullPath);
-        if (cached?.frontmatterRaw === null) return cached.label;
-        buildDeckLabelCache.set(fullPath, {
-          frontmatterRaw: null,
-          label: undefined,
-        });
-        return undefined;
-      }
-      const frontmatter = lines.slice(1, endIndex).join("\n");
-      const cached = buildDeckLabelCache.get(fullPath);
-      if (cached?.frontmatterRaw === frontmatter) {
-        return cached.label;
-      }
-      const parsed = parseToml(frontmatter) as Record<string, unknown>;
-      const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
-      const resolvedLabel = label.length > 0 ? label : undefined;
-      buildDeckLabelCache.set(fullPath, {
-        frontmatterRaw: frontmatter,
-        label: resolvedLabel,
-      });
-      return resolvedLabel;
-    } catch {
-      buildDeckLabelCache.set(fullPath, {
-        frontmatterRaw: null,
-        label: undefined,
-      });
-      return undefined;
-    }
-  };
-
-  const listBuildBotFiles = async (
-    root: string,
-  ): Promise<Array<BuildBotFileEntry>> => {
-    const entries: Array<BuildBotFileEntry> = [];
-    const shouldSkipRelativePath = (relativePath: string) => {
-      const segments = relativePath.split(/\\|\//g).filter(Boolean);
-      return segments.includes(".gambit") || segments.includes(".codex");
-    };
-    const walk = async (dir: string, relativePrefix: string) => {
-      for await (const entry of Deno.readDir(dir)) {
-        if (entry.isSymlink) continue;
-        const fullPath = path.join(dir, entry.name);
-        const relPath = relativePrefix
-          ? path.join(relativePrefix, entry.name)
-          : entry.name;
-        if (shouldSkipRelativePath(relPath)) continue;
-        if (entry.isDirectory) {
-          entries.push({ path: relPath, type: "dir" });
-          await walk(fullPath, relPath);
-        } else if (entry.isFile) {
-          const info = await Deno.stat(fullPath);
-          const label = shouldReadBuildDeckLabel(relPath)
-            ? await readBuildDeckLabel(fullPath)
-            : undefined;
-          entries.push({
-            path: relPath,
-            type: "file",
-            size: info.size,
-            modifiedAt: info.mtime ? info.mtime.toISOString() : undefined,
-            label,
-          });
-        }
-      }
-    };
-    await walk(root, "");
-    return entries;
-  };
-
   const resolveBuildBotPath = async (root: string, inputPath: string) => {
     if (!inputPath || typeof inputPath !== "string") {
       throw new Error("path is required");
@@ -1578,6 +1794,7 @@ export function startWebSocketSimulator(opts: {
     return { fullPath: candidate, relativePath, stat };
   };
 
+  const MAX_FILE_PREVIEW_BYTES = 250_000;
   const readPreviewText = (bytes: Uint8Array): string | null => {
     const limit = Math.min(bytes.length, 8192);
     for (let i = 0; i < limit; i += 1) {
@@ -1591,65 +1808,6 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
-  const isBuildStreamDebugEnabled = (() => {
-    const raw = Deno.env.get("GAMBIT_BUILD_STREAM_DEBUG")?.trim()
-      .toLowerCase();
-    return raw === "1" || raw === "true" || raw === "yes";
-  })();
-
-  const logBuildStreamDebug = (
-    event: string,
-    payload?: Record<string, unknown>,
-  ) => {
-    if (!isBuildStreamDebugEnabled) return;
-    const ts = new Date().toISOString();
-    if (payload && Object.keys(payload).length > 0) {
-      logger.info(
-        `[build-stream-debug] ${ts} ${event} ${JSON.stringify(payload)}`,
-      );
-      return;
-    }
-    logger.info(`[build-stream-debug] ${ts} ${event}`);
-  };
-
-  const broadcastBuildBot = (payload: unknown, workspaceId?: string) => {
-    const record = payload && typeof payload === "object"
-      ? payload as Record<string, unknown>
-      : null;
-    const type = record && typeof record.type === "string"
-      ? record.type
-      : "(unknown)";
-    const runId = record && typeof record.runId === "string"
-      ? record.runId
-      : record && record.run && typeof record.run === "object" &&
-          typeof (record.run as { id?: unknown }).id === "string"
-      ? (record.run as { id: string }).id
-      : undefined;
-    const traceType = type === "buildBotTrace" && record &&
-        record.event && typeof record.event === "object" &&
-        typeof (record.event as { type?: unknown }).type === "string"
-      ? (record.event as { type: string }).type
-      : undefined;
-    logBuildStreamDebug("broadcastBuildBot", {
-      type,
-      runId,
-      traceType,
-    });
-    const eventWorkspaceId = workspaceId ??
-      (typeof runId === "string" ? runId : undefined);
-    if (eventWorkspaceId) {
-      const state = readSessionState(eventWorkspaceId);
-      if (state) {
-        appendWorkspaceEnvelope(
-          state,
-          "build",
-          payload as Record<string, unknown>,
-        );
-      }
-    }
-    appendDurableStreamEvent(WORKSPACE_STREAM_ID, payload);
-    appendDurableStreamEvent(BUILD_STREAM_ID, payload);
-  };
   let deckSlug = deckSlugFromPath(resolvedDeckPath);
   let deckLabel: string | undefined = undefined;
   let rootStartMode: "assistant" | "user" | undefined = undefined;
@@ -1707,20 +1865,16 @@ export function startWebSocketSimulator(opts: {
     return { state: { ...state, meta }, dir };
   };
   const {
-    parseFiniteInteger,
     selectCanonicalScenarioRunSummary,
     appendWorkspaceEnvelope,
     appendSessionEvent,
-    appendFeedbackLog,
     appendGradingLog,
-    appendServerErrorLog,
     persistSessionState,
     readSessionStateStrict,
     readSessionState,
     readBuildState,
   } = createSessionStore({
     sessionsRoot,
-    ensureDir,
     randomId,
     logger,
     enrichStateWithSession,
@@ -1779,7 +1933,7 @@ export function startWebSocketSimulator(opts: {
     };
   };
 
-  const createWorkspaceSession = async (
+  const _createWorkspaceSession = async (
     opts?: { onboarding?: boolean },
   ): Promise<{
     id: string;
@@ -1824,6 +1978,37 @@ export function startWebSocketSimulator(opts: {
     });
     return record;
   };
+  const _ensureWorkspaceSession = (
+    workspaceId: string,
+  ): {
+    id: string;
+    rootDir: string;
+    rootDeckPath: string;
+    createdAt: string;
+  } => {
+    const existingRecord = resolveWorkspaceRecord(workspaceId);
+    const createdAt = existingRecord?.createdAt ?? new Date().toISOString();
+    const record = existingRecord ??
+      registerWorkspace({
+        id: workspaceId,
+        rootDir: path.dirname(resolvedDeckPath),
+        rootDeckPath: resolvedDeckPath,
+        createdAt,
+      });
+    const existingState = readSessionState(workspaceId);
+    if (!existingState) {
+      persistSessionState({
+        runId: workspaceId,
+        messages: [],
+        meta: buildWorkspaceMeta(record, {
+          sessionCreatedAt: createdAt,
+          workspaceCreatedAt: createdAt,
+          workspaceOnboarding: activeWorkspaceOnboarding,
+        }),
+      });
+    }
+    return record;
+  };
 
   if (
     opts.workspace?.id && opts.workspace.rootDir && opts.workspace.rootDeckPath
@@ -1849,18 +2034,57 @@ export function startWebSocketSimulator(opts: {
     }
   }
 
-  const activateWorkspaceDeck = async (workspaceId?: string | null) => {
+  async function activateWorkspaceDeck(
+    workspaceId?: string | null,
+    options?: {
+      forceReload?: boolean;
+      source?: string;
+      reloadAttemptId?: string;
+    },
+  ) {
     if (!workspaceId) return;
     const record = resolveWorkspaceRecord(workspaceId);
     if (!record) return;
+    const source = options?.source ?? "unspecified";
+    const reloadAttemptId = options?.reloadAttemptId ?? null;
     const nextPath = resolveDeckPath(record.rootDeckPath);
-    if (nextPath === resolvedDeckPath) return;
-    resolvedDeckPath = nextPath;
-    buildBotRootCache.delete("default");
+    const shouldSwitch = nextPath !== resolvedDeckPath;
+    logWorkspaceRefreshDebug("deck.activate.begin", {
+      workspaceId,
+      source,
+      reloadAttemptId,
+      forceReload: Boolean(options?.forceReload),
+      nextPath,
+      resolvedDeckPath,
+      ...summarizeScenarioDeckRegistry(),
+    });
+    if (shouldSwitch) {
+      resolvedDeckPath = nextPath;
+      buildBotRootCache.delete("default");
+    } else if (!options?.forceReload) {
+      logWorkspaceRefreshDebug("deck.activate.skip", {
+        workspaceId,
+        source,
+        reloadAttemptId,
+        reason: "already-active-and-not-forced",
+        resolvedDeckPath,
+        ...summarizeScenarioDeckRegistry(),
+      });
+      return;
+    }
     reloadPrimaryDeck();
-    await deckLoadPromise.catch(() => null);
-  };
-  const deleteSessionState = (sessionId: string): boolean => {
+    const loadedDeck = await deckLoadPromise.catch(() => null);
+    logWorkspaceRefreshDebug("deck.activate.done", {
+      workspaceId,
+      source,
+      reloadAttemptId,
+      loaded: Boolean(loadedDeck),
+      loadedDeckPath: loadedDeck?.path ?? null,
+      resolvedDeckPath,
+      ...summarizeScenarioDeckRegistry(),
+    });
+  }
+  const _deleteSessionState = (sessionId: string): boolean => {
     if (
       !sessionId ||
       sessionId === "." ||
@@ -1885,7 +2109,7 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
-  const cloneTraces = (traces: Array<TraceEvent>): Array<TraceEvent> => {
+  const _cloneTraces = (traces: Array<TraceEvent>): Array<TraceEvent> => {
     try {
       return structuredClone(traces);
     } catch {
@@ -1895,14 +2119,6 @@ export function startWebSocketSimulator(opts: {
         return [...traces];
       }
     }
-  };
-
-  let simulatorRunning = false;
-  let simulatorCurrentRunId: string | undefined;
-  let simulatorSavedState: SavedState | undefined;
-  let simulatorCapturedTraces: Array<TraceEvent> = [];
-  const emitSimulator = (payload: OutgoingMessage) => {
-    appendDurableStreamEvent(SIMULATOR_STREAM_ID, payload);
   };
 
   const listSessions = (): Array<SessionMeta> => {
@@ -1928,7 +2144,7 @@ export function startWebSocketSimulator(opts: {
   const getWorkspaceIdFromQuery = (url: URL): string | undefined =>
     resolveWorkspaceIdFromSearchParams(url.searchParams);
 
-  const getWorkspaceIdFromBody = (
+  const _getWorkspaceIdFromBody = (
     body: Record<string, unknown> | null | undefined,
   ): string | undefined => {
     if (!body || typeof body !== "object") return undefined;
@@ -1949,7 +2165,7 @@ export function startWebSocketSimulator(opts: {
     return undefined;
   };
 
-  const buildWorkspaceReadModel = async (
+  const _buildWorkspaceReadModel = async (
     workspaceId: string,
     opts?: {
       requestedTestDeckPath?: string | null;
@@ -2243,7 +2459,7 @@ export function startWebSocketSimulator(opts: {
     const byPath = testDeckByPath.get(path.resolve(identifier));
     return byPath;
   };
-  const resolveGraderDeck = (
+  const _resolveGraderDeck = (
     identifier: string,
   ): AvailableGraderDeck | undefined => {
     if (!identifier) return undefined;
@@ -2353,7 +2569,7 @@ export function startWebSocketSimulator(opts: {
     };
   };
 
-  const buildScenarioConversationArtifacts = (
+  const _buildScenarioConversationArtifacts = (
     state: SavedState,
   ): {
     messages: Array<ModelMessage>;
@@ -2415,8 +2631,14 @@ export function startWebSocketSimulator(opts: {
     return { messages: conversation, assistantTurns };
   };
 
-  const buildScenarioConversationArtifactsFromRun = (
-    run: TestBotRunStatus,
+  const _buildScenarioConversationArtifactsFromRun = (
+    run: {
+      messages: Array<{
+        role: string;
+        content: string;
+        messageRefId?: string;
+      }>;
+    },
   ): {
     messages: Array<ModelMessage>;
     assistantTurns: Array<{
@@ -2451,6 +2673,367 @@ export function startWebSocketSimulator(opts: {
       }
     }
     return { messages: conversation, assistantTurns };
+  };
+
+  const gradeSchemaHasField = (
+    schema: ZodTypeAny | undefined,
+    field: string,
+  ): boolean => {
+    if (!schema) return false;
+    let current: ZodTypeAny = schema;
+    while (current && typeof current === "object") {
+      const def =
+        (current as { _def?: { typeName?: string; [k: string]: unknown } })
+          ._def;
+      const typeName = def?.typeName;
+      if (
+        typeName === "ZodOptional" || typeName === "ZodNullable" ||
+        typeName === "ZodDefault"
+      ) {
+        current = (def as { innerType: ZodTypeAny }).innerType;
+        continue;
+      }
+      if (typeName === "ZodEffects") {
+        current = (def as { schema: ZodTypeAny }).schema;
+        continue;
+      }
+      if (typeName === "ZodCatch") {
+        current = (def as { innerType: ZodTypeAny }).innerType;
+        continue;
+      }
+      if (typeName === "ZodBranded") {
+        current = (def as { type: ZodTypeAny }).type;
+        continue;
+      }
+      break;
+    }
+    const def = (current as { _def?: { typeName?: string; shape?: unknown } })
+      ._def;
+    if (def?.typeName !== "ZodObject") return false;
+    const shape = typeof def.shape === "function" ? def.shape() : def.shape;
+    return Boolean(shape && typeof shape === "object" && field in shape);
+  };
+
+  type WorkspaceVerifyBatchRequestRecordForGraphql = {
+    id: string;
+    status: "queued" | "running" | "completed" | "error";
+    runId?: string;
+    error?: string;
+  };
+
+  type WorkspaceVerifyBatchRecordForGraphql = {
+    id: string;
+    workspaceId: string;
+    graderId: string;
+    scenarioRunId?: string;
+    status: "idle" | "running" | "completed" | "error";
+    startedAt?: string;
+    finishedAt?: string;
+    requested: number;
+    active: number;
+    completed: number;
+    failed: number;
+    requests: Array<WorkspaceVerifyBatchRequestRecordForGraphql>;
+  };
+
+  const normalizeVerifyBatchStatus = (
+    value: unknown,
+  ): WorkspaceVerifyBatchRecordForGraphql["status"] => {
+    if (value === "running") return "running";
+    if (value === "completed") return "completed";
+    if (value === "error") return "error";
+    return "idle";
+  };
+
+  const normalizeVerifyBatchRequestStatus = (
+    value: unknown,
+  ): WorkspaceVerifyBatchRequestRecordForGraphql["status"] => {
+    if (value === "running") return "running";
+    if (value === "completed") return "completed";
+    if (value === "error") return "error";
+    return "queued";
+  };
+
+  const readWorkspaceVerifyBatchesFromState = (
+    state: SavedState,
+  ): Array<WorkspaceVerifyBatchRecordForGraphql> => {
+    const meta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    if (!Array.isArray(meta.verifyBatches)) return [];
+    return meta.verifyBatches.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const batch = entry as Record<string, unknown>;
+      if (typeof batch.graderId !== "string" || batch.graderId.trim() === "") {
+        return [];
+      }
+      const requests = Array.isArray(batch.requests)
+        ? batch.requests.flatMap((request, requestIndex) => {
+          if (!request || typeof request !== "object") return [];
+          const requestRecord = request as Record<string, unknown>;
+          const requestId = typeof requestRecord.id === "string" &&
+              requestRecord.id.trim().length > 0
+            ? requestRecord.id
+            : `${String(batch.id ?? randomId("vbatch"))}:${requestIndex + 1}`;
+          const runId = typeof requestRecord.runId === "string" &&
+              requestRecord.runId.trim().length > 0
+            ? requestRecord.runId
+            : undefined;
+          const error = typeof requestRecord.error === "string" &&
+              requestRecord.error.trim().length > 0
+            ? requestRecord.error
+            : undefined;
+          return [{
+            id: requestId,
+            status: normalizeVerifyBatchRequestStatus(requestRecord.status),
+            runId,
+            error,
+          }];
+        })
+        : [];
+      const active = requests.filter((request) => request.status === "running")
+        .length;
+      const completed = requests.filter((request) =>
+        request.status === "completed"
+      ).length;
+      const failed = requests.filter((request) => request.status === "error")
+        .length;
+      const requested = Math.max(
+        requests.length,
+        typeof batch.requested === "number" && Number.isFinite(batch.requested)
+          ? Math.max(0, Math.round(batch.requested))
+          : 0,
+      );
+      return [{
+        id: typeof batch.id === "string" && batch.id.trim().length > 0
+          ? batch.id
+          : randomId("vbatch"),
+        workspaceId:
+          typeof batch.workspaceId === "string" && batch.workspaceId.trim()
+            ? batch.workspaceId
+            : "",
+        graderId: batch.graderId,
+        scenarioRunId: typeof batch.scenarioRunId === "string" &&
+            batch.scenarioRunId.trim().length > 0
+          ? batch.scenarioRunId
+          : undefined,
+        status: normalizeVerifyBatchStatus(batch.status),
+        startedAt:
+          typeof batch.startedAt === "string" && batch.startedAt.trim().length >
+              0
+            ? batch.startedAt
+            : undefined,
+        finishedAt: typeof batch.finishedAt === "string" &&
+            batch.finishedAt.trim().length > 0
+          ? batch.finishedAt
+          : undefined,
+        requested,
+        active,
+        completed,
+        failed,
+        requests,
+      }];
+    });
+  };
+
+  const writeWorkspaceVerifyBatchesToState = (
+    state: SavedState,
+    batches: Array<WorkspaceVerifyBatchRecordForGraphql>,
+  ): SavedState => {
+    const currentMeta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    return {
+      ...state,
+      meta: {
+        ...currentMeta,
+        verifyBatches: batches,
+      },
+    };
+  };
+
+  const upsertWorkspaceVerifyBatchInState = (
+    state: SavedState,
+    nextBatch: WorkspaceVerifyBatchRecordForGraphql,
+  ): SavedState => {
+    const existing = readWorkspaceVerifyBatchesFromState(state);
+    const nextBatches = [...existing];
+    const existingIndex = nextBatches.findIndex((entry) =>
+      entry.id === nextBatch.id
+    );
+    if (existingIndex >= 0) {
+      nextBatches[existingIndex] = nextBatch;
+    } else {
+      nextBatches.unshift(nextBatch);
+    }
+    return writeWorkspaceVerifyBatchesToState(
+      state,
+      nextBatches.slice(0, 50),
+    );
+  };
+
+  const readGradingRunsFromState = (
+    state: SavedState,
+  ): Array<GradingRunRecord> => {
+    const meta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    const fromGradingRuns = Array.isArray(meta.gradingRuns)
+      ? meta.gradingRuns
+      : null;
+    const fromCalibrationRuns = Array.isArray(meta.calibrationRuns)
+      ? meta.calibrationRuns
+      : null;
+    const raw = fromGradingRuns ?? fromCalibrationRuns ?? [];
+    return raw.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const run = entry as GradingRunRecord;
+      const id = typeof run.id === "string" && run.id.trim().length > 0
+        ? run.id
+        : randomId("grade");
+      if (
+        typeof run.graderId !== "string" || typeof run.graderPath !== "string"
+      ) {
+        return [];
+      }
+      return [{
+        ...run,
+        id,
+      }];
+    });
+  };
+
+  const upsertGradingRunInState = (
+    state: SavedState,
+    nextRun: GradingRunRecord,
+  ): SavedState => {
+    const runs = readGradingRunsFromState(state);
+    const index = runs.findIndex((entry) => entry.id === nextRun.id);
+    const nextRuns = [...runs];
+    if (index >= 0) {
+      nextRuns[index] = nextRun;
+    } else {
+      nextRuns.unshift(nextRun);
+    }
+    const currentMeta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    const nextMeta: Record<string, unknown> = {
+      ...currentMeta,
+      gradingRuns: nextRuns,
+    };
+    delete nextMeta.calibrationRuns;
+    return { ...state, meta: nextMeta };
+  };
+
+  const readGradingFlagsFromState = (
+    state: SavedState,
+  ): Array<GradingFlag> => {
+    const meta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    if (!Array.isArray(meta.gradingFlags)) return [];
+    return meta.gradingFlags.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const flag = entry as GradingFlag;
+      if (typeof flag.refId !== "string" || flag.refId.trim().length === 0) {
+        return [];
+      }
+      return [{
+        id: typeof flag.id === "string" && flag.id.trim().length > 0
+          ? flag.id
+          : randomId("gflag"),
+        refId: flag.refId.trim(),
+        runId: typeof flag.runId === "string" ? flag.runId : undefined,
+        turnIndex: typeof flag.turnIndex === "number"
+          ? flag.turnIndex
+          : undefined,
+        reason: typeof flag.reason === "string" ? flag.reason : undefined,
+        createdAt: typeof flag.createdAt === "string" && flag.createdAt
+          ? flag.createdAt
+          : new Date().toISOString(),
+      }];
+    });
+  };
+
+  const writeGradingFlagsToState = (
+    state: SavedState,
+    flags: Array<GradingFlag>,
+  ): SavedState => {
+    const currentMeta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    return {
+      ...state,
+      meta: {
+        ...currentMeta,
+        gradingFlags: flags,
+      },
+    };
+  };
+
+  const extractGradeScoreAndReason = (value: unknown): {
+    score?: number;
+    reason?: string;
+  } => {
+    if (!value || typeof value !== "object") return {};
+    const record = value as Record<string, unknown>;
+    const payload = record.payload && typeof record.payload === "object"
+      ? record.payload as Record<string, unknown>
+      : record;
+    const score = typeof payload.score === "number" ? payload.score : undefined;
+    const reason = typeof payload.reason === "string"
+      ? payload.reason
+      : undefined;
+    return { score, reason };
+  };
+
+  const extractGradeTurnContext = (value: unknown): {
+    priorUser?: string;
+    gradedAssistant?: string;
+  } => {
+    if (!value || typeof value !== "object") return {};
+    const input = value as Record<string, unknown>;
+    const messageToGrade = input.messageToGrade;
+    const gradedAssistant = messageToGrade && typeof messageToGrade === "object"
+      ? typeof (messageToGrade as { content?: unknown }).content === "string"
+        ? (messageToGrade as { content: string }).content
+        : undefined
+      : undefined;
+    const session = input.session;
+    const messages = session && typeof session === "object" &&
+        Array.isArray((session as { messages?: unknown }).messages)
+      ? (session as { messages: Array<{ role?: string; content?: unknown }> })
+        .messages
+      : [];
+    let priorUser: string | undefined;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message?.role !== "user") continue;
+      if (typeof message.content === "string" && message.content.trim()) {
+        priorUser = message.content;
+        break;
+      }
+    }
+    return { priorUser, gradedAssistant };
+  };
+
+  const deriveScenarioRunIdFromGradingRun = (
+    run: GradingRunRecord,
+  ): string | undefined => {
+    if (typeof run.scenarioRunId === "string" && run.scenarioRunId.trim()) {
+      return run.scenarioRunId.trim();
+    }
+    if (!run.input || typeof run.input !== "object") return undefined;
+    const input = run.input as Record<string, unknown>;
+    const session = input.session;
+    if (!session || typeof session !== "object") return undefined;
+    const meta = (session as { meta?: unknown }).meta;
+    if (!meta || typeof meta !== "object") return undefined;
+    const scenarioRunId = (meta as { scenarioRunId?: unknown }).scenarioRunId;
+    return typeof scenarioRunId === "string" && scenarioRunId.trim().length > 0
+      ? scenarioRunId
+      : undefined;
   };
 
   const normalizePersistedTestRunStatus = (
@@ -2533,6 +3116,122 @@ export function startWebSocketSimulator(opts: {
     }
   };
 
+  const listPersistedTestRunStatuses = (
+    sessionState: SavedState,
+    workspaceId: string,
+  ): Array<TestBotRunStatus> => {
+    const eventsPath = typeof sessionState.meta?.sessionEventsPath === "string"
+      ? sessionState.meta.sessionEventsPath
+      : undefined;
+    if (!eventsPath) return [];
+    try {
+      const text = Deno.readTextFileSync(eventsPath);
+      const latestByRunId = new Map<string, TestBotRunStatus>();
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+        const payload = extractPersistedWorkspacePayload(parsed);
+        if (
+          payload.type !== "testBotStatus" &&
+          payload.type !== "gambit.test.status"
+        ) continue;
+        const normalized = normalizePersistedTestRunStatus(
+          payload.run,
+          workspaceId,
+        );
+        if (!normalized || !normalized.id) continue;
+        latestByRunId.set(normalized.id, normalized);
+      }
+      return [...latestByRunId.values()];
+    } catch {
+      return [];
+    }
+  };
+
+  const listScenarioRunStatusesFromStateMeta = (
+    sessionState: SavedState,
+    workspaceId: string,
+  ): Array<TestBotRunStatus> => {
+    const meta = sessionState.meta && typeof sessionState.meta === "object"
+      ? sessionState.meta as Record<string, unknown>
+      : null;
+    if (!meta) return [];
+
+    const runsById = new Map<string, TestBotRunStatus>();
+    const upsertPlaceholder = (runId: string, updatedAt?: string) => {
+      if (!runId || runsById.has(runId)) return;
+      runsById.set(runId, {
+        id: runId,
+        status: "completed",
+        workspaceId,
+        sessionId: workspaceId,
+        startedAt: updatedAt,
+        finishedAt: updatedAt,
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      });
+    };
+
+    const primaryRunId = typeof meta.scenarioRunId === "string" &&
+        meta.scenarioRunId.trim().length > 0
+      ? meta.scenarioRunId.trim()
+      : typeof meta.testBotRunId === "string" &&
+          meta.testBotRunId.trim().length > 0
+      ? meta.testBotRunId.trim()
+      : null;
+    if (primaryRunId) {
+      const primary: TestBotRunStatus = {
+        id: primaryRunId,
+        status: "idle",
+        workspaceId,
+        sessionId: workspaceId,
+        startedAt: typeof meta.startedAt === "string"
+          ? meta.startedAt
+          : undefined,
+        finishedAt: typeof meta.finishedAt === "string"
+          ? meta.finishedAt
+          : undefined,
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      };
+      syncTestBotRunFromState(primary, sessionState);
+      if (primary.messages.length > 0 && primary.status === "idle") {
+        primary.status = "completed";
+      }
+      runsById.set(primary.id, primary);
+    }
+
+    const summaryValues = [
+      meta.scenarioRunSummary,
+      ...(Array.isArray(meta.scenarioRunSummaries)
+        ? meta.scenarioRunSummaries
+        : []),
+    ];
+    for (const value of summaryValues) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const summary = value as Record<string, unknown>;
+      const summaryRunId = typeof summary.scenarioRunId === "string" &&
+          summary.scenarioRunId.trim().length > 0
+        ? summary.scenarioRunId.trim()
+        : null;
+      if (!summaryRunId) continue;
+      const updatedAt = typeof summary.updatedAt === "string"
+        ? summary.updatedAt
+        : undefined;
+      upsertPlaceholder(summaryRunId, updatedAt);
+    }
+
+    return [...runsById.values()];
+  };
+
   const resolveMessageByRef = (
     state: SavedState,
     messageRefId: string,
@@ -2547,7 +3246,7 @@ export function startWebSocketSimulator(opts: {
     };
   };
 
-  const isFeedbackEligibleMessageRef = (
+  const _isFeedbackEligibleMessageRef = (
     state: SavedState,
     messageRefId: string,
   ): boolean => {
@@ -2558,7 +3257,7 @@ export function startWebSocketSimulator(opts: {
     return summarizeRespondCall(message) !== null;
   };
 
-  const isFeedbackEligiblePersistedTestRunMessageRef = (
+  const _isFeedbackEligiblePersistedTestRunMessageRef = (
     state: SavedState,
     runId: string,
     messageRefId: string,
@@ -2700,16 +3399,6 @@ export function startWebSocketSimulator(opts: {
     run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
   };
 
-  const syncBuildBotRunFromState = (
-    run: BuildBotRunStatus,
-    state: SavedState,
-  ) => {
-    const snapshot = buildTestBotSnapshot(state);
-    run.messages = snapshot.messages;
-    run.toolInserts = snapshot.toolInserts;
-    run.traces = Array.isArray(state.traces) ? [...state.traces] : undefined;
-  };
-
   const buildRunFromProjection = (workspaceId: string): BuildBotRunStatus => {
     const projection = readBuildState(workspaceId);
     const run = projection?.run;
@@ -2734,7 +3423,25 @@ export function startWebSocketSimulator(opts: {
     };
   };
 
-  const startTestBotRun = (runOpts: {
+  const readWorkspaceBuildRunForGraphql = (
+    workspaceId: string,
+  ): BuildBotRunStatus => {
+    const active = buildBotRuns.get(workspaceId)?.run;
+    if (active) {
+      return {
+        ...active,
+        messages: Array.isArray(active.messages) ? [...active.messages] : [],
+        traces: Array.isArray(active.traces) ? [...active.traces] : [],
+        toolInserts: Array.isArray(active.toolInserts)
+          ? [...active.toolInserts]
+          : [],
+      };
+    }
+    return buildRunFromProjection(workspaceId);
+  };
+
+  const _startTestBotRun = (runOpts: {
+    runId?: string;
     maxTurnsOverride?: number;
     deckInput?: unknown;
     botInput?: unknown;
@@ -2778,7 +3485,10 @@ export function startWebSocketSimulator(opts: {
     );
     const selectedScenarioDeckId = runOpts.botDeckId ?? testBotName;
     const selectedScenarioDeckLabel = runOpts.botDeckLabel ?? testBotName;
-    const runId = randomId("testbot");
+    const runId = typeof runOpts.runId === "string" &&
+        runOpts.runId.trim().length > 0
+      ? runOpts.runId.trim()
+      : randomId("testbot");
     const startedAt = new Date().toISOString();
     const controller = new AbortController();
     const entry: TestBotRunEntry = {
@@ -2791,11 +3501,16 @@ export function startWebSocketSimulator(opts: {
         traces: [],
         toolInserts: [],
       },
+      state: null,
       promise: null,
       abort: controller,
     };
     testBotRuns.set(runId, entry);
     const run = entry.run;
+    if (runOpts.workspaceId) {
+      run.workspaceId = runOpts.workspaceId;
+      run.sessionId = runOpts.workspaceId;
+    }
     const emitTestBot = (payload: unknown) =>
       broadcastTestBot(payload, run.workspaceId ?? runOpts.workspaceId);
     if (runOpts.initFill) run.initFill = runOpts.initFill;
@@ -2987,6 +3702,7 @@ export function startWebSocketSimulator(opts: {
                 traces: capturedTraces,
               });
               savedState = enriched;
+              entry.state = enriched;
               flushPendingTraceEvents(enriched);
               appendFromState(enriched);
             },
@@ -3003,6 +3719,7 @@ export function startWebSocketSimulator(opts: {
             onStreamText: (chunk) =>
               emitTestBot({
                 type: "testBotStream",
+                workspaceId: run.workspaceId ?? runOpts.workspaceId,
                 runId,
                 role: "user",
                 chunk,
@@ -3014,6 +3731,7 @@ export function startWebSocketSimulator(opts: {
           });
           emitTestBot({
             type: "testBotStreamEnd",
+            workspaceId: run.workspaceId ?? runOpts.workspaceId,
             runId,
             role: "user",
             turn,
@@ -3066,12 +3784,14 @@ export function startWebSocketSimulator(opts: {
                 traces: capturedTraces,
               });
               savedState = enriched;
+              entry.state = enriched;
               flushPendingTraceEvents(enriched);
               appendFromState(enriched);
             },
             onStreamText: (chunk) =>
               emitTestBot({
                 type: "testBotStream",
+                workspaceId: run.workspaceId ?? runOpts.workspaceId,
                 runId,
                 role: "assistant",
                 chunk,
@@ -3085,6 +3805,7 @@ export function startWebSocketSimulator(opts: {
           }
           emitTestBot({
             type: "testBotStreamEnd",
+            workspaceId: run.workspaceId ?? runOpts.workspaceId,
             runId,
             role: "assistant",
             turn,
@@ -3100,6 +3821,14 @@ export function startWebSocketSimulator(opts: {
         } else {
           run.status = "error";
           run.error = err instanceof Error ? err.message : String(err);
+          const stack = err instanceof Error ? err.stack : undefined;
+          logger.error(
+            `[sim] scenario run failed runId=${runId} workspaceId=${
+              run.workspaceId ?? runOpts.workspaceId ?? "unknown"
+            } rootDeck=${resolvedDeckPath} scenarioDeck=${botDeckPath} error=${run.error}${
+              stack ? `\n${stack}` : ""
+            }`,
+          );
         }
         emitTestBot({ type: "testBotStatus", run });
       } finally {
@@ -3112,6 +3841,9 @@ export function startWebSocketSimulator(opts: {
         run.traces = Array.isArray(savedState?.traces)
           ? [...(savedState?.traces ?? [])]
           : undefined;
+        if (savedState) {
+          entry.state = savedState;
+        }
         run.finishedAt = new Date().toISOString();
         entry.abort = null;
         entry.promise = null;
@@ -3124,7 +3856,7 @@ export function startWebSocketSimulator(opts: {
     return run;
   };
 
-  const persistFailedInitFill = (args: {
+  const _persistFailedInitFill = (args: {
     error: string;
     initFill: TestBotInitFill | undefined;
     botDeckPath: string;
@@ -3214,6 +3946,7 @@ export function startWebSocketSimulator(opts: {
       .then((deck) => {
         resolvedDeckPath = deck.path;
         buildBotRootCache.clear();
+        deckGraphqlConfigCache.clear();
         deckSlug = deckSlugFromPath(resolvedDeckPath);
         rootStartMode = deck.startMode === "assistant" ||
             deck.startMode === "user"
@@ -3263,15 +3996,24 @@ export function startWebSocketSimulator(opts: {
           },
         );
         updateGraderDeckRegistry(availableGraderDecks);
+        logWorkspaceRefreshDebug("deck.reload.success", {
+          resolvedDeckPath,
+          ...summarizeScenarioDeckRegistry(),
+          graderDeckCount: availableGraderDecks.length,
+        });
         return deck;
       })
       .catch((err) => {
         const message = err instanceof Error ? err.message : String(err);
+        logWorkspaceRefreshDebug("deck.reload.failure", {
+          resolvedDeckPath,
+          error: message,
+          missingPath: extractMissingReadfilePath(message),
+          ...summarizeScenarioDeckRegistry(),
+          graderDeckCount: availableGraderDecks.length,
+        });
         logger.warn(`[sim] failed to load deck: ${message}`);
-        availableTestDecks = [];
-        updateTestDeckRegistry(availableTestDecks);
-        availableGraderDecks = [];
-        updateGraderDeckRegistry(availableGraderDecks);
+        // Preserve last-known-good registries on reload failure.
         return null;
       });
 
@@ -3305,6 +4047,15 @@ export function startWebSocketSimulator(opts: {
   const reloadPrimaryDeck = () => {
     deckLoadPromise = createDeckLoadPromise();
     schemaPromise = createSchemaPromise(deckLoadPromise);
+  };
+  const readDeckGraphqlConfigCached = async (
+    deckPath: string,
+  ): Promise<Awaited<ReturnType<typeof describeDeckGraphqlConfigFromPath>>> => {
+    const cached = deckGraphqlConfigCache.get(deckPath);
+    if (cached) return cached;
+    const loaded = await describeDeckGraphqlConfigFromPath(deckPath);
+    deckGraphqlConfigCache.set(deckPath, loaded);
+    return loaded;
   };
 
   const wantsSourceMap = Boolean(opts.sourceMap);
@@ -3367,12 +4118,2892 @@ export function startWebSocketSimulator(opts: {
     }
   }
 
+  const ensureWorkspaceStateForBuild = (
+    workspaceId: string,
+  ): SavedState => {
+    const state = readSessionStateStrict(workspaceId, { withTraces: true });
+    if (!state) {
+      throw new Error("Workspace not found");
+    }
+    return state;
+  };
+
+  const broadcastBuild = (
+    workspaceId: string,
+    payload: Record<string, unknown>,
+  ) => {
+    const state = readSessionState(workspaceId);
+    if (state) {
+      appendWorkspaceEnvelope(state, "build", payload);
+    }
+    appendDurableStreamEvent(WORKSPACE_STREAM_ID, payload);
+  };
+
+  const startWorkspaceBuildRun = (args: {
+    workspaceId: string;
+    message: string;
+  }): BuildBotRunStatus => {
+    const workspaceId = args.workspaceId;
+    const active = buildBotRuns.get(workspaceId);
+    if (active?.run.status === "running") {
+      throw new Error("Build run already in progress for this workspace.");
+    }
+
+    const state = ensureWorkspaceStateForBuild(workspaceId);
+    const projection = readBuildState(workspaceId);
+    const seedRun = projection?.run;
+    const runId = seedRun?.id && seedRun.id.trim().length > 0
+      ? seedRun.id
+      : randomId("build");
+    const trimmedMessage = args.message.trim();
+    const run: BuildBotRunStatus = {
+      id: runId,
+      status: "running",
+      startedAt: new Date().toISOString(),
+      error: undefined,
+      finishedAt: undefined,
+      messages: Array.isArray(seedRun?.messages) ? [...seedRun!.messages] : [],
+      traces: Array.isArray(seedRun?.traces) ? [...seedRun!.traces] : [],
+      toolInserts: Array.isArray(seedRun?.toolInserts)
+        ? [...seedRun!.toolInserts]
+        : [],
+    };
+    if (trimmedMessage.length > 0) {
+      run.messages = [
+        ...run.messages,
+        { role: "user", content: trimmedMessage, messageSource: "manual" },
+      ];
+    }
+
+    const controller = new AbortController();
+    const entry: BuildBotRunEntry = {
+      run,
+      state,
+      promise: null,
+      abort: controller,
+    };
+    buildBotRuns.set(workspaceId, entry);
+
+    const onStateUpdate = (next: SavedState) => {
+      const enriched = persistSessionState({
+        ...next,
+        meta: {
+          ...(next.meta ?? {}),
+          workspaceId,
+        },
+      });
+      entry.state = enriched;
+      const snapshot = buildTestBotSnapshot(enriched);
+      run.messages = snapshot.messages;
+      run.toolInserts = snapshot.toolInserts;
+      const nextTraces = Array.isArray(enriched.traces)
+        ? [...enriched.traces]
+        : [];
+      if (nextTraces.length > 0) {
+        run.traces = nextTraces;
+      } else if (!Array.isArray(run.traces)) {
+        run.traces = [];
+      }
+      broadcastBuild(workspaceId, {
+        type: "buildBotStatus",
+        workspaceId,
+        run,
+      });
+    };
+
+    const tracer = (trace: TraceEvent) => {
+      const event = trace.ts ? trace : { ...trace, ts: Date.now() };
+      const currentTraces = Array.isArray(run.traces) ? run.traces : [];
+      run.traces = [...currentTraces, event];
+      broadcastBuild(workspaceId, {
+        type: "buildBotTrace",
+        workspaceId,
+        runId,
+        event,
+      });
+    };
+
+    const turn = run.messages.filter((message) => message.role === "user")
+      .length;
+    let hasStartedAssistantStreamMessage = false;
+    entry.promise = (async () => {
+      try {
+        broadcastBuild(workspaceId, {
+          type: "buildBotStatus",
+          workspaceId,
+          run,
+        });
+        await runDeck({
+          path: buildAssistantDeckPath,
+          input: initialContext,
+          inputProvided: hasInitialContext,
+          modelProvider: opts.modelProvider,
+          defaultModel: opts.model,
+          modelOverride: opts.modelForce,
+          trace: tracer,
+          stream: true,
+          state: entry.state ?? undefined,
+          allowRootStringInput: true,
+          initialUserMessage: trimmedMessage.length > 0 ? trimmedMessage : "",
+          responsesMode: opts.responsesMode,
+          workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+            workerSandbox: opts.workerSandbox,
+            signal: controller.signal,
+          }),
+          signal: controller.signal,
+          onStateUpdate,
+          onStreamText: (chunk) => {
+            if (typeof chunk === "string" && chunk.length > 0) {
+              if (!hasStartedAssistantStreamMessage) {
+                run.messages = [
+                  ...run.messages,
+                  {
+                    role: "assistant",
+                    content: chunk,
+                  },
+                ];
+                hasStartedAssistantStreamMessage = true;
+              } else {
+                const last = run.messages[run.messages.length - 1];
+                if (last?.role === "assistant") {
+                  last.content += chunk;
+                } else {
+                  run.messages = [
+                    ...run.messages,
+                    {
+                      role: "assistant",
+                      content: chunk,
+                    },
+                  ];
+                }
+              }
+            }
+            broadcastBuild(workspaceId, {
+              type: "buildBotStream",
+              workspaceId,
+              runId,
+              role: "assistant",
+              chunk,
+              turn,
+              ts: Date.now(),
+            });
+          },
+        });
+        broadcastBuild(workspaceId, {
+          type: "buildBotStreamEnd",
+          workspaceId,
+          runId,
+          role: "assistant",
+          turn,
+          ts: Date.now(),
+        });
+        run.status = controller.signal.aborted ? "canceled" : "completed";
+        run.error = undefined;
+      } catch (err) {
+        if (controller.signal.aborted || isRunCanceledError(err)) {
+          run.status = "canceled";
+          run.error = undefined;
+        } else {
+          run.status = "error";
+          run.error = err instanceof Error ? err.message : String(err);
+        }
+      } finally {
+        run.finishedAt = new Date().toISOString();
+        entry.abort = null;
+        entry.promise = null;
+        broadcastBuild(workspaceId, {
+          type: "buildBotStatus",
+          workspaceId,
+          run,
+        });
+      }
+    })();
+
+    return run;
+  };
+
+  const stopWorkspaceBuildRun = async (args: {
+    workspaceId: string;
+    runId: string;
+  }): Promise<BuildBotRunStatus> => {
+    const active = buildBotRuns.get(args.workspaceId);
+    if (!active || active.run.id !== args.runId) {
+      return buildRunFromProjection(args.workspaceId);
+    }
+    active.abort?.abort();
+    try {
+      await active.promise;
+    } catch {
+      // Abort path can reject internally; projection is still authoritative.
+    }
+    return buildRunFromProjection(args.workspaceId);
+  };
+
+  const resetWorkspaceBuild = async (
+    workspaceId: string,
+  ): Promise<BuildBotRunStatus> => {
+    const active = buildBotRuns.get(workspaceId);
+    active?.abort?.abort();
+    try {
+      await active?.promise;
+    } catch {
+      // Ignore aborted in-flight run.
+    }
+
+    const state = ensureWorkspaceStateForBuild(workspaceId);
+    const reset = persistSessionState({
+      ...state,
+      messages: [],
+      messageRefs: [],
+      traces: [],
+      items: [],
+    });
+    const run: BuildBotRunStatus = {
+      id: randomId("build"),
+      status: "idle",
+      messages: [],
+      traces: [],
+      toolInserts: [],
+    };
+    appendWorkspaceEnvelope(reset, "build", {
+      type: "buildBotStatus",
+      workspaceId,
+      run,
+    });
+    appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
+      type: "buildBotStatus",
+      workspaceId,
+      run,
+    });
+    return buildRunFromProjection(workspaceId);
+  };
+
+  const startWorkspaceScenarioRunForGraphql = async (args: {
+    workspaceId: string;
+    runId?: string;
+    scenarioDeckId?: string | null;
+    scenarioInput?: unknown;
+    assistantInit?: unknown;
+  }): Promise<{
+    id: string;
+    workspaceId: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    messages: Array<{
+      role: string;
+      content: string;
+      messageRefId?: string;
+    }>;
+    traces?: Array<Record<string, unknown>>;
+    toolInserts?: Array<{
+      actionCallId?: string;
+      parentActionCallId?: string;
+      name?: string;
+      index: number;
+    }>;
+  }> => {
+    await activateWorkspaceDeck(args.workspaceId, { forceReload: true });
+    const workspaceRecord = workspaceById.get(args.workspaceId);
+    if (!workspaceRecord) {
+      throw new Error("Workspace not found");
+    }
+    const requestedDeckId = typeof args.scenarioDeckId === "string" &&
+        args.scenarioDeckId.trim().length > 0
+      ? args.scenarioDeckId.trim()
+      : null;
+    const fallbackScenarioDeck: AvailableTestDeck = {
+      id: "root",
+      label: toDeckLabel(resolvedDeckPath),
+      description: "Root simulator deck",
+      path: resolvedDeckPath,
+    };
+    const scenarioDeck = requestedDeckId
+      ? resolveTestDeck(requestedDeckId) ??
+        (requestedDeckId === resolvedDeckPath ? fallbackScenarioDeck : null)
+      // No explicit scenario deck means "manual assistant chat" start, which
+      // should use the workspace root deck instead of auto-picking a scenario.
+      : fallbackScenarioDeck;
+    if (requestedDeckId && !scenarioDeck) {
+      throw new Error("Unknown scenario deck selection");
+    }
+    if (!scenarioDeck) {
+      throw new Error("No scenario deck configured for this workspace.");
+    }
+    try {
+      const stat = await Deno.stat(scenarioDeck.path);
+      if (!stat.isFile) {
+        throw new Error(
+          `Scenario deck path is not a file: ${scenarioDeck.path}`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(
+        `[sim] workspaceScenarioRunStart deck preflight failed workspaceId=${args.workspaceId} deckId=${scenarioDeck.id} deckPath=${scenarioDeck.path} error=${message}`,
+      );
+      throw new Error(
+        `Scenario deck is unavailable (${scenarioDeck.label}): ${message}`,
+      );
+    }
+    const parseOptionalJsonInput = (
+      value: unknown,
+      label: string,
+    ): unknown => {
+      if (value === null || value === undefined) return undefined;
+      if (typeof value !== "string") return value;
+      const text = value.trim();
+      if (text.length === 0) return undefined;
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid JSON";
+        throw new Error(`${label} must be valid JSON: ${message}`);
+      }
+    };
+    const parsedScenarioInput = parseOptionalJsonInput(
+      args.scenarioInput,
+      "scenarioInput",
+    );
+    const parsedAssistantInit = parseOptionalJsonInput(
+      args.assistantInit,
+      "assistantInit",
+    );
+    let assistantInit = parsedAssistantInit;
+    if (assistantInit === undefined) {
+      try {
+        const desc = await schemaPromise as {
+          defaults?: unknown;
+          schema?: NormalizedSchema;
+        };
+        assistantInit = desc.defaults !== undefined
+          ? cloneValue(desc.defaults)
+          : _deriveInitialFromSchema(desc.schema);
+      } catch {
+        // keep assistantInit undefined when schema introspection fails
+      }
+    }
+    if (!requestedDeckId) {
+      const startedAt = new Date().toISOString();
+      const manualRun: TestBotRunStatus = {
+        id: typeof args.runId === "string" && args.runId.trim().length > 0
+          ? args.runId.trim()
+          : randomId("testbot"),
+        status: "idle",
+        workspaceId: args.workspaceId,
+        sessionId: args.workspaceId,
+        startedAt,
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      };
+      const existing = readSessionState(args.workspaceId);
+      const baseMeta = buildWorkspaceMeta(
+        workspaceRecord,
+        existing?.meta as Record<string, unknown> | undefined,
+      );
+      const nextMeta = {
+        ...baseMeta,
+        testBot: true,
+        testBotRunId: manualRun.id,
+        testBotConfigPath: scenarioDeck.path,
+        testBotName: path.basename(scenarioDeck.path).replace(
+          /\.deck\.(md|ts)$/i,
+          "",
+        ),
+        scenarioRunId: manualRun.id,
+        selectedScenarioDeckId: scenarioDeck.id,
+        selectedScenarioDeckLabel: "Manual assistant chat",
+        scenarioConfigPath: scenarioDeck.path,
+        scenarioRunMode: "manual",
+        workspaceId: args.workspaceId,
+      };
+      const manualState = persistSessionState({
+        ...(existing ?? {
+          runId: args.workspaceId,
+          messages: [],
+        }),
+        runId: manualRun.id,
+        messages: [],
+        messageRefs: [],
+        traces: [],
+        items: [],
+        meta: nextMeta,
+      });
+      testBotRuns.set(manualRun.id, {
+        run: manualRun,
+        state: manualState,
+        promise: null,
+        abort: null,
+      });
+      broadcastTestBot(
+        { type: "testBotStatus", run: manualRun },
+        args.workspaceId,
+      );
+      return {
+        id: manualRun.id,
+        workspaceId: args.workspaceId,
+        status: manualRun.status,
+        error: manualRun.error,
+        startedAt: manualRun.startedAt,
+        finishedAt: manualRun.finishedAt,
+        messages: [],
+        traces: [],
+        toolInserts: [],
+      };
+    }
+    const run = _startTestBotRun({
+      runId: args.runId,
+      workspaceId: args.workspaceId,
+      workspaceRecord,
+      botDeckPath: scenarioDeck.path,
+      botDeckId: scenarioDeck.id,
+      botDeckLabel: scenarioDeck.label,
+      maxTurnsOverride: scenarioDeck.maxTurns,
+      botInput: parsedScenarioInput,
+      deckInput: assistantInit,
+      baseMeta: {
+        scenarioRunMode: "scenario",
+      },
+    });
+    return {
+      id: run.id ?? randomId("testbot"),
+      workspaceId: args.workspaceId,
+      status: run.status,
+      error: run.error,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      messages: Array.isArray(run.messages) ? [...run.messages] : [],
+      traces: Array.isArray(run.traces) ? [...run.traces] : [],
+      toolInserts: Array.isArray(run.toolInserts) ? [...run.toolInserts] : [],
+    };
+  };
+
+  const sendWorkspaceScenarioRunForGraphql = async (args: {
+    workspaceId: string;
+    runId: string;
+    message: string;
+  }): Promise<{
+    id: string;
+    workspaceId: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    messages: Array<{
+      role: string;
+      content: string;
+      messageRefId?: string;
+    }>;
+    traces?: Array<Record<string, unknown>>;
+    toolInserts?: Array<{
+      actionCallId?: string;
+      parentActionCallId?: string;
+      name?: string;
+      index: number;
+    }>;
+  }> => {
+    await activateWorkspaceDeck(args.workspaceId, { forceReload: true });
+    const workspaceRecord = workspaceById.get(args.workspaceId);
+    if (!workspaceRecord) {
+      throw new Error("Workspace not found");
+    }
+
+    const active = testBotRuns.get(args.runId);
+    if (
+      active &&
+      active.run.status === "running" &&
+      (active.run.workspaceId === args.workspaceId ||
+        active.run.sessionId === args.workspaceId)
+    ) {
+      throw new Error("Scenario run already in progress.");
+    }
+
+    const activeMatchesWorkspace = active
+      ? (active.run.workspaceId === args.workspaceId ||
+        active.run.sessionId === args.workspaceId)
+      : false;
+    let state: SavedState | undefined = activeMatchesWorkspace
+      ? (active?.state ?? undefined)
+      : undefined;
+    if (!state) {
+      try {
+        state = readSessionStateStrict(args.workspaceId, { withTraces: true });
+      } catch {
+        state = undefined;
+      }
+    }
+    if (!state) {
+      throw new Error("Workspace state unavailable for scenario send.");
+    }
+    const stateMeta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    const stateRunId = typeof stateMeta.scenarioRunId === "string"
+      ? stateMeta.scenarioRunId
+      : typeof stateMeta.testBotRunId === "string"
+      ? stateMeta.testBotRunId
+      : null;
+    if (stateRunId !== args.runId) {
+      throw new Error(
+        "Scenario run is not the active run state. Open latest run first.",
+      );
+    }
+
+    const scenarioDeckPath = typeof stateMeta.scenarioConfigPath === "string"
+      ? stateMeta.scenarioConfigPath
+      : typeof stateMeta.testBotConfigPath === "string"
+      ? stateMeta.testBotConfigPath
+      : null;
+    if (!scenarioDeckPath) {
+      throw new Error("Scenario deck path unavailable for this run.");
+    }
+
+    const scenarioDeckId = typeof stateMeta.selectedScenarioDeckId === "string"
+      ? stateMeta.selectedScenarioDeckId
+      : undefined;
+    const scenarioDeckLabel =
+      typeof stateMeta.selectedScenarioDeckLabel === "string"
+        ? stateMeta.selectedScenarioDeckLabel
+        : undefined;
+    const userMessageSource = stateMeta.scenarioRunMode === "manual"
+      ? "manual"
+      : "scenario";
+    const runMaxTurns = typeof stateMeta.testBotMaxTurns === "number" &&
+        Number.isFinite(stateMeta.testBotMaxTurns)
+      ? Math.round(stateMeta.testBotMaxTurns)
+      : undefined;
+    const existingRun = active?.run;
+    const run: TestBotRunStatus = {
+      id: args.runId,
+      status: "running",
+      workspaceId: args.workspaceId,
+      sessionId: args.workspaceId,
+      startedAt: existingRun?.startedAt ??
+        (typeof stateMeta.startedAt === "string"
+          ? stateMeta.startedAt
+          : null) ??
+        new Date().toISOString(),
+      finishedAt: undefined,
+      error: undefined,
+      maxTurns: existingRun?.maxTurns ?? runMaxTurns,
+      messages: existingRun?.messages ? [...existingRun.messages] : [],
+      traces: existingRun?.traces
+        ? [...existingRun.traces]
+        : Array.isArray(state.traces)
+        ? [...state.traces]
+        : [],
+      toolInserts: existingRun?.toolInserts ? [...existingRun.toolInserts] : [],
+      initFill:
+        (stateMeta as { testBotInitFill?: TestBotInitFill }).testBotInitFill ??
+          existingRun?.initFill,
+    };
+
+    const controller = new AbortController();
+    const entry: TestBotRunEntry = {
+      run,
+      state,
+      promise: null,
+      abort: controller,
+    };
+    testBotRuns.set(args.runId, entry);
+
+    const emitTestBot = (payload: unknown) =>
+      broadcastTestBot(payload, args.workspaceId);
+    const baseMeta = buildWorkspaceMeta(workspaceRecord, stateMeta);
+    let savedState: SavedState | undefined = state;
+    const capturedTraces: Array<TraceEvent> = Array.isArray(state.traces)
+      ? [...state.traces]
+      : [];
+
+    const appendFromState = (nextState: SavedState) => {
+      const snapshot = buildTestBotSnapshot(nextState);
+      run.messages = snapshot.messages;
+      run.toolInserts = snapshot.toolInserts;
+      run.traces = Array.isArray(nextState.traces)
+        ? [...nextState.traces]
+        : undefined;
+      emitTestBot({ type: "testBotStatus", run });
+    };
+
+    const tracer = (event: TraceEvent) => {
+      const stamped = event.ts ? event : { ...event, ts: Date.now() };
+      capturedTraces.push(stamped);
+      emitTestBot({
+        type: "testBotTrace",
+        workspaceId: args.workspaceId,
+        runId: args.runId,
+        event: stamped,
+      });
+    };
+
+    const trimmedMessage = args.message.trim();
+    const turn = run.messages.filter((message) => message.role === "user")
+      .length;
+    if (trimmedMessage.length > 0) {
+      run.messages = [
+        ...run.messages,
+        { role: "user", content: trimmedMessage },
+      ];
+    }
+    let hasStartedAssistantStreamMessage = false;
+    entry.promise = (async () => {
+      try {
+        emitTestBot({ type: "testBotStatus", run });
+        const rootResult = await runDeck({
+          path: scenarioDeckPath,
+          input: undefined,
+          inputProvided: false,
+          modelProvider: opts.modelProvider,
+          defaultModel: opts.model,
+          modelOverride: opts.modelForce,
+          trace: tracer,
+          stream: true,
+          state: savedState,
+          allowRootStringInput: true,
+          initialUserMessage: trimmedMessage,
+          responsesMode: opts.responsesMode,
+          workerSandbox: resolveWorkerSandboxForSignalAwareRun({
+            workerSandbox: opts.workerSandbox,
+            signal: controller.signal,
+          }),
+          signal: controller.signal,
+          onStateUpdate: (nextState) => {
+            const sourced = applyUserMessageRefSource(
+              savedState,
+              nextState,
+              userMessageSource,
+            );
+            const nextMeta = {
+              ...baseMeta,
+              ...(sourced.meta ?? {}),
+              testBot: true,
+              testBotRunId: args.runId,
+              testBotConfigPath: scenarioDeckPath,
+              testBotName: path.basename(scenarioDeckPath).replace(
+                /\.deck\.(md|ts)$/i,
+                "",
+              ),
+              scenarioRunId: args.runId,
+              ...(scenarioDeckId
+                ? { selectedScenarioDeckId: scenarioDeckId }
+                : {}),
+              ...(scenarioDeckLabel
+                ? { selectedScenarioDeckLabel: scenarioDeckLabel }
+                : {}),
+              scenarioConfigPath: scenarioDeckPath,
+              scenarioRunMode: userMessageSource === "manual"
+                ? "manual"
+                : "scenario",
+              ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
+              workspaceId: args.workspaceId,
+              ...(run.maxTurns ? { testBotMaxTurns: run.maxTurns } : {}),
+            };
+            const enriched = persistSessionState({
+              ...sourced,
+              meta: nextMeta,
+              traces: capturedTraces,
+            });
+            savedState = enriched;
+            entry.state = enriched;
+            appendFromState(enriched);
+          },
+          onStreamText: (chunk) => {
+            if (typeof chunk === "string" && chunk.length > 0) {
+              if (!hasStartedAssistantStreamMessage) {
+                run.messages = [
+                  ...run.messages,
+                  { role: "assistant", content: chunk },
+                ];
+                hasStartedAssistantStreamMessage = true;
+              } else {
+                const last = run.messages[run.messages.length - 1];
+                if (last?.role === "assistant") {
+                  last.content += chunk;
+                }
+              }
+            }
+            emitTestBot({
+              type: "testBotStream",
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              role: "assistant",
+              chunk,
+              turn,
+              ts: Date.now(),
+            });
+          },
+        });
+        if (!isGambitEndSignal(rootResult)) {
+          emitTestBot({
+            type: "testBotStreamEnd",
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            role: "assistant",
+            turn,
+            ts: Date.now(),
+          });
+        }
+        run.status = controller.signal.aborted ? "canceled" : "completed";
+        run.error = undefined;
+      } catch (err) {
+        if (controller.signal.aborted || isRunCanceledError(err)) {
+          run.status = "canceled";
+          run.error = undefined;
+        } else {
+          run.status = "error";
+          run.error = err instanceof Error ? err.message : String(err);
+        }
+      } finally {
+        if (savedState?.messages) {
+          const snapshot = buildTestBotSnapshot(savedState);
+          run.messages = snapshot.messages;
+          run.toolInserts = snapshot.toolInserts;
+          run.traces = Array.isArray(savedState.traces)
+            ? [...savedState.traces]
+            : run.traces;
+        }
+        if (savedState) {
+          entry.state = savedState;
+        }
+        run.finishedAt = new Date().toISOString();
+        entry.abort = null;
+        entry.promise = null;
+        emitTestBot({ type: "testBotStatus", run });
+      }
+    })();
+
+    return {
+      id: run.id,
+      workspaceId: args.workspaceId,
+      status: run.status,
+      error: run.error,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      messages: Array.isArray(run.messages) ? [...run.messages] : [],
+      traces: Array.isArray(run.traces) ? [...run.traces] : [],
+      toolInserts: Array.isArray(run.toolInserts) ? [...run.toolInserts] : [],
+    };
+  };
+
+  const readWorkspaceScenarioRunsForGraphql = (
+    workspaceId: string,
+  ): Array<{
+    id: string;
+    workspaceId: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    messages: Array<{
+      role: string;
+      content: string;
+      messageRefId?: string;
+    }>;
+    traces?: Array<Record<string, unknown>>;
+    toolInserts?: Array<{
+      actionCallId?: string;
+      parentActionCallId?: string;
+      name?: string;
+      index: number;
+    }>;
+  }> => {
+    const latestByRunId = new Map<string, TestBotRunStatus>();
+    const persistedState = readSessionState(workspaceId);
+    if (persistedState) {
+      const metaRuns = listScenarioRunStatusesFromStateMeta(
+        persistedState,
+        workspaceId,
+      );
+      if (metaRuns.length > 0) {
+        for (const run of metaRuns) {
+          latestByRunId.set(run.id, run);
+        }
+      } else {
+        for (
+          const run of listPersistedTestRunStatuses(persistedState, workspaceId)
+        ) {
+          latestByRunId.set(run.id, run);
+        }
+      }
+    }
+    for (const entry of testBotRuns.values()) {
+      const run = entry.run;
+      if (
+        run.workspaceId !== workspaceId &&
+        run.sessionId !== workspaceId
+      ) {
+        continue;
+      }
+      if (!run.id || run.id.trim().length === 0) continue;
+      latestByRunId.set(run.id, run);
+    }
+    const records = [...latestByRunId.values()].map((run) => ({
+      id: run.id,
+      workspaceId,
+      status: run.status,
+      error: run.error,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      messages: Array.isArray(run.messages) ? [...run.messages] : [],
+      traces: Array.isArray(run.traces) ? [...run.traces] : [],
+      toolInserts: Array.isArray(run.toolInserts) ? [...run.toolInserts] : [],
+    }));
+    records.sort((a, b) => {
+      const aKey = a.startedAt ?? a.finishedAt ?? a.id;
+      const bKey = b.startedAt ?? b.finishedAt ?? b.id;
+      return bKey.localeCompare(aKey);
+    });
+    return records;
+  };
+
+  const stopWorkspaceScenarioRunForGraphql = async (args: {
+    workspaceId: string;
+    runId: string;
+  }): Promise<{
+    id: string;
+    workspaceId: string;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    messages: Array<{
+      role: string;
+      content: string;
+      messageRefId?: string;
+    }>;
+    traces?: Array<Record<string, unknown>>;
+    toolInserts?: Array<{
+      actionCallId?: string;
+      parentActionCallId?: string;
+      name?: string;
+      index: number;
+    }>;
+  }> => {
+    const active = testBotRuns.get(args.runId);
+    if (
+      active &&
+      (active.run.workspaceId === args.workspaceId ||
+        active.run.sessionId === args.workspaceId)
+    ) {
+      active.abort?.abort();
+      try {
+        await active.promise;
+      } catch {
+        // Abort path can reject internally; run projection remains authoritative.
+      }
+    }
+
+    const latest = readWorkspaceScenarioRunsForGraphql(args.workspaceId).find(
+      (run) => run.id === args.runId,
+    );
+    if (latest) return latest;
+    throw new Error(`Scenario run ${args.runId} not found`);
+  };
+
+  const toWorkspaceGradeRunForGraphql = (
+    run: GradingRunRecord,
+    flags: Array<GradingFlag>,
+  ): {
+    id: string;
+    workspaceId: string;
+    scenarioRunId?: string;
+    graderId: string;
+    graderPath: string;
+    graderLabel?: string;
+    status: "running" | "completed" | "error";
+    runAt?: string;
+    error?: string;
+    summary?: {
+      score?: number;
+      reason?: string;
+    };
+    turns: Array<{
+      id: string;
+      runId: string;
+      turnIndex: number;
+      turnNumber: number;
+      refId: string;
+      score?: number;
+      reason?: string;
+      priorUser?: string;
+      gradedAssistant?: string;
+    }>;
+  } => {
+    const flagByRef = new Map(flags.map((entry) => [entry.refId, entry]));
+    const result = run.result && typeof run.result === "object"
+      ? run.result as Record<string, unknown>
+      : null;
+    const turns =
+      result && result.mode === "turns" && Array.isArray(result.turns)
+        ? result.turns as Array<Record<string, unknown>>
+        : [];
+    const totalTurns = typeof result?.totalTurns === "number" &&
+        Number.isFinite(result.totalTurns)
+      ? result.totalTurns
+      : turns.length;
+    const normalizedTurns = turns.map((turn, index) => {
+      const turnIndex =
+        typeof turn.index === "number" && Number.isFinite(turn.index)
+          ? turn.index
+          : index;
+      const turnNumber = totalTurns > 0
+        ? Math.min(totalTurns, index + 1)
+        : index + 1;
+      const turnInput = turn.input;
+      const turnResult = turn.result;
+      const { score, reason } = extractGradeScoreAndReason(turnResult);
+      const context = extractGradeTurnContext(turnInput);
+      const messageToGrade = turnInput && typeof turnInput === "object"
+        ? (turnInput as { messageToGrade?: unknown }).messageToGrade
+        : undefined;
+      const messageRefId =
+        messageToGrade && typeof messageToGrade === "object" &&
+          typeof (messageToGrade as { messageRefId?: unknown }).messageRefId ===
+            "string"
+          ? (messageToGrade as { messageRefId: string }).messageRefId
+          : undefined;
+      const fallbackRefId = `gradingRun:${run.id}#turn:${turnIndex}`;
+      const refId = messageRefId ?? fallbackRefId;
+      const turnFlag = flagByRef.get(refId);
+      return {
+        id: `${run.id}:turn:${turnIndex}`,
+        runId: run.id,
+        turnIndex,
+        turnNumber,
+        refId,
+        score,
+        reason,
+        priorUser: context.priorUser,
+        gradedAssistant: context.gradedAssistant,
+        flagReason: turnFlag?.reason,
+      };
+    });
+    const summaryFromResult = extractGradeScoreAndReason(run.result);
+    const scenarioRunId = deriveScenarioRunIdFromGradingRun(run);
+    return {
+      id: run.id,
+      workspaceId: run.workspaceId ?? "",
+      scenarioRunId,
+      graderId: run.graderId,
+      graderPath: run.graderPath,
+      graderLabel: run.graderLabel,
+      status: run.status,
+      runAt: run.runAt,
+      error: run.error,
+      summary: summaryFromResult.score !== undefined ||
+          summaryFromResult.reason !== undefined
+        ? summaryFromResult
+        : undefined,
+      turns: normalizedTurns.map((turn) => ({
+        id: turn.id,
+        runId: turn.runId,
+        turnIndex: turn.turnIndex,
+        turnNumber: turn.turnNumber,
+        refId: turn.refId,
+        score: turn.score,
+        reason: turn.reason,
+        priorUser: turn.priorUser,
+        gradedAssistant: turn.gradedAssistant,
+      })),
+    };
+  };
+
+  const emitGradeWorkspaceEvent = (
+    workspaceId: string,
+    payload: Record<string, unknown>,
+  ) => {
+    appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
+      ...payload,
+      workspaceId,
+    });
+  };
+
+  const emitVerifyWorkspaceEvent = (
+    workspaceId: string,
+    payload: Record<string, unknown>,
+  ) => {
+    appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
+      ...payload,
+      workspaceId,
+    });
+  };
+
+  const readWorkspaceVerifyBatchesForGraphql = (
+    workspaceId: string,
+  ): Array<{
+    id: string;
+    workspaceId: string;
+    graderId: string;
+    scenarioRunId?: string;
+    status: "idle" | "running" | "completed" | "error";
+    startedAt?: string;
+    finishedAt?: string;
+    requested: number;
+    active: number;
+    completed: number;
+    failed: number;
+    requests: Array<{
+      id: string;
+      status: "queued" | "running" | "completed" | "error";
+      runId?: string;
+      error?: string;
+    }>;
+  }> => {
+    const state = readSessionState(workspaceId);
+    if (!state) return [];
+    return readWorkspaceVerifyBatchesFromState(state).map((batch) => ({
+      ...batch,
+      workspaceId: workspaceId,
+    }));
+  };
+
+  const createWorkspaceVerifyBatchRunForGraphql = async (args: {
+    workspaceId: string;
+    graderId: string;
+    scenarioRunId?: string | null;
+    batchSize: number;
+    concurrency: number;
+  }): Promise<{
+    id: string;
+    workspaceId: string;
+    graderId: string;
+    scenarioRunId?: string;
+    status: "idle" | "running" | "completed" | "error";
+    startedAt?: string;
+    finishedAt?: string;
+    requested: number;
+    active: number;
+    completed: number;
+    failed: number;
+    requests: Array<{
+      id: string;
+      status: "queued" | "running" | "completed" | "error";
+      runId?: string;
+      error?: string;
+    }>;
+  }> => {
+    await activateWorkspaceDeck(args.workspaceId, {
+      source: "graphql:createWorkspaceVerifyBatchRun",
+    });
+    const grader = _resolveGraderDeck(args.graderId);
+    if (!grader) {
+      throw new Error(`Unknown grader deck: ${args.graderId}`);
+    }
+
+    const state = readSessionStateStrict(args.workspaceId, {
+      withTraces: true,
+    });
+    if (!state) {
+      throw new Error(`Workspace ${args.workspaceId} not found`);
+    }
+
+    const explicitScenarioRunId = typeof args.scenarioRunId === "string" &&
+        args.scenarioRunId.trim().length > 0
+      ? args.scenarioRunId.trim()
+      : null;
+    const runFromState =
+      state.meta && typeof state.meta.scenarioRunId === "string"
+        ? state.meta.scenarioRunId
+        : null;
+    const selectedScenarioRunId = explicitScenarioRunId ?? runFromState;
+    const scenarioRun = selectedScenarioRunId
+      ? readWorkspaceScenarioRunsForGraphql(args.workspaceId).find((entry) =>
+        entry.id === selectedScenarioRunId
+      )
+      : null;
+    if (selectedScenarioRunId && !scenarioRun) {
+      throw new Error(`Scenario run ${selectedScenarioRunId} not found`);
+    }
+
+    const normalizedBatchSize = Math.max(
+      1,
+      Math.min(
+        VERIFY_BATCH_SIZE_MAX,
+        Number.isFinite(args.batchSize) ? Math.round(args.batchSize) : 1,
+      ),
+    );
+    const normalizedConcurrency = Math.max(
+      1,
+      Math.min(
+        VERIFY_BATCH_CONCURRENCY_MAX,
+        normalizedBatchSize,
+        Number.isFinite(args.concurrency) ? Math.round(args.concurrency) : 1,
+      ),
+    );
+
+    const now = new Date().toISOString();
+    const batchId = randomId("vbatch");
+    let batch: WorkspaceVerifyBatchRecordForGraphql = {
+      id: batchId,
+      workspaceId: args.workspaceId,
+      graderId: grader.id,
+      scenarioRunId: selectedScenarioRunId ?? undefined,
+      status: "running",
+      startedAt: now,
+      finishedAt: undefined,
+      requested: normalizedBatchSize,
+      active: 0,
+      completed: 0,
+      failed: 0,
+      requests: Array.from(
+        { length: normalizedBatchSize },
+        (_value, index) => ({
+          id: `${batchId}:${index + 1}`,
+          status: "queued",
+        }),
+      ),
+    };
+
+    let persistedState = persistSessionState(
+      upsertWorkspaceVerifyBatchInState(state, batch),
+    );
+    const persistAndBroadcastBatch = (reason: string) => {
+      const latest = readSessionStateStrict(args.workspaceId, {
+        withTraces: true,
+      }) ?? persistedState;
+      persistedState = persistSessionState(
+        upsertWorkspaceVerifyBatchInState(latest, batch),
+      );
+      appendGradingLog(persistedState, {
+        type: "gambit.verify.batch",
+        workspaceId: args.workspaceId,
+        reason,
+        batch,
+      });
+      emitVerifyWorkspaceEvent(args.workspaceId, {
+        type: "gambit.verify.batch",
+        reason,
+        batch,
+      });
+    };
+    persistAndBroadcastBatch("created");
+
+    let updateQueue = Promise.resolve();
+    const updateBatchRequest = async (
+      requestIndex: number,
+      patch: Partial<WorkspaceVerifyBatchRequestRecordForGraphql>,
+    ) => {
+      updateQueue = updateQueue.then(() => {
+        if (requestIndex < 0 || requestIndex >= batch.requests.length) return;
+        const nextRequests = batch.requests.map((request, index) =>
+          index === requestIndex ? { ...request, ...patch } : request
+        );
+        const active = nextRequests.filter((request) =>
+          request.status === "running"
+        ).length;
+        const completed =
+          nextRequests.filter((request) => request.status === "completed")
+            .length;
+        const failed =
+          nextRequests.filter((request) => request.status === "error").length;
+        const terminal = completed + failed === batch.requested && active === 0;
+        batch = {
+          ...batch,
+          requests: nextRequests,
+          active,
+          completed,
+          failed,
+          status: terminal ? (failed > 0 ? "error" : "completed") : "running",
+          finishedAt: terminal ? new Date().toISOString() : undefined,
+        };
+        persistAndBroadcastBatch("request-update");
+      });
+      await updateQueue;
+    };
+
+    let cursor = 0;
+    const workers = Array.from(
+      { length: normalizedConcurrency },
+      () =>
+        (async () => {
+          while (true) {
+            const requestIndex = cursor;
+            cursor += 1;
+            if (requestIndex >= normalizedBatchSize) return;
+            await updateBatchRequest(requestIndex, { status: "running" });
+            try {
+              const run = await createWorkspaceGradeRunForGraphql({
+                workspaceId: args.workspaceId,
+                graderId: grader.id,
+                scenarioRunId: selectedScenarioRunId,
+              });
+              if (run.status === "completed") {
+                await updateBatchRequest(requestIndex, {
+                  status: "completed",
+                  runId: run.id,
+                  error: undefined,
+                });
+              } else {
+                await updateBatchRequest(requestIndex, {
+                  status: "error",
+                  runId: run.id,
+                  error: run.error ??
+                    `Grade run ended with status ${run.status}`,
+                });
+              }
+            } catch (error) {
+              await updateBatchRequest(requestIndex, {
+                status: "error",
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        })(),
+    );
+
+    await Promise.all(workers);
+    await updateQueue;
+    return batch;
+  };
+
+  const readWorkspaceGradingFlagsForGraphql = (
+    workspaceId: string,
+  ): Array<GradingFlag> => {
+    const state = readSessionState(workspaceId);
+    if (!state) return [];
+    return readGradingFlagsFromState(state);
+  };
+
+  const readWorkspaceGradeRunsForGraphql = (
+    workspaceId: string,
+  ): Array<{
+    id: string;
+    workspaceId: string;
+    scenarioRunId?: string;
+    graderId: string;
+    graderPath: string;
+    graderLabel?: string;
+    status: "running" | "completed" | "error";
+    runAt?: string;
+    error?: string;
+    summary?: {
+      score?: number;
+      reason?: string;
+    };
+    turns: Array<{
+      id: string;
+      runId: string;
+      turnIndex: number;
+      turnNumber: number;
+      refId: string;
+      score?: number;
+      reason?: string;
+      priorUser?: string;
+      gradedAssistant?: string;
+    }>;
+  }> => {
+    const state = readSessionState(workspaceId);
+    if (!state) return [];
+    const runs = readGradingRunsFromState(state).map((entry) => ({
+      ...entry,
+      workspaceId,
+    }));
+    const flags = readGradingFlagsFromState(state);
+    const projected = runs.map((run) =>
+      toWorkspaceGradeRunForGraphql(run, flags)
+    );
+    projected.sort((a, b) => {
+      const left = a.runAt ?? a.id;
+      const right = b.runAt ?? b.id;
+      return right.localeCompare(left);
+    });
+    return projected;
+  };
+
+  const createWorkspaceGradeRunForGraphql = async (args: {
+    workspaceId: string;
+    graderId: string;
+    scenarioRunId?: string | null;
+  }): Promise<{
+    id: string;
+    workspaceId: string;
+    scenarioRunId?: string;
+    graderId: string;
+    graderPath: string;
+    graderLabel?: string;
+    status: "running" | "completed" | "error";
+    runAt?: string;
+    error?: string;
+    summary?: {
+      score?: number;
+      reason?: string;
+    };
+    turns: Array<{
+      id: string;
+      runId: string;
+      turnIndex: number;
+      turnNumber: number;
+      refId: string;
+      score?: number;
+      reason?: string;
+      priorUser?: string;
+      gradedAssistant?: string;
+    }>;
+  }> => {
+    await activateWorkspaceDeck(args.workspaceId, {
+      source: "graphql:createWorkspaceGradeRun",
+    });
+    const grader = _resolveGraderDeck(args.graderId);
+    if (!grader) {
+      throw new Error(`Unknown grader deck: ${args.graderId}`);
+    }
+    const state = readSessionStateStrict(args.workspaceId, {
+      withTraces: true,
+    });
+    if (!state) {
+      throw new Error(`Workspace ${args.workspaceId} not found`);
+    }
+
+    const explicitScenarioRunId = typeof args.scenarioRunId === "string" &&
+        args.scenarioRunId.trim().length > 0
+      ? args.scenarioRunId.trim()
+      : null;
+    const runFromState =
+      state.meta && typeof state.meta.scenarioRunId === "string"
+        ? state.meta.scenarioRunId
+        : null;
+    const selectedScenarioRunId = explicitScenarioRunId ?? runFromState;
+    const scenarioRun = selectedScenarioRunId
+      ? readWorkspaceScenarioRunsForGraphql(args.workspaceId).find((entry) =>
+        entry.id === selectedScenarioRunId
+      )
+      : null;
+    if (selectedScenarioRunId && !scenarioRun) {
+      throw new Error(`Scenario run ${selectedScenarioRunId} not found`);
+    }
+    const artifacts = scenarioRun
+      ? _buildScenarioConversationArtifactsFromRun(scenarioRun)
+      : _buildScenarioConversationArtifacts(state);
+    const metaForGrading = (() => {
+      const baseMeta = state.meta && typeof state.meta === "object"
+        ? state.meta as Record<string, unknown>
+        : {};
+      const next = { ...baseMeta };
+      delete next.calibrationRuns;
+      delete next.gradingRuns;
+      return next;
+    })();
+    if (selectedScenarioRunId) {
+      metaForGrading.scenarioRunId = selectedScenarioRunId;
+    }
+    const sessionPayload = {
+      runId: state.runId,
+      messages: artifacts.messages,
+      messageRefs: state.messageRefs,
+      feedback: state.feedback,
+      notes: state.notes,
+      conversationScore: state.conversationScore,
+      traces: Array.isArray(state.traces) ? state.traces : [],
+      meta: metaForGrading,
+    };
+
+    const runId = randomId("grade");
+    const runAt = new Date().toISOString();
+    const runningRun: GradingRunRecord = {
+      id: runId,
+      workspaceId: args.workspaceId,
+      scenarioRunId: selectedScenarioRunId ?? undefined,
+      graderId: grader.id,
+      graderPath: grader.path,
+      graderLabel: grader.label,
+      status: "running",
+      runAt,
+      input: { session: sessionPayload },
+    };
+    let persistedState = persistSessionState(
+      upsertGradingRunInState(state, runningRun),
+    );
+    appendGradingLog(persistedState, {
+      type: "gambit.grade.status",
+      workspaceId: args.workspaceId,
+      run: runningRun,
+    });
+    emitGradeWorkspaceEvent(args.workspaceId, {
+      type: "gambit.grade.status",
+      run: runningRun,
+    });
+
+    let completedRun: GradingRunRecord = runningRun;
+    try {
+      const graderDeck = await loadDeck(grader.path);
+      const runMode =
+        gradeSchemaHasField(graderDeck.inputSchema, "messageToGrade")
+          ? "turns"
+          : "conversation";
+      const result = runMode === "conversation"
+        ? await runDeckWithFallback({
+          path: grader.path,
+          input: { session: sessionPayload },
+          inputProvided: true,
+          modelProvider: opts.modelProvider,
+          responsesMode: opts.responsesMode,
+          workerSandbox: opts.workerSandbox,
+        })
+        : {
+          mode: "turns",
+          totalTurns: artifacts.assistantTurns.length,
+          turns: await Promise.all(artifacts.assistantTurns.map(
+            async (turn) => {
+              const messageToGrade =
+                turn.message && typeof turn.message === "object"
+                  ? {
+                    ...(turn.message as Record<string, unknown>),
+                    messageRefId: turn.messageRefId,
+                  }
+                  : turn.message;
+              const input = {
+                session: sessionPayload,
+                messageToGrade,
+              };
+              const turnResult = await runDeckWithFallback({
+                path: grader.path,
+                input,
+                inputProvided: true,
+                modelProvider: opts.modelProvider,
+                responsesMode: opts.responsesMode,
+                workerSandbox: opts.workerSandbox,
+              });
+              return {
+                index: turn.conversationIndex,
+                input,
+                result: turnResult,
+              };
+            },
+          )),
+        };
+      completedRun = {
+        ...runningRun,
+        status: "completed",
+        result,
+        error: undefined,
+      };
+    } catch (error) {
+      completedRun = {
+        ...runningRun,
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    persistedState = persistSessionState(
+      upsertGradingRunInState(persistedState, completedRun),
+    );
+    appendGradingLog(persistedState, {
+      type: "gambit.grade.status",
+      workspaceId: args.workspaceId,
+      run: completedRun,
+    });
+    emitGradeWorkspaceEvent(args.workspaceId, {
+      type: "gambit.grade.status",
+      run: completedRun,
+    });
+    const flags = readGradingFlagsFromState(persistedState);
+    return toWorkspaceGradeRunForGraphql(completedRun, flags);
+  };
+
+  const toggleWorkspaceGradeFlagForGraphql = (args: {
+    workspaceId: string;
+    refId: string;
+    runId: string;
+    turnIndex?: number | null;
+  }): Promise<Array<GradingFlag>> => {
+    const state = readSessionStateStrict(args.workspaceId, {
+      withTraces: true,
+    });
+    if (!state) throw new Error(`Workspace ${args.workspaceId} not found`);
+    const existing = readGradingFlagsFromState(state);
+    const refId = args.refId.trim();
+    if (!refId) throw new Error("Missing grade flag refId");
+    const existingIndex = existing.findIndex((entry) => entry.refId === refId);
+    const nextFlags = [...existing];
+    if (existingIndex >= 0) {
+      nextFlags.splice(existingIndex, 1);
+    } else {
+      nextFlags.push({
+        id: randomId("gflag"),
+        refId,
+        runId: args.runId,
+        turnIndex: typeof args.turnIndex === "number"
+          ? args.turnIndex
+          : undefined,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    const persistedState = persistSessionState(
+      writeGradingFlagsToState(state, nextFlags),
+    );
+    appendGradingLog(persistedState, {
+      type: "gambit.grade.flag",
+      workspaceId: args.workspaceId,
+      action: existingIndex >= 0 ? "remove" : "add",
+      refId,
+      flags: nextFlags,
+    });
+    emitGradeWorkspaceEvent(args.workspaceId, {
+      type: "gambit.grade.flag",
+      action: existingIndex >= 0 ? "remove" : "add",
+      refId,
+      runId: args.runId,
+    });
+    return Promise.resolve(readGradingFlagsFromState(persistedState));
+  };
+
+  const updateWorkspaceGradeFlagReasonForGraphql = (args: {
+    workspaceId: string;
+    refId: string;
+    reason: string;
+  }): Promise<Array<GradingFlag>> => {
+    const state = readSessionStateStrict(args.workspaceId, {
+      withTraces: true,
+    });
+    if (!state) throw new Error(`Workspace ${args.workspaceId} not found`);
+    const existing = readGradingFlagsFromState(state);
+    const refId = args.refId.trim();
+    const index = existing.findIndex((entry) => entry.refId === refId);
+    if (index < 0) {
+      throw new Error(`Flag not found for refId: ${refId}`);
+    }
+    const nextFlags = [...existing];
+    nextFlags[index] = {
+      ...nextFlags[index],
+      reason: args.reason,
+    };
+    const persistedState = persistSessionState(
+      writeGradingFlagsToState(state, nextFlags),
+    );
+    appendGradingLog(persistedState, {
+      type: "gambit.grade.flag",
+      workspaceId: args.workspaceId,
+      action: "reason",
+      refId,
+      reason: args.reason,
+      flags: nextFlags,
+    });
+    emitGradeWorkspaceEvent(args.workspaceId, {
+      type: "gambit.grade.flag",
+      action: "reason",
+      refId,
+      runId: nextFlags[index]?.runId,
+    });
+    return Promise.resolve(readGradingFlagsFromState(persistedState));
+  };
+
   const server = Deno.serve(
     { port, signal: opts.signal, onListen: () => {} },
     async (req) => {
       const url = new URL(req.url);
-      if (url.pathname.startsWith("/api/durable-streams/stream/")) {
+      const _callApi = async (args: {
+        path: string;
+        method: string;
+        query?: string | null;
+        body?: string | null;
+      }): Promise<{
+        status: number;
+        ok: boolean;
+        body: string;
+        contentType?: string;
+      }> => {
+        const rawPath = typeof args.path === "string" ? args.path.trim() : "";
+        if (!rawPath.startsWith("/")) {
+          throw new Error("Path must start with '/'");
+        }
+        if (rawPath === "/graphql" || rawPath.startsWith("/graphql?")) {
+          throw new Error("Recursive /graphql proxy calls are not allowed");
+        }
+        if (
+          rawPath !== "/schema" &&
+          rawPath !== "/graphql/stream" &&
+          rawPath !== "/graphql/streams" &&
+          !rawPath.startsWith(GRAPHQL_STREAMS_PREFIX)
+        ) {
+          throw new Error(
+            "Only /schema, /graphql/stream, /graphql/streams, and /graphql/streams/* paths are allowed",
+          );
+        }
+        const target = new URL(rawPath, url);
+        if (typeof args.query === "string" && args.query.trim().length > 0) {
+          const normalizedQuery = args.query.startsWith("?")
+            ? args.query.slice(1)
+            : args.query;
+          target.search = normalizedQuery;
+        }
+        const method = args.method.toUpperCase();
+        const bodyText = typeof args.body === "string" ? args.body : null;
+        const response = await fetch(target, {
+          method,
+          headers: bodyText === null
+            ? undefined
+            : { "content-type": "application/json" },
+          body: bodyText,
+        });
+        return {
+          status: response.status,
+          ok: response.ok,
+          body: await response.text(),
+          contentType: response.headers.get("content-type") ?? undefined,
+        };
+      };
+      const readWorkspaceFiles: ReadWorkspaceFiles = async (args) => {
+        const root = await resolveBuildBotRoot(args.workspaceId);
+        const fileId = typeof args.id === "string" ? args.id.trim() : "";
+        const pathPrefix = typeof args.pathPrefix === "string"
+          ? args.pathPrefix.trim()
+          : "";
+
+        const normalizeRelativePath = (value: string) =>
+          value.split(/\\|\//g).filter(Boolean).join("/");
+        const isInternalWorkspacePath = (value: string): boolean => {
+          const normalized = normalizeRelativePath(value);
+          return normalized === ".gambit" ||
+            normalized.startsWith(".gambit/");
+        };
+
+        const readTextContent = async (
+          fullPath: string,
+        ): Promise<string | null> => {
+          try {
+            return await Deno.readTextFile(fullPath);
+          } catch {
+            return null;
+          }
+        };
+
+        const toRecord = async (
+          fullPath: string,
+          relPath: string,
+          stat: Deno.FileInfo,
+        ): Promise<WorkspaceFileReadRecord> => {
+          const normalizedPath = normalizeRelativePath(relPath);
+          return {
+            id: asGambitID(
+              `workspace-file:${args.workspaceId}:${normalizedPath}`,
+            ),
+            path: asGambitWorkspaceRelativePath(normalizedPath),
+            size: typeof stat.size === "number" ? stat.size : null,
+            modifiedAt: stat.mtime
+              ? asGambitISODateTime(stat.mtime.toISOString())
+              : null,
+            content: await readTextContent(fullPath),
+          };
+        };
+
+        if (fileId.length > 0) {
+          try {
+            const idPrefix = `workspace-file:${args.workspaceId}:`;
+            if (!fileId.startsWith(idPrefix)) return [];
+            const idPath = fileId.slice(idPrefix.length);
+            if (idPath.length === 0) return [];
+            const resolved = await resolveBuildBotPath(root, idPath);
+            if (!resolved.stat.isFile) return [];
+            if (isInternalWorkspacePath(resolved.relativePath)) return [];
+            return [
+              await toRecord(
+                resolved.fullPath,
+                resolved.relativePath,
+                resolved.stat,
+              ),
+            ];
+          } catch {
+            return [];
+          }
+        }
+
+        const records: Array<WorkspaceFileReadRecord> = [];
+        const pending: Array<string> = [root];
+
+        while (pending.length > 0) {
+          const current = pending.pop();
+          if (!current) continue;
+          for await (const entry of Deno.readDir(current)) {
+            const fullPath = path.join(current, entry.name);
+            let stat: Deno.FileInfo;
+            try {
+              stat = await Deno.lstat(fullPath);
+            } catch {
+              continue;
+            }
+            if (stat.isSymlink) continue;
+            if (stat.isDirectory) {
+              pending.push(fullPath);
+              continue;
+            }
+            if (!stat.isFile) continue;
+            const relativePath = normalizeRelativePath(
+              path.relative(root, fullPath),
+            );
+            if (relativePath.length === 0) continue;
+            if (isInternalWorkspacePath(relativePath)) continue;
+            if (
+              pathPrefix.length > 0 &&
+              !relativePath.startsWith(normalizeRelativePath(pathPrefix))
+            ) {
+              continue;
+            }
+            records.push(await toRecord(fullPath, relativePath, stat));
+          }
+        }
+
+        records.sort((a, b) => a.path.localeCompare(b.path));
+        return records;
+      };
+
+      if (url.pathname === WORKSPACES_API_BASE) {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        return new Response(JSON.stringify({ workspaces: listSessions() }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const workspaceTestRunGetMatch = url.pathname.match(
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/test/([^/]+)$`),
+      );
+      if (workspaceTestRunGetMatch) {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspaceId = decodeURIComponent(workspaceTestRunGetMatch[1]);
+          const requestedTestRunId = decodeURIComponent(
+            workspaceTestRunGetMatch[2],
+          );
+          await logWorkspaceBotRoot(
+            `${WORKSPACES_API_BASE}/:id/test/:runId`,
+            workspaceId,
+          );
+          await activateWorkspaceDeck(workspaceId);
+          const payload = await _buildWorkspaceReadModel(workspaceId, {
+            requestedTestDeckPath: url.searchParams.get("deckPath"),
+            requestedTestRunId,
+          });
+          if ("error" in payload) {
+            return new Response(JSON.stringify({ error: payload.error }), {
+              status: payload.status,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(_safeJsonStringify(payload), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      const workspaceGradeRunGetMatch = url.pathname.match(
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/grade/([^/]+)$`),
+      );
+      if (workspaceGradeRunGetMatch) {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspaceId = decodeURIComponent(workspaceGradeRunGetMatch[1]);
+          const requestedGradeRunId = decodeURIComponent(
+            workspaceGradeRunGetMatch[2],
+          );
+          await logWorkspaceBotRoot(
+            `${WORKSPACES_API_BASE}/:id/grade/:runId`,
+            workspaceId,
+          );
+          await activateWorkspaceDeck(workspaceId);
+          const payload = await _buildWorkspaceReadModel(workspaceId, {
+            requestedTestDeckPath: url.searchParams.get("deckPath"),
+            requestedGradeRunId,
+          });
+          if ("error" in payload) {
+            return new Response(JSON.stringify({ error: payload.error }), {
+              status: payload.status,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(_safeJsonStringify(payload), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      const workspaceGetMatch = url.pathname.match(
+        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)$`),
+      );
+      if (workspaceGetMatch) {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspaceId = decodeURIComponent(workspaceGetMatch[1]);
+          await logWorkspaceBotRoot(`${WORKSPACES_API_BASE}/:id`, workspaceId);
+          await activateWorkspaceDeck(workspaceId);
+          const payload = await _buildWorkspaceReadModel(workspaceId, {
+            requestedTestDeckPath: url.searchParams.get("deckPath"),
+          });
+          if ("error" in payload) {
+            return new Response(JSON.stringify({ error: payload.error }), {
+              status: payload.status,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          return new Response(_safeJsonStringify(payload), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === `${WORKSPACE_API_BASE}/new`) {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          let onboarding = false;
+          try {
+            const body = await req.json() as { onboarding?: unknown };
+            onboarding = body.onboarding === true;
+          } catch {
+            // ignore malformed body
+          }
+          const workspace = await _createWorkspaceSession({ onboarding });
+          await activateWorkspaceDeck(workspace.id);
+          return new Response(
+            JSON.stringify({
+              workspaceId: workspace.id,
+              deckPath: workspace.rootDeckPath,
+              workspaceDir: workspace.rootDir,
+              createdAt: workspace.createdAt,
+              workspaceSchemaVersion: WORKSPACE_STATE_SCHEMA_VERSION,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === `${WORKSPACE_API_BASE}/delete`) {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          const workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            throw new Error("Missing workspaceId");
+          }
+          const deleted = _deleteSessionState(workspaceId);
+          if (!deleted) {
+            return new Response(
+              JSON.stringify({ error: "Workspace not found" }),
+              { status: 404, headers: { "content-type": "application/json" } },
+            );
+          }
+          stopWorkspaceFsWatcher(workspaceId);
+          workspaceById.delete(workspaceId);
+          buildBotRuns.delete(workspaceId);
+          return new Response(
+            JSON.stringify({
+              workspaceId,
+              deleted: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === `${WORKSPACE_API_BASE}/feedback`) {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as {
+            workspaceId?: string;
+            runId?: string;
+            messageRefId?: string;
+            score?: number | null;
+            reason?: string;
+          };
+          const workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            throw new Error("Missing workspaceId");
+          }
+          if (!body.messageRefId) {
+            throw new Error("Missing messageRefId");
+          }
+          if (
+            body.score !== null &&
+            (typeof body.score !== "number" || Number.isNaN(body.score))
+          ) {
+            throw new Error("Invalid score");
+          }
+          const state = readSessionState(workspaceId);
+          if (!state) {
+            throw new Error("Workspace not found");
+          }
+          const requestedRunId = typeof body.runId === "string" &&
+              body.runId.trim().length > 0
+            ? body.runId.trim()
+            : undefined;
+          const feedbackEligible = _isFeedbackEligibleMessageRef(
+            state,
+            body.messageRefId,
+          ) ||
+            (requestedRunId
+              ? _isFeedbackEligiblePersistedTestRunMessageRef(
+                state,
+                requestedRunId,
+                body.messageRefId,
+              )
+              : false);
+          if (!feedbackEligible) {
+            throw new Error("Feedback target is not eligible");
+          }
+          const existing = state.feedback ?? [];
+          const idx = existing.findIndex((entry) =>
+            entry.messageRefId === body.messageRefId
+          );
+          let entry: FeedbackEntry | undefined;
+          let feedback: Array<FeedbackEntry> = existing;
+          let deleted = false;
+          if (body.score === null) {
+            if (idx >= 0) {
+              feedback = existing.filter((_, i) => i !== idx);
+              deleted = true;
+            }
+          } else {
+            const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
+            const reason = typeof body.reason === "string"
+              ? body.reason
+              : idx >= 0
+              ? existing[idx].reason
+              : undefined;
+            const runId = requestedRunId ??
+              (typeof state.runId === "string" ? state.runId : "session");
+            const scenarioRunId = requestedRunId ??
+              (typeof state.meta?.scenarioRunId === "string"
+                ? state.meta.scenarioRunId
+                : runId);
+            const now = new Date().toISOString();
+            entry = idx >= 0
+              ? {
+                ...existing[idx],
+                score: clamped,
+                reason,
+                runId: existing[idx].runId ?? runId,
+              }
+              : {
+                id: randomId("fb"),
+                runId,
+                messageRefId: body.messageRefId,
+                score: clamped,
+                reason,
+                createdAt: now,
+              };
+            if (entry) {
+              (entry as Record<string, unknown>).workspaceId = workspaceId;
+              (entry as Record<string, unknown>).scenarioRunId = scenarioRunId;
+            }
+            feedback = idx >= 0
+              ? existing.map((item, i) => i === idx ? entry! : item)
+              : [...existing, entry];
+          }
+          const nextState = persistSessionState({
+            ...state,
+            feedback,
+          });
+          appendSessionEvent(nextState, {
+            type: "feedback.update",
+            kind: "artifact",
+            category: "feedback",
+            workspaceId,
+            scenarioRunId: typeof nextState.meta?.scenarioRunId === "string"
+              ? nextState.meta.scenarioRunId
+              : nextState.runId,
+            messageRefId: body.messageRefId,
+            feedback: entry,
+            deleted,
+          });
+          const testBotRunId = typeof nextState.meta?.testBotRunId === "string"
+            ? nextState.meta.testBotRunId
+            : undefined;
+          if (testBotRunId) {
+            const testEntry = testBotRuns.get(testBotRunId);
+            if (testEntry) {
+              syncTestBotRunFromState(testEntry.run, nextState);
+              broadcastTestBot(
+                { type: "testBotStatus", run: testEntry.run },
+                workspaceId,
+              );
+            }
+          }
+          return new Response(
+            JSON.stringify({
+              workspaceId,
+              feedback: entry,
+              saved: !deleted,
+              deleted,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/test") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspaceId = getWorkspaceIdFromQuery(url);
+          await logWorkspaceBotRoot("/api/test", workspaceId);
+          if (workspaceId) {
+            await activateWorkspaceDeck(workspaceId);
+          }
+          await deckLoadPromise.catch(() => null);
+          const requestedDeck = url.searchParams.get("deckPath");
+          const selection = requestedDeck
+            ? resolveTestDeck(requestedDeck)
+            : availableTestDecks[0];
+          if (requestedDeck && !selection) {
+            return new Response(
+              JSON.stringify({ error: "Unknown scenario deck selection" }),
+              { status: 400, headers: { "content-type": "application/json" } },
+            );
+          }
+          if (!selection) {
+            return new Response(
+              JSON.stringify({
+                botPath: null,
+                botLabel: null,
+                botDescription: null,
+                selectedDeckId: null,
+                inputSchema: null,
+                inputSchemaError: null,
+                defaults: {},
+                testDecks: availableTestDecks,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          const schemaDesc = await describeDeckInputSchemaFromPath(
+            selection.path,
+          );
+          return new Response(
+            JSON.stringify({
+              botPath: selection.path,
+              botLabel: selection.label,
+              botDescription: selection.description,
+              selectedDeckId: selection.id,
+              inputSchema: schemaDesc.schema,
+              inputSchemaError: schemaDesc.error,
+              defaults: { input: schemaDesc.defaults },
+              testDecks: availableTestDecks,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/test/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          let workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            const created = await _createWorkspaceSession();
+            workspaceId = created.id;
+          }
+          _ensureWorkspaceSession(workspaceId);
+          await logWorkspaceBotRoot("/api/test/run", workspaceId);
+          await activateWorkspaceDeck(workspaceId);
+          let run = await startWorkspaceScenarioRunForGraphql({
+            workspaceId,
+            scenarioDeckId: typeof body.botDeckPath === "string"
+              ? body.botDeckPath
+              : typeof body.scenarioDeckId === "string"
+              ? body.scenarioDeckId
+              : null,
+            scenarioInput: body.botInput,
+            assistantInit: body.context ?? body.init,
+          });
+          const initialUserMessage = typeof body.initialUserMessage === "string"
+            ? body.initialUserMessage.trim()
+            : "";
+          if (initialUserMessage.length > 0) {
+            run = await sendWorkspaceScenarioRunForGraphql({
+              workspaceId,
+              runId: run.id,
+              message: initialUserMessage,
+            });
+          }
+          const liveRun = testBotRuns.get(run.id)?.run;
+          const runPayload = liveRun?.maxTurns !== undefined
+            ? { ...run, maxTurns: liveRun.maxTurns }
+            : run;
+          return new Response(JSON.stringify({ run: runPayload }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/test/message") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          let workspaceId = _getWorkspaceIdFromBody(body);
+          const requestedRunId = typeof body.runId === "string"
+            ? body.runId.trim()
+            : "";
+          if (!workspaceId && requestedRunId) {
+            const active = testBotRuns.get(requestedRunId)?.run;
+            workspaceId = active?.workspaceId ?? active?.sessionId;
+          }
+          if (!workspaceId) {
+            const created = await _createWorkspaceSession();
+            workspaceId = created.id;
+          }
+          _ensureWorkspaceSession(workspaceId);
+          await logWorkspaceBotRoot("/api/test/message", workspaceId);
+          await activateWorkspaceDeck(workspaceId);
+          const existingRun = requestedRunId.length > 0
+            ? readWorkspaceScenarioRunsForGraphql(workspaceId).find((run) =>
+              run.id === requestedRunId
+            )
+            : undefined;
+          let runId = existingRun?.id;
+          if (!runId) {
+            const started = await startWorkspaceScenarioRunForGraphql({
+              runId: requestedRunId || undefined,
+              workspaceId,
+              scenarioDeckId: typeof body.botDeckPath === "string"
+                ? body.botDeckPath
+                : typeof body.scenarioDeckId === "string"
+                ? body.scenarioDeckId
+                : null,
+              scenarioInput: body.botInput,
+              assistantInit: body.context ?? body.init,
+            });
+            runId = started.id;
+            const initialMessage = typeof body.message === "string"
+              ? body.message.trim()
+              : "";
+            if (initialMessage.length === 0) {
+              const liveStarted = testBotRuns.get(started.id)?.run;
+              const startedPayload = liveStarted?.maxTurns !== undefined
+                ? { ...started, maxTurns: liveStarted.maxTurns }
+                : started;
+              return new Response(JSON.stringify({ run: startedPayload }), {
+                headers: { "content-type": "application/json" },
+              });
+            }
+          }
+          const message = typeof body.message === "string" ? body.message : "";
+          const run = await sendWorkspaceScenarioRunForGraphql({
+            workspaceId,
+            runId,
+            message,
+          });
+          const liveRun = testBotRuns.get(run.id)?.run;
+          const runPayload = liveRun?.maxTurns !== undefined
+            ? { ...run, maxTurns: liveRun.maxTurns }
+            : run;
+          return new Response(JSON.stringify({ run: runPayload }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/test/stop") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as {
+            runId?: unknown;
+            workspaceId?: unknown;
+          };
+          const runId = typeof body.runId === "string" ? body.runId : "";
+          if (!runId) {
+            return new Response(
+              JSON.stringify({
+                stopped: false,
+                run: {
+                  id: "",
+                  status: "idle",
+                  messages: [],
+                  traces: [],
+                  toolInserts: [],
+                },
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          const existing = testBotRuns.get(runId);
+          const workspaceId = typeof body.workspaceId === "string"
+            ? body.workspaceId
+            : existing?.run.workspaceId ?? existing?.run.sessionId;
+          const wasRunning = Boolean(existing?.promise);
+          if (!workspaceId) {
+            existing?.abort?.abort();
+            return new Response(
+              JSON.stringify({
+                stopped: wasRunning,
+                run: existing?.run ?? {
+                  id: runId,
+                  status: "idle",
+                  messages: [],
+                  traces: [],
+                  toolInserts: [],
+                },
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          const run = await stopWorkspaceScenarioRunForGraphql({
+            workspaceId,
+            runId,
+          });
+          return new Response(JSON.stringify({ stopped: wasRunning, run }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (
+        url.pathname === "/api/codex/trust-workspace" ||
+        url.pathname === "/api/build/provider-status"
+      ) {
+        if (req.method !== "GET" && req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const isLegacyCodexTrustEndpoint =
+          url.pathname === "/api/codex/trust-workspace";
+        let provider = "codex-cli";
+        let workspaceId: string | undefined;
+        let online = true;
+        if (req.method === "POST") {
+          try {
+            const body = await req.json() as {
+              workspaceId?: unknown;
+              online?: unknown;
+              provider?: unknown;
+            };
+            if (typeof body.workspaceId === "string") {
+              workspaceId = body.workspaceId;
+            }
+            if (
+              !isLegacyCodexTrustEndpoint &&
+              body.provider === "claude-code-cli"
+            ) {
+              provider = "claude-code-cli";
+            }
+            if (
+              body.online === true ||
+              body.online === "true" ||
+              body.online === 1 ||
+              body.online === "1"
+            ) {
+              online = true;
+            } else if (
+              body.online === false ||
+              body.online === "false" ||
+              body.online === 0 ||
+              body.online === "0" ||
+              body.online === "no"
+            ) {
+              online = false;
+            }
+          } catch {
+            // Ignore malformed body and fall back to query/default workspace.
+          }
+        }
+        if (!workspaceId) {
+          workspaceId = getWorkspaceIdFromQuery(url);
+        }
+        if (
+          !isLegacyCodexTrustEndpoint &&
+          url.searchParams.get("provider") === "claude-code-cli"
+        ) {
+          provider = "claude-code-cli";
+        }
+        const onlineQuery = url.searchParams.get("online");
+        if (
+          onlineQuery === "1" || onlineQuery === "true" ||
+          onlineQuery === "yes"
+        ) {
+          online = true;
+        } else if (
+          onlineQuery === "0" || onlineQuery === "false" ||
+          onlineQuery === "no"
+        ) {
+          online = false;
+        }
+        try {
+          await logWorkspaceBotRoot(url.pathname, workspaceId);
+          if (!isLegacyCodexTrustEndpoint && provider === "claude-code-cli") {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                provider,
+                loggedIn: false,
+                loginStatus:
+                  "Claude Code status check is not yet supported in this build.",
+                writeEnabled: false,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          const result = await readCodexWorkspaceStatus(workspaceId, online);
+          if (!isLegacyCodexTrustEndpoint) {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                provider,
+                loggedIn: result.codexLoggedIn,
+                loginStatus: result.codexLoginStatus,
+                writeEnabled: result.writeEnabled,
+                trustedPath: result.trustedPath,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              ...result,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(
+            JSON.stringify({ ok: false, error: message }),
+            { status: 400, headers: { "content-type": "application/json" } },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/simulator/run") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          const requestedWorkspaceId = _getWorkspaceIdFromBody(body);
+          let workspaceId = requestedWorkspaceId;
+          if (!workspaceId) {
+            const created = await _createWorkspaceSession();
+            workspaceId = created.id;
+          }
+          if (requestedWorkspaceId) {
+            try {
+              readSessionStateStrict(requestedWorkspaceId, {
+                withTraces: true,
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              return new Response(JSON.stringify({ error: message }), {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              });
+            }
+          }
+          _ensureWorkspaceSession(workspaceId);
+          await logWorkspaceBotRoot(url.pathname, workspaceId);
+          await activateWorkspaceDeck(workspaceId);
+          let run = await startWorkspaceScenarioRunForGraphql({
+            workspaceId,
+            scenarioDeckId: typeof body.botDeckPath === "string"
+              ? body.botDeckPath
+              : typeof body.scenarioDeckId === "string"
+              ? body.scenarioDeckId
+              : null,
+            scenarioInput: body.botInput,
+            assistantInit: body.context ?? body.init ??
+              (typeof body.input === "string"
+                ? JSON.stringify(body.input)
+                : body.input),
+          });
+          const initialUserMessage = typeof body.message === "string"
+            ? body.message.trim()
+            : "";
+          if (initialUserMessage.length > 0) {
+            run = await sendWorkspaceScenarioRunForGraphql({
+              workspaceId,
+              runId: run.id,
+              message: initialUserMessage,
+            });
+          }
+          const liveRun = testBotRuns.get(run.id)?.run;
+          const runPayload = liveRun?.maxTurns !== undefined
+            ? { ...run, maxTurns: liveRun.maxTurns }
+            : run;
+          return new Response(
+            JSON.stringify({
+              run: runPayload,
+              runId: run.id,
+              workspaceId,
+            }),
+            {
+              headers: { "content-type": "application/json" },
+            },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/message") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          let workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId && typeof body.runId === "string") {
+            workspaceId = body.runId;
+          }
+          if (!workspaceId) {
+            const created = await _createWorkspaceSession();
+            workspaceId = created.id;
+          }
+          _ensureWorkspaceSession(workspaceId);
+          await logWorkspaceBotRoot(url.pathname, workspaceId);
+          await activateWorkspaceDeck(workspaceId);
+          const message = typeof body.message === "string"
+            ? body.message
+            : typeof body.input === "string"
+            ? body.input
+            : "";
+          const run = startWorkspaceBuildRun({
+            workspaceId,
+            message,
+          });
+          return new Response(JSON.stringify({ run }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          const status = message.includes("already in progress") ? 409 : 400;
+          return new Response(JSON.stringify({ error: message }), {
+            status,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/stop") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          const workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            throw new Error("Missing workspaceId");
+          }
+          const active = buildBotRuns.get(workspaceId);
+          const wasRunning = Boolean(active?.promise);
+          const runId = active?.run.id ??
+            readWorkspaceBuildRunForGraphql(workspaceId).id;
+          const run = await stopWorkspaceBuildRun({
+            workspaceId,
+            runId,
+          });
+          return new Response(JSON.stringify({ stopped: wasRunning, run }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/reset") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          const workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            throw new Error("Missing workspaceId");
+          }
+          const run = await resetWorkspaceBuild(workspaceId);
+          return new Response(JSON.stringify({ reset: true, run }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/files") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const workspaceId = getWorkspaceIdFromQuery(url) ??
+            activeWorkspaceId ??
+            "";
+          await logWorkspaceBotRoot("/api/build/files", workspaceId);
+          const root = await resolveBuildBotRoot(workspaceId);
+          const records = await readWorkspaceFiles({
+            workspaceId: asGambitID(workspaceId),
+          });
+          const entries = records.map((record) => ({
+            path: record.path,
+            type: "file" as const,
+            size: typeof record.size === "number" ? record.size : undefined,
+            modifiedAt: record.modifiedAt ?? undefined,
+          }));
+          return new Response(JSON.stringify({ root, entries }), {
+            headers: { "content-type": "application/json" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/file") {
+        if (req.method !== "GET") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        const workspaceId = getWorkspaceIdFromQuery(url) ?? activeWorkspaceId ??
+          "";
+        await logWorkspaceBotRoot("/api/build/file", workspaceId);
+        const inputPath = url.searchParams.get("path") ?? "";
+        if (!inputPath) {
+          return new Response(JSON.stringify({ error: "Missing path" }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        try {
+          const root = await resolveBuildBotRoot(workspaceId);
+          const resolved = await resolveBuildBotPath(root, inputPath);
+          if (!resolved.stat.isFile) {
+            return new Response(
+              JSON.stringify({ error: "Path is not a file" }),
+              {
+                status: 400,
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          if (
+            typeof resolved.stat.size === "number" &&
+            resolved.stat.size > MAX_FILE_PREVIEW_BYTES
+          ) {
+            return new Response(
+              JSON.stringify({
+                path: resolved.relativePath,
+                tooLarge: true,
+                size: resolved.stat.size,
+              }),
+              {
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          const bytes = await Deno.readFile(resolved.fullPath);
+          const text = readPreviewText(bytes);
+          if (text === null) {
+            return new Response(
+              JSON.stringify({
+                path: resolved.relativePath,
+                binary: true,
+                size: resolved.stat.size,
+              }),
+              {
+                headers: { "content-type": "application/json" },
+              },
+            );
+          }
+          return new Response(
+            JSON.stringify({
+              path: resolved.relativePath,
+              contents: text,
+              size: resolved.stat.size,
+            }),
+            {
+              headers: { "content-type": "application/json" },
+            },
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname.startsWith("/api/")) {
+        return new Response("Not found", { status: 404 });
+      }
+      if (url.pathname === "/graphql/streams") {
+        return handleGraphqlStreamMultiplexRequest(req);
+      }
+      if (url.pathname.startsWith(GRAPHQL_STREAMS_PREFIX)) {
         return handleDurableStreamRequest(req);
+      }
+      const simulatorGraphqlOperations: SimulatorGraphqlOperations = {
+        listWorkspaces: () => Promise.resolve(listSessions()),
+        createWorkspace: async () => {
+          const created = await _createWorkspaceSession();
+          return { workspaceId: created.id };
+        },
+        deleteWorkspace: (workspaceId: string) => {
+          const deleted = _deleteSessionState(workspaceId);
+          if (deleted) {
+            stopWorkspaceFsWatcher(workspaceId);
+            workspaceById.delete(workspaceId);
+            buildBotRuns.delete(workspaceId);
+          }
+          return Promise.resolve({ ok: deleted });
+        },
+        readWorkspaceBuildRun: (workspaceId: string) =>
+          Promise.resolve(readWorkspaceBuildRunForGraphql(workspaceId)),
+        createWorkspaceBuildRun: async (
+          workspaceId: string,
+          message: string,
+        ) => await startWorkspaceBuildRun({ workspaceId, message }),
+        stopWorkspaceBuildRun: async (workspaceId: string, runId: string) =>
+          await stopWorkspaceBuildRun({ workspaceId, runId }),
+        resetWorkspaceBuild: async (workspaceId: string) =>
+          await resetWorkspaceBuild(workspaceId),
+        createWorkspaceScenarioRun: async (args: {
+          workspaceId: string;
+          scenarioDeckId?: string | null;
+          scenarioInput?: unknown;
+          assistantInit?: unknown;
+        }) => await startWorkspaceScenarioRunForGraphql(args),
+        sendWorkspaceScenarioRun: async (args: {
+          workspaceId: string;
+          runId: string;
+          message: string;
+        }) => await sendWorkspaceScenarioRunForGraphql(args),
+        stopWorkspaceScenarioRun: async (args: {
+          workspaceId: string;
+          runId: string;
+        }) => await stopWorkspaceScenarioRunForGraphql(args),
+        readWorkspaceScenarioRuns: async (workspaceId: string) =>
+          await readWorkspaceScenarioRunsForGraphql(workspaceId),
+        readWorkspaceModelStatus: async (args: {
+          workspaceId: string;
+          model: "codex";
+          checkOnline?: boolean;
+        }) => {
+          if (args.model !== "codex") {
+            return {
+              model: args.model,
+              workspaceId: args.workspaceId,
+              available: false,
+              requiresLogin: false,
+              loggedIn: false,
+              statusText: "Model status is unavailable.",
+              writeEnabled: false,
+            };
+          }
+          const status = await readCodexWorkspaceStatus(
+            args.workspaceId,
+            args.checkOnline,
+          );
+          return {
+            model: "codex" as const,
+            workspaceId: args.workspaceId,
+            available: status.writeEnabled && status.codexLoggedIn,
+            requiresLogin: !status.codexLoggedIn,
+            loggedIn: status.codexLoggedIn,
+            statusText: status.codexLoginStatus,
+            trustedPath: status.trustedPath,
+            writeEnabled: status.writeEnabled,
+          };
+        },
+        listWorkspaceGraderDecks: async (workspaceId: string) => {
+          await activateWorkspaceDeck(workspaceId, {
+            source: "graphql:listWorkspaceGraderDecks",
+          });
+          return availableGraderDecks.map((deck) => ({
+            id: deck.id,
+            label: deck.label,
+            description: deck.description,
+            path: deck.path,
+          }));
+        },
+        readWorkspaceGradeRuns: async (workspaceId: string) =>
+          await readWorkspaceGradeRunsForGraphql(workspaceId),
+        readWorkspaceGradingFlags: async (workspaceId: string) =>
+          await readWorkspaceGradingFlagsForGraphql(workspaceId),
+        createWorkspaceGradeRun: async (args: {
+          workspaceId: string;
+          graderId: string;
+          scenarioRunId?: string | null;
+        }) => await createWorkspaceGradeRunForGraphql(args),
+        toggleWorkspaceGradeFlag: async (args: {
+          workspaceId: string;
+          refId: string;
+          runId: string;
+          turnIndex?: number | null;
+        }) => await toggleWorkspaceGradeFlagForGraphql(args),
+        updateWorkspaceGradeFlagReason: async (args: {
+          workspaceId: string;
+          refId: string;
+          reason: string;
+        }) => await updateWorkspaceGradeFlagReasonForGraphql(args),
+        readWorkspaceVerifyBatches: async (workspaceId: string) =>
+          await readWorkspaceVerifyBatchesForGraphql(workspaceId),
+        createWorkspaceVerifyBatchRun: async (args: {
+          workspaceId: string;
+          graderId: string;
+          scenarioRunId?: string | null;
+          batchSize: number;
+          concurrency: number;
+        }) => await createWorkspaceVerifyBatchRunForGraphql(args),
+        listWorkspaceScenarioDecks: async (workspaceId: string) => {
+          logWorkspaceRefreshDebug("graphql.scenarioDecks.list.begin", {
+            workspaceId,
+            resolvedDeckPath,
+            ...summarizeScenarioDeckRegistry(),
+          });
+          await activateWorkspaceDeck(workspaceId, {
+            source: "graphql:listWorkspaceScenarioDecks",
+          });
+          logWorkspaceRefreshDebug("graphql.scenarioDecks.list.afterActivate", {
+            workspaceId,
+            resolvedDeckPath,
+            ...summarizeScenarioDeckRegistry(),
+          });
+          const enrichedDecks = await Promise.all(availableTestDecks.map(
+            async (deck) => {
+              const config = await readDeckGraphqlConfigCached(deck.path);
+              return {
+                id: deck.id,
+                label: deck.label,
+                description: deck.description,
+                path: deck.path,
+                maxTurns: deck.maxTurns,
+                inputSchema: config.inputSchema,
+                defaults: config.defaults,
+                inputSchemaError: config.inputSchemaError,
+              };
+            },
+          ));
+          const result = enrichedDecks.map((deck) => ({
+            id: deck.id,
+            label: deck.label,
+            description: deck.description,
+            path: deck.path,
+            maxTurns: deck.maxTurns,
+            inputSchema: deck.inputSchema,
+            defaults: deck.defaults,
+            inputSchemaError: deck.inputSchemaError,
+          }));
+          logWorkspaceRefreshDebug("graphql.scenarioDecks.list.return", {
+            workspaceId,
+            returnedDeckCount: result.length,
+            returnedDeckPaths: result.slice(0, 12).map((deck) => deck.path),
+          });
+          return result;
+        },
+        readWorkspaceAssistantDeck: async (workspaceId: string) => {
+          await activateWorkspaceDeck(workspaceId, {
+            source: "graphql:readWorkspaceAssistantDeck",
+          });
+          const primaryDeckPath = resolvedDeckPath;
+          return await readDeckGraphqlConfigCached(primaryDeckPath);
+        },
+      };
+      if (url.pathname === "/graphql/stream") {
+        return await handleGraphqlSubscriptionStreamRequest(req, {
+          readWorkspaceFiles,
+          ...simulatorGraphqlOperations,
+        });
+      }
+      if (url.pathname === "/graphql") {
+        return await gambitYoga.fetch(req, {
+          readWorkspaceFiles,
+          ...simulatorGraphqlOperations,
+        });
       }
       if (url.pathname === "/v1/responses") {
         if (req.method !== "POST") {
@@ -3704,2749 +7335,33 @@ export function startWebSocketSimulator(opts: {
         }
       }
 
-      const workspaceTestRunGetMatch = url.pathname.match(
-        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/test/([^/]+)$`),
-      );
-      if (workspaceTestRunGetMatch) {
-        if (req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        const workspaceId = decodeURIComponent(workspaceTestRunGetMatch[1]);
-        const requestedTestRunId = decodeURIComponent(
-          workspaceTestRunGetMatch[2],
-        );
-        await logWorkspaceBotRoot(
-          `${WORKSPACES_API_BASE}/:id/test/:runId`,
-          workspaceId,
-        );
-        await activateWorkspaceDeck(workspaceId);
-        const payload = await buildWorkspaceReadModel(workspaceId, {
-          requestedTestDeckPath: url.searchParams.get("deckPath"),
-          requestedTestRunId,
-        });
-        if ("error" in payload) {
-          return new Response(
-            JSON.stringify({ error: payload.error }),
-            {
-              status: payload.status,
-              headers: { "content-type": "application/json" },
-            },
-          );
-        }
-        return new Response(safeJsonStringify(payload), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      const workspaceGradeRunGetMatch = url.pathname.match(
-        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)/grade/([^/]+)$`),
-      );
-      if (workspaceGradeRunGetMatch) {
-        if (req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        const workspaceId = decodeURIComponent(workspaceGradeRunGetMatch[1]);
-        const requestedGradeRunId = decodeURIComponent(
-          workspaceGradeRunGetMatch[2],
-        );
-        await logWorkspaceBotRoot(
-          `${WORKSPACES_API_BASE}/:id/grade/:runId`,
-          workspaceId,
-        );
-        await activateWorkspaceDeck(workspaceId);
-        const payload = await buildWorkspaceReadModel(workspaceId, {
-          requestedTestDeckPath: url.searchParams.get("deckPath"),
-          requestedGradeRunId,
-        });
-        if ("error" in payload) {
-          return new Response(
-            JSON.stringify({ error: payload.error }),
-            {
-              status: payload.status,
-              headers: { "content-type": "application/json" },
-            },
-          );
-        }
-        return new Response(safeJsonStringify(payload), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      const workspaceGetMatch = url.pathname.match(
-        new RegExp(`^${WORKSPACES_API_BASE}/([^/]+)$`),
-      );
-      if (workspaceGetMatch) {
-        if (req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        const workspaceId = decodeURIComponent(workspaceGetMatch[1]);
-        await logWorkspaceBotRoot(`${WORKSPACES_API_BASE}/:id`, workspaceId);
-        await activateWorkspaceDeck(workspaceId);
-        const payload = await buildWorkspaceReadModel(workspaceId, {
-          requestedTestDeckPath: url.searchParams.get("deckPath"),
-        });
-        if ("error" in payload) {
-          return new Response(
-            JSON.stringify({ error: payload.error }),
-            {
-              status: payload.status,
-              headers: { "content-type": "application/json" },
-            },
-          );
-        }
-        return new Response(safeJsonStringify(payload), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      if (url.pathname === "/api/calibrate/run") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            graderId?: string;
-            scenarioRunId?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          await logWorkspaceBotRoot("/api/calibrate/run", workspaceId);
-          await activateWorkspaceDeck(workspaceId);
-          await deckLoadPromise.catch(() => null);
-          const grader = body.graderId
-            ? resolveGraderDeck(body.graderId)
-            : availableGraderDecks[0];
-          if (!grader) {
-            throw new Error("Unknown grader deck selection");
-          }
-          const sessionState = readSessionState(workspaceId);
-          if (!sessionState) {
-            throw new Error("Workspace not found");
-          }
-          const requestedScenarioRunId =
-            typeof body.scenarioRunId === "string" &&
-              body.scenarioRunId.trim().length > 0
-              ? body.scenarioRunId
-              : undefined;
-          const requestedLiveRun = requestedScenarioRunId
-            ? testBotRuns.get(requestedScenarioRunId)?.run
-            : undefined;
-          const requestedLiveRunMatchesWorkspace = Boolean(
-            requestedLiveRun &&
-              (requestedLiveRun.workspaceId === workspaceId ||
-                requestedLiveRun.sessionId === workspaceId),
-          );
-          const requestedPersistedRun = requestedScenarioRunId
-            ? readPersistedTestRunStatusById(
-              sessionState,
-              workspaceId,
-              requestedScenarioRunId,
-            )
-            : null;
-          const selectedScenarioRun = requestedLiveRunMatchesWorkspace
-            ? requestedLiveRun
-            : requestedPersistedRun;
-          if (requestedScenarioRunId && !selectedScenarioRun) {
-            throw new Error(
-              `Scenario run "${requestedScenarioRunId}" not found for workspace`,
-            );
-          }
-          const graderSchema = await describeDeckInputSchemaFromPath(
-            grader.path,
-          );
-          const runMode = schemaHasField(graderSchema.schema, "messageToGrade")
-            ? "turns"
-            : "conversation";
-          const metaForGrading = (() => {
-            const rawMeta = sessionState.meta;
-            if (!rawMeta || typeof rawMeta !== "object") return undefined;
-            const next = { ...(rawMeta as Record<string, unknown>) };
-            delete next.calibrationRuns;
-            delete next.gradingRuns;
-            return next;
-          })();
-          const conversationArtifacts = selectedScenarioRun
-            ? buildScenarioConversationArtifactsFromRun(selectedScenarioRun)
-            : buildScenarioConversationArtifacts(sessionState);
-          const conversationMessages = conversationArtifacts.messages;
-          const activeScenarioRunId = requestedScenarioRunId ??
-            (typeof sessionState.meta?.scenarioRunId === "string" &&
-                sessionState.meta.scenarioRunId.trim().length > 0
-              ? sessionState.meta.scenarioRunId
-              : undefined);
-          const sessionMetaForPayload = {
-            ...(metaForGrading ?? {}),
-            ...(activeScenarioRunId
-              ? {
-                scenarioRunId: activeScenarioRunId,
-                testBotRunId: activeScenarioRunId,
-              }
-              : {}),
-          };
-          const sessionPayload = {
-            messages: conversationMessages.length > 0
-              ? conversationMessages.map((msg) => ({
-                role: msg.role,
-                content: msg.content,
-                name: msg.name,
-              }))
-              : undefined,
-            meta: sessionMetaForPayload,
-            notes: sessionState.notes
-              ? { text: sessionState.notes.text }
-              : undefined,
-          };
-          const startedAt = new Date().toISOString();
-          const runId = randomId("cal");
-          let entry: GradingRunRecord;
-          const upsertCalibrationRun = (
-            nextEntry: GradingRunRecord,
-          ): SavedState => {
-            const latestState = readSessionState(workspaceId) ?? sessionState;
-            const previousRuns = Array.isArray(
-                (latestState.meta as { gradingRuns?: unknown })?.gradingRuns,
-              )
-              ? ((latestState.meta as { gradingRuns: Array<GradingRunRecord> })
-                .gradingRuns)
-              : Array.isArray(latestState.meta?.calibrationRuns)
-              ? (latestState.meta?.calibrationRuns as Array<GradingRunRecord>)
-              : [];
-            const index = previousRuns.findIndex((run) =>
-              run.id === nextEntry.id
-            );
-            const nextRuns = index >= 0
-              ? previousRuns.map((run, i) => (i === index ? nextEntry : run))
-              : [...previousRuns, nextEntry];
-            const nextState = persistSessionState({
-              ...latestState,
-              meta: {
-                ...(latestState.meta ?? {}),
-                gradingRuns: nextRuns,
-              },
-            });
-            appendGradingLog(nextState, {
-              type: "grading.run",
-              run: nextEntry,
-            });
-            const sessionMeta = buildSessionMeta(workspaceId, nextState);
-            appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
-              type: "calibrateSession",
-              workspaceId,
-              run: nextEntry,
-              session: sessionMeta,
-            });
-            appendDurableStreamEvent(GRADE_STREAM_ID, {
-              type: "calibrateSession",
-              workspaceId,
-              run: nextEntry,
-              session: sessionMeta,
-            });
-            return nextState;
-          };
-          try {
-            const result = await (async () => {
-              if (runMode !== "turns") {
-                entry = {
-                  id: runId,
-                  workspaceId,
-                  graderId: grader.id,
-                  graderPath: grader.path,
-                  graderLabel: grader.label,
-                  status: "running",
-                  runAt: startedAt,
-                  gradingRunId: runId,
-                  input: { session: sessionPayload },
-                };
-                upsertCalibrationRun(entry);
-                return await runDeckWithFallback({
-                  path: grader.path,
-                  input: { session: sessionPayload },
-                  inputProvided: true,
-                  modelProvider: opts.modelProvider,
-                  allowRootStringInput: false,
-                  initialUserMessage: undefined,
-                  stream: false,
-                  responsesMode: opts.responsesMode,
-                });
-              }
-              const messages = sessionPayload.messages ?? [];
-              const assistantTurns = conversationArtifacts.assistantTurns;
-              const totalTurns = assistantTurns.length;
-              const turns: Array<{
-                index: number;
-                gradingRunId: string;
-                artifactRevisionId: string;
-                messageRefId?: string;
-                message: unknown;
-                input: unknown;
-                result: unknown;
-              }> = [];
-              entry = {
-                id: runId,
-                workspaceId,
-                graderId: grader.id,
-                graderPath: grader.path,
-                graderLabel: grader.label,
-                status: "running",
-                runAt: startedAt,
-                gradingRunId: runId,
-                input: { session: sessionPayload },
-                result: { mode: "turns", totalTurns, turns: [] },
-              };
-              upsertCalibrationRun(entry);
-              if (totalTurns === 0) {
-                return { mode: "turns", totalTurns, turns: [] };
-              }
-              for (const turnEntry of assistantTurns) {
-                const msg = turnEntry.message;
-                const idx = turnEntry.conversationIndex;
-                const input = {
-                  session: {
-                    ...sessionPayload,
-                    messages: messages.slice(0, idx + 1),
-                  },
-                  messageToGrade: msg,
-                };
-                const turnResult = await runDeckWithFallback({
-                  path: grader.path,
-                  input,
-                  inputProvided: true,
-                  modelProvider: opts.modelProvider,
-                  allowRootStringInput: false,
-                  initialUserMessage: undefined,
-                  stream: false,
-                  responsesMode: opts.responsesMode,
-                });
-                turns.push({
-                  index: idx,
-                  gradingRunId: runId,
-                  artifactRevisionId: randomId("grade-rev"),
-                  messageRefId: turnEntry.messageRefId,
-                  message: msg,
-                  input,
-                  result: turnResult,
-                });
-                entry = {
-                  ...entry,
-                  result: { mode: "turns", totalTurns, turns: [...turns] },
-                };
-                upsertCalibrationRun(entry);
-              }
-              return { mode: "turns", totalTurns, turns };
-            })();
-            entry = {
-              id: runId,
-              workspaceId,
-              graderId: grader.id,
-              graderPath: grader.path,
-              graderLabel: grader.label,
-              status: "completed",
-              runAt: startedAt,
-              gradingRunId: runId,
-              input: { session: sessionPayload },
-              result,
-            };
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            logger.error("[sim] calibrate run failed", {
-              workspaceId,
-              runId,
-              runMode,
-              graderId: grader.id,
-              graderPath: grader.path,
-              error: message,
-              stack: err instanceof Error ? err.stack : undefined,
-            });
-            entry = {
-              id: runId,
-              workspaceId,
-              graderId: grader.id,
-              graderPath: grader.path,
-              graderLabel: grader.label,
-              status: "error",
-              runAt: startedAt,
-              gradingRunId: runId,
-              input: { session: sessionPayload },
-              error: message,
-            };
-          }
-          const nextState = upsertCalibrationRun(entry);
-          const sessionMeta = buildSessionMeta(workspaceId, nextState);
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              run: entry,
-              session: sessionMeta,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          logger.error("[sim] /api/calibrate/run request failed", {
-            error: message,
-            stack: err instanceof Error ? err.stack : undefined,
-          });
-          return new Response(
-            JSON.stringify({
-              error: message,
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/calibrate/flag") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            refId?: string;
-            runId?: string;
-            turnIndex?: number;
-            reason?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId || !body.refId) {
-            throw new Error("Missing workspaceId or refId");
-          }
-          await logWorkspaceBotRoot("/api/calibrate/flag", workspaceId);
-          const state = readSessionState(workspaceId);
-          if (!state) {
-            throw new Error("Workspace not found");
-          }
-          const meta = (state.meta && typeof state.meta === "object")
-            ? { ...(state.meta as Record<string, unknown>) }
-            : {};
-          const existingFlags = Array.isArray(
-              (meta as { gradingFlags?: unknown }).gradingFlags,
-            )
-            ? ((meta as { gradingFlags: Array<GradingFlag> }).gradingFlags)
-            : [];
-          const flagIndex = existingFlags.findIndex((flag) =>
-            flag?.refId === body.refId
-          );
-          let nextFlags: Array<GradingFlag>;
-          let flagged = false;
-          let flagEntry: GradingFlag | undefined;
-          if (flagIndex >= 0) {
-            flagEntry = existingFlags[flagIndex];
-            nextFlags = existingFlags.filter((_, idx) => idx !== flagIndex);
-            flagged = false;
-          } else {
-            const now = new Date().toISOString();
-            flagEntry = {
-              id: randomId("flag"),
-              refId: body.refId,
-              runId: body.runId,
-              turnIndex: body.turnIndex,
-              reason: body.reason?.trim() || undefined,
-              createdAt: now,
-            };
-            nextFlags = [
-              ...existingFlags,
-              flagEntry,
-            ];
-            flagged = true;
-          }
-          const updated = persistSessionState({
-            ...state,
-            meta: {
-              ...meta,
-              gradingFlags: nextFlags,
-            },
-          });
-          appendGradingLog(updated, {
-            type: "grading.flag",
-            flagged,
-            flag: flagEntry,
-            refId: body.refId,
-          });
-          const sessionMeta = buildSessionMeta(workspaceId, updated);
-          appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
-            type: "calibrateSession",
-            workspaceId,
-            session: sessionMeta,
-          });
-          appendDurableStreamEvent(GRADE_STREAM_ID, {
-            type: "calibrateSession",
-            workspaceId,
-            session: sessionMeta,
-          });
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              flagged,
-              flags: nextFlags,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/calibrate/flag/reason") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            refId?: string;
-            reason?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId || !body.refId) {
-            throw new Error("Missing workspaceId or refId");
-          }
-          await logWorkspaceBotRoot("/api/calibrate/flag/reason", workspaceId);
-          const state = readSessionState(workspaceId);
-          if (!state) {
-            throw new Error("Workspace not found");
-          }
-          const meta = (state.meta && typeof state.meta === "object")
-            ? { ...(state.meta as Record<string, unknown>) }
-            : {};
-          const existingFlags = Array.isArray(
-              (meta as { gradingFlags?: unknown }).gradingFlags,
-            )
-            ? ((meta as { gradingFlags: Array<GradingFlag> }).gradingFlags)
-            : [];
-          const flagIndex = existingFlags.findIndex((flag) =>
-            flag?.refId === body.refId
-          );
-          if (flagIndex < 0) {
-            throw new Error("Flag not found");
-          }
-          const updatedFlag: GradingFlag = {
-            ...existingFlags[flagIndex],
-            reason: body.reason?.trim() || undefined,
-          };
-          const nextFlags = existingFlags.map((flag, idx) =>
-            idx === flagIndex ? updatedFlag : flag
-          );
-          const updated = persistSessionState({
-            ...state,
-            meta: {
-              ...meta,
-              gradingFlags: nextFlags,
-            },
-          });
-          appendGradingLog(updated, {
-            type: "grading.flag.reason",
-            flag: updatedFlag,
-            refId: body.refId,
-          });
-          const sessionMeta = buildSessionMeta(workspaceId, updated);
-          appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
-            type: "calibrateSession",
-            workspaceId,
-            session: sessionMeta,
-          });
-          appendDurableStreamEvent(GRADE_STREAM_ID, {
-            type: "calibrateSession",
-            workspaceId,
-            session: sessionMeta,
-          });
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              flags: nextFlags,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      const gradingReferenceResponse = await handleGradingReferenceRoute({
-        url,
-        req,
-        getWorkspaceIdFromBody,
-        logWorkspaceBotRoot,
-        readSessionState,
-        persistSessionState,
-        appendGradingLog,
-        buildSessionMeta,
-        appendDurableStreamEvent,
-        workspaceStreamId: WORKSPACE_STREAM_ID,
-        gradeStreamId: GRADE_STREAM_ID,
-        parseFiniteInteger,
-        randomId,
-      });
-      if (gradingReferenceResponse) return gradingReferenceResponse;
-
-      if (url.pathname === "/api/test") {
-        if (req.method === "GET") {
-          const workspaceId = getWorkspaceIdFromQuery(url);
-          await logWorkspaceBotRoot("/api/test", workspaceId);
-          await activateWorkspaceDeck(workspaceId);
-          await deckLoadPromise.catch(() => null);
-          const requestedDeck = url.searchParams.get("deckPath");
-          const selection = requestedDeck
-            ? resolveTestDeck(requestedDeck)
-            : availableTestDecks[0];
-          if (requestedDeck && !selection) {
-            return new Response(
-              JSON.stringify({
-                error: "Unknown scenario deck selection",
-              }),
-              {
-                status: 400,
-                headers: { "content-type": "application/json" },
-              },
-            );
-          }
-          if (selection) {
-            const schemaDesc = await describeDeckInputSchemaFromPath(
-              selection.path,
-            );
-            return new Response(
-              JSON.stringify({
-                botPath: selection.path,
-                botLabel: selection.label,
-                botDescription: selection.description,
-                selectedDeckId: selection.id,
-                inputSchema: schemaDesc.schema,
-                inputSchemaError: schemaDesc.error,
-                defaults: { input: schemaDesc.defaults },
-                testDecks: availableTestDecks,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          return new Response(
-            JSON.stringify({
-              botPath: null,
-              botLabel: null,
-              botDescription: null,
-              selectedDeckId: null,
-              inputSchema: null,
-              inputSchemaError: null,
-              defaults: {},
-              testDecks: availableTestDecks,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        }
-        return new Response("Method not allowed", { status: 405 });
-      }
-
-      if (url.pathname === "/api/test/run") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let maxTurnsOverride: number | undefined = undefined;
-        let deckInput: unknown = undefined;
-        let botInput: unknown = undefined;
-        let initialUserMessage: string | undefined = undefined;
-        let botDeckSelection: AvailableTestDeck | undefined;
-        let requestedBotDeckPath: string | undefined;
-        let hasExplicitBotDeckPath = false;
-        let inheritBotInput = false;
-        let userProvidedDeckInput = false;
-        let initFillRequestMissing: Array<string> | undefined = undefined;
-        let sessionId: string | undefined = undefined;
-        try {
-          const body = await req.json() as {
-            maxTurns?: number;
-            init?: unknown;
-            context?: unknown;
-            botInput?: unknown;
-            initialUserMessage?: unknown;
-            botDeckPath?: unknown;
-            inheritBotInput?: unknown;
-            initFill?: { missing?: unknown };
-            workspaceId?: string;
-          };
-          if (
-            typeof body.maxTurns === "number" && Number.isFinite(body.maxTurns)
-          ) {
-            maxTurnsOverride = body.maxTurns;
-          }
-          deckInput = body.context ?? body.init;
-          if (body.context !== undefined || body.init !== undefined) {
-            userProvidedDeckInput = true;
-          }
-          if (body.init !== undefined && body.context === undefined) {
-            logger.warn(
-              '[gambit] Received deprecated "init" field in test API; use "context" instead.',
-            );
-          }
-          botInput = body.botInput;
-          if (typeof body.inheritBotInput === "boolean") {
-            inheritBotInput = body.inheritBotInput;
-          }
-          if (body.initFill && Array.isArray(body.initFill.missing)) {
-            initFillRequestMissing = body.initFill.missing.filter((entry) =>
-              typeof entry === "string" && entry.trim().length > 0
-            ) as Array<string>;
-          }
-          sessionId = getWorkspaceIdFromBody(body);
-          hasExplicitBotDeckPath = "botDeckPath" in body;
-          if (typeof body.botDeckPath === "string") {
-            requestedBotDeckPath = body.botDeckPath;
-          }
-          if (
-            typeof body.initialUserMessage === "string" &&
-            body.initialUserMessage.trim().length > 0
-          ) {
-            initialUserMessage = body.initialUserMessage;
-          }
-        } catch {
-          // ignore parse errors; use defaults
-        }
-        if (sessionId) {
-          await logWorkspaceBotRoot("/api/test/run", sessionId);
-          await activateWorkspaceDeck(sessionId);
-        }
-        await deckLoadPromise.catch(() => null);
-        if (hasExplicitBotDeckPath) {
-          if (
-            !requestedBotDeckPath || requestedBotDeckPath.trim().length === 0
-          ) {
-            return new Response(
-              JSON.stringify({ error: "Unknown scenario deck selection" }),
-              {
-                status: 400,
-                headers: { "content-type": "application/json" },
-              },
-            );
-          }
-          const resolved = resolveTestDeck(requestedBotDeckPath);
-          if (!resolved) {
-            return new Response(
-              JSON.stringify({ error: "Unknown scenario deck selection" }),
-              {
-                status: 400,
-                headers: { "content-type": "application/json" },
-              },
-            );
-          }
-          botDeckSelection = resolved;
-        } else if (availableTestDecks.length > 0) {
-          botDeckSelection = availableTestDecks[0];
-        }
-        if (deckInput === undefined) {
-          try {
-            const desc = await schemaPromise;
-            deckInput = desc.defaults !== undefined
-              ? desc.defaults
-              : deriveInitialFromSchema(desc.schema);
-          } catch {
-            // ignore; keep undefined
-          }
-        }
-        if (
-          !userProvidedDeckInput && inheritBotInput && botInput !== undefined
-        ) {
-          deckInput = cloneValue(botInput);
-        }
-        if (!botDeckSelection) {
-          return new Response(
-            JSON.stringify({ error: "No scenario decks configured" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        let initFillInfo: TestBotInitFill | undefined;
-        let initFillTrace: {
-          args: Record<string, unknown>;
-          result: Record<string, unknown>;
-        } | undefined;
-        try {
-          const rootDeck = await deckLoadPromise.catch(() => null);
-          const rootSchema = rootDeck?.contextSchema ?? rootDeck?.inputSchema;
-          const normalizedSchema = rootSchema
-            ? normalizeSchema(rootSchema)
-            : undefined;
-          const missing = normalizedSchema
-            ? findMissingRequiredFields(normalizedSchema, deckInput)
-            : [];
-          const requested = initFillRequestMissing?.length
-            ? missing.filter((entry) => initFillRequestMissing?.includes(entry))
-            : missing;
-          if (requested.length > 0) {
-            const fillPrompt = buildInitFillPrompt({
-              missing: requested,
-              current: deckInput,
-              schema: normalizedSchema,
-            });
-            const fillOutput = await runDeckWithFallback({
-              path: botDeckSelection.path,
-              input: botInput,
-              inputProvided: botInput !== undefined,
-              modelProvider: opts.modelProvider,
-              allowRootStringInput: true,
-              initialUserMessage: fillPrompt,
-              responsesMode: opts.responsesMode,
-            });
-            const parsed = parseInitFillOutput(fillOutput);
-            if (parsed.error) {
-              initFillInfo = {
-                requested,
-                provided: fillOutput,
-                error: parsed.error,
-              };
-              const failure = persistFailedInitFill({
-                error: parsed.error,
-                initFill: initFillInfo,
-                botDeckPath: botDeckSelection.path,
-                botDeckId: botDeckSelection.id,
-                botDeckLabel: botDeckSelection.label,
-              });
-              return new Response(
-                JSON.stringify({
-                  error: parsed.error,
-                  initFill: initFillInfo,
-                  workspaceId: failure.workspaceId,
-                  workspacePath: failure.workspacePath,
-                }),
-                {
-                  status: 400,
-                  headers: { "content-type": "application/json" },
-                },
-              );
-            }
-            let appliedObject: Record<string, unknown> = {};
-            let appliedRoot: unknown = undefined;
-            let nextInput = deckInput;
-            for (const pathKey of requested) {
-              const segments = pathKey === "(root)" ? [] : pathKey.split(".");
-              const leafSchema = getSchemaAtPath(normalizedSchema, segments);
-              const currentValue = getPathValue(nextInput, segments);
-              if (
-                currentValue !== undefined && currentValue !== null &&
-                !(typeof currentValue === "string" &&
-                  (leafSchema?.kind === "string" ||
-                    leafSchema?.kind === "enum") &&
-                  currentValue.trim() === "") &&
-                !(Array.isArray(currentValue) && leafSchema?.kind === "array" &&
-                  currentValue.length === 0)
-              ) {
-                continue;
-              }
-              const fillValue = getPathValue(parsed.data, segments);
-              if (fillValue === undefined) continue;
-              if (segments.length === 0) {
-                nextInput = fillValue;
-                appliedRoot = fillValue;
-                continue;
-              }
-              nextInput = setPathValue(nextInput, segments, fillValue);
-              const appliedValue = setPathValue(
-                appliedObject,
-                segments,
-                fillValue,
-              );
-              if (appliedValue && typeof appliedValue === "object") {
-                appliedObject = appliedValue as Record<string, unknown>;
-              }
-            }
-            const validated = validateInitInput(rootSchema, nextInput);
-            deckInput = validated;
-            const remainingMissing = normalizedSchema
-              ? findMissingRequiredFields(normalizedSchema, deckInput)
-              : [];
-            if (remainingMissing.length > 0) {
-              const message = `Init fill incomplete: missing ${
-                remainingMissing.join(", ")
-              }`;
-              initFillInfo = {
-                requested,
-                applied: appliedRoot !== undefined
-                  ? appliedRoot
-                  : Object.keys(appliedObject).length
-                  ? appliedObject
-                  : undefined,
-                provided: parsed.data,
-                error: message,
-              };
-              const failure = persistFailedInitFill({
-                error: message,
-                initFill: initFillInfo,
-                botDeckPath: botDeckSelection.path,
-                botDeckId: botDeckSelection.id,
-                botDeckLabel: botDeckSelection.label,
-              });
-              return new Response(
-                JSON.stringify({
-                  error: message,
-                  initFill: initFillInfo,
-                  workspaceId: failure.workspaceId,
-                  workspacePath: failure.workspacePath,
-                }),
-                {
-                  status: 400,
-                  headers: { "content-type": "application/json" },
-                },
-              );
-            }
-            initFillInfo = {
-              requested,
-              applied: appliedRoot !== undefined
-                ? appliedRoot
-                : Object.keys(appliedObject).length
-                ? appliedObject
-                : undefined,
-              provided: parsed.data,
-            };
-            initFillTrace = {
-              args: {
-                missing: requested,
-              },
-              result: {
-                applied: initFillInfo.applied,
-                provided: initFillInfo.provided,
-              },
-            };
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          initFillInfo = initFillInfo ?? {
-            requested: [],
-          };
-          initFillInfo.error = message;
-          const failure = persistFailedInitFill({
-            error: message,
-            initFill: initFillInfo,
-            botDeckPath: botDeckSelection.path,
-            botDeckId: botDeckSelection.id,
-            botDeckLabel: botDeckSelection.label,
-          });
-          return new Response(
-            JSON.stringify({
-              error: message,
-              initFill: initFillInfo,
-              workspaceId: failure.workspaceId,
-              workspacePath: failure.workspacePath,
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        const existingSessionState = sessionId
-          ? readSessionState(sessionId)
-          : undefined;
-        const workspaceRecord = sessionId
-          ? resolveWorkspaceRecord(sessionId) ?? {
-            id: sessionId,
-            rootDir: path.dirname(resolvedDeckPath),
-            rootDeckPath: resolvedDeckPath,
-            createdAt: new Date().toISOString(),
-          }
-          : undefined;
-        if (workspaceRecord && !resolveWorkspaceRecord(sessionId)) {
-          registerWorkspace(workspaceRecord);
-        }
-        const run = startTestBotRun({
-          maxTurnsOverride: maxTurnsOverride ?? botDeckSelection.maxTurns,
-          deckInput,
-          botInput,
-          initialUserMessage,
-          botDeckPath: botDeckSelection.path,
-          botDeckId: botDeckSelection.id,
-          botDeckLabel: botDeckSelection.label,
-          initFill: initFillInfo,
-          initFillTrace,
-          workspaceId: sessionId,
-          workspaceRecord,
-          baseMeta: existingSessionState?.meta as Record<string, unknown> ??
-            undefined,
-        });
-        return new Response(
-          JSON.stringify({ run }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (url.pathname === "/api/test/message") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        // 1) Parse request payload and stitch together run/session state.
-        let payload: {
-          runId?: unknown;
-          workspaceId?: unknown;
-          message?: unknown;
-          context?: unknown;
-          init?: unknown;
-          botDeckPath?: unknown;
-          model?: unknown;
-          modelForce?: unknown;
-          stream?: unknown;
-        } = {};
-        try {
-          payload = await req.json();
-        } catch {
-          // ignore parse errors
-        }
-        const requestedRunId = typeof payload.runId === "string"
-          ? payload.runId
-          : undefined;
-        let runId = requestedRunId;
-        const workspaceId = (() => {
-          const workspaceId = typeof payload.workspaceId === "string" &&
-              payload.workspaceId.trim().length > 0
-            ? payload.workspaceId
-            : undefined;
-          if (workspaceId) return workspaceId;
-          return undefined;
-        })();
-        await logWorkspaceBotRoot("/api/test/message", workspaceId);
-        if (workspaceId) {
-          await activateWorkspaceDeck(workspaceId);
-        }
-        let savedState = workspaceId
-          ? readSessionState(workspaceId, { withTraces: true })
-          : undefined;
-        if (savedState && requestedRunId) {
-          const savedRunId = typeof savedState.meta?.testBotRunId === "string"
-            ? savedState.meta.testBotRunId
-            : savedState.runId;
-          if (!savedRunId || savedRunId !== requestedRunId) {
-            // Explicit runId in the same workspace means "start a fresh run".
-            savedState = undefined;
-          }
-        }
-        if (!savedState && runId) {
-          const entry = testBotRuns.get(runId);
-          const runWorkspaceId = entry?.run.workspaceId ?? entry?.run.sessionId;
-          if (
-            runWorkspaceId &&
-            (!workspaceId || runWorkspaceId === workspaceId)
-          ) {
-            savedState = readSessionState(runWorkspaceId, {
-              withTraces: true,
-            });
-          }
-        }
-        if (savedState && !runId) {
-          runId = typeof savedState.meta?.testBotRunId === "string"
-            ? savedState.meta.testBotRunId
-            : savedState.runId;
-        }
-        runId = runId ?? randomId("testbot");
-        const workspaceRecord = workspaceId
-          ? resolveWorkspaceRecord(workspaceId) ?? {
-            id: workspaceId,
-            rootDir: path.dirname(resolvedDeckPath),
-            rootDeckPath: resolvedDeckPath,
-            createdAt: new Date().toISOString(),
-          }
-          : undefined;
-        if (workspaceRecord && !resolveWorkspaceRecord(workspaceId)) {
-          registerWorkspace(workspaceRecord);
-        }
-        const workspaceMeta = workspaceRecord
-          ? buildWorkspaceMeta(
-            workspaceRecord,
-            savedState?.meta as Record<string, unknown> ?? {},
-          )
-          : (savedState?.meta ?? {});
-        const existingEntry = testBotRuns.get(runId);
-        if (existingEntry?.promise) {
-          return new Response(
-            JSON.stringify({ error: "Scenario run already in progress" }),
-            { status: 409, headers: { "content-type": "application/json" } },
-          );
-        }
-        // 2) Resolve which scenario deck to use and derive initial input.
-        await deckLoadPromise.catch(() => null);
-        const hasExplicitDeckPath = "botDeckPath" in payload;
-        const requestedDeck = typeof payload.botDeckPath === "string"
-          ? payload.botDeckPath
-          : undefined;
-        if (hasExplicitDeckPath) {
-          if (!requestedDeck || requestedDeck.trim().length === 0) {
-            return new Response(
-              JSON.stringify({ error: "Unknown scenario deck selection" }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-        }
-        const selection = (() => {
-          if (requestedDeck !== undefined) {
-            return resolveTestDeck(requestedDeck);
-          }
-          const metaPath =
-            typeof savedState?.meta?.testBotConfigPath === "string"
-              ? savedState.meta.testBotConfigPath
-              : undefined;
-          if (metaPath) return resolveTestDeck(metaPath);
-          return availableTestDecks[0];
-        })();
-        if (requestedDeck && !selection) {
-          return new Response(
-            JSON.stringify({ error: "Unknown scenario deck selection" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        const botConfigPath = selection?.path ?? resolvedDeckPath;
-        const testBotName = selection
-          ? path.basename(botConfigPath).replace(/\.deck\.(md|ts)$/i, "")
-          : toDeckLabel(resolvedDeckPath);
-        const selectedScenarioDeckId = selection?.id ?? testBotName;
-        const selectedScenarioDeckLabel = selection?.label ?? testBotName;
-        const message = typeof payload.message === "string"
-          ? payload.message.trim()
-          : "";
-        const hasSavedMessages = (savedState?.messages?.length ?? 0) > 0;
-        let deckInput = payload.context ?? payload.init;
-        if (!hasSavedMessages && deckInput === undefined) {
-          try {
-            const desc = await schemaPromise;
-            deckInput = desc.defaults !== undefined
-              ? desc.defaults
-              : deriveInitialFromSchema(desc.schema);
-          } catch {
-            // ignore; keep undefined
-          }
-        }
-        const stream = typeof payload.stream === "boolean"
-          ? payload.stream
-          : true;
-        const deckForStart = await deckLoadPromise.catch(() => null);
-        const startMode = deckForStart &&
-            (deckForStart.startMode === "assistant" ||
-              deckForStart.startMode === "user")
-          ? deckForStart.startMode
-          : "assistant";
-        const startOnly = !message && startMode === "assistant" &&
-          !hasSavedMessages;
-        if (!message && !startOnly) {
-          return new Response(
-            JSON.stringify({ error: "Missing message" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        // 3) Initialize the run, sync from prior session state, and prep tracing.
-        const entry = existingEntry ?? {
-          run: {
-            id: runId,
-            status: "idle",
-            messages: [],
-            traces: [],
-            toolInserts: [],
-          },
-          promise: null,
-          abort: null,
+      const matchedEntrypoint = Array.from(simulatorIsographAppRoutes).find(
+        ([pattern]) =>
+          matchSimulatorRouteWithParams(url.pathname, pattern).match,
+      )?.[1];
+      const maybePathRedirect = (() => {
+        if (!matchedEntrypoint) return null;
+        const globals = globalThis as typeof globalThis & {
+          __GAMBIT_CURRENT_PATH__?: unknown;
         };
-        testBotRuns.set(runId, entry);
-        const run = entry.run;
-        const emitTestBot = (payload: unknown) =>
-          broadcastTestBot(payload, run.workspaceId ?? workspaceId ?? runId);
-        run.status = "running";
-        run.error = undefined;
-        run.startedAt = run.startedAt ?? new Date().toISOString();
-        if (savedState) {
-          syncTestBotRunFromState(run, savedState);
-        }
-        emitTestBot({ type: "testBotStatus", run });
-        const controller = new AbortController();
-        entry.abort = controller;
-        const isAborted = () => controller.signal.aborted;
-        const capturedTraces = Array.isArray(savedState?.traces)
-          ? cloneTraces(savedState.traces)
-          : [];
-        const pendingTraceEvents: Array<TraceEvent> = [];
-        const flushPendingTraceEvents = (state: SavedState) => {
-          if (!pendingTraceEvents.length) return;
-          for (const pending of pendingTraceEvents) {
-            appendSessionEvent(state, {
-              ...pending,
-              kind: "trace",
-              category: traceCategory(pending.type),
-            } as Record<string, unknown>);
-          }
-          pendingTraceEvents.length = 0;
-        };
-        const tracer = (event: TraceEvent) => {
-          const stamped = event.ts ? event : { ...event, ts: Date.now() };
-          capturedTraces.push(stamped);
-          consoleTracer?.(stamped);
-          if (savedState?.meta?.sessionId) {
-            appendSessionEvent(savedState, {
-              ...stamped,
-              kind: "trace",
-              category: traceCategory(stamped.type),
-            } as Record<string, unknown>);
-          } else {
-            pendingTraceEvents.push(stamped);
-          }
-        };
-        const appendFromState = (state: SavedState) => {
-          const snapshot = buildTestBotSnapshot(state);
-          run.messages = snapshot.messages;
-          run.toolInserts = snapshot.toolInserts;
-          run.traces = Array.isArray(state.traces)
-            ? [...state.traces]
-            : undefined;
-          const nextWorkspaceId = typeof state.meta?.workspaceId === "string"
-            ? state.meta.workspaceId
-            : typeof state.meta?.sessionId === "string"
-            ? state.meta.sessionId
-            : undefined;
-          if (nextWorkspaceId) {
-            run.workspaceId = nextWorkspaceId;
-            run.sessionId = nextWorkspaceId;
-          }
-          emitTestBot({ type: "testBotStatus", run });
-        };
-        // 4) Execute the deck run(s): optional assistant start, then user message.
-        entry.promise = (async () => {
-          try {
-            const countAssistantMessages = (state?: SavedState): number => {
-              if (!state?.messages?.length) return 0;
-              let count = 0;
-              for (const msg of state.messages) {
-                if (msg?.role === "assistant") count += 1;
-              }
-              return count;
-            };
-            const runOnce = async (
-              initialUserMessage: string | undefined,
-              turn: number,
-              shouldStream = stream,
-            ) => {
-              if (isAborted()) return undefined;
-              const hasSavedMessages = (savedState?.messages?.length ?? 0) > 0;
-              const inputProvided = !hasSavedMessages &&
-                deckInput !== undefined;
-              const input = inputProvided ? deckInput : undefined;
-              const result = await runDeck({
-                path: resolvedDeckPath,
-                input,
-                inputProvided,
-                modelProvider: opts.modelProvider,
-                isRoot: true,
-                allowRootStringInput: true,
-                defaultModel: typeof payload.model === "string"
-                  ? payload.model
-                  : opts.model,
-                modelOverride: typeof payload.modelForce === "string"
-                  ? payload.modelForce
-                  : opts.modelForce,
-                trace: tracer,
-                stream: shouldStream,
-                state: savedState,
-                responsesMode: opts.responsesMode,
-                workerSandbox: resolveWorkerSandboxForSignalAwareRun({
-                  workerSandbox: opts.workerSandbox,
-                  signal: controller.signal,
-                }),
-                signal: controller.signal,
-                initialUserMessage,
-                onStateUpdate: (state) => {
-                  if (isAborted()) return;
-                  const nextStateWithSource = applyUserMessageRefSource(
-                    savedState,
-                    state,
-                    "manual",
-                  );
-                  const nextMeta = {
-                    ...workspaceMeta,
-                    ...(nextStateWithSource.meta ?? {}),
-                    testBot: true,
-                    testBotRunId: runId,
-                    testBotConfigPath: botConfigPath,
-                    testBotName,
-                    scenarioRunId: runId,
-                    selectedScenarioDeckId,
-                    selectedScenarioDeckLabel,
-                    scenarioConfigPath: botConfigPath,
-                    ...(workspaceId ? { workspaceId } : {}),
-                  };
-                  const enriched = persistSessionState({
-                    ...nextStateWithSource,
-                    meta: nextMeta,
-                    traces: capturedTraces,
-                  });
-                  savedState = enriched;
-                  flushPendingTraceEvents(enriched);
-                  appendFromState(enriched);
-                },
-                onStreamText: (chunk) =>
-                  emitTestBot({
-                    type: "testBotStream",
-                    runId,
-                    role: "assistant",
-                    chunk,
-                    turn,
-                    ts: Date.now(),
-                  }),
-              });
-              if (isAborted()) return result;
-              if (shouldStream) {
-                emitTestBot({
-                  type: "testBotStreamEnd",
-                  runId,
-                  role: "assistant",
-                  turn,
-                  ts: Date.now(),
-                });
-              }
-              return result;
-            };
-            let assistantTurn = countAssistantMessages(savedState);
-            if (
-              startMode === "assistant" &&
-              !hasSavedMessages
-            ) {
-              if (isAborted()) {
-                run.status = "canceled";
-                return;
-              }
-              await runOnce(undefined, assistantTurn, stream);
-              assistantTurn += 1;
-            }
-            let result: unknown = undefined;
-            if (message) {
-              if (isAborted()) {
-                run.status = "canceled";
-                return;
-              }
-              result = await runOnce(message, assistantTurn, stream);
-            }
-            if (isAborted()) {
-              run.status = "canceled";
-            } else if (result !== undefined && isGambitEndSignal(result)) {
-              run.status = "completed";
-            } else {
-              run.status = "completed";
-            }
-          } catch (err) {
-            if (isAborted() || isRunCanceledError(err)) {
-              run.status = "canceled";
-              run.error = undefined;
-            } else {
-              run.status = "error";
-              run.error = err instanceof Error ? err.message : String(err);
-              logger.warn(
-                `[sim] build bot run failed (workspaceId=${workspaceId}): ${run.error}`,
-              );
-            }
-          } finally {
-            if (savedState) {
-              syncTestBotRunFromState(run, savedState);
-            }
-            run.finishedAt = new Date().toISOString();
-            entry.abort = null;
-            entry.promise = null;
-            emitTestBot({ type: "testBotStatus", run });
-          }
-        })();
-        // 5) Return the current run snapshot to the caller.
-        return new Response(
-          JSON.stringify({ run }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (url.pathname === "/api/test/stop") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let runId: string | undefined = undefined;
+        const previousPath = globals.__GAMBIT_CURRENT_PATH__;
+        globals.__GAMBIT_CURRENT_PATH__ = url.pathname;
         try {
-          const body = await req.json() as { runId?: string };
-          if (typeof body.runId === "string") runId = body.runId;
-        } catch {
-          // ignore
-        }
-        const entry = runId ? testBotRuns.get(runId) : undefined;
-        const wasRunning = Boolean(entry?.promise);
-        if (entry?.abort) {
-          entry.abort.abort();
-        }
-        if (entry?.run?.status === "running") {
-          entry.run.status = "canceled";
-          entry.run.finishedAt = entry.run.finishedAt ??
-            new Date().toISOString();
-        }
-        return new Response(
-          JSON.stringify({
-            stopped: wasRunning,
-            run: entry?.run ?? {
-              id: runId ?? "",
-              status: "idle",
-              messages: [],
-              traces: [],
-              toolInserts: [],
-            },
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (url.pathname === "/api/build/reset") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let workspaceId: string | undefined = undefined;
-        try {
-          const body = await req.json() as {
-            runId?: string;
-            workspaceId?: string;
-          };
-          workspaceId = getWorkspaceIdFromBody(body);
-        } catch {
-          // ignore
-        }
-        if (!workspaceId) {
-          return new Response(
-            JSON.stringify({ error: "Missing workspaceId" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        const entry = buildBotRuns.get(workspaceId);
-        if (entry?.abort) {
-          entry.abort.abort();
-        }
-        if (entry?.run) {
-          if (entry.run.status === "running") {
-            entry.run.status = "canceled";
-          }
-          entry.run.finishedAt = entry.run.finishedAt ??
-            new Date().toISOString();
-          const state = readSessionState(workspaceId);
-          if (state) {
-            persistSessionState({
-              ...state,
-              meta: {
-                ...(state.meta ?? {}),
-                buildStatus: entry.run.status,
-                buildFinishedAt: entry.run.finishedAt,
-                buildError: entry.run.error,
-              },
-            });
-          }
-        }
-        buildBotRuns.delete(workspaceId);
-        broadcastBuildBot({
-          type: "buildBotStatus",
-          run: {
-            id: workspaceId,
-            status: "idle",
-            messages: [],
-            traces: [],
-            toolInserts: [],
-          },
-        }, workspaceId);
-        return new Response(JSON.stringify({ reset: true }), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      if (url.pathname === "/api/build/stop") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let workspaceId: string | undefined = undefined;
-        try {
-          const body = await req.json() as {
-            runId?: string;
-            workspaceId?: string;
-          };
-          workspaceId = getWorkspaceIdFromBody(body);
-        } catch {
-          // ignore
-        }
-        if (!workspaceId) {
-          return new Response(
-            JSON.stringify({ error: "Missing workspaceId" }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-        const entry = buildBotRuns.get(workspaceId);
-        const wasRunning = Boolean(entry?.promise);
-        if (entry?.abort) {
-          entry.abort.abort();
-        }
-        if (entry?.run?.status === "running") {
-          entry.run.status = "canceled";
-          entry.run.finishedAt = entry.run.finishedAt ??
-            new Date().toISOString();
-        }
-        if (entry?.run) {
-          const state = readSessionState(workspaceId);
-          if (state) {
-            persistSessionState({
-              ...state,
-              meta: {
-                ...(state.meta ?? {}),
-                buildStatus: entry.run.status,
-                buildFinishedAt: entry.run.finishedAt,
-                buildError: entry.run.error,
-              },
-            });
-          }
-        }
-        const run = entry?.run ?? {
-          id: workspaceId,
-          status: "idle",
-          messages: [],
-          traces: [],
-          toolInserts: [],
-        };
-        broadcastBuildBot(
-          { type: "buildBotStatus", run, state: entry?.state ?? undefined },
-          workspaceId,
-        );
-        return new Response(
-          JSON.stringify({
-            stopped: wasRunning,
-            run,
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (url.pathname === "/api/build/message") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let payload: {
-          runId?: unknown;
-          workspaceId?: unknown;
-          message?: unknown;
-          model?: unknown;
-          modelForce?: unknown;
-        } = {};
-        try {
-          payload = await req.json();
-        } catch {
-          // ignore
-        }
-        let workspaceId = typeof payload.workspaceId === "string"
-          ? payload.workspaceId
-          : typeof payload.runId === "string"
-          ? payload.runId
-          : undefined;
-        if (!workspaceId) {
-          const created = await createWorkspaceSession();
-          workspaceId = created.id;
-        }
-        await logWorkspaceBotRoot("/api/build/message", workspaceId);
-        const message = typeof payload.message === "string"
-          ? payload.message
-          : "";
-
-        const workspaceRecord = resolveWorkspaceRecord(workspaceId) ?? {
-          id: workspaceId,
-          rootDir: path.dirname(resolvedDeckPath),
-          rootDeckPath: resolvedDeckPath,
-          createdAt: new Date().toISOString(),
-        };
-        if (!resolveWorkspaceRecord(workspaceId)) {
-          registerWorkspace(workspaceRecord);
-        }
-
-        const existingEntry = buildBotRuns.get(workspaceId);
-        if (existingEntry?.promise) {
-          return new Response(
-            JSON.stringify({ error: "Run already in progress" }),
-            { status: 409, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        const entry = existingEntry ?? {
-          run: {
-            id: workspaceId,
-            status: "idle",
-            messages: [],
-            traces: [],
-            toolInserts: [],
-          },
-          state: null,
-          promise: null,
-          abort: null,
-        };
-        buildBotRuns.set(workspaceId, entry);
-
-        if (!entry.state) {
-          const projection = readBuildState(workspaceId);
-          if (projection?.state) {
-            entry.state = projection.state;
-          }
-        }
-
-        const run = entry.run;
-        run.status = "running";
-        run.error = undefined;
-        run.startedAt = run.startedAt ?? new Date().toISOString();
-        if (entry.state) {
-          syncBuildBotRunFromState(run, entry.state);
-        }
-        broadcastBuildBot({
-          type: "buildBotStatus",
-          run,
-          state: entry.state ?? undefined,
-        }, workspaceId);
-        const workspaceBaseState = readSessionState(workspaceId) ?? {
-          runId: workspaceId,
-          messages: [],
-          meta: {},
-        };
-        persistSessionState({
-          ...workspaceBaseState,
-          meta: {
-            ...buildWorkspaceMeta(
-              workspaceRecord,
-              workspaceBaseState.meta ?? {},
-            ),
-            buildStatus: run.status,
-            buildStartedAt: run.startedAt,
-          },
-        });
-
-        const controller = new AbortController();
-        entry.abort = controller;
-        const isAborted = () => controller.signal.aborted;
-
-        const botDeckUrl = new URL(
-          "./decks/gambit-bot/PROMPT.md",
-          import.meta.url,
-        );
-        if (botDeckUrl.protocol !== "file:") {
-          run.status = "error";
-          run.error = "Unable to resolve Gambit Bot deck path";
-          broadcastBuildBot({ type: "buildBotStatus", run }, workspaceId);
-          const state = readSessionState(workspaceId);
-          if (state) {
-            persistSessionState({
-              ...state,
-              meta: {
-                ...(state.meta ?? {}),
-                buildStatus: "error",
-                buildError: run.error,
-                buildFinishedAt: new Date().toISOString(),
-              },
-            });
-          }
-          return new Response(
-            JSON.stringify({ error: run.error }),
-            { status: 500, headers: { "content-type": "application/json" } },
-          );
-        }
-        const botDeckPath = path.fromFileUrl(botDeckUrl);
-
-        let botRoot: string;
-        try {
-          botRoot = await resolveBuildBotRoot(workspaceId);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          run.status = "error";
-          run.error = msg;
-          broadcastBuildBot({ type: "buildBotStatus", run }, workspaceId);
-          const state = readSessionState(workspaceId);
-          if (state) {
-            persistSessionState({
-              ...state,
-              meta: {
-                ...(state.meta ?? {}),
-                buildStatus: "error",
-                buildError: msg,
-                buildFinishedAt: new Date().toISOString(),
-              },
-            });
-          }
-          return new Response(
-            JSON.stringify({ error: msg }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-
-        const prevBotRoot = Deno.env.get("GAMBIT_BOT_ROOT");
-        Deno.env.set("GAMBIT_BOT_ROOT", botRoot);
-
-        const capturedTraces = Array.isArray(entry.state?.traces)
-          ? cloneTraces(entry.state!.traces!)
-          : [];
-        const tracer = (event: TraceEvent) => {
-          const stamped = event.ts ? event : { ...event, ts: Date.now() };
-          capturedTraces.push(stamped);
-          consoleTracer?.(stamped);
-          broadcastBuildBot({
-            type: "buildBotTrace",
-            runId: workspaceId,
-            event: stamped,
-          }, workspaceId);
-        };
-
-        const appendFromState = (state: SavedState) => {
-          syncBuildBotRunFromState(run, state);
-          run.traces = Array.isArray(state.traces) ? [...state.traces] : [];
-          broadcastBuildBot(
-            { type: "buildBotStatus", run, state },
-            workspaceId,
-          );
-          const base = readSessionState(workspaceId) ?? {
-            runId: workspaceId,
-            messages: [],
-            meta: {},
-          };
-          persistSessionState({
-            ...base,
-            meta: {
-              ...buildWorkspaceMeta(workspaceRecord, base.meta ?? {}),
-              buildStatus: run.status,
-              buildStartedAt: run.startedAt,
-              buildFinishedAt: run.finishedAt,
-              buildError: run.error,
-            },
-          });
-        };
-
-        entry.promise = (async () => {
-          try {
-            const runOnce = async (
-              initialUserMessage: string | undefined,
-              turn: number,
-              shouldStream = true,
-            ) => {
-              if (isAborted()) return undefined;
-              const result = await runDeck({
-                path: botDeckPath,
-                input: undefined,
-                inputProvided: false,
-                modelProvider: opts.modelProvider,
-                allowRootStringInput: true,
-                defaultModel: typeof payload.model === "string"
-                  ? payload.model
-                  : opts.model,
-                modelOverride: typeof payload.modelForce === "string"
-                  ? payload.modelForce
-                  : opts.modelForce,
-                trace: tracer,
-                stream: shouldStream,
-                state: entry.state ?? undefined,
-                responsesMode: opts.responsesMode,
-                workerSandbox: resolveWorkerSandboxForSignalAwareRun({
-                  workerSandbox: opts.workerSandbox,
-                  signal: controller.signal,
-                }),
-                signal: controller.signal,
-                initialUserMessage,
-                onStateUpdate: (state) => {
-                  if (isAborted()) return;
-                  const nextState: SavedState = {
-                    ...state,
-                    traces: capturedTraces,
-                  };
-                  entry.state = nextState;
-                  appendFromState(nextState);
-                },
-                onStreamText: (chunk) =>
-                  broadcastBuildBot({
-                    type: "buildBotStream",
-                    runId: workspaceId,
-                    role: "assistant",
-                    chunk,
-                    turn,
-                    ts: Date.now(),
-                  }, workspaceId),
-              });
-              if (shouldStream) {
-                broadcastBuildBot({
-                  type: "buildBotStreamEnd",
-                  runId: workspaceId,
-                  role: "assistant",
-                  turn,
-                  ts: Date.now(),
-                }, workspaceId);
-              }
-              return result;
-            };
-
-            const hasSavedMessages = (entry.state?.messages?.length ?? 0) > 0;
-            let assistantTurn = 0;
-            if (Array.isArray(entry.state?.messages)) {
-              for (const msg of entry.state!.messages) {
-                if (msg?.role === "assistant") assistantTurn += 1;
-              }
-            }
-            if (!hasSavedMessages && message.trim().length === 0) {
-              await runOnce(undefined, assistantTurn, true);
-            } else {
-              await runOnce(message, assistantTurn, true);
-            }
-
-            if (isAborted()) {
-              run.status = "canceled";
-            } else {
-              run.status = "completed";
-            }
-          } catch (err) {
-            if (isAborted() || isRunCanceledError(err)) {
-              run.status = "canceled";
-              run.error = undefined;
-            } else {
-              run.status = "error";
-              run.error = err instanceof Error ? err.message : String(err);
-              logger.warn(
-                `[sim] build bot run failed (workspaceId=${workspaceId}): ${run.error}`,
-              );
-            }
-          } finally {
-            run.finishedAt = new Date().toISOString();
-            entry.abort = null;
-            entry.promise = null;
-            const base = readSessionState(workspaceId) ?? {
-              runId: workspaceId,
-              messages: [],
-              meta: {},
-            };
-            persistSessionState({
-              ...base,
-              meta: {
-                ...buildWorkspaceMeta(workspaceRecord, base.meta ?? {}),
-                buildStatus: run.status,
-                buildStartedAt: run.startedAt,
-                buildFinishedAt: run.finishedAt,
-                buildError: run.error,
-              },
-            });
-            try {
-              reloadPrimaryDeck();
-            } catch (err) {
-              logger.warn(
-                `[sim] failed to reload primary deck after build: ${
-                  err instanceof Error ? err.message : String(err)
-                }`,
-              );
-            }
-            broadcastBuildBot(
-              { type: "buildBotStatus", run, state: entry.state ?? undefined },
-              workspaceId,
-            );
-            if (prevBotRoot === undefined) {
-              try {
-                Deno.env.delete("GAMBIT_BOT_ROOT");
-              } catch {
-                // ignore
-              }
-            } else {
-              Deno.env.set("GAMBIT_BOT_ROOT", prevBotRoot);
-            }
-          }
-        })();
-
-        return new Response(JSON.stringify({ run }), {
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      if (url.pathname === "/api/build/files") {
-        if (req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const workspaceId = getWorkspaceIdFromQuery(url);
-          await logWorkspaceBotRoot("/api/build/files", workspaceId);
-          const root = await resolveBuildBotRoot(workspaceId);
-          const entries = await listBuildBotFiles(root);
-          return new Response(JSON.stringify({ root, entries }), {
-            headers: { "content-type": "application/json" },
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(JSON.stringify({ error: message }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-      }
-
-      if (url.pathname === "/api/build/file") {
-        if (req.method !== "GET") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        const workspaceId = getWorkspaceIdFromQuery(url);
-        await logWorkspaceBotRoot("/api/build/file", workspaceId);
-        const inputPath = url.searchParams.get("path") ?? "";
-        if (!inputPath) {
-          appendServerErrorLog(workspaceId, {
-            endpoint: "/api/build/file",
-            status: 400,
-            message: "Missing path",
-            method: req.method,
-          });
-          return new Response(JSON.stringify({ error: "Missing path" }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-        try {
-          const root = await resolveBuildBotRoot(workspaceId);
-          const resolved = await resolveBuildBotPath(root, inputPath);
-          if (!resolved.stat.isFile) {
-            return new Response(
-              JSON.stringify({ error: "Path is not a file" }),
-              {
-                status: 400,
-                headers: { "content-type": "application/json" },
-              },
-            );
-          }
-          if (resolved.stat.size > MAX_FILE_PREVIEW_BYTES) {
-            return new Response(
-              JSON.stringify({
-                path: resolved.relativePath,
-                tooLarge: true,
-                size: resolved.stat.size,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          const bytes = await Deno.readFile(resolved.fullPath);
-          const text = readPreviewText(bytes);
-          if (text === null) {
-            return new Response(
-              JSON.stringify({
-                path: resolved.relativePath,
-                binary: true,
-                size: resolved.stat.size,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          return new Response(
-            JSON.stringify({
-              path: resolved.relativePath,
-              contents: text,
-              size: resolved.stat.size,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(JSON.stringify({ error: message }), {
-            status: 400,
-            headers: { "content-type": "application/json" },
-          });
-        }
-      }
-
-      if (url.pathname === "/api/codex/trust-workspace") {
-        if (req.method !== "GET" && req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        let workspaceId: string | undefined;
-        let online = true;
-        if (req.method === "POST") {
-          try {
-            const body = await req.json() as {
-              workspaceId?: unknown;
-              online?: unknown;
-            };
-            if (typeof body.workspaceId === "string") {
-              workspaceId = body.workspaceId;
-            }
-            if (
-              body.online === true ||
-              body.online === "true" ||
-              body.online === 1 ||
-              body.online === "1"
-            ) {
-              online = true;
-            } else if (
-              body.online === false ||
-              body.online === "false" ||
-              body.online === 0 ||
-              body.online === "0" ||
-              body.online === "no"
-            ) {
-              online = false;
-            }
-          } catch {
-            // Ignore malformed body and fall back to query/default workspace.
-          }
-        }
-        if (!workspaceId) {
-          workspaceId = getWorkspaceIdFromQuery(url);
-        }
-        const onlineQuery = url.searchParams.get("online");
-        if (
-          onlineQuery === "1" || onlineQuery === "true" ||
-          onlineQuery === "yes"
-        ) {
-          online = true;
-        } else if (
-          onlineQuery === "0" || onlineQuery === "false" ||
-          onlineQuery === "no"
-        ) {
-          online = false;
-        }
-        try {
-          await logWorkspaceBotRoot("/api/codex/trust-workspace", workspaceId);
-          const result = await readCodexWorkspaceStatus(workspaceId, online);
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              ...result,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(
-            JSON.stringify({ ok: false, error: message }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/simulator/run") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        if (simulatorRunning) {
-          emitSimulator({ type: "error", message: "Run already in progress" });
-          return new Response(
-            JSON.stringify({ error: "Run already in progress" }),
-            { status: 409, headers: { "content-type": "application/json" } },
-          );
-        }
-        let payload: {
-          input?: unknown;
-          message?: unknown;
-          trace?: boolean;
-          resetState?: boolean;
-          stream?: boolean;
-          model?: string;
-          modelForce?: string;
-          workspaceId?: string;
-        } = {};
-        try {
-          payload = await req.json();
-        } catch {
-          // ignore parse errors
-        }
-        if (payload.resetState) {
-          simulatorSavedState = undefined;
-          simulatorCapturedTraces = [];
-          simulatorCurrentRunId = undefined;
-        }
-        if (payload.workspaceId) {
-          let loaded: SavedState | undefined;
-          try {
-            loaded = readSessionStateStrict(payload.workspaceId, {
-              withTraces: true,
-            });
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            emitSimulator({ type: "error", message });
-            return new Response(
-              JSON.stringify({ error: message }),
-              { status: 400, headers: { "content-type": "application/json" } },
-            );
-          }
-          if (!loaded) {
-            const message = "Workspace not found";
-            emitSimulator({ type: "error", message });
-            return new Response(
-              JSON.stringify({ error: message }),
-              { status: 404, headers: { "content-type": "application/json" } },
-            );
-          }
-          simulatorSavedState = loaded;
-          simulatorCapturedTraces = Array.isArray(loaded.traces)
-            ? cloneTraces(loaded.traces)
-            : [];
-        }
-        simulatorCurrentRunId = undefined;
-        const stream = payload.stream ?? true;
-        const forwardTrace = payload.trace ?? true;
-        const pendingTraceEvents: Array<TraceEvent> = [];
-        const flushPendingTraceEvents = (state: SavedState) => {
-          if (!pendingTraceEvents.length) return;
-          for (const pending of pendingTraceEvents) {
-            appendSessionEvent(state, {
-              ...pending,
-              kind: "trace",
-              category: traceCategory(pending.type),
-            } as Record<string, unknown>);
-          }
-          pendingTraceEvents.length = 0;
-        };
-        const tracer = (event: TraceEvent) => {
-          const stamped = event.ts ? event : { ...event, ts: Date.now() };
-          if (stamped.type === "run.start") {
-            simulatorCurrentRunId = stamped.runId;
-          }
-          simulatorCapturedTraces.push(stamped);
-          consoleTracer?.(stamped);
-          if (forwardTrace) emitSimulator({ type: "trace", event: stamped });
-          if (simulatorSavedState?.meta?.sessionId) {
-            appendSessionEvent(simulatorSavedState, {
-              ...stamped,
-              kind: "trace",
-              category: traceCategory(stamped.type),
-            } as Record<string, unknown>);
-          } else {
-            pendingTraceEvents.push(stamped);
-          }
-        };
-        let initialUserMessage: unknown = typeof payload.message === "string"
-          ? payload.message
-          : undefined;
-        let input = payload.input;
-        let inputProvided = payload.input !== undefined;
-        const hasSavedMessages =
-          (simulatorSavedState?.messages?.length ?? 0) > 0;
-        if (
-          initialUserMessage === undefined &&
-          input !== undefined &&
-          hasSavedMessages
-        ) {
-          initialUserMessage = input;
-          input = undefined;
-          inputProvided = false;
-        }
-        if (opts.verbose) {
-          logger.log(
-            `[sim] starting run runId=${
-              simulatorSavedState?.runId ?? "(new)"
-            } messages=${
-              simulatorSavedState?.messages?.length ?? 0
-            } stream=${stream}`,
-          );
-        }
-        simulatorRunning = true;
-        try {
-          const result = await runDeck({
-            path: resolvedDeckPath,
-            input,
-            inputProvided,
-            modelProvider: opts.modelProvider,
-            isRoot: true,
-            allowRootStringInput: true,
-            defaultModel: payload.model ?? opts.model,
-            modelOverride: payload.modelForce ?? opts.modelForce,
-            trace: tracer,
-            stream,
-            state: simulatorSavedState,
-            responsesMode: opts.responsesMode,
-            onStateUpdate: (state) => {
-              const nextMeta = {
-                ...(simulatorSavedState?.meta ?? {}),
-                ...(state.meta ?? {}),
-              };
-              const enrichedState = persistSessionState({
-                ...state,
-                meta: nextMeta,
-                notes: state.notes ?? simulatorSavedState?.notes,
-                conversationScore: state.conversationScore ??
-                  simulatorSavedState?.conversationScore,
-                traces: simulatorCapturedTraces,
-              });
-              simulatorSavedState = enrichedState;
-              flushPendingTraceEvents(enrichedState);
-              emitSimulator({ type: "state", state: enrichedState });
-            },
-            initialUserMessage,
-            onStreamText: (chunk) =>
-              emitSimulator({
-                type: "stream",
-                chunk,
-                runId: simulatorCurrentRunId,
-              }),
-          });
-          emitSimulator({
-            type: "result",
-            result,
-            runId: simulatorCurrentRunId,
-            streamed: stream,
-          });
-          return new Response(
-            JSON.stringify({
-              runId: simulatorCurrentRunId,
-              workspaceId: simulatorSavedState?.meta?.workspaceId,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          emitSimulator({
-            type: "error",
-            message,
-            runId: simulatorCurrentRunId,
-          });
-          return new Response(
-            JSON.stringify({ error: message }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
+          return getRedirectFromEntrypoint(matchedEntrypoint);
         } finally {
-          simulatorRunning = false;
-        }
-      }
-
-      if (url.pathname === "/api/simulator/feedback") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            runId?: string;
-            messageRefId?: string;
-            score?: number | null;
-            reason?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          if (!body.messageRefId) {
-            throw new Error("Missing messageRefId");
-          }
-          if (
-            body.score !== null &&
-            (typeof body.score !== "number" || Number.isNaN(body.score))
-          ) {
-            throw new Error("Invalid score");
-          }
-          let state: SavedState | undefined;
-          try {
-            state = readSessionStateStrict(workspaceId, { withTraces: true });
-          } catch (err) {
-            throw new Error(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-          if (!state) throw new Error("Workspace not found");
-          const requestedRunId = typeof body.runId === "string" &&
-              body.runId.trim().length > 0
-            ? body.runId.trim()
-            : undefined;
-          const feedbackEligible = isFeedbackEligibleMessageRef(
-            state,
-            body.messageRefId,
-          ) ||
-            (requestedRunId
-              ? isFeedbackEligiblePersistedTestRunMessageRef(
-                state,
-                requestedRunId,
-                body.messageRefId,
-              )
-              : false);
-          if (!feedbackEligible) {
-            throw new Error("Feedback target is not eligible");
-          }
-          simulatorSavedState = state;
-          simulatorCapturedTraces = Array.isArray(state.traces)
-            ? cloneTraces(state.traces)
-            : [];
-          const existing = state.feedback ?? [];
-          const idx = existing.findIndex((f) =>
-            f.messageRefId === body.messageRefId
-          );
-          let entry: FeedbackEntry | undefined;
-          let feedback: Array<FeedbackEntry> = existing;
-          let deleted = false;
-          if (body.score === null) {
-            if (idx >= 0) {
-              feedback = existing.filter((_, i) => i !== idx);
-              deleted = true;
-            }
+          if (previousPath === undefined) {
+            delete globals.__GAMBIT_CURRENT_PATH__;
           } else {
-            const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
-            const reason = typeof body.reason === "string"
-              ? body.reason
-              : idx >= 0
-              ? existing[idx].reason
-              : undefined;
-            const runId = requestedRunId ??
-              (typeof state.runId === "string" ? state.runId : "run");
-            const scenarioRunId = typeof state.meta?.scenarioRunId === "string"
-              ? state.meta.scenarioRunId
-              : runId;
-            const now = new Date().toISOString();
-            entry = idx >= 0
-              ? {
-                ...existing[idx],
-                score: clamped,
-                reason,
-                runId: existing[idx].runId ?? runId,
-              }
-              : {
-                id: randomId("fb"),
-                runId,
-                messageRefId: body.messageRefId,
-                score: clamped,
-                reason,
-                createdAt: now,
-              };
-            if (entry) {
-              (entry as Record<string, unknown>).workspaceId = workspaceId;
-              (entry as Record<string, unknown>).scenarioRunId = scenarioRunId;
-            }
-            feedback = idx >= 0
-              ? existing.map((f, i) => i === idx ? entry! : f)
-              : [...existing, entry];
+            globals.__GAMBIT_CURRENT_PATH__ = previousPath;
           }
-          const enriched = persistSessionState({
-            ...state,
-            feedback,
-            traces: simulatorCapturedTraces,
-          });
-          appendFeedbackLog(enriched, {
-            type: "feedback.update",
-            messageRefId: body.messageRefId,
-            feedback: entry,
-            deleted,
-          });
-          appendSessionEvent(enriched, {
-            type: "feedback.update",
-            kind: "artifact",
-            category: "feedback",
-            workspaceId,
-            scenarioRunId: typeof enriched.meta?.scenarioRunId === "string"
-              ? enriched.meta.scenarioRunId
-              : enriched.runId,
-            messageRefId: body.messageRefId,
-            feedback: entry,
-            deleted,
-          });
-          simulatorSavedState = enriched;
-          emitSimulator({ type: "state", state: enriched });
-          return new Response(
-            JSON.stringify({ feedback: entry, deleted }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
         }
+      })();
+      if (maybePathRedirect) {
+        return createServerRedirectResponse(maybePathRedirect.location);
       }
-
-      if (url.pathname === "/api/simulator/notes") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            runId?: string;
-            text?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          let state: SavedState | undefined;
-          try {
-            state = readSessionStateStrict(workspaceId, { withTraces: true });
-          } catch (err) {
-            throw new Error(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-          if (!state) throw new Error("Workspace not found");
-          simulatorSavedState = state;
-          simulatorCapturedTraces = Array.isArray(state.traces)
-            ? cloneTraces(state.traces)
-            : [];
-          const now = new Date().toISOString();
-          const enriched = persistSessionState({
-            ...state,
-            notes: { text: body.text ?? "", updatedAt: now },
-            traces: simulatorCapturedTraces,
-          });
-          appendSessionEvent(enriched, {
-            type: "notes.update",
-            kind: "artifact",
-            category: "notes",
-            workspaceId,
-            notes: enriched.notes,
-          });
-          simulatorSavedState = enriched;
-          emitSimulator({ type: "state", state: enriched });
-          return new Response(
-            JSON.stringify({ notes: enriched.notes, saved: true }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/simulator/conversation-score") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            runId?: string;
-            score?: number;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          if (typeof body.score !== "number" || Number.isNaN(body.score)) {
-            throw new Error("Invalid score");
-          }
-          let state: SavedState | undefined;
-          try {
-            state = readSessionStateStrict(workspaceId, { withTraces: true });
-          } catch (err) {
-            throw new Error(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-          if (!state) throw new Error("Workspace not found");
-          simulatorSavedState = state;
-          simulatorCapturedTraces = Array.isArray(state.traces)
-            ? cloneTraces(state.traces)
-            : [];
-          const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
-          const now = new Date().toISOString();
-          const enriched = persistSessionState({
-            ...state,
-            conversationScore: { score: clamped, updatedAt: now },
-            traces: simulatorCapturedTraces,
-          });
-          appendSessionEvent(enriched, {
-            type: "conversation.score.update",
-            kind: "artifact",
-            category: "score",
-            workspaceId,
-            conversationScore: enriched.conversationScore,
-          });
-          simulatorSavedState = enriched;
-          emitSimulator({ type: "state", state: enriched });
-          return new Response(
-            JSON.stringify({
-              conversationScore: enriched.conversationScore,
-              saved: true,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === "/api/simulator/load-session") {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            runId?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          let state: SavedState | undefined;
-          try {
-            state = readSessionStateStrict(workspaceId, { withTraces: true });
-          } catch (err) {
-            throw new Error(
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-          if (!state) {
-            throw new Error("Workspace not found");
-          }
-          simulatorSavedState = state;
-          simulatorCapturedTraces = Array.isArray(state.traces)
-            ? cloneTraces(state.traces)
-            : [];
-          emitSimulator({ type: "state", state });
-          return new Response(
-            JSON.stringify({ state }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === `${WORKSPACE_API_BASE}/notes`) {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            text?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          const state = readSessionState(workspaceId);
-          if (!state) {
-            throw new Error("Workspace not found");
-          }
-          const now = new Date().toISOString();
-          const nextState = persistSessionState({
-            ...state,
-            notes: { text: body.text ?? "", updatedAt: now },
-          });
-          appendSessionEvent(nextState, {
-            type: "notes.update",
-            kind: "artifact",
-            category: "notes",
-            workspaceId,
-            notes: nextState.notes,
-          });
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              notes: nextState.notes,
-              saved: true,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === `${WORKSPACE_API_BASE}/feedback`) {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as {
-            workspaceId?: string;
-            runId?: string;
-            messageRefId?: string;
-            score?: number | null;
-            reason?: string;
-          };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          if (!body.messageRefId) {
-            throw new Error("Missing messageRefId");
-          }
-          if (
-            body.score !== null &&
-            (typeof body.score !== "number" || Number.isNaN(body.score))
-          ) {
-            throw new Error("Invalid score");
-          }
-          const state = readSessionState(workspaceId);
-          if (!state) {
-            throw new Error("Workspace not found");
-          }
-          const requestedRunId = typeof body.runId === "string" &&
-              body.runId.trim().length > 0
-            ? body.runId.trim()
-            : undefined;
-          const feedbackEligible = isFeedbackEligibleMessageRef(
-            state,
-            body.messageRefId,
-          ) ||
-            (requestedRunId
-              ? isFeedbackEligiblePersistedTestRunMessageRef(
-                state,
-                requestedRunId,
-                body.messageRefId,
-              )
-              : false);
-          if (!feedbackEligible) {
-            throw new Error("Feedback target is not eligible");
-          }
-          const existing = state.feedback ?? [];
-          const idx = existing.findIndex((entry) =>
-            entry.messageRefId === body.messageRefId
-          );
-          let entry: FeedbackEntry | undefined;
-          let feedback: Array<FeedbackEntry> = existing;
-          let deleted = false;
-          if (body.score === null) {
-            if (idx >= 0) {
-              feedback = existing.filter((_, i) => i !== idx);
-              deleted = true;
-            }
-          } else {
-            const clamped = Math.max(-3, Math.min(3, Math.round(body.score)));
-            const reason = typeof body.reason === "string"
-              ? body.reason
-              : idx >= 0
-              ? existing[idx].reason
-              : undefined;
-            const runId = requestedRunId ??
-              (typeof state.runId === "string" ? state.runId : "session");
-            const scenarioRunId = requestedRunId ??
-              (typeof state.meta?.scenarioRunId === "string"
-                ? state.meta.scenarioRunId
-                : runId);
-            const now = new Date().toISOString();
-            entry = idx >= 0
-              ? {
-                ...existing[idx],
-                score: clamped,
-                reason,
-                runId: existing[idx].runId ?? runId,
-              }
-              : {
-                id: randomId("fb"),
-                runId,
-                messageRefId: body.messageRefId,
-                score: clamped,
-                reason,
-                createdAt: now,
-              };
-            if (entry) {
-              (entry as Record<string, unknown>).workspaceId = workspaceId;
-              (entry as Record<string, unknown>).scenarioRunId = scenarioRunId;
-            }
-            feedback = idx >= 0
-              ? existing.map((item, i) => i === idx ? entry! : item)
-              : [...existing, entry];
-          }
-          const nextState = persistSessionState({
-            ...state,
-            feedback,
-          });
-          appendFeedbackLog(nextState, {
-            type: "feedback.update",
-            messageRefId: body.messageRefId,
-            feedback: entry,
-            deleted,
-          });
-          appendSessionEvent(nextState, {
-            type: "feedback.update",
-            kind: "artifact",
-            category: "feedback",
-            workspaceId,
-            scenarioRunId: typeof nextState.meta?.scenarioRunId === "string"
-              ? nextState.meta.scenarioRunId
-              : nextState.runId,
-            messageRefId: body.messageRefId,
-            feedback: entry,
-            deleted,
-          });
-          const testBotRunId = typeof nextState.meta?.testBotRunId === "string"
-            ? nextState.meta.testBotRunId
-            : undefined;
-          if (testBotRunId) {
-            const testEntry = testBotRuns.get(testBotRunId);
-            if (testEntry) {
-              syncTestBotRunFromState(testEntry.run, nextState);
-              broadcastTestBot(
-                { type: "testBotStatus", run: testEntry.run },
-                workspaceId,
-              );
-            }
-          }
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              feedback: entry,
-              saved: !deleted,
-              deleted,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      if (url.pathname === `${WORKSPACE_API_BASE}/delete`) {
-        if (req.method !== "POST") {
-          return new Response("Method not allowed", { status: 405 });
-        }
-        try {
-          const body = await req.json() as { workspaceId?: string };
-          const workspaceId = getWorkspaceIdFromBody(body);
-          if (!workspaceId) {
-            throw new Error("Missing workspaceId");
-          }
-          const removed = deleteSessionState(workspaceId);
-          if (!removed) {
-            return new Response(
-              JSON.stringify({ error: "Workspace not found" }),
-              { status: 404, headers: { "content-type": "application/json" } },
-            );
-          }
-          return new Response(
-            JSON.stringify({
-              workspaceId,
-              deleted: true,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          return new Response(
-            JSON.stringify({
-              error: err instanceof Error ? err.message : String(err),
-            }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
-      }
-
-      const feedbackResponse = await handleFeedbackRoutes({
-        url,
-        req,
-        sessionsRoot,
-        getWorkspaceIdFromBody,
-        readSessionState,
-        persistSessionState,
-        appendFeedbackLog,
-        appendSessionEvent,
-      });
-      if (feedbackResponse) return feedbackResponse;
 
       const uiRoutesResponse = await handleUiRoutes({
         url,
-        req,
         workspaceRouteBase: WORKSPACE_ROUTE_BASE,
         activeWorkspaceId,
         activeWorkspaceOnboarding,
@@ -6457,14 +7372,16 @@ export function startWebSocketSimulator(opts: {
         schemaPromise,
         deckLoadPromise,
         canServeReactBundle,
-        simulatorReactHtml,
+        simulatorReactHtml: (rootDeckPath, rootDeckLabel, opts) =>
+          simulatorReactHtml(
+            rootDeckPath,
+            rootDeckLabel,
+            opts,
+          ),
         toDeckLabel,
         readReactBundle,
         shouldAdvertiseSourceMap,
         readReactBundleSourceMap,
-        listSessions,
-        createWorkspaceSession,
-        workspaceStateSchemaVersion: WORKSPACE_STATE_SCHEMA_VERSION,
       });
       if (uiRoutesResponse) return uiRoutesResponse;
 
@@ -6476,6 +7393,11 @@ export function startWebSocketSimulator(opts: {
   logger.log(
     `Simulator listening on http://localhost:${listenPort} (deck=${resolvedDeckPath})`,
   );
+  server.finished.finally(() => {
+    for (const workspaceId of workspaceFsWatchers.keys()) {
+      stopWorkspaceFsWatcher(workspaceId);
+    }
+  });
   return server;
 }
 
@@ -6598,11 +7520,17 @@ async function readRemoteBundle(
   }
 }
 
-function simulatorReactHtml(
+async function simulatorReactHtml(
   deckPath: string,
   deckLabel?: string,
-  opts?: { workspaceId?: string | null; onboarding?: boolean },
-): string {
+  opts?: {
+    workspaceId?: string | null;
+    onboarding?: boolean;
+    currentPath?: string;
+  },
+  readWorkspaceFiles?: ReadWorkspaceFiles,
+  operations?: SimulatorGraphqlOperations,
+): Promise<string> {
   const safeDeckPath = deckPath.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const safeDeckLabel =
     deckLabel?.replaceAll("<", "&lt;").replaceAll(">", "&gt;") ?? null;
@@ -6638,6 +7566,12 @@ function simulatorReactHtml(
       normalized === "yes" ||
       normalized === "on";
   })();
+  const gambitDev = (() => {
+    const raw = (Deno.env.get("GAMBIT_ENV") ?? Deno.env.get("NODE_ENV") ?? "")
+      .trim()
+      .toLowerCase();
+    return raw === "development" || raw === "dev" || raw === "local";
+  })();
   const bundleStamp = (() => {
     try {
       const stat = Deno.statSync(simulatorBundlePath);
@@ -6652,6 +7586,140 @@ function simulatorReactHtml(
     : "/ui/bundle.js";
   const workspaceId = opts?.workspaceId ?? null;
   const workspaceOnboarding = Boolean(opts?.onboarding);
+  const buildChatProvider = (() => {
+    const raw = (Deno.env.get("GAMBIT_SIMULATOR_BUILD_CHAT_PROVIDER") ?? "")
+      .trim()
+      .toLowerCase();
+    return raw === "claude-code-cli" ? "claude-code-cli" : "codex-cli";
+  })();
+  const currentPath = opts?.currentPath ?? "/";
+  const serializeForScript = (value: unknown): string =>
+    JSON.stringify(value)
+      .replace(/</g, "\\u003c")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+
+  let rootMarkup = "";
+  let isoPreloads: Record<string, unknown> = {};
+  if (readWorkspaceFiles) {
+    try {
+      const globals = globalThis as typeof globalThis & {
+        __GAMBIT_CURRENT_PATH__?: unknown;
+        __GAMBIT_DECK_PATH__?: unknown;
+        __GAMBIT_DECK_LABEL__?: unknown;
+        __GAMBIT_VERSION__?: unknown;
+        __GAMBIT_BUILD_TAB_ENABLED__?: unknown;
+        __GAMBIT_VERIFY_TAB_ENABLED__?: unknown;
+        __GAMBIT_CHAT_ACCORDION_ENABLED__?: unknown;
+        __GAMBIT_WORKSPACE_ID__?: unknown;
+        __GAMBIT_WORKSPACE_ONBOARDING__?: unknown;
+        __GAMBIT_BUILD_STREAM_DEBUG__?: unknown;
+        __GAMBIT_DEV__?: unknown;
+      };
+      const previousPath = globals.__GAMBIT_CURRENT_PATH__;
+      const previousDeckPath = globals.__GAMBIT_DECK_PATH__;
+      const previousDeckLabel = globals.__GAMBIT_DECK_LABEL__;
+      const previousVersion = globals.__GAMBIT_VERSION__;
+      const previousBuildTabEnabled = globals.__GAMBIT_BUILD_TAB_ENABLED__;
+      const previousVerifyTabEnabled = globals.__GAMBIT_VERIFY_TAB_ENABLED__;
+      const previousChatAccordionEnabled =
+        globals.__GAMBIT_CHAT_ACCORDION_ENABLED__;
+      const previousWorkspaceId = globals.__GAMBIT_WORKSPACE_ID__;
+      const previousWorkspaceOnboarding =
+        globals.__GAMBIT_WORKSPACE_ONBOARDING__;
+      const previousBuildStreamDebug = globals.__GAMBIT_BUILD_STREAM_DEBUG__;
+      const previousDev = globals.__GAMBIT_DEV__;
+      globals.__GAMBIT_CURRENT_PATH__ = currentPath;
+      globals.__GAMBIT_DECK_PATH__ = safeDeckPath;
+      globals.__GAMBIT_DECK_LABEL__ = safeDeckLabel;
+      globals.__GAMBIT_VERSION__ = gambitVersion;
+      globals.__GAMBIT_BUILD_TAB_ENABLED__ = buildTabEnabled;
+      globals.__GAMBIT_VERIFY_TAB_ENABLED__ = verifyTabEnabled;
+      globals.__GAMBIT_CHAT_ACCORDION_ENABLED__ = chatAccordionEnabled;
+      globals.__GAMBIT_WORKSPACE_ID__ = workspaceId;
+      globals.__GAMBIT_WORKSPACE_ONBOARDING__ = workspaceOnboarding;
+      globals.__GAMBIT_BUILD_STREAM_DEBUG__ = buildStreamDebugEnabled;
+      globals.__GAMBIT_DEV__ = gambitDev;
+      try {
+        const { environment, preloads } = getSimulatorIsographEnvironment(
+          readWorkspaceFiles,
+          operations,
+        );
+        const stream = await renderToReadableStream(
+          createElement(AppRoot, { environment, initialPath: currentPath }),
+        );
+        if ("allReady" in stream && stream.allReady) {
+          await stream.allReady;
+        }
+        rootMarkup = await new Response(stream).text();
+        isoPreloads = preloads;
+      } finally {
+        if (previousPath === undefined) {
+          delete globals.__GAMBIT_CURRENT_PATH__;
+        } else {
+          globals.__GAMBIT_CURRENT_PATH__ = previousPath;
+        }
+        if (previousDeckPath === undefined) {
+          delete globals.__GAMBIT_DECK_PATH__;
+        } else {
+          globals.__GAMBIT_DECK_PATH__ = previousDeckPath;
+        }
+        if (previousDeckLabel === undefined) {
+          delete globals.__GAMBIT_DECK_LABEL__;
+        } else {
+          globals.__GAMBIT_DECK_LABEL__ = previousDeckLabel;
+        }
+        if (previousVersion === undefined) {
+          delete globals.__GAMBIT_VERSION__;
+        } else {
+          globals.__GAMBIT_VERSION__ = previousVersion;
+        }
+        if (previousBuildTabEnabled === undefined) {
+          delete globals.__GAMBIT_BUILD_TAB_ENABLED__;
+        } else {
+          globals.__GAMBIT_BUILD_TAB_ENABLED__ = previousBuildTabEnabled;
+        }
+        if (previousVerifyTabEnabled === undefined) {
+          delete globals.__GAMBIT_VERIFY_TAB_ENABLED__;
+        } else {
+          globals.__GAMBIT_VERIFY_TAB_ENABLED__ = previousVerifyTabEnabled;
+        }
+        if (previousChatAccordionEnabled === undefined) {
+          delete globals.__GAMBIT_CHAT_ACCORDION_ENABLED__;
+        } else {
+          globals.__GAMBIT_CHAT_ACCORDION_ENABLED__ =
+            previousChatAccordionEnabled;
+        }
+        if (previousWorkspaceId === undefined) {
+          delete globals.__GAMBIT_WORKSPACE_ID__;
+        } else {
+          globals.__GAMBIT_WORKSPACE_ID__ = previousWorkspaceId;
+        }
+        if (previousWorkspaceOnboarding === undefined) {
+          delete globals.__GAMBIT_WORKSPACE_ONBOARDING__;
+        } else {
+          globals.__GAMBIT_WORKSPACE_ONBOARDING__ = previousWorkspaceOnboarding;
+        }
+        if (previousBuildStreamDebug === undefined) {
+          delete globals.__GAMBIT_BUILD_STREAM_DEBUG__;
+        } else {
+          globals.__GAMBIT_BUILD_STREAM_DEBUG__ = previousBuildStreamDebug;
+        }
+        if (previousDev === undefined) {
+          delete globals.__GAMBIT_DEV__;
+        } else {
+          globals.__GAMBIT_DEV__ = previousDev;
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      rootMarkup =
+        `<div style="padding:16px;font-family:ui-sans-serif,system-ui,sans-serif;color:#b91c1c">SSR error: ${
+          message.replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+        }</div>`;
+    }
+  }
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -6659,12 +7727,11 @@ function simulatorReactHtml(
   <title>Gambit Debug</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin: 0; background: #f3f5f9; }
-    #root { min-height: 100vh; }
+${globalStyles}
   </style>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">${rootMarkup}</div>
   <script>
     window.__GAMBIT_DECK_PATH__ = ${JSON.stringify(safeDeckPath)};
     window.__GAMBIT_DECK_LABEL__ = ${JSON.stringify(safeDeckLabel)};
@@ -6687,6 +7754,14 @@ function simulatorReactHtml(
       buildStreamDebugEnabled,
     )
   };
+    window.__GAMBIT_BUILD_CHAT_PROVIDER__ = ${
+    JSON.stringify(
+      buildChatProvider,
+    )
+  };
+    window.__GAMBIT_DEV__ = ${JSON.stringify(gambitDev)};
+    window.__GAMBIT_CURRENT_PATH__ = ${JSON.stringify(currentPath)};
+    window.__ISO_PRELOADED__ = ${serializeForScript(isoPreloads)};
   </script>
   <script type="module" src="${bundleUrl}"></script>
 </body>

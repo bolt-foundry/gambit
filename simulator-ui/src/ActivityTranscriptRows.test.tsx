@@ -1,5 +1,6 @@
+// deno-lint-ignore-file
 import { assert, assertEquals } from "@std/assert";
-import React from "react";
+import type React from "react";
 import TestRenderer, { act } from "npm:react-test-renderer@19.2.0";
 import type { ReactTestInstance } from "npm:react-test-renderer@19.2.0";
 
@@ -26,7 +27,7 @@ function makeTool(id: string, name = "tool_name"): ToolCallSummary {
 }
 
 Deno.test("ActivityTranscriptRows shows tool preview when no reasoning exists", async () => {
-  const display: BuildDisplayMessage[] = [
+  const display: Array<BuildDisplayMessage> = [
     {
       kind: "tool",
       toolCallId: "tool-1",
@@ -62,7 +63,7 @@ Deno.test("ActivityTranscriptRows shows tool preview when no reasoning exists", 
 });
 
 Deno.test("ActivityTranscriptRows keeps tool preview hidden when reasoning text exists", async () => {
-  const display: BuildDisplayMessage[] = [
+  const display: Array<BuildDisplayMessage> = [
     {
       kind: "tool",
       toolCallId: "tool-1",

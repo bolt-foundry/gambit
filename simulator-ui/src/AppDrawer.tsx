@@ -1,13 +1,14 @@
 import { useEffect } from "react";
 import Button from "./gds/Button.tsx";
 import Icon from "./gds/Icon.tsx";
+import Listbox from "./gds/Listbox.tsx";
 import { GambitLogo } from "./GambitLogo.tsx";
 import { classNames, formatTimestamp, gambitVersion } from "./utils.ts";
 import type { SessionMeta } from "./utils.ts";
 
 export default function AppDrawer(props: {
   open: boolean;
-  workspaces: SessionMeta[];
+  workspaces: Array<SessionMeta>;
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
@@ -17,6 +18,8 @@ export default function AppDrawer(props: {
   onClose: () => void;
   activeWorkspaceId?: string | null;
   bundleStamp: string | null;
+  appearance: "light" | "dark" | "system";
+  onAppearanceChange: (appearance: "light" | "dark" | "system") => void;
 }) {
   const {
     open,
@@ -30,6 +33,8 @@ export default function AppDrawer(props: {
     onClose,
     activeWorkspaceId,
     bundleStamp,
+    appearance,
+    onAppearanceChange,
   } = props;
   useEffect(() => {
     if (!open) return;
@@ -38,8 +43,8 @@ export default function AppDrawer(props: {
         onClose();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    globalThis.addEventListener("keydown", handler);
+    return () => globalThis.removeEventListener("keydown", handler);
   }, [onClose, open]);
   if (!open) return null;
   return (
@@ -116,6 +121,22 @@ export default function AppDrawer(props: {
           </div>
         </section>
         <div className="sessions-drawer-footer">
+          <div className="appearance-row">
+            <span className="appearance-row-label">Display appearance</span>
+            <div className="appearance-row-select">
+              <Listbox
+                value={appearance}
+                onChange={(next) =>
+                  onAppearanceChange(next as "light" | "dark" | "system")}
+                options={[
+                  { value: "system", label: "System" },
+                  { value: "light", label: "Light" },
+                  { value: "dark", label: "Dark" },
+                ]}
+                size="small"
+              />
+            </div>
+          </div>
           {gambitVersion
             ? <span className="bundle-stamp">Gambit v{gambitVersion}</span>
             : bundleStamp

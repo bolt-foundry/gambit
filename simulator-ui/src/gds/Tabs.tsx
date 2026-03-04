@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import Button from "./Button.tsx";
 import { classNames } from "../utils.ts";
 
@@ -11,7 +11,7 @@ type TabItem = {
 };
 
 type TabsProps = {
-  tabs: TabItem[];
+  tabs: Array<TabItem>;
   activeId: string;
   onChange: (id: string) => void;
   size?: "small" | "medium" | "large";

@@ -11,7 +11,8 @@ type StreamState = {
 };
 
 const streams = new Map<string, StreamState>();
-const STREAM_PREFIX = "/api/durable-streams/stream/";
+export const DURABLE_STREAM_PREFIX = "/api/durable-streams/stream/";
+export const GRAPHQL_STREAMS_PREFIX = "/graphql/streams/";
 
 function getStreamState(streamId: string): StreamState {
   const existing = streams.get(streamId);
@@ -47,14 +48,48 @@ export function appendDurableStreamEvent(
   return appendEvent(streamId, data);
 }
 
+export function readDurableStreamEvents(
+  streamId: string,
+  fromOffset = 0,
+): Array<StreamEvent> {
+  const state = getStreamState(streamId);
+  const startOffset = Number.isFinite(fromOffset) ? Math.max(0, fromOffset) : 0;
+  return state.events.filter((event) => event.offset >= startOffset);
+}
+
+export function getDurableStreamNextOffset(streamId: string): number {
+  const state = getStreamState(streamId);
+  return state.nextOffset;
+}
+
+export function subscribeDurableStream(
+  streamId: string,
+  listener: (event: StreamEvent) => void,
+): () => void {
+  const state = getStreamState(streamId);
+  state.listeners.add(listener);
+  return () => {
+    state.listeners.delete(listener);
+  };
+}
+
+export function deleteDurableStream(streamId: string): void {
+  streams.delete(streamId);
+}
+
 export async function handleDurableStreamRequest(
   request: Request,
 ): Promise<Response> {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith(STREAM_PREFIX)) {
+  const prefix = url.pathname.startsWith(GRAPHQL_STREAMS_PREFIX)
+    ? GRAPHQL_STREAMS_PREFIX
+    : url.pathname.startsWith(DURABLE_STREAM_PREFIX)
+    ? DURABLE_STREAM_PREFIX
+    : null;
+  if (!prefix) {
     return new Response("Not found", { status: 404 });
   }
-  const streamId = decodeURIComponent(url.pathname.slice(STREAM_PREFIX.length));
+  const streamId = decodeURIComponent(url.pathname.slice(prefix.length));
   if (!streamId) {
     return new Response("Stream id missing", { status: 400 });
   }

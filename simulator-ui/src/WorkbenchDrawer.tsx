@@ -1,7 +1,8 @@
-import React, {
+import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -13,10 +14,14 @@ import ScrollingText from "./gds/ScrollingText.tsx";
 import Callout from "./gds/Callout.tsx";
 import Chat from "./Chat.tsx";
 import Accordion from "./gds/Accordion.tsx";
+import Listbox, { type ListboxOption } from "./gds/Listbox.tsx";
+import CodexLoginRequiredOverlay from "./CodexLoginRequiredOverlay.tsx";
 import { useBuildChat } from "./BuildChatContext.tsx";
 import List from "./gds/List.tsx";
 import ListItem from "./gds/ListItem.tsx";
+import ProviderLoginPanel from "./ProviderLoginPanel.tsx";
 import {
+  type BuildChatProvider,
   chatAccordionEnabled,
   extractGradingFlags,
   extractScoreAndReason,
@@ -58,16 +63,131 @@ type WorkbenchDrawerProps = {
     feedback?: FeedbackEntry | null;
   }>;
   sessionDetail?: SessionDetailResponse | null;
-  feedbackItems?: WorkbenchDrawerFeedbackItem[];
-  gradingFlags?: GradingFlag[];
+  feedbackItems?: Array<WorkbenchDrawerFeedbackItem>;
+  gradingFlags?: Array<GradingFlag>;
   runLabelById?: Map<string, string>;
   runItemByRefId?: Map<string, WorkbenchDrawerRunItem>;
-  composerChips?: WorkbenchComposerChip[];
-  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
+  composerChips?: Array<WorkbenchComposerChip>;
+  onComposerChipsChange?: (next: Array<WorkbenchComposerChip>) => void;
 };
 
+type CodexOverlayState = {
+  copiedCodexLoginCommand: boolean;
+  codexLoginRecheckPending: boolean;
+  showCodexLoginRecheck: boolean;
+  codexAutoRecheckActive: boolean;
+  codexWorkspaceLoggedIn: boolean | null;
+  codexLoginError: string | null;
+  codexLoginStatusText: string | null;
+  codexLoginOverlayDismissed: boolean;
+};
+
+type CodexOverlayAction =
+  | { type: "reset_for_session" }
+  | { type: "status_fetch_start" }
+  | {
+    type: "status_fetch_success";
+    loggedIn: boolean;
+    statusText: string | null;
+  }
+  | { type: "status_fetch_error"; error: string }
+  | { type: "copy_login_command" }
+  | { type: "clear_copied_login_command" }
+  | { type: "start_recheck" }
+  | { type: "finish_recheck" }
+  | { type: "show_recheck" }
+  | { type: "dismiss_overlay" };
+
+const initialCodexOverlayState: CodexOverlayState = {
+  copiedCodexLoginCommand: false,
+  codexLoginRecheckPending: false,
+  showCodexLoginRecheck: false,
+  codexAutoRecheckActive: false,
+  codexWorkspaceLoggedIn: null,
+  codexLoginError: null,
+  codexLoginStatusText: null,
+  codexLoginOverlayDismissed: false,
+};
+
+function codexOverlayReducer(
+  state: CodexOverlayState,
+  action: CodexOverlayAction,
+): CodexOverlayState {
+  switch (action.type) {
+    case "reset_for_session":
+      return initialCodexOverlayState;
+    case "status_fetch_start":
+      return {
+        ...state,
+        codexLoginError: null,
+      };
+    case "status_fetch_success":
+      return {
+        ...state,
+        codexWorkspaceLoggedIn: action.loggedIn,
+        codexLoginStatusText: action.statusText,
+        showCodexLoginRecheck: action.loggedIn
+          ? false
+          : state.showCodexLoginRecheck,
+        codexAutoRecheckActive: action.loggedIn
+          ? false
+          : state.codexAutoRecheckActive,
+      };
+    case "status_fetch_error":
+      return {
+        ...state,
+        codexWorkspaceLoggedIn: null,
+        codexLoginStatusText: null,
+        codexLoginError: action.error,
+      };
+    case "copy_login_command":
+      return {
+        ...state,
+        copiedCodexLoginCommand: true,
+        showCodexLoginRecheck: true,
+        codexAutoRecheckActive: true,
+      };
+    case "clear_copied_login_command":
+      return {
+        ...state,
+        copiedCodexLoginCommand: false,
+      };
+    case "start_recheck":
+      return {
+        ...state,
+        codexLoginRecheckPending: true,
+        codexLoginError: null,
+      };
+    case "finish_recheck":
+      return {
+        ...state,
+        codexLoginRecheckPending: false,
+      };
+    case "show_recheck":
+      return {
+        ...state,
+        showCodexLoginRecheck: true,
+      };
+    case "dismiss_overlay":
+      return {
+        ...state,
+        codexLoginOverlayDismissed: true,
+        codexAutoRecheckActive: false,
+      };
+    default:
+      return state;
+  }
+}
+
 export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
-  const { run, chatSending, resetChat, loadChat } = useBuildChat();
+  const {
+    run,
+    chatSending,
+    resetChat,
+    loadChat,
+    buildChatProvider,
+    setBuildChatProvider,
+  } = useBuildChat();
   const {
     open = true,
     onClose,
@@ -95,34 +215,39 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
   const [chatHistoryLoading, setChatHistoryLoading] = useState(false);
   const [chatHistoryError, setChatHistoryError] = useState<string | null>(null);
   const [copiedStatePath, setCopiedStatePath] = useState(false);
-  const [copiedCodexLoginCommand, setCopiedCodexLoginCommand] = useState(false);
-  const [codexLoginRecheckPending, setCodexLoginRecheckPending] = useState(
-    false,
+  const [codexOverlayState, dispatchCodexOverlay] = useReducer(
+    codexOverlayReducer,
+    initialCodexOverlayState,
   );
-  const [showCodexLoginRecheck, setShowCodexLoginRecheck] = useState(false);
-  const [codexAutoRecheckActive, setCodexAutoRecheckActive] = useState(false);
-  const [codexWorkspaceLoggedIn, setCodexWorkspaceLoggedIn] = useState<
-    boolean | null
-  >(null);
-  const [codexLoginError, setCodexLoginError] = useState<string | null>(null);
-  const [codexLoginStatusText, setCodexLoginStatusText] = useState<
-    string | null
-  >(null);
-  const [codexLoginOverlayDismissed, setCodexLoginOverlayDismissed] = useState(
-    false,
-  );
+  const {
+    copiedCodexLoginCommand,
+    codexLoginRecheckPending,
+    showCodexLoginRecheck,
+    codexAutoRecheckActive,
+    codexWorkspaceLoggedIn,
+    codexLoginError,
+    codexLoginStatusText,
+    codexLoginOverlayDismissed,
+  } = codexOverlayState;
   const initializedChipTrackingRef = useRef(false);
   const seenRatingChipIdsRef = useRef(new Set<string>());
   const seenFlagChipIdsRef = useRef(new Set<string>());
-  const showCodexLoginOverlay = codexWorkspaceLoggedIn === false &&
-      !codexLoginOverlayDismissed || Boolean(codexLoginError);
-  const workspaceIdForTrust = (sessionId ?? run.id) || undefined;
-  const codexStatusEndpoint = workspaceIdForTrust
+  const buildProviderOptions = useMemo<Array<ListboxOption>>(
+    () => [
+      { value: "codex-cli", label: "Codex" },
+      { value: "claude-code-cli", label: "Claude Code" },
+    ],
+    [],
+  );
+  const codexLoginCommand = "codex login";
+  const codexWorkspaceId = sessionId ?? run.id;
+  const codexStatusEndpoint = codexWorkspaceId
     ? `/api/codex/trust-workspace?workspaceId=${
-      encodeURIComponent(workspaceIdForTrust)
+      encodeURIComponent(codexWorkspaceId)
     }`
     : "/api/codex/trust-workspace";
-  const codexLoginCommand = "codex login";
+  const showCodexLoginOverlay = (codexWorkspaceLoggedIn === false &&
+    !codexLoginOverlayDismissed) || Boolean(codexLoginError);
   const resolvedStatePath = useMemo(() => {
     if (statePath) return statePath;
     const meta = sessionDetail?.meta;
@@ -264,7 +389,7 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     return map;
   }, [runItemByRefId, sessionDetail]);
   const mergeComposerChip = useCallback(
-    (base: WorkbenchComposerChip[], chip: WorkbenchComposerChip) => {
+    (base: Array<WorkbenchComposerChip>, chip: WorkbenchComposerChip) => {
       const next = [...base];
       const existingIndex = next.findIndex((entry) =>
         entry.chipId === chip.chipId
@@ -352,20 +477,13 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     initializedChipTrackingRef.current = false;
     seenRatingChipIdsRef.current.clear();
     seenFlagChipIdsRef.current.clear();
-    setCodexWorkspaceLoggedIn(null);
-    setCodexLoginError(null);
-    setCodexLoginStatusText(null);
-    setCopiedCodexLoginCommand(false);
-    setCodexLoginRecheckPending(false);
-    setShowCodexLoginRecheck(false);
-    setCodexAutoRecheckActive(false);
-    setCodexLoginOverlayDismissed(false);
+    dispatchCodexOverlay({ type: "reset_for_session" });
   }, [sessionId]);
 
   useEffect(() => {
     if (!open) return;
     let canceled = false;
-    setCodexLoginError(null);
+    dispatchCodexOverlay({ type: "status_fetch_start" });
     fetch(codexStatusEndpoint)
       .then(async (response) => {
         const payload = await response.json() as {
@@ -380,22 +498,20 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
           throw new Error(payload.error || response.statusText);
         }
         if (canceled) return;
-        setCodexWorkspaceLoggedIn(payload.codexLoggedIn === true);
-        if (payload.codexLoggedIn === true) {
-          setShowCodexLoginRecheck(false);
-          setCodexAutoRecheckActive(false);
-        }
-        setCodexLoginStatusText(
-          typeof payload.codexLoginStatus === "string"
+        dispatchCodexOverlay({
+          type: "status_fetch_success",
+          loggedIn: payload.codexLoggedIn === true,
+          statusText: typeof payload.codexLoginStatus === "string"
             ? payload.codexLoginStatus
             : null,
-        );
+        });
       })
       .catch((err) => {
         if (canceled) return;
-        setCodexWorkspaceLoggedIn(null);
-        setCodexLoginStatusText(null);
-        setCodexLoginError(err instanceof Error ? err.message : String(err));
+        dispatchCodexOverlay({
+          type: "status_fetch_error",
+          error: err instanceof Error ? err.message : String(err),
+        });
       })
       .finally(() => {
         if (canceled) return;
@@ -409,12 +525,11 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     if (!showCodexLoginOverlay) return;
     if (codexWorkspaceLoggedIn !== false) return;
     if (showCodexLoginRecheck) return;
-    const timeout = window.setTimeout(() => {
-      setShowCodexLoginRecheck(true);
+    const timeout = globalThis.setTimeout(() => {
+      dispatchCodexOverlay({ type: "show_recheck" });
     }, 5000);
-    return () => window.clearTimeout(timeout);
+    return () => globalThis.clearTimeout(timeout);
   }, [codexWorkspaceLoggedIn, showCodexLoginOverlay, showCodexLoginRecheck]);
-
   useEffect(() => {
     if (loading) return;
     const currentRatingChipIds = new Set(
@@ -565,19 +680,18 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
     return () => {
       navigator.clipboard?.writeText(resolvedStatePath);
       setCopiedStatePath(true);
-      window.setTimeout(() => setCopiedStatePath(false), 1200);
+      globalThis.setTimeout(() => setCopiedStatePath(false), 1200);
     };
   }, [resolvedStatePath]);
   const handleCopyCodexLoginCommand = useCallback(() => {
     navigator.clipboard?.writeText(codexLoginCommand);
-    setCopiedCodexLoginCommand(true);
-    setShowCodexLoginRecheck(true);
-    setCodexAutoRecheckActive(true);
-    window.setTimeout(() => setCopiedCodexLoginCommand(false), 1200);
+    dispatchCodexOverlay({ type: "copy_login_command" });
+    globalThis.setTimeout(() => {
+      dispatchCodexOverlay({ type: "clear_copied_login_command" });
+    }, 1200);
   }, [codexLoginCommand]);
   const handleRecheckCodexLogin = useCallback(async () => {
-    setCodexLoginRecheckPending(true);
-    setCodexLoginError(null);
+    dispatchCodexOverlay({ type: "start_recheck" });
     try {
       const response = await fetch(codexStatusEndpoint);
       const payload = await response.json() as {
@@ -589,33 +703,31 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
       if (!response.ok || payload.ok === false) {
         throw new Error(payload.error || response.statusText);
       }
-      setCodexWorkspaceLoggedIn(payload.codexLoggedIn === true);
-      if (payload.codexLoggedIn === true) {
-        setShowCodexLoginRecheck(false);
-        setCodexAutoRecheckActive(false);
-      }
-      setCodexLoginStatusText(
-        typeof payload.codexLoginStatus === "string"
+      dispatchCodexOverlay({
+        type: "status_fetch_success",
+        loggedIn: payload.codexLoggedIn === true,
+        statusText: typeof payload.codexLoginStatus === "string"
           ? payload.codexLoginStatus
           : null,
-      );
+      });
     } catch (err) {
-      setCodexWorkspaceLoggedIn(null);
-      setCodexLoginStatusText(null);
-      setCodexLoginError(err instanceof Error ? err.message : String(err));
+      dispatchCodexOverlay({
+        type: "status_fetch_error",
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
-      setCodexLoginRecheckPending(false);
+      dispatchCodexOverlay({ type: "finish_recheck" });
     }
   }, [codexStatusEndpoint]);
   useEffect(() => {
     if (!codexAutoRecheckActive) return;
     if (!showCodexLoginOverlay) return;
     if (codexWorkspaceLoggedIn !== false) return;
-    const interval = window.setInterval(() => {
+    const interval = globalThis.setInterval(() => {
       if (codexLoginRecheckPending) return;
       void handleRecheckCodexLogin();
     }, 2000);
-    return () => window.clearInterval(interval);
+    return () => globalThis.clearInterval(interval);
   }, [
     codexAutoRecheckActive,
     codexLoginRecheckPending,
@@ -631,8 +743,8 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
         onClose();
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    globalThis.addEventListener("keydown", handler);
+    return () => globalThis.removeEventListener("keydown", handler);
   }, [onClose, open]);
   if (!open) return null;
   return (
@@ -680,20 +792,41 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
               defaultOpen: true,
               contentClassName: "workbench-chat-content",
               headerActions: (
-                <Button
-                  variant="secondary"
-                  size="small"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    resetChat().then(() => {
-                      loadChatHistory().catch(() => {});
-                    });
-                  }}
-                  className="gds-accordion-open-only"
-                  disabled={chatSending || run.status === "running"}
-                >
-                  New chat
-                </Button>
+                <div className="workbench-chat-header-actions gds-accordion-open-only">
+                  <label className="workbench-provider-select-label">
+                    <div
+                      className="workbench-provider-select"
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <Listbox
+                        value={buildChatProvider}
+                        onChange={(value) =>
+                          setBuildChatProvider(value as BuildChatProvider)}
+                        options={buildProviderOptions}
+                        disabled={chatSending || run.status === "running"}
+                        size="small"
+                        popoverMatchTriggerWidth={false}
+                        popoverMinWidth={200}
+                        popoverAlign="right"
+                      />
+                    </div>
+                  </label>
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      resetChat().then(() => {
+                        loadChatHistory().catch(() => {});
+                      });
+                    }}
+                    disabled={chatSending || run.status === "running"}
+                  >
+                    New chat
+                  </Button>
+                </div>
               ),
               content: (
                 <div className="workbench-chat-panel">
@@ -746,76 +879,31 @@ export default function WorkbenchDrawer(props: WorkbenchDrawerProps) {
                         chatHistoryOpen ? " is-history" : ""
                       }`}
                     >
+                      <ProviderLoginPanel
+                        key={`${
+                          sessionId ?? "sessionless"
+                        }:${buildChatProvider}`}
+                        open={open}
+                        buildChatProvider={buildChatProvider}
+                        workspaceId={(sessionId ?? run.id) || undefined}
+                      />
                       {showCodexLoginOverlay && (
-                        <div className="workbench-chat-readonly-overlay">
-                          <div className="workbench-chat-readonly-card">
-                            <h3 className="workbench-chat-readonly-title">
-                              Codex login required
-                            </h3>
-                            {codexWorkspaceLoggedIn === false && (
-                              <>
-                                <p className="workbench-chat-readonly-copy">
-                                  Codex login is required for this workspace.
-                                </p>
-                                <p className="workbench-chat-readonly-copy">
-                                  Run this in your terminal to authenticate
-                                  Codex, then restart Gambit.
-                                </p>
-                                <div className="workbench-chat-command-row">
-                                  <pre className="workbench-chat-command-code">
-                                    <code>{codexLoginCommand}</code>
-                                  </pre>
-                                  <Button
-                                    variant="secondary"
-                                    size="medium"
-                                    onClick={handleCopyCodexLoginCommand}
-                                  >
-                                    <Icon
-                                      name={copiedCodexLoginCommand
-                                        ? "copied"
-                                        : "copy"}
-                                      size={14}
-                                    />
-                                    {copiedCodexLoginCommand
-                                      ? "Copied"
-                                      : "Copy"}
-                                  </Button>
-                                </div>
-                                {showCodexLoginRecheck && (
-                                  <div className="workbench-chat-readonly-actions">
-                                    <Button
-                                      variant="primary"
-                                      size="medium"
-                                      style={{ width: "100%" }}
-                                      onClick={() => handleRecheckCodexLogin()}
-                                      disabled={codexLoginRecheckPending}
-                                    >
-                                      {codexLoginRecheckPending
-                                        ? "Rechecking..."
-                                        : "Recheck login"}
-                                    </Button>
-                                  </div>
-                                )}
-                              </>
-                            )}
-                            {codexLoginStatusText &&
-                              !/^not logged in$/i.test(
-                                codexLoginStatusText.trim(),
-                              ) && <Callout>{codexLoginStatusText}</Callout>}
-                            {codexLoginError && (
-                              <div className="error">{codexLoginError}</div>
-                            )}
-                            <Button
-                              variant="secondary"
-                              onClick={() => {
-                                setCodexLoginOverlayDismissed(true);
-                                setCodexAutoRecheckActive(false);
-                              }}
-                            >
-                              Dismiss
-                            </Button>
-                          </div>
-                        </div>
+                        <CodexLoginRequiredOverlay
+                          codexWorkspaceLoggedIn={codexWorkspaceLoggedIn}
+                          codexLoginCommand={codexLoginCommand}
+                          copiedCodexLoginCommand={copiedCodexLoginCommand}
+                          showCodexLoginRecheck={showCodexLoginRecheck}
+                          codexLoginRecheckPending={codexLoginRecheckPending}
+                          codexLoginStatusText={codexLoginStatusText}
+                          codexLoginError={codexLoginError}
+                          onCopyCodexLoginCommand={handleCopyCodexLoginCommand}
+                          onRecheckCodexLogin={() => {
+                            void handleRecheckCodexLogin();
+                          }}
+                          onDismiss={() => {
+                            dispatchCodexOverlay({ type: "dismiss_overlay" });
+                          }}
+                        />
                       )}
                       <Chat
                         composerChips={composerChips}

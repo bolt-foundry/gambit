@@ -14,8 +14,14 @@ Deno.test("provider router selects prefixed provider", () => {
   const openrouter = stubProvider("openrouter");
   const ollama = stubProvider("ollama");
   const codexCli = stubProvider("codex-cli");
+  const claudeCode = stubProvider("claude-code-cli");
   const router = createProviderRouter({
-    providers: { openrouter, ollama, "codex-cli": codexCli },
+    providers: {
+      openrouter,
+      ollama,
+      "codex-cli": codexCli,
+      "claude-code-cli": claudeCode,
+    },
   });
 
   const selection = router.resolve({ model: "ollama/llama3" });
@@ -27,6 +33,13 @@ Deno.test("provider router selects prefixed provider", () => {
   assertEquals(codexSelection.providerKey, "codex-cli");
   assertEquals(codexSelection.provider, codexCli);
   assertEquals(codexSelection.model, "default");
+
+  const claudeSelection = router.resolve({
+    model: "claude-code-cli/default",
+  });
+  assertEquals(claudeSelection.providerKey, "claude-code-cli");
+  assertEquals(claudeSelection.provider, claudeCode);
+  assertEquals(claudeSelection.model, "default");
 });
 
 Deno.test("provider router maps bare codex-cli to codex-cli/default", () => {
@@ -40,6 +53,21 @@ Deno.test("provider router maps bare codex-cli to codex-cli/default", () => {
   assertEquals(selection.provider, codexCli);
   assertEquals(selection.model, "default");
 });
+
+Deno.test(
+  "provider router maps bare claude-code-cli to claude-code-cli/default",
+  () => {
+    const claudeCode = stubProvider("claude-code-cli");
+    const router = createProviderRouter({
+      providers: { "claude-code-cli": claudeCode },
+      defaultProvider: null,
+    });
+    const selection = router.resolve({ model: "claude-code-cli" });
+    assertEquals(selection.providerKey, "claude-code-cli");
+    assertEquals(selection.provider, claudeCode);
+    assertEquals(selection.model, "default");
+  },
+);
 
 Deno.test("provider router defaults to openrouter when no prefix", () => {
   const openrouter = stubProvider("openrouter");

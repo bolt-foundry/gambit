@@ -1,0 +1,533 @@
+import type { EagerReaderArtifact, ReaderAst } from '@isograph/react';
+import { Mutation__GambitWorkspaceScenarioRunStop__param } from './param_type.ts';
+import { Mutation__GambitWorkspaceScenarioRunStop__output_type } from './output_type.ts';
+import { GambitWorkspaceScenarioRunStopMutation as resolver } from '../../../../mutations/GambitWorkspaceScenarioRunStop.tsx';
+import OpenResponseOutputItem__asOutputMessage__resolver_reader from '../../OpenResponseOutputItem/asOutputMessage/resolver_reader.ts';
+import OpenResponseOutputItem__asOutputReasoning__resolver_reader from '../../OpenResponseOutputItem/asOutputReasoning/resolver_reader.ts';
+import OpenResponseOutputItem__asOutputToolCall__resolver_reader from '../../OpenResponseOutputItem/asOutputToolCall/resolver_reader.ts';
+
+const readerAst: ReaderAst<Mutation__GambitWorkspaceScenarioRunStop__param> = [
+  {
+    kind: "Linked",
+    fieldName: "workspaceScenarioRunStop",
+    alias: null,
+    arguments: [
+      [
+        "input",
+        { kind: "Variable", name: "input" },
+      ],
+    ],
+    condition: null,
+    isUpdatable: false,
+    refetchQueryIndex: null,
+    selections: [
+      {
+        kind: "Linked",
+        fieldName: "workspace",
+        alias: null,
+        arguments: null,
+        condition: null,
+        isUpdatable: false,
+        refetchQueryIndex: null,
+        selections: [
+          {
+            kind: "Scalar",
+            fieldName: "id",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Linked",
+            fieldName: "scenarioRuns",
+            alias: null,
+            arguments: [
+              [
+                "first",
+                { kind: "Literal", value: 25 },
+              ],
+            ],
+            condition: null,
+            isUpdatable: false,
+            refetchQueryIndex: null,
+            selections: [
+              {
+                kind: "Linked",
+                fieldName: "edges",
+                alias: null,
+                arguments: null,
+                condition: null,
+                isUpdatable: false,
+                refetchQueryIndex: null,
+                selections: [
+                  {
+                    kind: "Linked",
+                    fieldName: "node",
+                    alias: null,
+                    arguments: null,
+                    condition: null,
+                    isUpdatable: false,
+                    refetchQueryIndex: null,
+                    selections: [
+                      {
+                        kind: "Scalar",
+                        fieldName: "id",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "status",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "startedAt",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "finishedAt",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "error",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Linked",
+                        fieldName: "openResponses",
+                        alias: null,
+                        arguments: [
+                          [
+                            "first",
+                            { kind: "Literal", value: 1 },
+                          ],
+                        ],
+                        condition: null,
+                        isUpdatable: false,
+                        refetchQueryIndex: null,
+                        selections: [
+                          {
+                            kind: "Linked",
+                            fieldName: "edges",
+                            alias: null,
+                            arguments: null,
+                            condition: null,
+                            isUpdatable: false,
+                            refetchQueryIndex: null,
+                            selections: [
+                              {
+                                kind: "Linked",
+                                fieldName: "node",
+                                alias: null,
+                                arguments: null,
+                                condition: null,
+                                isUpdatable: false,
+                                refetchQueryIndex: null,
+                                selections: [
+                                  {
+                                    kind: "Scalar",
+                                    fieldName: "id",
+                                    alias: null,
+                                    arguments: null,
+                                    isUpdatable: false,
+                                  },
+                                  {
+                                    kind: "Scalar",
+                                    fieldName: "status",
+                                    alias: null,
+                                    arguments: null,
+                                    isUpdatable: false,
+                                  },
+                                  {
+                                    kind: "Linked",
+                                    fieldName: "outputItems",
+                                    alias: null,
+                                    arguments: [
+                                      [
+                                        "first",
+                                        { kind: "Literal", value: 200 },
+                                      ],
+                                    ],
+                                    condition: null,
+                                    isUpdatable: false,
+                                    refetchQueryIndex: null,
+                                    selections: [
+                                      {
+                                        kind: "Linked",
+                                        fieldName: "edges",
+                                        alias: null,
+                                        arguments: null,
+                                        condition: null,
+                                        isUpdatable: false,
+                                        refetchQueryIndex: null,
+                                        selections: [
+                                          {
+                                            kind: "Linked",
+                                            fieldName: "node",
+                                            alias: null,
+                                            arguments: null,
+                                            condition: null,
+                                            isUpdatable: false,
+                                            refetchQueryIndex: null,
+                                            selections: [
+                                              {
+                                                kind: "Scalar",
+                                                fieldName: "__typename",
+                                                alias: null,
+                                                arguments: null,
+                                                isUpdatable: false,
+                                              },
+                                              {
+                                                kind: "Linked",
+                                                fieldName: "asOutputMessage",
+                                                alias: null,
+                                                arguments: null,
+                                                condition: OpenResponseOutputItem__asOutputMessage__resolver_reader,
+                                                isUpdatable: false,
+                                                refetchQueryIndex: null,
+                                                selections: [
+                                                  {
+                                                    kind: "Scalar",
+                                                    fieldName: "id",
+                                                    alias: null,
+                                                    arguments: null,
+                                                    isUpdatable: false,
+                                                  },
+                                                  {
+                                                    kind: "Scalar",
+                                                    fieldName: "role",
+                                                    alias: null,
+                                                    arguments: null,
+                                                    isUpdatable: false,
+                                                  },
+                                                  {
+                                                    kind: "Scalar",
+                                                    fieldName: "content",
+                                                    alias: null,
+                                                    arguments: null,
+                                                    isUpdatable: false,
+                                                  },
+                                                ],
+                                              },
+                                            ],
+                                          },
+                                        ],
+                                      },
+                                    ],
+                                  },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        kind: "Linked",
+        fieldName: "run",
+        alias: null,
+        arguments: null,
+        condition: null,
+        isUpdatable: false,
+        refetchQueryIndex: null,
+        selections: [
+          {
+            kind: "Scalar",
+            fieldName: "id",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "workspaceId",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "status",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "startedAt",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "finishedAt",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "error",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Linked",
+            fieldName: "openResponses",
+            alias: null,
+            arguments: [
+              [
+                "first",
+                { kind: "Literal", value: 1 },
+              ],
+            ],
+            condition: null,
+            isUpdatable: false,
+            refetchQueryIndex: null,
+            selections: [
+              {
+                kind: "Linked",
+                fieldName: "edges",
+                alias: null,
+                arguments: null,
+                condition: null,
+                isUpdatable: false,
+                refetchQueryIndex: null,
+                selections: [
+                  {
+                    kind: "Linked",
+                    fieldName: "node",
+                    alias: null,
+                    arguments: null,
+                    condition: null,
+                    isUpdatable: false,
+                    refetchQueryIndex: null,
+                    selections: [
+                      {
+                        kind: "Scalar",
+                        fieldName: "id",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "status",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Linked",
+                        fieldName: "outputItems",
+                        alias: null,
+                        arguments: [
+                          [
+                            "first",
+                            { kind: "Literal", value: 200 },
+                          ],
+                        ],
+                        condition: null,
+                        isUpdatable: false,
+                        refetchQueryIndex: null,
+                        selections: [
+                          {
+                            kind: "Linked",
+                            fieldName: "edges",
+                            alias: null,
+                            arguments: null,
+                            condition: null,
+                            isUpdatable: false,
+                            refetchQueryIndex: null,
+                            selections: [
+                              {
+                                kind: "Linked",
+                                fieldName: "node",
+                                alias: null,
+                                arguments: null,
+                                condition: null,
+                                isUpdatable: false,
+                                refetchQueryIndex: null,
+                                selections: [
+                                  {
+                                    kind: "Scalar",
+                                    fieldName: "__typename",
+                                    alias: null,
+                                    arguments: null,
+                                    isUpdatable: false,
+                                  },
+                                  {
+                                    kind: "Linked",
+                                    fieldName: "asOutputMessage",
+                                    alias: null,
+                                    arguments: null,
+                                    condition: OpenResponseOutputItem__asOutputMessage__resolver_reader,
+                                    isUpdatable: false,
+                                    refetchQueryIndex: null,
+                                    selections: [
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "id",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "role",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "content",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                    ],
+                                  },
+                                  {
+                                    kind: "Linked",
+                                    fieldName: "asOutputReasoning",
+                                    alias: null,
+                                    arguments: null,
+                                    condition: OpenResponseOutputItem__asOutputReasoning__resolver_reader,
+                                    isUpdatable: false,
+                                    refetchQueryIndex: null,
+                                    selections: [
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "id",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "summary",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "reasoningType",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                    ],
+                                  },
+                                  {
+                                    kind: "Linked",
+                                    fieldName: "asOutputToolCall",
+                                    alias: null,
+                                    arguments: null,
+                                    condition: OpenResponseOutputItem__asOutputToolCall__resolver_reader,
+                                    isUpdatable: false,
+                                    refetchQueryIndex: null,
+                                    selections: [
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "id",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "toolCallId",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "toolName",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "status",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "argumentsText",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "resultText",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "error",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                    ],
+                                  },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+];
+
+const artifact: EagerReaderArtifact<
+  Mutation__GambitWorkspaceScenarioRunStop__param,
+  Mutation__GambitWorkspaceScenarioRunStop__output_type
+> = {
+  kind: "EagerReaderArtifact",
+  fieldName: "GambitWorkspaceScenarioRunStop",
+  resolver,
+  readerAst,
+  hasUpdatable: false,
+};
+
+export default artifact;

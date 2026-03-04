@@ -2,7 +2,7 @@
 label = "gambit_bot"
 
 [modelParams]
-model = ["codex-cli/default"]
+model = ["codex-cli/default", "claude-code-cli/default"]
 temperature = 0.2
 
 [modelParams.reasoning]

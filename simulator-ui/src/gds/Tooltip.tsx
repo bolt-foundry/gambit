@@ -118,11 +118,11 @@ export default function Tooltip(props: TooltipProps) {
 
     const clampedLeft = Math.min(
       Math.max(margin, nextLeft),
-      window.innerWidth - tooltipRect.width - margin,
+      globalThis.innerWidth - tooltipRect.width - margin,
     );
     const clampedTop = Math.min(
       Math.max(margin, nextTop),
-      window.innerHeight - tooltipRect.height - margin,
+      globalThis.innerHeight - tooltipRect.height - margin,
     );
 
     setPosition({ top: clampedTop, left: clampedLeft });
@@ -147,12 +147,12 @@ export default function Tooltip(props: TooltipProps) {
     };
     const handleReposition = () => updatePosition();
     document.addEventListener("keydown", handleEscape);
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
+    globalThis.addEventListener("resize", handleReposition);
+    globalThis.addEventListener("scroll", handleReposition, true);
     return () => {
       document.removeEventListener("keydown", handleEscape);
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
+      globalThis.removeEventListener("resize", handleReposition);
+      globalThis.removeEventListener("scroll", handleReposition, true);
     };
   }, [canUseDom, closeNow, open, updatePosition]);
 

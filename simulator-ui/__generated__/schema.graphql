@@ -1,0 +1,638 @@
+### @generated 
+type BuildState {
+  canSend: Boolean
+  canStop: Boolean
+  runStatus: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): BuildStateTranscriptConnection
+  workspaceId: ID
+}
+
+type BuildStateTranscriptConnection {
+  edges: [BuildStateTranscriptConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type BuildStateTranscriptConnectionEdge {
+  cursor: String!
+  node: OpenResponseOutputItem
+}
+
+type GambitDurableStreamEvent {
+  createdAt: String
+  data: JSON
+  offset: Int
+  type: String
+}
+
+type GambitDurableStreamReplay {
+  events: [GambitDurableStreamEvent!]
+  fromOffset: Int
+  nextOffset: Int
+  streamId: ID
+}
+
+scalar JSON
+
+type Mutation {
+  gambitWorkspaceCreate: WorkspaceCreatePayload
+  gambitWorkspaceDelete(workspaceId: ID!): WorkspaceDeletePayload
+  simulatorResetWorkspace(input: SimulatorResetWorkspaceInput!): SimulatorResetWorkspacePayload
+  simulatorStopRun(input: SimulatorStopRunInput!): SimulatorStopRunPayload
+  workspaceBuildRunCreate(input: WorkspaceBuildRunCreateInput!): WorkspaceBuildRunCreatePayload
+  workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload
+  workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload
+  workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload
+  workspaceScenarioRunSend(input: WorkspaceScenarioRunSendInput!): WorkspaceScenarioRunSendPayload
+  workspaceScenarioRunStart(input: WorkspaceScenarioRunStartInput!): WorkspaceScenarioRunStartPayload
+  workspaceScenarioRunStop(input: WorkspaceScenarioRunStopInput!): WorkspaceScenarioRunStopPayload
+  workspaceVerifyBatchRunCreate(input: WorkspaceVerifyBatchRunCreateInput!): WorkspaceVerifyBatchRunCreatePayload
+}
+
+type OpenResponse {
+  events(after: String, before: String, first: Int, last: Int): OpenResponseEventsConnection
+  id: ID
+  outputItems(after: String, before: String, first: Int, last: Int): OpenResponseOutputItemsConnection
+  runId: ID
+  status: OpenResponseStatus
+}
+
+type OpenResponseEvent {
+  data: JSON
+  id: ID
+  type: String
+}
+
+type OpenResponseEventUpdate {
+  eventType: String
+  runId: ID
+  workspaceId: ID
+}
+
+type OpenResponseEventsConnection {
+  edges: [OpenResponseEventsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type OpenResponseEventsConnectionEdge {
+  cursor: String!
+  node: OpenResponseEvent
+}
+
+input OpenResponseInputItemInput {
+  content: String!
+  role: String
+}
+
+union OpenResponseOutputItem = OutputMessage | OutputReasoning | OutputToolCall
+
+type OpenResponseOutputItemsConnection {
+  edges: [OpenResponseOutputItemsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type OpenResponseOutputItemsConnectionEdge {
+  cursor: String!
+  node: OpenResponseOutputItem
+}
+
+enum OpenResponseStatus {
+  CANCELED
+  COMPLETED
+  FAILED
+  IDLE
+  RUNNING
+}
+
+type OutputMessage {
+  content: String
+  id: ID
+  messageRefId: ID
+  role: String
+}
+
+type OutputReasoning {
+  id: ID
+  reasoningType: String
+  summary: String
+}
+
+type OutputToolCall {
+  argumentsText: String
+  error: String
+  id: ID
+  resultText: String
+  status: ToolCallStatus
+  toolCallId: ID
+  toolName: String
+}
+
+type PageInfo {
+  endCursor: String
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+}
+
+type Query {
+  gambitDurableStreamReplay(fromOffset: Int, streamId: ID!): GambitDurableStreamReplay
+  gambitWorkspaces(after: String, before: String, first: Int, last: Int): QueryGambitWorkspacesConnection
+  workspace(id: ID!): Workspace
+}
+
+type QueryGambitWorkspacesConnection {
+  edges: [QueryGambitWorkspacesConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type QueryGambitWorkspacesConnectionEdge {
+  cursor: String!
+  node: WorkspaceSessionMeta
+}
+
+input SimulatorResetWorkspaceInput {
+  workspaceId: ID!
+}
+
+type SimulatorResetWorkspacePayload {
+  build: BuildState
+  workspace: Workspace
+}
+
+input SimulatorStopRunInput {
+  runId: ID!
+  workspaceId: ID!
+}
+
+type SimulatorStopRunPayload {
+  run: WorkspaceBuildRun
+  workspace: Workspace
+}
+
+type Subscription {
+  workspaceBuildLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+  workspaceGradeLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+  workspaceTestLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+  workspaceUpdates(fromOffset: Int, workspaceId: ID!): WorkspaceUpdate
+  workspaceVerifyLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+}
+
+enum ToolCallStatus {
+  COMPLETED
+  ERROR
+  RUNNING
+}
+
+type Workspace {
+  assistantDeck: WorkspaceAssistantDeck
+  build: BuildState
+  buildRuns(after: String, before: String, first: Int, last: Int): WorkspaceBuildRunsConnection
+  files(after: String, before: String, first: Int, id: ID, last: Int, pathPrefix: WorkspaceRelativePath): WorkspaceFilesConnection
+  gradeTab: WorkspaceGradeTab
+  id: ID
+  models: WorkspaceModels
+  scenarioDecks: [WorkspaceScenarioDeck!]
+  scenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceScenarioRunsConnection
+  verification: WorkspaceVerification
+}
+
+type WorkspaceAssistantDeck {
+  deck: String
+  defaults: String
+  inputSchema: String
+  inputSchemaError: String
+  modelParams: String
+  startMode: String
+  tools: String
+}
+
+type WorkspaceBuildLiveEdge {
+  cursor: String
+  node: Workspace
+  occurredAt: String
+  sourceOffset: Int
+}
+
+type WorkspaceBuildRun implements WorkspaceConversationRun & WorkspaceRun {
+  error: String
+  finishedAt: String
+  id: ID
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  startedAt: String
+  status: OpenResponseStatus
+  workspaceId: ID
+}
+
+input WorkspaceBuildRunCreateInput {
+  inputItems: [OpenResponseInputItemInput!]!
+  workspaceId: ID!
+}
+
+type WorkspaceBuildRunCreatePayload {
+  run: WorkspaceBuildRun
+  workspace: Workspace
+}
+
+type WorkspaceBuildRunsConnection {
+  edges: [WorkspaceBuildRunsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceBuildRunsConnectionEdge {
+  cursor: String!
+  node: WorkspaceConversationRun
+}
+
+interface WorkspaceConversationRun {
+  error: String
+  finishedAt: String
+  id: ID
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  startedAt: String
+  status: OpenResponseStatus
+  workspaceId: ID
+}
+
+type WorkspaceConversationRunOpenResponsesConnection {
+  edges: [WorkspaceConversationRunOpenResponsesConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceConversationRunOpenResponsesConnectionEdge {
+  cursor: String!
+  node: OpenResponse
+}
+
+type WorkspaceCreatePayload {
+  workspace: Workspace
+  workspaces(after: String, before: String, first: Int, last: Int): WorkspaceCreatePayloadWorkspacesConnection
+}
+
+type WorkspaceCreatePayloadWorkspacesConnection {
+  edges: [WorkspaceCreatePayloadWorkspacesConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceCreatePayloadWorkspacesConnectionEdge {
+  cursor: String!
+  node: WorkspaceSessionMeta
+}
+
+type WorkspaceDeletePayload {
+  deleted: Boolean
+  error: String
+  workspaceId: ID
+}
+
+type WorkspaceFile {
+  content: String
+  id: ID
+  modifiedAt: String
+  path: WorkspaceRelativePath
+  size: Int
+}
+
+type WorkspaceFilesConnection {
+  edges: [WorkspaceFilesConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceFilesConnectionEdge {
+  cursor: String!
+  node: WorkspaceFile
+}
+
+type WorkspaceGradeFlag {
+  createdAt: String
+  id: ID
+  reason: String
+  refId: ID
+  runId: ID
+  turnIndex: Int
+}
+
+input WorkspaceGradeFlagReasonUpdateInput {
+  reason: String!
+  refId: ID!
+  workspaceId: ID!
+}
+
+type WorkspaceGradeFlagReasonUpdatePayload {
+  flags: [WorkspaceGradeFlag!]
+  workspace: Workspace
+}
+
+input WorkspaceGradeFlagToggleInput {
+  refId: ID!
+  runId: ID!
+  turnIndex: Int
+  workspaceId: ID!
+}
+
+type WorkspaceGradeFlagTogglePayload {
+  flags: [WorkspaceGradeFlag!]
+  workspace: Workspace
+}
+
+type WorkspaceGradeRun {
+  error: String
+  graderId: ID
+  graderLabel: String
+  graderPath: String
+  id: ID
+  runAt: String
+  scenarioRunId: ID
+  status: WorkspaceGradeRunStatus
+  summary: WorkspaceGradeRunSummary
+  turns: [WorkspaceGradeTurn!]
+  workspaceId: ID
+}
+
+input WorkspaceGradeRunCreateInput {
+  graderId: ID!
+  scenarioRunId: ID
+  workspaceId: ID!
+}
+
+type WorkspaceGradeRunCreatePayload {
+  run: WorkspaceGradeRun
+  workspace: Workspace
+}
+
+enum WorkspaceGradeRunStatus {
+  COMPLETED
+  ERROR
+  RUNNING
+}
+
+type WorkspaceGradeRunSummary {
+  reason: String
+  score: Float
+}
+
+type WorkspaceGradeTab {
+  flags: [WorkspaceGradeFlag!]
+  graderDecks: [WorkspaceGraderDeck!]
+  runs: [WorkspaceGradeRun!]
+}
+
+type WorkspaceGradeTurn {
+  gradedAssistant: String
+  id: ID
+  priorUser: String
+  reason: String
+  refId: ID
+  runId: ID
+  score: Float
+  turnIndex: Int
+  turnNumber: Int
+}
+
+type WorkspaceGraderDeck {
+  description: String
+  id: ID
+  label: String
+  path: String
+}
+
+type WorkspaceModelStatus {
+  available: Boolean
+  loggedIn: Boolean
+  model: String
+  requiresLogin: Boolean
+  statusText: String
+  trustedPath: String
+  workspaceId: ID
+  writeEnabled: Boolean
+}
+
+type WorkspaceModels {
+  codex(checkOnline: Boolean): WorkspaceModelStatus
+}
+
+scalar WorkspaceRelativePath
+
+interface WorkspaceRun {
+  id: ID
+  status: OpenResponseStatus
+  workspaceId: ID
+}
+
+type WorkspaceRunLifecycleUpdate {
+  runId: ID
+  status: String
+  workspaceId: ID
+}
+
+type WorkspaceScenarioDeck {
+  defaults: String
+  description: String
+  id: ID
+  inputSchema: String
+  inputSchemaError: String
+  label: String
+  maxTurns: Int
+  path: String
+}
+
+type WorkspaceScenarioRun implements WorkspaceConversationRun {
+  error: String
+  finishedAt: String
+  id: ID
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  startedAt: String
+  status: OpenResponseStatus
+  workspaceId: ID
+}
+
+input WorkspaceScenarioRunSendInput {
+  inputItems: [OpenResponseInputItemInput!]!
+  runId: ID!
+  workspaceId: ID!
+}
+
+type WorkspaceScenarioRunSendPayload {
+  run: WorkspaceScenarioRun
+  workspace: Workspace
+}
+
+input WorkspaceScenarioRunStartInput {
+  assistantInit: JSON
+  scenarioDeckId: ID
+  scenarioInput: JSON
+  workspaceId: ID!
+}
+
+type WorkspaceScenarioRunStartPayload {
+  run: WorkspaceScenarioRun
+  workspace: Workspace
+}
+
+input WorkspaceScenarioRunStopInput {
+  runId: ID!
+  workspaceId: ID!
+}
+
+type WorkspaceScenarioRunStopPayload {
+  run: WorkspaceScenarioRun
+  workspace: Workspace
+}
+
+type WorkspaceScenarioRunsConnection {
+  edges: [WorkspaceScenarioRunsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceScenarioRunsConnectionEdge {
+  cursor: String!
+  node: WorkspaceConversationRun
+}
+
+type WorkspaceSessionMeta {
+  createdAt: String
+  deck: String
+  deckSlug: String
+  id: ID
+  sessionDir: String
+  statePath: String
+  testBotName: String
+}
+
+type WorkspaceSnapshotUpdate {
+  workspaceId: ID
+}
+
+type WorkspaceUpdate {
+  occurredAt: String
+  offset: Int
+  payload: WorkspaceUpdatePayload
+  workspaceId: ID
+}
+
+union WorkspaceUpdatePayload = OpenResponseEventUpdate | WorkspaceRunLifecycleUpdate | WorkspaceSnapshotUpdate
+
+type WorkspaceVerification {
+  batches(after: String, before: String, first: Int, last: Int): WorkspaceVerificationBatchesConnection
+  graderDecks(after: String, before: String, first: Int, last: Int): WorkspaceVerificationGraderDecksConnection
+}
+
+type WorkspaceVerificationBatchesConnection {
+  edges: [WorkspaceVerificationBatchesConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceVerificationBatchesConnectionEdge {
+  cursor: String!
+  node: WorkspaceVerifyBatch
+}
+
+type WorkspaceVerificationGraderDecksConnection {
+  edges: [WorkspaceVerificationGraderDecksConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceVerificationGraderDecksConnectionEdge {
+  cursor: String!
+  node: WorkspaceGraderDeck
+}
+
+type WorkspaceVerifyBatch {
+  active: Int
+  completed: Int
+  failed: Int
+  finishedAt: String
+  graderId: ID
+  id: ID
+  metrics: WorkspaceVerifyMetrics
+  requested: Int
+  requests(after: String, before: String, first: Int, last: Int): WorkspaceVerifyBatchRequestsConnection
+  scenarioRunId: ID
+  startedAt: String
+  status: WorkspaceVerifyBatchStatus
+  workspaceId: ID
+}
+
+type WorkspaceVerifyBatchRequest {
+  error: String
+  id: ID
+  runId: ID
+  status: WorkspaceVerifyBatchRequestStatus
+}
+
+enum WorkspaceVerifyBatchRequestStatus {
+  COMPLETED
+  ERROR
+  QUEUED
+  RUNNING
+}
+
+type WorkspaceVerifyBatchRequestsConnection {
+  edges: [WorkspaceVerifyBatchRequestsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceVerifyBatchRequestsConnectionEdge {
+  cursor: String!
+  node: WorkspaceVerifyBatchRequest
+}
+
+input WorkspaceVerifyBatchRunCreateInput {
+  batchSize: Int!
+  concurrency: Int!
+  graderId: ID!
+  scenarioRunId: ID
+  workspaceId: ID!
+}
+
+type WorkspaceVerifyBatchRunCreatePayload {
+  batch: WorkspaceVerifyBatch
+  workspace: Workspace
+}
+
+enum WorkspaceVerifyBatchStatus {
+  COMPLETED
+  ERROR
+  IDLE
+  RUNNING
+}
+
+type WorkspaceVerifyMetrics {
+  agreementRate: Float
+  instabilityCount: Int
+  outliers(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsOutliersConnection
+  sampleSize: Int
+  scoreSpreadMax: Float
+  scoreSpreadMedian: Float
+  scoreSpreadMin: Float
+  verdict: WorkspaceVerifyVerdict
+  verdictReason: String
+}
+
+type WorkspaceVerifyMetricsOutliersConnection {
+  edges: [WorkspaceVerifyMetricsOutliersConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceVerifyMetricsOutliersConnectionEdge {
+  cursor: String!
+  node: WorkspaceVerifyOutlier
+}
+
+type WorkspaceVerifyOutlier {
+  agreementRate: Float
+  instability: Boolean
+  key: ID
+  label: String
+  maxRunId: ID
+  messageRefId: ID
+  minRunId: ID
+  passFlip: Boolean
+  sampleSize: Int
+  scoreDelta: Float
+  turnIndex: Int
+}
+
+enum WorkspaceVerifyVerdict {
+  FAIL
+  PASS
+  WARN
+}

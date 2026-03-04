@@ -1,9 +1,10 @@
 +++
 command = "serve"
 summary = "Run the debug UI server"
-usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec] [--yolo]"
+usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--build-assistant-provider <id>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec] [--yolo]"
 flags = [
   "--artifact <bundle.tar.gz> Serve from a restored artifact bundle (mutually exclusive with <deck>)",
+  "--build-assistant-provider <id> Build chat provider default: codex-cli or claude-code-cli",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--port <n>              Port for serve (default: 8000)",

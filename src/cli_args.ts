@@ -52,6 +52,8 @@ type Args = {
   botInput?: string;
   botRoot?: string;
   maxTurns?: number;
+  provider?: string;
+  buildAssistantProvider?: string;
   context?: string;
   message?: string;
   contextProvided: boolean;
@@ -115,6 +117,8 @@ const STRING_OPTION_FLAGS = [
   "bot-input",
   "bot-root",
   "max-turns",
+  "provider",
+  "build-assistant-provider",
   "model",
   "model-force",
   "platform",
@@ -506,6 +510,10 @@ export function parseCliArgs(argv: Array<string>): Args {
     botInput: parsed["bot-input"] as string | undefined,
     botRoot: parsed["bot-root"] as string | undefined,
     maxTurns: parsePortValue(parsed["max-turns"], "max-turns"),
+    provider: parsed.provider as string | undefined,
+    buildAssistantProvider: parsed["build-assistant-provider"] as
+      | string
+      | undefined,
     model: parsed.model as string | undefined,
     modelForce: parsed["model-force"] as string | undefined,
     trace: parsed.trace as string | undefined,

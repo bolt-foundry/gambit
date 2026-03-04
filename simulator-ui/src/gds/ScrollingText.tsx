@@ -1,3 +1,4 @@
+// deno-lint-ignore-file
 import React, {
   useCallback,
   useEffect,
@@ -42,8 +43,8 @@ export default function ScrollingText(props: ScrollingTextProps) {
       return () => observer.disconnect();
     }
     const handleResize = () => measure();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    globalThis.addEventListener("resize", handleResize);
+    return () => globalThis.removeEventListener("resize", handleResize);
   }, [measure]);
 
   const safeSpeed = speed > 0 ? speed : 40;

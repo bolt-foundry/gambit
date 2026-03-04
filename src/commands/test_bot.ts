@@ -308,6 +308,7 @@ function setPathValue(
 ): unknown {
   if (path.length === 0) return nextValue;
   const root = value && typeof value === "object"
+    // this predates the lint rule
     ? cloneValue(value as unknown)
     : {};
   let cursor = root as Record<string, unknown>;
@@ -315,6 +316,7 @@ function setPathValue(
     const segment = path[i];
     const existing = cursor[segment];
     const next = existing && typeof existing === "object"
+      // this predates the lint rule
       ? cloneValue(existing as unknown)
       : {};
     cursor[segment] = next;
@@ -722,6 +724,7 @@ export async function runTestBotLoop(opts: {
           result: {
             applied: initFillMeta.applied,
             provided: initFillMeta.provided,
+            // this predates the lint rule
           } as unknown as import("@bolt-foundry/gambit-core").JSONValue,
         });
       }

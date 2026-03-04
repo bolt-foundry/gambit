@@ -20,7 +20,7 @@ type VerifyExamplePoint = {
 type VerifyExampleBucket = {
   key: string;
   label: string;
-  points: VerifyExamplePoint[];
+  points: Array<VerifyExamplePoint>;
 };
 
 export type VerifyOutlier = {
@@ -49,7 +49,7 @@ export type VerifyConsistencyReport = {
   instabilityCount: number;
   verdict: VerifyVerdict;
   verdictReason: string;
-  outliers: VerifyOutlier[];
+  outliers: Array<VerifyOutlier>;
 };
 
 export const VERIFY_CONSISTENCY_THRESHOLDS = {
@@ -112,11 +112,11 @@ const extractScoreReasonPass = (result: unknown): {
 
 const flattenRunExamples = (
   run: VerifyCalibrationRun,
-): VerifyExampleBucket[] => {
+): Array<VerifyExampleBucket> => {
   if (!run.result || typeof run.result !== "object") return [];
   const record = run.result as Record<string, unknown>;
   if (record.mode === "turns" && Array.isArray(record.turns)) {
-    const buckets: VerifyExampleBucket[] = [];
+    const buckets: Array<VerifyExampleBucket> = [];
     record.turns.forEach((turn, fallbackIndex) => {
       if (!turn || typeof turn !== "object") return;
       const turnRecord = turn as Record<string, unknown>;
@@ -161,7 +161,7 @@ const flattenRunExamples = (
   }];
 };
 
-const median = (values: number[]): number | null => {
+const median = (values: Array<number>): number | null => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -220,7 +220,7 @@ const resolveVerdict = (input: {
 };
 
 export function buildVerifyConsistencyReport(
-  runs: VerifyCalibrationRun[],
+  runs: Array<VerifyCalibrationRun>,
 ): VerifyConsistencyReport {
   const completedRuns = runs.filter((run) => run.status === "completed");
   const sampleSize = completedRuns.length;
@@ -241,10 +241,10 @@ export function buildVerifyConsistencyReport(
     });
   });
 
-  const outliers: VerifyOutlier[] = [];
+  const outliers: Array<VerifyOutlier> = [];
   let agreementVotes = 0;
   let agreementTotal = 0;
-  const scoreDeltas: number[] = [];
+  const scoreDeltas: Array<number> = [];
 
   bucketsByKey.forEach((bucket) => {
     const scores = bucket.points

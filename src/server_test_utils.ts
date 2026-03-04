@@ -29,9 +29,15 @@ export async function readDurableStreamEvents(
   streamId: string,
   offset = 0,
 ) {
-  const res = await fetch(
-    `http://127.0.0.1:${port}/api/durable-streams/stream/${streamId}?offset=${offset}`,
+  let res = await fetch(
+    `http://127.0.0.1:${port}/graphql/streams/${streamId}?offset=${offset}`,
   );
+  if (!res.ok && res.status === 404) {
+    // Backward compatibility for legacy paths.
+    res = await fetch(
+      `http://127.0.0.1:${port}/api/durable-streams/stream/${streamId}?offset=${offset}`,
+    );
+  }
   if (!res.ok) {
     throw new Error(res.statusText);
   }
@@ -42,7 +48,15 @@ export async function readDurableStreamEvents(
 }
 
 export async function readStreamEvents(port: number, offset = 0) {
-  return await readDurableStreamEvents(port, "gambit-simulator", offset);
+  try {
+    return await readDurableStreamEvents(port, "gambit-simulator", offset);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.toLowerCase().includes("not found")) {
+      throw err;
+    }
+    return await readDurableStreamEvents(port, "gambit-workspace", offset);
+  }
 }
 
 export async function readJsonLines(filePath: string): Promise<Array<unknown>> {

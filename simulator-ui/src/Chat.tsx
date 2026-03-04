@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+// deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate no-console
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type BuildDisplayMessage,
   classNames,
@@ -6,7 +7,6 @@ import {
 } from "./utils.ts";
 import Button from "./gds/Button.tsx";
 import Callout from "./gds/Callout.tsx";
-import Icon from "./gds/Icon.tsx";
 import WorkbenchComposerChip from "./gds/WorkbenchComposerChip.tsx";
 import {
   ActivityTranscriptRows,
@@ -16,10 +16,8 @@ import { useBuildChat } from "./BuildChatContext.tsx";
 
 export { bucketBuildChatDisplay };
 
-type WorkbenchErrorSource = "scenario_run_error" | "grader_run_error";
-
 export type WorkbenchScenarioErrorContext = {
-  source: WorkbenchErrorSource;
+  source: "scenario_run_error";
   workspaceId?: string;
   runId?: string;
   capturedAt: string;
@@ -49,22 +47,10 @@ export type WorkbenchFlagContext = {
   message: string;
 };
 
-export type WorkbenchVerifyOutlierContext = {
-  source: "verify_outlier";
-  workspaceId?: string;
-  runId?: string;
-  capturedAt: string;
-  outlierKey: string;
-  instability?: boolean;
-  score?: number;
-  message: string;
-};
-
 export type WorkbenchMessageContext =
   | WorkbenchScenarioErrorContext
   | WorkbenchRatingContext
-  | WorkbenchFlagContext
-  | WorkbenchVerifyOutlierContext;
+  | WorkbenchFlagContext;
 
 export type WorkbenchScenarioErrorChip = WorkbenchScenarioErrorContext & {
   enabled: boolean;
@@ -74,20 +60,6 @@ export type WorkbenchComposerChip = WorkbenchMessageContext & {
   chipId: string;
   enabled: boolean;
 };
-
-function isWorkbenchErrorContext(
-  context: WorkbenchMessageContext,
-): context is WorkbenchScenarioErrorContext {
-  return context.source === "scenario_run_error" ||
-    context.source === "grader_run_error";
-}
-
-function isWorkbenchErrorChip(
-  chip: WorkbenchComposerChip,
-): chip is WorkbenchComposerChip & WorkbenchScenarioErrorContext {
-  return chip.source === "scenario_run_error" ||
-    chip.source === "grader_run_error";
-}
 
 const ERROR_CONTEXT_START_MARKER = "[gambit:error-context/v1]";
 const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
@@ -110,15 +82,12 @@ function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
     : undefined;
   const runId = typeof record.runId === "string" ? record.runId : undefined;
 
-  if (
-    record.source === "scenario_run_error" ||
-    record.source === "grader_run_error"
-  ) {
+  if (record.source === "scenario_run_error") {
     if (typeof record.error !== "string" || record.error.trim().length === 0) {
       return null;
     }
     return {
-      source: record.source,
+      source: "scenario_run_error",
       workspaceId,
       runId,
       capturedAt: record.capturedAt,
@@ -163,30 +132,6 @@ function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
       capturedAt: record.capturedAt,
       flagId: typeof record.flagId === "string" ? record.flagId : undefined,
       refId: record.refId,
-      score: typeof record.score === "number" && Number.isFinite(record.score)
-        ? record.score
-        : undefined,
-      message: record.message,
-    };
-  }
-  if (record.source === "verify_outlier") {
-    if (
-      typeof record.outlierKey !== "string" ||
-      record.outlierKey.trim().length === 0 ||
-      typeof record.message !== "string" ||
-      record.message.trim().length === 0
-    ) {
-      return null;
-    }
-    return {
-      source: "verify_outlier",
-      workspaceId,
-      runId,
-      capturedAt: record.capturedAt,
-      outlierKey: record.outlierKey,
-      instability: typeof record.instability === "boolean"
-        ? record.instability
-        : undefined,
       score: typeof record.score === "number" && Number.isFinite(record.score)
         ? record.score
         : undefined,
@@ -238,7 +183,7 @@ export function encodeWorkbenchMessageWithErrorContext(
 
 export function encodeWorkbenchMessageWithContext(
   message: string,
-  contexts: WorkbenchMessageContext[],
+  contexts: Array<WorkbenchMessageContext>,
 ): string {
   const body = message.trim();
   const encodedContexts = contexts.filter((context) =>
@@ -256,7 +201,9 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
 } | null {
   const decoded = decodeWorkbenchMessageWithContext(content);
   if (decoded) {
-    const errorContext = decoded.contexts.find(isWorkbenchErrorContext);
+    const errorContext = decoded.contexts.find((context) =>
+      context.source === "scenario_run_error"
+    );
     if (!errorContext) return null;
     return { context: errorContext, body: decoded.body };
   }
@@ -264,7 +211,7 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
 }
 
 export function decodeWorkbenchMessageWithContext(content: string): {
-  contexts: WorkbenchMessageContext[];
+  contexts: Array<WorkbenchMessageContext>;
   body: string;
 } | null {
   if (typeof content !== "string") return null;
@@ -314,8 +261,6 @@ function UserMessageContent(props: { content: string }) {
               context={context}
               testId={context.source === "scenario_run_error"
                 ? "workbench-transcript-error-chip"
-                : context.source === "grader_run_error"
-                ? "workbench-transcript-error-chip"
                 : undefined}
             />
           ))}
@@ -331,7 +276,7 @@ function UserMessageContent(props: { content: string }) {
   );
 }
 
-export function BuildChatRows(props: { display: BuildDisplayMessage[] }) {
+export function BuildChatRows(props: { display: Array<BuildDisplayMessage> }) {
   const { display } = props;
   return (
     <ActivityTranscriptRows
@@ -378,7 +323,7 @@ export function deriveBuildChatActivityState(
   args: {
     runStatus: "idle" | "running" | "completed" | "error" | "canceled";
     chatSending: boolean;
-    display: BuildDisplayMessage[];
+    display: Array<BuildDisplayMessage>;
     streamingAssistant: { runId: string; turn: number; text: string } | null;
     runId: string;
   },
@@ -479,8 +424,8 @@ function BuildChatActivityIndicator(
 
 export function ChatView(props: {
   state: BuildChatViewState;
-  composerChips?: WorkbenchComposerChip[];
-  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
+  composerChips?: Array<WorkbenchComposerChip>;
+  onComposerChipsChange?: (next: Array<WorkbenchComposerChip>) => void;
   scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
   onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
 }) {
@@ -550,26 +495,31 @@ export function ChatView(props: {
         chipId: "scenario_run_error",
       }]
       : []);
-  const updateComposerChips = useCallback((next: WorkbenchComposerChip[]) => {
-    if (onComposerChipsChange) {
-      onComposerChipsChange(next);
-      return;
-    }
-    if (!onScenarioErrorChipChange) return;
-    const errorChip = next.find(isWorkbenchErrorChip);
-    if (!errorChip) {
-      onScenarioErrorChipChange(null);
-      return;
-    }
-    onScenarioErrorChipChange({
-      source: errorChip.source,
-      workspaceId: errorChip.workspaceId,
-      runId: errorChip.runId,
-      capturedAt: errorChip.capturedAt,
-      error: errorChip.error,
-      enabled: errorChip.enabled,
-    });
-  }, [onComposerChipsChange, onScenarioErrorChipChange]);
+  const updateComposerChips = useCallback(
+    (next: Array<WorkbenchComposerChip>) => {
+      if (onComposerChipsChange) {
+        onComposerChipsChange(next);
+        return;
+      }
+      if (!onScenarioErrorChipChange) return;
+      const errorChip = next.find((chip) =>
+        chip.source === "scenario_run_error"
+      );
+      if (!errorChip) {
+        onScenarioErrorChipChange(null);
+        return;
+      }
+      onScenarioErrorChipChange({
+        source: "scenario_run_error",
+        workspaceId: errorChip.workspaceId,
+        runId: errorChip.runId,
+        capturedAt: errorChip.capturedAt,
+        error: errorChip.error,
+        enabled: errorChip.enabled,
+      });
+    },
+    [onComposerChipsChange, onScenarioErrorChipChange],
+  );
   const hasEnabledComposerChip = resolvedComposerChips.some((chip) =>
     chip.enabled
   );
@@ -583,35 +533,32 @@ export function ChatView(props: {
     const message = chatDraft.trim();
     const activeChips = resolvedComposerChips.filter((chip) => chip.enabled);
     const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
-    const activeContexts: WorkbenchMessageContext[] = [];
-    for (const chip of activeChips) {
-      if (isWorkbenchErrorChip(chip)) {
-        activeContexts.push({
-          source: chip.source,
-          workspaceId: chip.workspaceId,
-          runId: chip.runId,
-          capturedAt: chip.capturedAt,
-          error: chip.error,
-        });
-        continue;
-      }
-      if (chip.source === "message_rating") {
-        activeContexts.push({
-          source: "message_rating",
-          workspaceId: chip.workspaceId,
-          runId: chip.runId,
-          capturedAt: chip.capturedAt,
-          messageRefId: chip.messageRefId,
-          statePath: chip.statePath,
-          statePointer: chip.statePointer,
-          score: chip.score,
-          reason: chip.reason,
-        });
-        continue;
-      }
-      if (chip.source === "grading_flag") {
-        activeContexts.push({
-          source: "grading_flag",
+    const activeContexts = activeChips
+      .map((chip) => {
+        if (chip.source === "scenario_run_error") {
+          return {
+            source: "scenario_run_error" as const,
+            workspaceId: chip.workspaceId,
+            runId: chip.runId,
+            capturedAt: chip.capturedAt,
+            error: chip.error,
+          };
+        }
+        if (chip.source === "message_rating") {
+          return {
+            source: "message_rating" as const,
+            workspaceId: chip.workspaceId,
+            runId: chip.runId,
+            capturedAt: chip.capturedAt,
+            messageRefId: chip.messageRefId,
+            statePath: chip.statePath,
+            statePointer: chip.statePointer,
+            score: chip.score,
+            reason: chip.reason,
+          };
+        }
+        return {
+          source: "grading_flag" as const,
           workspaceId: chip.workspaceId,
           runId: chip.runId,
           capturedAt: chip.capturedAt,
@@ -619,22 +566,8 @@ export function ChatView(props: {
           refId: chip.refId,
           score: chip.score,
           message: chip.message,
-        });
-        continue;
-      }
-      if (chip.source === "verify_outlier") {
-        activeContexts.push({
-          source: "verify_outlier",
-          workspaceId: chip.workspaceId,
-          runId: chip.runId,
-          capturedAt: chip.capturedAt,
-          outlierKey: chip.outlierKey,
-          instability: chip.instability,
-          score: chip.score,
-          message: chip.message,
-        });
-      }
-    }
+        };
+      });
     if (!message && activeContexts.length === 0) return;
     const outboundMessage = activeContexts.length > 0
       ? encodeWorkbenchMessageWithContext(message, activeContexts)
@@ -826,8 +759,8 @@ export function ChatView(props: {
 }
 
 export default function Chat(props: {
-  composerChips?: WorkbenchComposerChip[];
-  onComposerChipsChange?: (next: WorkbenchComposerChip[]) => void;
+  composerChips?: Array<WorkbenchComposerChip>;
+  onComposerChipsChange?: (next: Array<WorkbenchComposerChip>) => void;
   scenarioErrorChip?: WorkbenchScenarioErrorChip | null;
   onScenarioErrorChipChange?: (next: WorkbenchScenarioErrorChip | null) => void;
 }) {

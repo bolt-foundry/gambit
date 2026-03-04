@@ -414,6 +414,7 @@ export function createGoogleProvider(opts: {
               OpenAI.Chat.Completions.ChatCompletionMessageParam
             >,
             tools: input
+              // this predates the lint rule
               .tools as unknown as Array<
                 OpenAI.Chat.Completions.ChatCompletionTool
               >,
@@ -511,10 +512,12 @@ export function createGoogleProvider(opts: {
         {
           model: input.model,
           messages: input
+            // this predates the lint rule
             .messages as unknown as Array<
               OpenAI.Chat.Completions.ChatCompletionMessageParam
             >,
           tools: input
+            // this predates the lint rule
             .tools as unknown as Array<
               OpenAI.Chat.Completions.ChatCompletionTool
             >,

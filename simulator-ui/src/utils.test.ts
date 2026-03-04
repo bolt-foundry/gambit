@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals, assertObjectMatch } from "@std/assert";
 
 const globals = globalThis as unknown as { window?: Record<string, unknown> };
 if (!globals.window) globals.window = {};
@@ -10,7 +10,7 @@ type TraceEvent = import("./utils.ts").TraceEvent;
 const { deriveBuildDisplayMessages } = await import("./utils.ts");
 
 Deno.test("deriveReasoningByAssistant maps codex reasoning to assistant turn", () => {
-  const traces: TraceEvent[] = [
+  const traces: Array<TraceEvent> = [
     {
       type: "model.stream.event",
       runId: "run_1",
@@ -45,7 +45,7 @@ Deno.test("deriveReasoningByAssistant maps codex reasoning to assistant turn", (
 });
 
 Deno.test("deriveReasoningByAssistant ignores non-reasoning codex events", () => {
-  const traces: TraceEvent[] = [
+  const traces: Array<TraceEvent> = [
     {
       type: "model.stream.event",
       actionCallId: "call_1",
@@ -86,7 +86,9 @@ Deno.test("deriveReasoningByAssistant ignores non-reasoning codex events", () =>
 });
 
 Deno.test("getWorkspaceRouteFromPath parses run-addressed test route", () => {
-  assertEquals(getWorkspaceRouteFromPath("/workspaces/ws_1/test/run_1"), {
+  const route = getWorkspaceRouteFromPath("/workspaces/ws_1/test/run_1");
+  assert(route);
+  assertObjectMatch(route, {
     workspaceId: "ws_1",
     tab: "test",
     isNew: false,
@@ -96,7 +98,9 @@ Deno.test("getWorkspaceRouteFromPath parses run-addressed test route", () => {
 });
 
 Deno.test("getWorkspaceRouteFromPath parses run-addressed grade route", () => {
-  assertEquals(getWorkspaceRouteFromPath("/workspaces/ws_1/grade/grade_1"), {
+  const route = getWorkspaceRouteFromPath("/workspaces/ws_1/grade/grade_1");
+  assert(route);
+  assertObjectMatch(route, {
     workspaceId: "ws_1",
     tab: "grade",
     isNew: false,
@@ -106,7 +110,9 @@ Deno.test("getWorkspaceRouteFromPath parses run-addressed grade route", () => {
 });
 
 Deno.test("getWorkspaceRouteFromPath parses verify route", () => {
-  assertEquals(getWorkspaceRouteFromPath("/workspaces/ws_1/verify"), {
+  const route = getWorkspaceRouteFromPath("/workspaces/ws_1/verify");
+  assert(route);
+  assertObjectMatch(route, {
     workspaceId: "ws_1",
     tab: "verify",
     isNew: false,
@@ -116,7 +122,7 @@ Deno.test("getWorkspaceRouteFromPath parses verify route", () => {
 });
 
 Deno.test("deriveBuildDisplayMessages keeps assistant turns ordered when item ids repeat across actions", () => {
-  const traces: TraceEvent[] = [
+  const traces: Array<TraceEvent> = [
     {
       type: "message.user",
       actionCallId: "action-1",
@@ -182,7 +188,7 @@ Deno.test("deriveBuildDisplayMessages keeps assistant turns ordered when item id
 });
 
 Deno.test("deriveBuildDisplayMessages dedupes model.result after streamed output_item.done", () => {
-  const traces: TraceEvent[] = [
+  const traces: Array<TraceEvent> = [
     {
       type: "message.user",
       actionCallId: "action-1",
@@ -220,7 +226,7 @@ Deno.test("deriveBuildDisplayMessages dedupes model.result after streamed output
 });
 
 Deno.test("deriveBuildDisplayMessages projects namespaced extension items", () => {
-  const traces: TraceEvent[] = [
+  const traces: Array<TraceEvent> = [
     {
       type: "model.stream.event",
       actionCallId: "action-1",

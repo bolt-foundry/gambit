@@ -29,6 +29,7 @@ import {
 } from "./providers/ollama.ts";
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { createProviderRouter, type ProviderKey } from "./providers/router.ts";
+import { createClaudeCodeProvider } from "./providers/claude_code.ts";
 
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -129,7 +130,8 @@ function parseFallbackProviderFromConfig(
   }
   if (
     normalized === "openrouter" || normalized === "ollama" ||
-    normalized === "google" || normalized === "codex-cli"
+    normalized === "google" || normalized === "codex-cli" ||
+    normalized === "claude-code-cli"
   ) {
     return normalized as ProviderKey;
   }
@@ -218,6 +220,7 @@ function buildDefaultModelProvider(opts: {
     })
     : null;
   const codexProvider = createCodexProvider();
+  const claudeCodeProvider = createClaudeCodeProvider();
 
   const providerRouter = createProviderRouter({
     providers: {
@@ -225,6 +228,7 @@ function buildDefaultModelProvider(opts: {
       ollama: ollamaProvider,
       google: googleProvider,
       "codex-cli": codexProvider,
+      "claude-code-cli": claudeCodeProvider,
     },
     defaultProvider: opts.configuredFallbackProvider,
     fallbackToDefaultOnMissing: ["google"],
@@ -328,6 +332,14 @@ function buildDefaultModelProvider(opts: {
         }
         return Promise.resolve({ available: true });
       },
+    },
+    {
+      name: "claude-code-cli",
+      matches: providerMatchers.matchesClaudeCode,
+      isAvailable: (_model, _capabilityOpts) =>
+        Promise.resolve({
+          available: true,
+        }),
     },
   ];
   const warnedMissingAliases = new Set<string>();
