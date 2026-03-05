@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 import { classNames, getScoreClass } from "../utils.ts";
 import Icon from "./Icon.tsx";
 import Tooltip from "./Tooltip.tsx";

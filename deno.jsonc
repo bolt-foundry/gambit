@@ -46,7 +46,8 @@
       "exclude": [
         "bolt-foundry/no-parent-directory-traversal",
         "no-external-import",
-        "no-unversioned-import"
+        "no-unversioned-import",
+        "verbatim-module-syntax"
       ],
       "include": [
         "gambit/init/examples-remote-imports",

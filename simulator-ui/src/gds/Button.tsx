@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 import { classNames } from "../utils.ts";
 
 export type ButtonVariant =
