@@ -65,7 +65,7 @@
   },
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "npm:react",
+    "jsxImportSource": "npm:react@19.2.4",
     "jsxImportSourceTypes": "npm:@types/react@^19",
     "skipLibCheck": true,
     "lib": [
@@ -107,7 +107,6 @@
     "graphql-yoga": "npm:graphql-yoga@^5.14.0",
     "@openai/openai": "npm:openai@^4.78.1",
     "react": "npm:react@19.2.4",
-    "npm:react/jsx-runtime": "npm:react@19.2.4/jsx-runtime",
     "react/jsx-runtime": "npm:react@19.2.4/jsx-runtime",
     "react-dom": "npm:react-dom@19.2.4"
   },
