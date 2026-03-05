@@ -10,6 +10,9 @@ export type RouteEntrypoint = {
 
 iso(`entrypoint Mutation.GambitSimulatorStopRun`)
 iso(`entrypoint Mutation.GambitWorkspaceBuildRunCreate`)
+iso(`entrypoint Mutation.GambitWorkspaceConversationSessionSend`)
+iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStart`)
+iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStop`)
 iso(`entrypoint Mutation.GambitWorkspaceCreate`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagReasonUpdate`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagToggle`)
@@ -49,6 +52,9 @@ import entrypointWorkspaceVerifyLiveWrite from "@iso-gambit-sim/Query/Entrypoint
 import entrypointWorkspaceWorkbenchLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceWorkbenchLiveWrite/entrypoint.ts"
 import gambitSimulatorStopRun from "@iso-gambit-sim/Mutation/GambitSimulatorStopRun/entrypoint.ts"
 import gambitWorkspaceBuildRunCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceBuildRunCreate/entrypoint.ts"
+import gambitWorkspaceConversationSessionSend from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionSend/entrypoint.ts"
+import gambitWorkspaceConversationSessionStart from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionStart/entrypoint.ts"
+import gambitWorkspaceConversationSessionStop from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionStop/entrypoint.ts"
 import gambitWorkspaceCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceCreate/entrypoint.ts"
 import gambitWorkspaceGradeFlagReasonUpdate from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagReasonUpdate/entrypoint.ts"
 import gambitWorkspaceGradeFlagToggle from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagToggle/entrypoint.ts"
@@ -74,6 +80,9 @@ export {entrypointWorkspaceVerifyLiveWrite};
 export {entrypointWorkspaceWorkbenchLiveWrite};
 export {gambitSimulatorStopRun};
 export {gambitWorkspaceBuildRunCreate};
+export {gambitWorkspaceConversationSessionSend};
+export {gambitWorkspaceConversationSessionStart};
+export {gambitWorkspaceConversationSessionStop};
 export {gambitWorkspaceCreate};
 export {gambitWorkspaceGradeFlagReasonUpdate};
 export {gambitWorkspaceGradeFlagToggle};

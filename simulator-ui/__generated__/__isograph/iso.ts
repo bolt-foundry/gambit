@@ -1,6 +1,9 @@
 import type { IsographEntrypoint } from '@isograph/react';
 import { type Mutation__GambitSimulatorStopRun__param } from './Mutation/GambitSimulatorStopRun/param_type.ts';
 import { type Mutation__GambitWorkspaceBuildRunCreate__param } from './Mutation/GambitWorkspaceBuildRunCreate/param_type.ts';
+import { type Mutation__GambitWorkspaceConversationSessionSend__param } from './Mutation/GambitWorkspaceConversationSessionSend/param_type.ts';
+import { type Mutation__GambitWorkspaceConversationSessionStart__param } from './Mutation/GambitWorkspaceConversationSessionStart/param_type.ts';
+import { type Mutation__GambitWorkspaceConversationSessionStop__param } from './Mutation/GambitWorkspaceConversationSessionStop/param_type.ts';
 import { type Mutation__GambitWorkspaceCreate__param } from './Mutation/GambitWorkspaceCreate/param_type.ts';
 import { type Mutation__GambitWorkspaceGradeFlagReasonUpdate__param } from './Mutation/GambitWorkspaceGradeFlagReasonUpdate/param_type.ts';
 import { type Mutation__GambitWorkspaceGradeFlagToggle__param } from './Mutation/GambitWorkspaceGradeFlagToggle/param_type.ts';
@@ -37,6 +40,9 @@ import { type WorkspaceConversationRun__WorkbenchConversationRunChat__param } fr
 import { type WorkspaceFile__PreviewFile__param } from './WorkspaceFile/PreviewFile/param_type.ts';
 import entrypoint_Mutation__GambitSimulatorStopRun from '../__isograph/Mutation/GambitSimulatorStopRun/entrypoint.ts';
 import entrypoint_Mutation__GambitWorkspaceBuildRunCreate from '../__isograph/Mutation/GambitWorkspaceBuildRunCreate/entrypoint.ts';
+import entrypoint_Mutation__GambitWorkspaceConversationSessionSend from '../__isograph/Mutation/GambitWorkspaceConversationSessionSend/entrypoint.ts';
+import entrypoint_Mutation__GambitWorkspaceConversationSessionStart from '../__isograph/Mutation/GambitWorkspaceConversationSessionStart/entrypoint.ts';
+import entrypoint_Mutation__GambitWorkspaceConversationSessionStop from '../__isograph/Mutation/GambitWorkspaceConversationSessionStop/entrypoint.ts';
 import entrypoint_Mutation__GambitWorkspaceCreate from '../__isograph/Mutation/GambitWorkspaceCreate/entrypoint.ts';
 import entrypoint_Mutation__GambitWorkspaceGradeFlagReasonUpdate from '../__isograph/Mutation/GambitWorkspaceGradeFlagReasonUpdate/entrypoint.ts';
 import entrypoint_Mutation__GambitWorkspaceGradeFlagToggle from '../__isograph/Mutation/GambitWorkspaceGradeFlagToggle/entrypoint.ts';
@@ -115,6 +121,18 @@ export function iso<T>(
 export function iso<T>(
   param: T & MatchesWhitespaceAndString<'field Mutation.GambitWorkspaceBuildRunCreate', T>
 ): IdentityWithParam<Mutation__GambitWorkspaceBuildRunCreate__param>;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'field Mutation.GambitWorkspaceConversationSessionSend', T>
+): IdentityWithParam<Mutation__GambitWorkspaceConversationSessionSend__param>;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'field Mutation.GambitWorkspaceConversationSessionStart', T>
+): IdentityWithParam<Mutation__GambitWorkspaceConversationSessionStart__param>;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'field Mutation.GambitWorkspaceConversationSessionStop', T>
+): IdentityWithParam<Mutation__GambitWorkspaceConversationSessionStop__param>;
 
 export function iso<T>(
   param: T & MatchesWhitespaceAndString<'field Mutation.GambitWorkspaceCreate', T>
@@ -261,6 +279,18 @@ export function iso<T>(
 ): typeof entrypoint_Mutation__GambitWorkspaceBuildRunCreate;
 
 export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'entrypoint Mutation.GambitWorkspaceConversationSessionSend', T>
+): typeof entrypoint_Mutation__GambitWorkspaceConversationSessionSend;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'entrypoint Mutation.GambitWorkspaceConversationSessionStart', T>
+): typeof entrypoint_Mutation__GambitWorkspaceConversationSessionStart;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'entrypoint Mutation.GambitWorkspaceConversationSessionStop', T>
+): typeof entrypoint_Mutation__GambitWorkspaceConversationSessionStop;
+
+export function iso<T>(
   param: T & MatchesWhitespaceAndString<'entrypoint Mutation.GambitWorkspaceCreate', T>
 ): typeof entrypoint_Mutation__GambitWorkspaceCreate;
 
@@ -358,6 +388,12 @@ export function iso(isographLiteralText: string):
       return entrypoint_Mutation__GambitSimulatorStopRun;
     case 'entrypoint Mutation.GambitWorkspaceBuildRunCreate':
       return entrypoint_Mutation__GambitWorkspaceBuildRunCreate;
+    case 'entrypoint Mutation.GambitWorkspaceConversationSessionSend':
+      return entrypoint_Mutation__GambitWorkspaceConversationSessionSend;
+    case 'entrypoint Mutation.GambitWorkspaceConversationSessionStart':
+      return entrypoint_Mutation__GambitWorkspaceConversationSessionStart;
+    case 'entrypoint Mutation.GambitWorkspaceConversationSessionStop':
+      return entrypoint_Mutation__GambitWorkspaceConversationSessionStop;
     case 'entrypoint Mutation.GambitWorkspaceCreate':
       return entrypoint_Mutation__GambitWorkspaceCreate;
     case 'entrypoint Mutation.GambitWorkspaceGradeFlagReasonUpdate':
