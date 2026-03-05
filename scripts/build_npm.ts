@@ -270,7 +270,7 @@ try {
       }
       if (
         diagnostic.code === 2686 &&
-        fileName.includes("/simulator-ui/src/")
+        fileName.includes("/simulator-ui/")
       ) {
         return false;
       }

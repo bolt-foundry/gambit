@@ -1,5 +1,5 @@
 import { iso } from "@iso-gambit-sim";
-import type React from "react";
+import React from "react";
 import { AppShell } from "../../../src/AppShell.tsx";
 
 function WorkbenchUnavailable(_: { open: boolean }) {
