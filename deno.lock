@@ -650,7 +650,6 @@
       "npm:openai@^4.78.1",
       "npm:playwright-core@^1.57.0",
       "npm:react-dom@19.2.4",
-      "npm:react@*",
       "npm:react@19.2.4",
       "npm:zod-to-json-schema@^3.23.0",
       "npm:zod@^3.23.8"

@@ -292,9 +292,10 @@ export function WorkspaceProvider(
   >(null);
   const pendingBuildTracesRef = useRef<Array<TraceEvent>>([]);
   const pendingBuildTraceRunIdRef = useRef<string | null>(null);
-  const buildTraceFlushHandleRef = useRef<number | null>(null);
+  const buildTraceFlushHandleRef = useRef<
+    number | ReturnType<typeof globalThis.setTimeout> | null
+  >(null);
   const buildTraceFlushModeRef = useRef<"raf" | "timeout" | null>(null);
-
   const [testRun, setTestRun] = useState<TestBotRun>(() => normalizeTestRun());
   const [activeTestRunId, setActiveTestRunId] = useState<string | null>(null);
   const [activeGradeRunId, setActiveGradeRunId] = useState<string | null>(null);
@@ -343,7 +344,6 @@ export function WorkspaceProvider(
       toolInserts: Array.isArray(run.toolInserts) ? run.toolInserts : [],
     };
   }, []);
-
   const mergeBuildRunSnapshot = useCallback(
     (prev: BuildRun, incomingRun: BuildRun): BuildRun => {
       const incoming = normalizeBuildRun(incomingRun);
@@ -354,7 +354,6 @@ export function WorkspaceProvider(
       const incomingMessages = incoming.messages ?? [];
       const incomingTraces = incoming.traces ?? [];
       const incomingToolInserts = incoming.toolInserts ?? [];
-
       const nextRun: BuildRun = {
         ...incoming,
         messages: preserveStreamingArrays &&
@@ -383,7 +382,7 @@ export function WorkspaceProvider(
       mode === "raf" && typeof window !== "undefined" &&
       typeof globalThis.cancelAnimationFrame === "function"
     ) {
-      globalThis.cancelAnimationFrame(handle);
+      globalThis.cancelAnimationFrame(handle as number);
     } else if (mode === "timeout") {
       clearTimeout(handle);
     }
