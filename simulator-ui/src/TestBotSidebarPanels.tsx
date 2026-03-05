@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 import Button from "./gds/Button.tsx";
 import Callout from "./gds/Callout.tsx";
 import List from "./gds/List.tsx";

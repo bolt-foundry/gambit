@@ -1,6 +1,6 @@
 // deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate
 import { useCallback, useEffect, useRef, useState } from "react";
-import type React from "react";
+import React from "react";
 import Badge from "./gds/Badge.tsx";
 import Icon from "./gds/Icon.tsx";
 import ActivityReasoningBubble from "./ActivityReasoningBubble.tsx";

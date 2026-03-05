@@ -1,4 +1,4 @@
-import type React from "react";
+import React from "react";
 import Badge from "./gds/Badge.tsx";
 
 export type WorkbenchChatRunStatus =
