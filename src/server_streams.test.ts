@@ -1251,9 +1251,15 @@ leakTolerantTest(
     );
 
     const provider: ModelProvider = {
-      chat() {
+      chat(input) {
+        const lastUser = [...input.messages].reverse().find((message) =>
+          message?.role === "user"
+        );
+        const prompt = typeof lastUser?.content === "string"
+          ? lastUser.content
+          : JSON.stringify(lastUser?.content ?? "");
         return Promise.resolve({
-          message: { role: "assistant", content: "ok" },
+          message: { role: "assistant", content: `assistant:${prompt}` },
           finishReason: "stop",
         });
       },
@@ -1371,10 +1377,17 @@ leakTolerantTest(
     const userMessages = (runBody.test?.run?.messages ?? [])
       .filter((message) => message.role === "user")
       .map((message) => message.content ?? "");
+    const assistantMessages = (runBody.test?.run?.messages ?? [])
+      .filter((message) => message.role === "assistant")
+      .map((message) => message.content ?? "");
 
     assertEquals(userMessages.includes("scenario one"), true);
     assertEquals(userMessages.includes("scenario two"), true);
     assertEquals(userMessages.includes("workbench ping"), false);
+    assertEquals(
+      assistantMessages.some((message) => message.includes("workbench ping")),
+      false,
+    );
 
     await server.shutdown();
     await server.finished;

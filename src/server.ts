@@ -2505,7 +2505,35 @@ export function startWebSocketSimulator(opts: {
     const messages: TestBotRunStatus["messages"] = [];
     const fallbackToolInserts: NonNullable<TestBotRunStatus["toolInserts"]> =
       [];
-    for (let i = 0; i < rawMessages.length; i++) {
+    const meta = state.meta && typeof state.meta === "object"
+      ? state.meta as Record<string, unknown>
+      : {};
+    const scope = typeof meta.scenarioRunMode === "string"
+      ? meta.scenarioRunMode
+      : undefined;
+    let effectiveStartIndex = 0;
+    if (scope === "scenario" && rawMessages.length > 0) {
+      const firstScenarioUserIndex = refs.findIndex((ref) =>
+        ref?.source === "scenario"
+      );
+      if (firstScenarioUserIndex > 0) {
+        effectiveStartIndex = firstScenarioUserIndex;
+        while (effectiveStartIndex > 0) {
+          const priorIndex = effectiveStartIndex - 1;
+          const priorMessage = rawMessages[priorIndex];
+          const priorSource = refs[priorIndex]?.source;
+          if (
+            priorMessage?.role === "assistant" &&
+            (priorSource === "scenario" || priorSource === "manual")
+          ) {
+            effectiveStartIndex = priorIndex;
+            continue;
+          }
+          break;
+        }
+      }
+    }
+    for (let i = effectiveStartIndex; i < rawMessages.length; i++) {
       const msg = rawMessages[i];
       const refId = refs[i]?.id;
       if (msg?.role === "assistant" || msg?.role === "user") {
@@ -5002,6 +5030,85 @@ export function startWebSocketSimulator(opts: {
     throw new Error(`Scenario run ${args.runId} not found`);
   };
 
+  type WorkspaceConversationSessionKindForGraphql =
+    | "build"
+    | "scenario"
+    | "grader"
+    | "verify";
+
+  type WorkspaceConversationSessionRecordForGraphql = {
+    sessionId: string;
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKindForGraphql;
+    status: "idle" | "running" | "completed" | "error" | "canceled";
+    error?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    buildRun?: ReturnType<typeof readWorkspaceBuildRunForGraphql>;
+    scenarioRun?: Awaited<
+      ReturnType<typeof startWorkspaceScenarioRunForGraphql>
+    >;
+    gradeRun?: Awaited<ReturnType<typeof createWorkspaceGradeRunForGraphql>>;
+    verifyBatch?: Awaited<
+      ReturnType<typeof createWorkspaceVerifyBatchRunForGraphql>
+    >;
+  };
+
+  const toBuildConversationSessionForGraphql = (
+    workspaceId: string,
+    run: ReturnType<typeof readWorkspaceBuildRunForGraphql>,
+  ): WorkspaceConversationSessionRecordForGraphql => ({
+    sessionId: run.id,
+    workspaceId,
+    kind: "build",
+    status: run.status,
+    error: run.error,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    buildRun: run,
+  });
+
+  const toScenarioConversationSessionForGraphql = (
+    workspaceId: string,
+    run: Awaited<ReturnType<typeof startWorkspaceScenarioRunForGraphql>>,
+  ): WorkspaceConversationSessionRecordForGraphql => ({
+    sessionId: run.id,
+    workspaceId,
+    kind: "scenario",
+    status: run.status,
+    error: run.error,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    scenarioRun: run,
+  });
+
+  const toGraderConversationSessionForGraphql = (
+    workspaceId: string,
+    run: Awaited<ReturnType<typeof createWorkspaceGradeRunForGraphql>>,
+  ): WorkspaceConversationSessionRecordForGraphql => ({
+    sessionId: run.id,
+    workspaceId,
+    kind: "grader",
+    status: run.status,
+    error: run.error,
+    startedAt: run.runAt,
+    finishedAt: run.runAt,
+    gradeRun: run,
+  });
+
+  const toVerifyConversationSessionForGraphql = (
+    workspaceId: string,
+    batch: Awaited<ReturnType<typeof createWorkspaceVerifyBatchRunForGraphql>>,
+  ): WorkspaceConversationSessionRecordForGraphql => ({
+    sessionId: batch.id,
+    workspaceId,
+    kind: "verify",
+    status: batch.status === "error" ? "error" : batch.status,
+    startedAt: batch.startedAt,
+    finishedAt: batch.finishedAt,
+    verifyBatch: batch,
+  });
+
   const toWorkspaceGradeRunForGraphql = (
     run: GradingRunRecord,
     flags: Array<GradingFlag>,
@@ -5688,6 +5795,163 @@ export function startWebSocketSimulator(opts: {
       runId: nextFlags[index]?.runId,
     });
     return Promise.resolve(readGradingFlagsFromState(persistedState));
+  };
+
+  const listWorkspaceConversationSessionsForGraphql = (args: {
+    workspaceId: string;
+    kind?: WorkspaceConversationSessionKindForGraphql | null;
+  }): Promise<Array<WorkspaceConversationSessionRecordForGraphql>> => {
+    const sessions: Array<WorkspaceConversationSessionRecordForGraphql> = [];
+    if (!args.kind || args.kind === "build") {
+      sessions.push(
+        toBuildConversationSessionForGraphql(
+          args.workspaceId,
+          readWorkspaceBuildRunForGraphql(args.workspaceId),
+        ),
+      );
+    }
+    if (!args.kind || args.kind === "scenario") {
+      for (const run of readWorkspaceScenarioRunsForGraphql(args.workspaceId)) {
+        sessions.push(
+          toScenarioConversationSessionForGraphql(args.workspaceId, run),
+        );
+      }
+    }
+    if (!args.kind || args.kind === "grader") {
+      for (const run of readWorkspaceGradeRunsForGraphql(args.workspaceId)) {
+        sessions.push(
+          toGraderConversationSessionForGraphql(args.workspaceId, run),
+        );
+      }
+    }
+    if (!args.kind || args.kind === "verify") {
+      for (
+        const batch of readWorkspaceVerifyBatchesForGraphql(args.workspaceId)
+      ) {
+        sessions.push(
+          toVerifyConversationSessionForGraphql(args.workspaceId, batch),
+        );
+      }
+    }
+    sessions.sort((left, right) => {
+      const leftKey = left.finishedAt ?? left.startedAt ?? left.sessionId;
+      const rightKey = right.finishedAt ?? right.startedAt ?? right.sessionId;
+      return rightKey.localeCompare(leftKey);
+    });
+    return Promise.resolve(sessions);
+  };
+
+  const readWorkspaceConversationSessionForGraphql = async (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKindForGraphql;
+    sessionId: string;
+  }): Promise<WorkspaceConversationSessionRecordForGraphql | null> => {
+    const sessions = await listWorkspaceConversationSessionsForGraphql({
+      workspaceId: args.workspaceId,
+      kind: args.kind,
+    });
+    return sessions.find((session) => session.sessionId === args.sessionId) ??
+      null;
+  };
+
+  const startWorkspaceConversationSessionForGraphql = async (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKindForGraphql;
+    sessionId?: string | null;
+    message?: string | null;
+    scenarioDeckId?: string | null;
+    scenarioInput?: unknown;
+    assistantInit?: unknown;
+    graderId?: string | null;
+    scenarioRunId?: string | null;
+    batchSize?: number | null;
+    concurrency?: number | null;
+  }): Promise<WorkspaceConversationSessionRecordForGraphql> => {
+    if (args.kind === "build") {
+      const run = await startWorkspaceBuildRun({
+        workspaceId: args.workspaceId,
+        message: args.message ?? "",
+      });
+      return toBuildConversationSessionForGraphql(args.workspaceId, run);
+    }
+    if (args.kind === "scenario") {
+      const run = await startWorkspaceScenarioRunForGraphql({
+        workspaceId: args.workspaceId,
+        runId: args.sessionId ?? undefined,
+        scenarioDeckId: args.scenarioDeckId ?? null,
+        scenarioInput: args.scenarioInput,
+        assistantInit: args.assistantInit,
+      });
+      return toScenarioConversationSessionForGraphql(args.workspaceId, run);
+    }
+    if (args.kind === "grader") {
+      if (!args.graderId) throw new Error("graderId is required");
+      const run = await createWorkspaceGradeRunForGraphql({
+        workspaceId: args.workspaceId,
+        graderId: args.graderId,
+        scenarioRunId: args.scenarioRunId ?? null,
+      });
+      return toGraderConversationSessionForGraphql(args.workspaceId, run);
+    }
+    if (!args.graderId) throw new Error("graderId is required");
+    const batch = await createWorkspaceVerifyBatchRunForGraphql({
+      workspaceId: args.workspaceId,
+      graderId: args.graderId,
+      scenarioRunId: args.scenarioRunId ?? null,
+      batchSize: args.batchSize ?? 1,
+      concurrency: args.concurrency ?? 1,
+    });
+    return toVerifyConversationSessionForGraphql(args.workspaceId, batch);
+  };
+
+  const sendWorkspaceConversationSessionForGraphql = async (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKindForGraphql;
+    sessionId: string;
+    message: string;
+  }): Promise<WorkspaceConversationSessionRecordForGraphql> => {
+    if (args.kind === "build") {
+      const run = await startWorkspaceBuildRun({
+        workspaceId: args.workspaceId,
+        message: args.message,
+      });
+      return toBuildConversationSessionForGraphql(args.workspaceId, run);
+    }
+    if (args.kind !== "scenario") {
+      throw new Error(`Send is unavailable for ${args.kind} sessions`);
+    }
+    const run = await sendWorkspaceScenarioRunForGraphql({
+      workspaceId: args.workspaceId,
+      runId: args.sessionId,
+      message: args.message,
+    });
+    return toScenarioConversationSessionForGraphql(args.workspaceId, run);
+  };
+
+  const stopWorkspaceConversationSessionForGraphql = async (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKindForGraphql;
+    sessionId: string;
+  }): Promise<WorkspaceConversationSessionRecordForGraphql> => {
+    if (args.kind === "build") {
+      const run = await stopWorkspaceBuildRun({
+        workspaceId: args.workspaceId,
+        runId: args.sessionId,
+      });
+      return toBuildConversationSessionForGraphql(args.workspaceId, run);
+    }
+    if (args.kind !== "scenario") {
+      const existing = await readWorkspaceConversationSessionForGraphql(args);
+      if (!existing) {
+        throw new Error(`Conversation session ${args.sessionId} not found`);
+      }
+      return existing;
+    }
+    const run = await stopWorkspaceScenarioRunForGraphql({
+      workspaceId: args.workspaceId,
+      runId: args.sessionId,
+    });
+    return toScenarioConversationSessionForGraphql(args.workspaceId, run);
   };
 
   const server = Deno.serve(
@@ -6939,6 +7203,39 @@ export function startWebSocketSimulator(opts: {
           batchSize: number;
           concurrency: number;
         }) => await createWorkspaceVerifyBatchRunForGraphql(args),
+        listWorkspaceConversationSessions: async (args: {
+          workspaceId: string;
+          kind?: WorkspaceConversationSessionKindForGraphql | null;
+        }) => await listWorkspaceConversationSessionsForGraphql(args),
+        readWorkspaceConversationSession: async (args: {
+          workspaceId: string;
+          kind: WorkspaceConversationSessionKindForGraphql;
+          sessionId: string;
+        }) => await readWorkspaceConversationSessionForGraphql(args),
+        startWorkspaceConversationSession: async (args: {
+          workspaceId: string;
+          kind: WorkspaceConversationSessionKindForGraphql;
+          sessionId?: string | null;
+          message?: string | null;
+          scenarioDeckId?: string | null;
+          scenarioInput?: unknown;
+          assistantInit?: unknown;
+          graderId?: string | null;
+          scenarioRunId?: string | null;
+          batchSize?: number | null;
+          concurrency?: number | null;
+        }) => await startWorkspaceConversationSessionForGraphql(args),
+        sendWorkspaceConversationSession: async (args: {
+          workspaceId: string;
+          kind: WorkspaceConversationSessionKindForGraphql;
+          sessionId: string;
+          message: string;
+        }) => await sendWorkspaceConversationSessionForGraphql(args),
+        stopWorkspaceConversationSession: async (args: {
+          workspaceId: string;
+          kind: WorkspaceConversationSessionKindForGraphql;
+          sessionId: string;
+        }) => await stopWorkspaceConversationSessionForGraphql(args),
         listWorkspaceScenarioDecks: async (workspaceId: string) => {
           logWorkspaceRefreshDebug("graphql.scenarioDecks.list.begin", {
             workspaceId,

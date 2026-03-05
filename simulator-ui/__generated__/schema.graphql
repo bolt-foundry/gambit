@@ -39,6 +39,9 @@ type Mutation {
   simulatorResetWorkspace(input: SimulatorResetWorkspaceInput!): SimulatorResetWorkspacePayload
   simulatorStopRun(input: SimulatorStopRunInput!): SimulatorStopRunPayload
   workspaceBuildRunCreate(input: WorkspaceBuildRunCreateInput!): WorkspaceBuildRunCreatePayload
+  workspaceConversationSessionSend(input: WorkspaceConversationSessionSendInput!): WorkspaceConversationSessionPayload
+  workspaceConversationSessionStart(input: WorkspaceConversationSessionStartInput!): WorkspaceConversationSessionPayload
+  workspaceConversationSessionStop(input: WorkspaceConversationSessionStopInput!): WorkspaceConversationSessionPayload
   workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload
   workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload
   workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload
@@ -186,6 +189,8 @@ type Workspace {
   assistantDeck: WorkspaceAssistantDeck
   build: BuildState
   buildRuns(after: String, before: String, first: Int, last: Int): WorkspaceBuildRunsConnection
+  conversationSession(sessionId: ID!): WorkspaceConversationSession
+  conversationSessions(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionsConnection
   files(after: String, before: String, first: Int, id: ID, last: Int, pathPrefix: WorkspaceRelativePath): WorkspaceFilesConnection
   gradeTab: WorkspaceGradeTab
   id: ID
@@ -203,6 +208,18 @@ type WorkspaceAssistantDeck {
   modelParams: String
   startMode: String
   tools: String
+}
+
+type WorkspaceBuildConversationSession implements WorkspaceConversationSession {
+  error: String
+  finishedAt: String
+  id: ID
+  run: WorkspaceConversationRun
+  sessionId: ID
+  startedAt: String
+  status: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
+  workspaceId: ID
 }
 
 type WorkspaceBuildLiveEdge {
@@ -260,6 +277,69 @@ type WorkspaceConversationRunOpenResponsesConnection {
 type WorkspaceConversationRunOpenResponsesConnectionEdge {
   cursor: String!
   node: OpenResponse
+}
+
+interface WorkspaceConversationSession {
+  error: String
+  finishedAt: String
+  id: ID
+  sessionId: ID
+  startedAt: String
+  status: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
+  workspaceId: ID
+}
+
+type WorkspaceConversationSessionPayload {
+  session: WorkspaceConversationSession
+  workspace: Workspace
+}
+
+input WorkspaceConversationSessionSendInput {
+  inputItems: [OpenResponseInputItemInput!]!
+  kind: String!
+  sessionId: ID!
+  workspaceId: ID!
+}
+
+input WorkspaceConversationSessionStartInput {
+  assistantInit: JSON
+  batchSize: Int
+  concurrency: Int
+  graderId: ID
+  inputItems: [OpenResponseInputItemInput!]
+  kind: String!
+  scenarioDeckId: ID
+  scenarioInput: JSON
+  scenarioRunId: ID
+  sessionId: ID
+  workspaceId: ID!
+}
+
+input WorkspaceConversationSessionStopInput {
+  kind: String!
+  sessionId: ID!
+  workspaceId: ID!
+}
+
+type WorkspaceConversationSessionTranscriptConnection {
+  edges: [WorkspaceConversationSessionTranscriptConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceConversationSessionTranscriptConnectionEdge {
+  cursor: String!
+  node: OpenResponseOutputItem
+}
+
+type WorkspaceConversationSessionsConnection {
+  edges: [WorkspaceConversationSessionsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceConversationSessionsConnectionEdge {
+  cursor: String!
+  node: WorkspaceConversationSession
 }
 
 type WorkspaceCreatePayload {
@@ -387,6 +467,18 @@ type WorkspaceGradeTurn {
   turnNumber: Int
 }
 
+type WorkspaceGraderConversationSession implements WorkspaceConversationSession {
+  error: String
+  finishedAt: String
+  gradeRun: WorkspaceGradeRun
+  id: ID
+  sessionId: ID
+  startedAt: String
+  status: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
+  workspaceId: ID
+}
+
 type WorkspaceGraderDeck {
   description: String
   id: ID
@@ -420,6 +512,18 @@ interface WorkspaceRun {
 type WorkspaceRunLifecycleUpdate {
   runId: ID
   status: String
+  workspaceId: ID
+}
+
+type WorkspaceScenarioConversationSession implements WorkspaceConversationSession {
+  error: String
+  finishedAt: String
+  id: ID
+  run: WorkspaceConversationRun
+  sessionId: ID
+  startedAt: String
+  status: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   workspaceId: ID
 }
 
@@ -593,6 +697,18 @@ enum WorkspaceVerifyBatchStatus {
   ERROR
   IDLE
   RUNNING
+}
+
+type WorkspaceVerifyConversationSession implements WorkspaceConversationSession {
+  error: String
+  finishedAt: String
+  id: ID
+  sessionId: ID
+  startedAt: String
+  status: OpenResponseStatus
+  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
+  verifyBatch: WorkspaceVerifyBatch
+  workspaceId: ID
 }
 
 type WorkspaceVerifyMetrics {

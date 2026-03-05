@@ -185,6 +185,754 @@ leakTolerantTest(
 );
 
 leakTolerantTest(
+  "/graphql workspace conversation sessions lifecycle supports build/scenario/grader/verify kinds",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const deckPath = path.join(dir, "graphql-conversation-sessions.deck.md");
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "default",
+      "PROMPT.md",
+    );
+    const graderDeckPath = path.join(dir, "graders", "default", "PROMPT.md");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.mkdir(path.dirname(graderDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `+++
+[contextSchema]
+schema = "gambit://schemas/contexts/conversation.zod.ts"
+
+[responseSchema]
+schema = "gambit://schemas/responses/assistant_message.zod.ts"
+
+[modelParams]
+model = ["dummy-model"]
+
+[[scenarios]]
+id = "default-scenario"
+path = "./scenarios/default/PROMPT.md"
+label = "Default scenario"
+
+[[graders]]
+id = "default-grader"
+path = "./graders/default/PROMPT.md"
+label = "Default grader"
++++
+Conversation session test root deck.
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `+++
+label = "Default scenario"
+contextSchema = "gambit://schemas/contexts/conversation.zod.ts"
+responseSchema = "gambit://schemas/responses/assistant_message.zod.ts"
+
+[modelParams]
+model = ["dummy-model"]
++++
+Scenario assistant.
+`,
+    );
+    await Deno.writeTextFile(
+      graderDeckPath,
+      `+++
+label = "Default grader"
+contextSchema = "gambit://schemas/graders/contexts/conversation.zod.ts"
+responseSchema = "gambit://schemas/graders/grader_output.zod.ts"
+
+[modelParams]
+model = ["dummy-model"]
++++
+Return JSON score/reason.
+`,
+    );
+
+    const provider: ModelProvider = {
+      chat(input) {
+        const lastUser = [...input.messages].reverse().find((message) =>
+          message?.role === "user"
+        );
+        const prompt = typeof lastUser?.content === "string"
+          ? lastUser.content
+          : JSON.stringify(lastUser?.content ?? "");
+        return Promise.resolve({
+          message: prompt.includes("grade")
+            ? {
+              role: "assistant",
+              content: JSON.stringify({ score: 1, reason: "ok" }),
+            }
+            : { role: "assistant", content: `assistant:${prompt}` },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(query: string, variables?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const createWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId =
+        createWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ?? "";
+      assert(workspaceId.length > 0);
+
+      const scenarioStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            __typename?: string;
+            sessionId?: string;
+            status?: string;
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "default-scenario",
+          },
+        },
+      );
+      const scenarioSessionId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ?? "";
+      assert(scenarioSessionId.length > 0);
+      assertEquals(
+        scenarioStart.data?.workspaceConversationSessionStart?.session
+          ?.__typename,
+        "WorkspaceScenarioConversationSession",
+      );
+
+      const scenarioSend = await gql<{
+        workspaceConversationSessionSend?: {
+          session?: {
+            sessionId?: string;
+            status?: string;
+            run?: {
+              id?: string;
+              openResponses?: {
+                edges?: Array<{
+                  node?: {
+                    outputItems?: {
+                      edges?: Array<{
+                        node?: {
+                          __typename?: string;
+                          role?: string;
+                          content?: string;
+                        };
+                      }>;
+                    };
+                  };
+                }>;
+              };
+            };
+          };
+        };
+      }>(
+        `
+          mutation SendScenario($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+                status
+                ... on WorkspaceScenarioConversationSession {
+                  run {
+                    openResponses(first: 1) {
+                      edges {
+                        node {
+                          outputItems(first: 50) {
+                            edges {
+                              node {
+                                __typename
+                                ... on OutputMessage {
+                                  role
+                                  content
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+            inputItems: [{ role: "user", content: "scenario message" }],
+          },
+        },
+      );
+      assertEquals(
+        scenarioSend.data?.workspaceConversationSessionSend?.session?.sessionId,
+        scenarioSessionId,
+      );
+      const emptyScenarioSend = await gql<{
+        workspaceConversationSessionSend?: {
+          session?: { sessionId?: string; status?: string };
+        };
+      }>(
+        `
+          mutation SendScenarioEmpty($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+            inputItems: [{ role: "user", content: "   " }],
+          },
+        },
+      );
+      assertEquals(
+        emptyScenarioSend.data?.workspaceConversationSessionSend?.session
+          ?.sessionId,
+        scenarioSessionId,
+      );
+
+      const createEmptyBuildWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const emptyBuildWorkspaceId =
+        createEmptyBuildWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ??
+          "";
+      assert(emptyBuildWorkspaceId.length > 0);
+
+      const emptyBuildStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            __typename?: string;
+            sessionId?: string;
+            status?: string;
+          };
+        };
+      }>(
+        `
+          mutation StartEmptyBuild($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId: emptyBuildWorkspaceId,
+            kind: "build",
+          },
+        },
+      );
+      const emptyBuildSessionId =
+        emptyBuildStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ?? "";
+      assert(emptyBuildSessionId.length > 0);
+      assertEquals(
+        emptyBuildStart.data?.workspaceConversationSessionStart?.session
+          ?.__typename,
+        "WorkspaceBuildConversationSession",
+      );
+      assertEquals(
+        emptyBuildStart.data?.workspaceConversationSessionStart?.session
+          ?.status,
+        "RUNNING",
+      );
+
+      const buildStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            __typename?: string;
+            sessionId?: string;
+            status?: string;
+          };
+        };
+      }>(
+        `
+          mutation StartBuild($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "build",
+            inputItems: [{ role: "user", content: "build message" }],
+          },
+        },
+      );
+      const buildSessionId =
+        buildStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ??
+          "";
+      assert(buildSessionId.length > 0);
+      assertEquals(
+        buildStart.data?.workspaceConversationSessionStart?.session?.__typename,
+        "WorkspaceBuildConversationSession",
+      );
+
+      const querySessions = await gql<{
+        workspace?: {
+          conversationSessions?: {
+            edges?: Array<{
+              node?: {
+                sessionId?: string;
+                __typename?: string;
+              };
+            }>;
+          };
+          conversationSession?: {
+            sessionId?: string;
+            __typename?: string;
+          };
+        } | null;
+      }>(
+        `
+          query Sessions($workspaceId: ID!, $buildSessionId: ID!) {
+            workspace(id: $workspaceId) {
+              conversationSessions(first: 25) {
+                edges {
+                  node {
+                    __typename
+                    sessionId
+                  }
+                }
+              }
+              conversationSession(sessionId: $buildSessionId) {
+                __typename
+                sessionId
+              }
+            }
+          }
+        `,
+        { workspaceId, buildSessionId },
+      );
+      const sessionTypeNames =
+        (querySessions.data?.workspace?.conversationSessions
+          ?.edges ?? [])
+          .map((edge) => edge?.node?.__typename ?? null)
+          .filter((typename): typename is string =>
+            typeof typename === "string"
+          );
+      assertEquals(
+        sessionTypeNames.includes("WorkspaceScenarioConversationSession"),
+        true,
+      );
+      assertEquals(
+        sessionTypeNames.includes("WorkspaceBuildConversationSession"),
+        true,
+      );
+      assertEquals(
+        querySessions.data?.workspace?.conversationSession?.sessionId,
+        buildSessionId,
+      );
+      assertEquals(
+        querySessions.data?.workspace?.conversationSession?.__typename,
+        "WorkspaceBuildConversationSession",
+      );
+
+      const graderStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: { sessionId?: string; __typename?: string };
+        };
+      }>(
+        `
+          mutation StartGrader($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "grader",
+            graderId: "default-grader",
+            scenarioRunId: scenarioSessionId,
+          },
+        },
+      );
+      assertEquals(
+        graderStart.data?.workspaceConversationSessionStart?.session
+          ?.__typename,
+        "WorkspaceGraderConversationSession",
+      );
+
+      const verifyStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: { sessionId?: string; __typename?: string };
+        };
+      }>(
+        `
+          mutation StartVerify($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "verify",
+            graderId: "default-grader",
+            scenarioRunId: scenarioSessionId,
+            batchSize: 1,
+            concurrency: 1,
+          },
+        },
+      );
+      assertEquals(
+        verifyStart.data?.workspaceConversationSessionStart?.session
+          ?.__typename,
+        "WorkspaceVerifyConversationSession",
+      );
+
+      const scenarioStop = await gql<{
+        workspaceConversationSessionStop?: {
+          session?: { sessionId?: string; status?: string };
+        };
+      }>(
+        `
+          mutation StopScenario($input: WorkspaceConversationSessionStopInput!) {
+            workspaceConversationSessionStop(input: $input) {
+              session {
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+          },
+        },
+      );
+      assertEquals(
+        scenarioStop.data?.workspaceConversationSessionStop?.session?.sessionId,
+        scenarioSessionId,
+      );
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql scenario conversation sessions preserve assistant-first transcript order",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-scenario-order.deck.ts");
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "assistant-first",
+      "PROMPT.deck.ts",
+    );
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+
+      export default defineDeck({
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+        testDecks: [{
+          id: "assistant-first",
+          path: "./scenarios/assistant-first/PROMPT.deck.ts",
+          label: "Assistant First",
+          maxTurns: 1,
+        }],
+      });
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+
+      export default defineDeck({
+        startMode: "assistant",
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+      });
+`,
+    );
+
+    const provider: ModelProvider = {
+      chat(input) {
+        const lastUser = [...input.messages].reverse().find((message) =>
+          message?.role === "user"
+        );
+        const prompt = typeof lastUser?.content === "string"
+          ? lastUser.content
+          : "";
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            content: prompt === "how are you"
+              ? "Fine. What do you need?"
+              : "Ready.",
+          },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(
+        query: string,
+        variables?: Record<string, unknown>,
+      ): Promise<GraphqlEnvelope<TData>> => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const createWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId =
+        createWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ?? "";
+      assert(workspaceId.length > 0);
+
+      const scenarioStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            status?: string;
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "assistant-first",
+          },
+        },
+      );
+      const scenarioSessionId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ?? "";
+      assert(scenarioSessionId.length > 0);
+
+      await gql<{
+        workspaceConversationSessionSend?: {
+          session?: { sessionId?: string };
+        };
+      }>(
+        `
+          mutation SendScenario($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+            inputItems: [{ role: "user", content: "how are you" }],
+          },
+        },
+      );
+
+      let messages: Array<{ role: string; content: string }> = [];
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const transcript = await gql<{
+          workspace?: {
+            conversationSession?: {
+              __typename?: string;
+              transcript?: {
+                edges?: Array<{
+                  node?: {
+                    __typename?: string;
+                    role?: string;
+                    content?: string;
+                  };
+                }>;
+              };
+            } | null;
+          } | null;
+        }>(
+          `
+            query ScenarioTranscript($workspaceId: ID!, $sessionId: ID!) {
+              workspace(id: $workspaceId) {
+                conversationSession(sessionId: $sessionId) {
+                  __typename
+                  ... on WorkspaceScenarioConversationSession {
+                    transcript(first: 50) {
+                      edges {
+                        node {
+                          __typename
+                          ... on OutputMessage {
+                            role
+                            content
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId, sessionId: scenarioSessionId },
+        );
+        messages = (
+          transcript.data?.workspace?.conversationSession?.transcript?.edges ??
+            []
+        ).flatMap((edge) => {
+          const node = edge?.node;
+          if (node?.__typename !== "OutputMessage") return [];
+          return [{ role: node.role ?? "", content: node.content ?? "" }];
+        });
+        if (
+          messages.length >= 3 &&
+          messages[2]?.content === "Fine. What do you need?"
+        ) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      const readyAssistantIndex = messages.findIndex((message) =>
+        message.role === "assistant" && message.content === "Ready."
+      );
+      const userPromptIndex = messages.findIndex((message) =>
+        message.role === "user" && message.content === "how are you"
+      );
+      const replyAssistantIndex = messages.findIndex((message) =>
+        message.role === "assistant" &&
+        message.content === "Fine. What do you need?"
+      );
+      assert(readyAssistantIndex >= 0);
+      assert(userPromptIndex >= 0);
+      assert(replyAssistantIndex >= 0);
+      assert(readyAssistantIndex < userPromptIndex);
+      assert(userPromptIndex < replyAssistantIndex);
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
   "/graphql verify tab mutation creates typed batch payload",
   async () => {
     const dir = await Deno.makeTempDir();

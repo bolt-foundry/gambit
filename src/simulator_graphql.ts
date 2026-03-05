@@ -74,7 +74,7 @@ type SessionMetaRecord = {
 type BuildRunRecord = {
   id: string;
   workspaceId?: string;
-  conversationRunKind?: "build";
+  conversationRunKind?: "build" | "scenario";
   status: "idle" | "running" | "completed" | "error" | "canceled";
   error?: string;
   startedAt?: string;
@@ -262,6 +262,26 @@ type WorkspaceVerifyMetricsRecord = {
   outliers: Array<WorkspaceVerifyOutlierRecord>;
 };
 
+type WorkspaceConversationSessionKind =
+  | "build"
+  | "scenario"
+  | "grader"
+  | "verify";
+
+type WorkspaceConversationSessionRecord = {
+  sessionId: string;
+  workspaceId: string;
+  kind: WorkspaceConversationSessionKind;
+  status: "idle" | "running" | "completed" | "error" | "canceled";
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  buildRun?: BuildRunRecord;
+  scenarioRun?: ScenarioRunRecord;
+  gradeRun?: WorkspaceGradeRunRecord;
+  verifyBatch?: WorkspaceVerifyBatchRecord;
+};
+
 type OutputMessageRecord = {
   __typename: "OutputMessage";
   id: string;
@@ -378,6 +398,39 @@ export type GambitGraphqlContext = {
     batchSize: number;
     concurrency: number;
   }) => Promise<WorkspaceVerifyBatchRecord>;
+  listWorkspaceConversationSessions?: (args: {
+    workspaceId: string;
+    kind?: Maybe<WorkspaceConversationSessionKind>;
+  }) => Promise<Array<WorkspaceConversationSessionRecord>>;
+  readWorkspaceConversationSession?: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+  }) => Promise<Maybe<WorkspaceConversationSessionRecord>>;
+  startWorkspaceConversationSession?: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId?: Maybe<string>;
+    message?: Maybe<string>;
+    scenarioDeckId?: Maybe<string>;
+    scenarioInput?: unknown;
+    assistantInit?: unknown;
+    graderId?: Maybe<string>;
+    scenarioRunId?: Maybe<string>;
+    batchSize?: Maybe<number>;
+    concurrency?: Maybe<number>;
+  }) => Promise<WorkspaceConversationSessionRecord>;
+  sendWorkspaceConversationSession?: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+    message: string;
+  }) => Promise<WorkspaceConversationSessionRecord>;
+  stopWorkspaceConversationSession?: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+  }) => Promise<WorkspaceConversationSessionRecord>;
 };
 
 const builder = new SchemaBuilder<{
@@ -472,369 +525,48 @@ function toOpenResponseStatus(
   }
 }
 
-function asRecord(value: unknown): Maybe<Record<string, unknown>> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function extractStreamPayload(value: unknown): Maybe<Record<string, unknown>> {
-  const record = asRecord(value);
-  if (!record) return null;
-  if (record.type === "codex.event") return asRecord(record.payload);
-  return record;
-}
-
-function extractReasoningText(payload: Record<string, unknown>): string {
-  const payloadType = asString(payload.type);
+function parseWorkspaceConversationSessionKind(
+  value: string,
+): WorkspaceConversationSessionKind {
   if (
-    payloadType === "response.reasoning.delta" ||
-    payloadType === "response.reasoning.done" ||
-    payloadType === "response.reasoning_summary_text.delta" ||
-    payloadType === "response.reasoning_summary_text.done"
+    value === "build" || value === "scenario" || value === "grader" ||
+    value === "verify"
   ) {
-    return asString(payload.delta) || asString(payload.text);
+    return value;
   }
-  if (
-    payloadType === "response.reasoning_summary_part.added" ||
-    payloadType === "response.reasoning_summary_part.done"
-  ) {
-    const part = asRecord(payload.part);
-    return part ? asString(part.text) : "";
-  }
-  return "";
+  throw new Error(`Unsupported conversation session kind: ${value}`);
+}
+
+function isWorkspaceConversationSessionRecord(
+  value: unknown,
+): value is WorkspaceConversationSessionRecord {
+  return !!value && typeof value === "object" &&
+    typeof (value as { kind?: unknown }).kind === "string";
 }
 
 function materializeOpenResponseOutputItems(
   run: BuildRunRecord,
 ): Array<OpenResponseOutputItemRecord> {
-  const itemsById = new Map<string, OpenResponseOutputItemRecord>();
-  const toolItems = new Map<string, OutputToolCallRecord>();
-  const reasoningItems = new Map<string, OutputReasoningRecord>();
-  const orderedIds: Array<string> = [];
-  const usedMessageIndexes = new Set<number>();
-
-  const pushOrdered = (id: string) => {
-    if (orderedIds.includes(id)) return;
-    orderedIds.push(id);
-  };
-
-  const toText = (value: unknown): string => {
-    if (typeof value === "string") return value;
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
-  };
-
-  const scopedId = (scope: string, id: string): string =>
-    scope.length > 0 ? `${scope}:${id}` : id;
-
-  const takeMatchingMessage = (
-    role: string,
-    content: string,
-  ): Maybe<{ index: number; message: BuildRunRecord["messages"][number] }> => {
-    for (let index = 0; index < run.messages.length; index += 1) {
-      if (usedMessageIndexes.has(index)) continue;
-      const message = run.messages[index];
-      if (message.role !== role) continue;
-      if (message.content !== content) continue;
-      usedMessageIndexes.add(index);
-      return { index, message };
-    }
-    return null;
-  };
-
-  const pushMessage = (input: {
-    role: string;
-    content: string;
-    fallbackId?: string;
-  }) => {
-    const content = input.content.trim();
-    if (!content) return;
-    const match = takeMatchingMessage(input.role, content);
-    const item = match
-      ? {
-        __typename: "OutputMessage" as const,
-        id: `${run.id}:item:${match.index}`,
-        role: match.message.role,
-        content: match.message.content,
-        messageRefId: match.message.messageRefId,
-      }
-      : {
-        __typename: "OutputMessage" as const,
-        id: input.fallbackId ?? `${run.id}:message:${orderedIds.length}`,
-        role: input.role,
-        content,
-        messageRefId: undefined,
-      };
-    const previous = orderedIds.length > 0
-      ? itemsById.get(orderedIds[orderedIds.length - 1])
-      : undefined;
-    if (
-      previous?.__typename === "OutputMessage" &&
-      previous.role === item.role &&
-      previous.content === item.content
-    ) {
-      return;
-    }
-    itemsById.set(item.id, item);
-    pushOrdered(item.id);
-  };
-
-  const extractAssistantTextFromItem = (
-    item: Record<string, unknown>,
-  ): string => {
-    const itemType = asString(item.type);
-    if (itemType === "agent_message") return asString(item.text);
-    if (itemType !== "message") return "";
-    if (asString(item.role) !== "assistant") return "";
-    const content = item.content;
-    if (!Array.isArray(content)) return "";
-    return content.map((part) => {
-      const partRecord = asRecord(part);
-      return partRecord ? asString(partRecord.text) : "";
-    }).join("");
-  };
-
-  const upsertTool = (input: {
-    callKey: string;
-    rawCallId: string;
-    name?: string;
-    kind: "tool.call" | "tool.result" | "tool.error";
-    args?: unknown;
-    result?: unknown;
-    error?: unknown;
-  }) => {
-    let entry = toolItems.get(input.callKey);
-    if (!entry) {
-      entry = {
-        __typename: "OutputToolCall",
-        id: `${run.id}:tool:${input.callKey}`,
-        toolCallId: input.rawCallId,
-        toolName: input.name ?? "tool",
-        status: "RUNNING",
-      };
-      toolItems.set(input.callKey, entry);
-      itemsById.set(entry.id, entry);
-      pushOrdered(entry.id);
-    }
-    if (input.name && entry.toolName === "tool") {
-      entry.toolName = input.name;
-    }
-    if (input.kind === "tool.call") {
-      entry.status = "RUNNING";
-      if (input.args !== undefined) entry.argumentsText = toText(input.args);
-      return;
-    }
-    if (input.kind === "tool.result") {
-      entry.status = "COMPLETED";
-      entry.resultText = input.result === undefined
-        ? undefined
-        : toText(input.result);
-      return;
-    }
-    entry.status = "ERROR";
-    entry.error = typeof input.error === "string"
-      ? input.error
-      : (input.error !== undefined
-        ? JSON.stringify(input.error)
-        : "Tool error");
-  };
-
-  const upsertReasoning = (input: {
-    reasoningKey: string;
-    text: string;
-    raw: Record<string, unknown>;
-    mode: "append" | "replace";
-  }) => {
-    const text = input.text.trim();
-    if (!text) return;
-    let entry = reasoningItems.get(input.reasoningKey);
-    if (!entry) {
-      entry = {
-        __typename: "OutputReasoning",
-        id: `${run.id}:reasoning:${input.reasoningKey}`,
-        summary: text,
-        reasoningType: asString(input.raw.type) || undefined,
-      };
-      reasoningItems.set(input.reasoningKey, entry);
-      itemsById.set(entry.id, entry);
-      pushOrdered(entry.id);
-      return;
-    }
-    if (input.mode === "append" && !entry.summary.endsWith(text)) {
-      entry.summary = `${entry.summary}${text}`;
-    } else if (input.mode === "replace") {
-      entry.summary = text;
-    }
-    entry.reasoningType = asString(input.raw.type) || entry.reasoningType;
-  };
-
-  for (const trace of run.traces ?? []) {
-    const record = asRecord(trace);
-    if (!record) continue;
-    const type = asString(record.type);
-    const actionScope = asString(record.actionCallId) ||
-      asString(record.parentActionCallId) ||
-      asString(record.runId);
-    if (type === "message.user") {
-      const rawMessage = asRecord(record.message);
-      const content = toText(rawMessage?.content);
-      pushMessage({
-        role: "user",
-        content,
-        fallbackId: `${run.id}:trace-message:user:${orderedIds.length}`,
-      });
-      continue;
-    }
-    if (type === "model.result") {
-      const rawMessage = asRecord(record.message);
-      const content = toText(rawMessage?.content);
-      pushMessage({
-        role: "assistant",
-        content,
-        fallbackId: `${run.id}:trace-message:assistant:${orderedIds.length}`,
-      });
-      continue;
-    }
-    if (
-      type === "tool.call" || type === "tool.result" || type === "tool.error"
-    ) {
-      const rawCallId = asString(record.actionCallId);
-      if (!rawCallId) continue;
-      const toolScope = asString(record.parentActionCallId) ||
-        asString(record.runId) ||
-        asString(record.actionCallId);
-      const callKey = scopedId(toolScope, rawCallId);
-      upsertTool({
-        callKey,
-        rawCallId,
-        name: asString(record.name) || undefined,
-        kind: type,
-        args: record.args,
-        result: record.result,
-        error: record.error,
-      });
-      continue;
-    }
-    if (type !== "model.stream.event") continue;
-    const payload = extractStreamPayload((record as { event?: unknown }).event);
-    if (!payload) continue;
-    const payloadType = asString(payload.type);
-    if (
-      payloadType === "tool.call" || payloadType === "tool.result" ||
-      payloadType === "tool.error"
-    ) {
-      const rawCallId = asString(payload.actionCallId);
-      if (!rawCallId) continue;
-      const callKey = scopedId(actionScope, rawCallId);
-      upsertTool({
-        callKey,
-        rawCallId,
-        name: asString(payload.name) || undefined,
-        kind: payloadType,
-        args: payload.args,
-        result: payload.result,
-        error: payload.error,
-      });
-      continue;
-    }
-    if (payloadType.startsWith("response.reasoning")) {
-      const baseReasoningId = asString(payload.item_id) || payloadType;
-      upsertReasoning({
-        reasoningKey: scopedId(actionScope, baseReasoningId),
-        text: extractReasoningText(payload),
-        raw: payload,
-        mode: payloadType.endsWith(".delta") ? "append" : "replace",
-      });
-      continue;
-    }
-    const item = asRecord(payload.item);
-    if (!item) continue;
-    const itemType = asString(item.type);
-    if (
-      payloadType === "response.output_item.done" &&
-      (itemType === "agent_message" || itemType === "message")
-    ) {
-      const assistantText = extractAssistantTextFromItem(item);
-      if (assistantText) {
-        pushMessage({
-          role: "assistant",
-          content: assistantText,
-          fallbackId: `${run.id}:trace-message:assistant:${orderedIds.length}`,
-        });
-      }
-      continue;
-    }
-    if (itemType !== "reasoning") continue;
-    const summary = Array.isArray(item.summary)
-      ? item.summary.map((part) => {
-        const partRecord = asRecord(part);
-        return partRecord ? asString(partRecord.text) : "";
-      }).join("")
-      : asString(item.text);
-    const baseReasoningId = asString(item.id) || "reasoning";
-    upsertReasoning({
-      reasoningKey: scopedId(actionScope, baseReasoningId),
-      text: summary,
-      raw: item,
-      mode: "replace",
-    });
-  }
-
-  for (let index = 0; index < run.messages.length; index += 1) {
-    if (usedMessageIndexes.has(index)) continue;
-    const message = run.messages[index];
-    const id = `${run.id}:item:${index}`;
-    const item: OutputMessageRecord = {
+  const materialized = run.messages.flatMap<OpenResponseOutputItemRecord>((
+    message,
+    index,
+  ) => {
+    const content = typeof message.content === "string" ? message.content : "";
+    if (!content.trim()) return [];
+    return [{
       __typename: "OutputMessage",
-      id,
+      id: `${run.id}:item:${index}`,
       role: message.role,
-      content: message.content,
+      content,
       messageRefId: message.messageRefId,
-    };
-    itemsById.set(id, item);
-    pushOrdered(id);
-  }
-
-  const items = orderedIds.flatMap((id) => {
-    const item = itemsById.get(id);
-    return item ? [item] : [];
+    }];
   });
-  for (const item of toolItems.values()) {
-    if (itemsById.has(item.id)) continue;
-    items.push(item);
-  }
-  for (const item of reasoningItems.values()) {
-    if (itemsById.has(item.id)) continue;
-    items.push(item);
-  }
-
-  const traceTypeCounts: Record<string, number> = {};
-  for (const trace of run.traces ?? []) {
-    const traceType = typeof trace.type === "string" ? trace.type : "unknown";
-    traceTypeCounts[traceType] = (traceTypeCounts[traceType] ?? 0) + 1;
-  }
-  const outputTypeCounts = {
-    message: items.filter((item) => item.__typename === "OutputMessage").length,
-    reasoning:
-      items.filter((item) => item.__typename === "OutputReasoning").length,
-    tool: items.filter((item) => item.__typename === "OutputToolCall").length,
-  };
   logBuildChatDebug("materialize.outputItems", {
     runId: run.id,
     messageCount: run.messages.length,
-    traceCount: (run.traces ?? []).length,
-    traceTypeCounts,
-    outputTypeCounts,
-    orderedHead: orderedIds.slice(0, 8),
+    outputCount: materialized.length,
   });
-  return items;
+  return materialized;
 }
 
 const WorkspaceSessionMetaType = builder.objectRef<SessionMetaRecord>(
@@ -1210,16 +942,11 @@ OpenResponseType.implement({
         after: t.arg.string(),
       },
       resolve: (parent, args) => {
-        const events = (parent.traces ?? []).map((trace, index) => ({
-          id: `${parent.id}:event:${index}`,
-          type: typeof trace.type === "string" ? trace.type : "trace",
-          data: trace,
-        }));
         logBuildChatDebug("resolver.openResponse.events", {
           runId: parent.id,
-          eventCount: events.length,
+          eventCount: 0,
         });
-        return resolveArrayConnection({ args }, events);
+        return resolveArrayConnection({ args }, []);
       },
     }),
   }),
@@ -1973,6 +1700,160 @@ WorkspaceVerifyBatchType.implement({
   }),
 });
 
+const WorkspaceConversationSessionInterface = builder.interfaceRef<
+  WorkspaceConversationSessionRecord
+>("WorkspaceConversationSession");
+WorkspaceConversationSessionInterface.implement({
+  resolveType: (parent) => {
+    if (parent.kind === "build") return "WorkspaceBuildConversationSession";
+    if (parent.kind === "scenario") {
+      return "WorkspaceScenarioConversationSession";
+    }
+    if (parent.kind === "grader") return "WorkspaceGraderConversationSession";
+    return "WorkspaceVerifyConversationSession";
+  },
+  fields: (t) => ({
+    id: t.id({ resolve: (parent) => `${parent.kind}:${parent.sessionId}` }),
+    sessionId: t.id({ resolve: (parent) => parent.sessionId }),
+    workspaceId: t.id({
+      resolve: (parent) => asGambitID(parent.workspaceId),
+    }),
+    status: t.field({
+      type: OpenResponseStatusEnum,
+      resolve: (parent) => toOpenResponseStatus(parent.status),
+    }),
+    error: t.string({
+      nullable: true,
+      resolve: (parent) => parent.error ?? null,
+    }),
+    startedAt: t.string({
+      nullable: true,
+      resolve: (parent) => parent.startedAt ?? null,
+    }),
+    finishedAt: t.string({
+      nullable: true,
+      resolve: (parent) => parent.finishedAt ?? null,
+    }),
+    transcript: t.connection({
+      type: OpenResponseOutputItemType,
+      args: {
+        first: t.arg.int(),
+        after: t.arg.string(),
+      },
+      resolve: (parent, args) => {
+        const run = parent.buildRun ?? parent.scenarioRun;
+        if (!run) return resolveArrayConnection({ args }, []);
+        const normalizedRun = {
+          ...run,
+          conversationRunKind: parent.kind === "scenario"
+            ? "scenario"
+            : "build",
+        } satisfies BuildRunRecord;
+        return resolveArrayConnection(
+          { args },
+          materializeOpenResponseOutputItems(normalizedRun),
+        );
+      },
+    }),
+  }),
+});
+
+const WorkspaceBuildConversationSessionType = builder.objectRef<
+  WorkspaceConversationSessionRecord
+>("WorkspaceBuildConversationSession");
+WorkspaceBuildConversationSessionType.implement({
+  interfaces: [WorkspaceConversationSessionInterface],
+  isTypeOf: (parent) =>
+    isWorkspaceConversationSessionRecord(parent) && parent.kind === "build",
+  fields: (t) => ({
+    run: t.field({
+      type: WorkspaceConversationRunInterface,
+      resolve: (parent) => {
+        if (!parent.buildRun) {
+          throw new Error(
+            "WorkspaceBuildConversationSession missing build run",
+          );
+        }
+        return {
+          ...parent.buildRun,
+          workspaceId: parent.workspaceId,
+          conversationRunKind: "build" as const,
+        };
+      },
+    }),
+  }),
+});
+
+const WorkspaceScenarioConversationSessionType = builder.objectRef<
+  WorkspaceConversationSessionRecord
+>("WorkspaceScenarioConversationSession");
+WorkspaceScenarioConversationSessionType.implement({
+  interfaces: [WorkspaceConversationSessionInterface],
+  isTypeOf: (parent) =>
+    isWorkspaceConversationSessionRecord(parent) && parent.kind === "scenario",
+  fields: (t) => ({
+    run: t.field({
+      type: WorkspaceConversationRunInterface,
+      resolve: (parent) => {
+        if (!parent.scenarioRun) {
+          throw new Error(
+            "WorkspaceScenarioConversationSession missing scenario run",
+          );
+        }
+        return {
+          ...parent.scenarioRun,
+          workspaceId: parent.workspaceId,
+          conversationRunKind: "scenario" as const,
+        };
+      },
+    }),
+  }),
+});
+
+const WorkspaceGraderConversationSessionType = builder.objectRef<
+  WorkspaceConversationSessionRecord
+>("WorkspaceGraderConversationSession");
+WorkspaceGraderConversationSessionType.implement({
+  interfaces: [WorkspaceConversationSessionInterface],
+  isTypeOf: (parent) =>
+    isWorkspaceConversationSessionRecord(parent) && parent.kind === "grader",
+  fields: (t) => ({
+    gradeRun: t.field({
+      type: WorkspaceGradeRunType,
+      resolve: (parent) => {
+        if (!parent.gradeRun) {
+          throw new Error(
+            "WorkspaceGraderConversationSession missing grade run",
+          );
+        }
+        return parent.gradeRun;
+      },
+    }),
+  }),
+});
+
+const WorkspaceVerifyConversationSessionType = builder.objectRef<
+  WorkspaceConversationSessionRecord
+>("WorkspaceVerifyConversationSession");
+WorkspaceVerifyConversationSessionType.implement({
+  interfaces: [WorkspaceConversationSessionInterface],
+  isTypeOf: (parent) =>
+    isWorkspaceConversationSessionRecord(parent) && parent.kind === "verify",
+  fields: (t) => ({
+    verifyBatch: t.field({
+      type: WorkspaceVerifyBatchType,
+      resolve: (parent) => {
+        if (!parent.verifyBatch) {
+          throw new Error(
+            "WorkspaceVerifyConversationSession missing verify batch",
+          );
+        }
+        return parent.verifyBatch;
+      },
+    }),
+  }),
+});
+
 const WorkspaceVerificationType = builder.objectRef<
   WorkspaceVerificationRecord
 >(
@@ -2113,6 +1994,51 @@ WorkspaceType.implement({
         );
       },
     }),
+    conversationSessions: t.connection({
+      type: WorkspaceConversationSessionInterface,
+      args: {
+        first: t.arg.int(),
+        after: t.arg.string(),
+      },
+      resolve: async (parent, args, context) => {
+        const sessions = context.listWorkspaceConversationSessions
+          ? await context.listWorkspaceConversationSessions({
+            workspaceId: parent.id,
+            kind: null,
+          })
+          : [];
+        return resolveArrayConnection({ args }, sessions);
+      },
+    }),
+    conversationSession: t.field({
+      type: WorkspaceConversationSessionInterface,
+      nullable: true,
+      args: {
+        sessionId: t.arg.id({ required: true }),
+      },
+      resolve: async (parent, args, context) => {
+        if (context.listWorkspaceConversationSessions) {
+          const sessions = await context.listWorkspaceConversationSessions({
+            workspaceId: parent.id,
+            kind: null,
+          });
+          return sessions.find((session) =>
+            session.sessionId === args.sessionId
+          ) ??
+            null;
+        }
+        if (!context.readWorkspaceConversationSession) return null;
+        for (const kind of ["build", "scenario", "grader", "verify"] as const) {
+          const session = await context.readWorkspaceConversationSession({
+            workspaceId: parent.id,
+            kind,
+            sessionId: args.sessionId,
+          });
+          if (session) return session;
+        }
+        return null;
+      },
+    }),
     gradeTab: t.field({
       type: WorkspaceGradeTabType,
       resolve: (parent) => ({ workspaceId: parent.id }),
@@ -2217,6 +2143,23 @@ WorkspaceScenarioRunStopPayloadType.implement({
     run: t.field({
       type: WorkspaceScenarioRunType,
       resolve: (parent) => parent.run,
+    }),
+  }),
+});
+
+const WorkspaceConversationSessionPayloadType = builder.objectRef<{
+  workspace: WorkspaceRecord;
+  session: WorkspaceConversationSessionRecord;
+}>("WorkspaceConversationSessionPayload");
+WorkspaceConversationSessionPayloadType.implement({
+  fields: (t) => ({
+    workspace: t.field({
+      type: WorkspaceType,
+      resolve: (parent) => parent.workspace,
+    }),
+    session: t.field({
+      type: WorkspaceConversationSessionInterface,
+      resolve: (parent) => parent.session,
     }),
   }),
 });
@@ -2782,6 +2725,51 @@ const WorkspaceScenarioRunStopInput = builder.inputType(
   },
 );
 
+const WorkspaceConversationSessionStartInput = builder.inputType(
+  "WorkspaceConversationSessionStartInput",
+  {
+    fields: (t) => ({
+      workspaceId: t.id({ required: true }),
+      kind: t.string({ required: true }),
+      sessionId: t.id(),
+      inputItems: t.field({ type: [OpenResponseInputItemInput] }),
+      scenarioDeckId: t.id(),
+      scenarioInput: t.field({ type: "JSON" }),
+      assistantInit: t.field({ type: "JSON" }),
+      graderId: t.id(),
+      scenarioRunId: t.id(),
+      batchSize: t.int(),
+      concurrency: t.int(),
+    }),
+  },
+);
+
+const WorkspaceConversationSessionSendInput = builder.inputType(
+  "WorkspaceConversationSessionSendInput",
+  {
+    fields: (t) => ({
+      workspaceId: t.id({ required: true }),
+      kind: t.string({ required: true }),
+      sessionId: t.id({ required: true }),
+      inputItems: t.field({
+        required: true,
+        type: [OpenResponseInputItemInput],
+      }),
+    }),
+  },
+);
+
+const WorkspaceConversationSessionStopInput = builder.inputType(
+  "WorkspaceConversationSessionStopInput",
+  {
+    fields: (t) => ({
+      workspaceId: t.id({ required: true }),
+      kind: t.string({ required: true }),
+      sessionId: t.id({ required: true }),
+    }),
+  },
+);
+
 const WorkspaceGradeRunCreateInput = builder.inputType(
   "WorkspaceGradeRunCreateInput",
   {
@@ -3002,6 +2990,73 @@ builder.mutationType({
         };
       },
     }),
+    workspaceConversationSessionStart: t.field({
+      type: WorkspaceConversationSessionPayloadType,
+      args: {
+        input: t.arg({
+          type: WorkspaceConversationSessionStartInput,
+          required: true,
+        }),
+      },
+      resolve: async (_parent, args, context) => {
+        if (!context.startWorkspaceConversationSession) {
+          throw new Error(
+            "workspace conversation session start is unavailable",
+          );
+        }
+        const message = (args.input.inputItems ?? [])
+          .map((item) => item.content.trim())
+          .filter((value) => value.length > 0)
+          .join("\n")
+          .trim();
+        const session = await context.startWorkspaceConversationSession({
+          workspaceId: args.input.workspaceId,
+          kind: parseWorkspaceConversationSessionKind(args.input.kind),
+          sessionId: args.input.sessionId ?? null,
+          message,
+          scenarioDeckId: args.input.scenarioDeckId ?? null,
+          scenarioInput: args.input.scenarioInput,
+          assistantInit: args.input.assistantInit,
+          graderId: args.input.graderId ?? null,
+          scenarioRunId: args.input.scenarioRunId ?? null,
+          batchSize: args.input.batchSize ?? null,
+          concurrency: args.input.concurrency ?? null,
+        });
+        return {
+          workspace: { id: asGambitID(args.input.workspaceId) },
+          session,
+        };
+      },
+    }),
+    workspaceConversationSessionSend: t.field({
+      type: WorkspaceConversationSessionPayloadType,
+      args: {
+        input: t.arg({
+          type: WorkspaceConversationSessionSendInput,
+          required: true,
+        }),
+      },
+      resolve: async (_parent, args, context) => {
+        if (!context.sendWorkspaceConversationSession) {
+          throw new Error("workspace conversation session send is unavailable");
+        }
+        const message = (args.input.inputItems ?? [])
+          .map((item) => item.content.trim())
+          .filter((value) => value.length > 0)
+          .join("\n")
+          .trim();
+        const session = await context.sendWorkspaceConversationSession({
+          workspaceId: args.input.workspaceId,
+          kind: parseWorkspaceConversationSessionKind(args.input.kind),
+          sessionId: args.input.sessionId,
+          message,
+        });
+        return {
+          workspace: { id: asGambitID(args.input.workspaceId) },
+          session,
+        };
+      },
+    }),
     workspaceScenarioRunStop: t.field({
       type: WorkspaceScenarioRunStopPayloadType,
       args: {
@@ -3021,6 +3076,29 @@ builder.mutationType({
         return {
           workspace: { id: asGambitID(args.input.workspaceId) },
           run,
+        };
+      },
+    }),
+    workspaceConversationSessionStop: t.field({
+      type: WorkspaceConversationSessionPayloadType,
+      args: {
+        input: t.arg({
+          type: WorkspaceConversationSessionStopInput,
+          required: true,
+        }),
+      },
+      resolve: async (_parent, args, context) => {
+        if (!context.stopWorkspaceConversationSession) {
+          throw new Error("workspace conversation session stop is unavailable");
+        }
+        const session = await context.stopWorkspaceConversationSession({
+          workspaceId: args.input.workspaceId,
+          kind: parseWorkspaceConversationSessionKind(args.input.kind),
+          sessionId: args.input.sessionId,
+        });
+        return {
+          workspace: { id: asGambitID(args.input.workspaceId) },
+          session,
         };
       },
     }),

@@ -143,6 +143,26 @@ type WorkspaceVerifyBatchRecord = {
   requests: Array<WorkspaceVerifyBatchRequestRecord>;
 };
 
+type WorkspaceConversationSessionKind =
+  | "build"
+  | "scenario"
+  | "grader"
+  | "verify";
+
+type WorkspaceConversationSessionRecord = {
+  sessionId: string;
+  workspaceId: string;
+  kind: WorkspaceConversationSessionKind;
+  status: "idle" | "running" | "completed" | "error" | "canceled";
+  error?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  buildRun?: BuildRunRecord;
+  scenarioRun?: ScenarioRunRecord;
+  gradeRun?: WorkspaceGradeRunRecord;
+  verifyBatch?: WorkspaceVerifyBatchRecord;
+};
+
 export type SimulatorGraphqlOperations = {
   listWorkspaces: () => Promise<Array<SessionMetaRecord>>;
   createWorkspace: () => Promise<{ workspaceId: string }>;
@@ -252,6 +272,39 @@ export type SimulatorGraphqlOperations = {
     batchSize: number;
     concurrency: number;
   }) => Promise<WorkspaceVerifyBatchRecord>;
+  listWorkspaceConversationSessions: (args: {
+    workspaceId: string;
+    kind?: Maybe<WorkspaceConversationSessionKind>;
+  }) => Promise<Array<WorkspaceConversationSessionRecord>>;
+  readWorkspaceConversationSession: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+  }) => Promise<Maybe<WorkspaceConversationSessionRecord>>;
+  startWorkspaceConversationSession: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId?: Maybe<string>;
+    message?: Maybe<string>;
+    scenarioDeckId?: Maybe<string>;
+    scenarioInput?: unknown;
+    assistantInit?: unknown;
+    graderId?: Maybe<string>;
+    scenarioRunId?: Maybe<string>;
+    batchSize?: Maybe<number>;
+    concurrency?: Maybe<number>;
+  }) => Promise<WorkspaceConversationSessionRecord>;
+  sendWorkspaceConversationSession: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+    message: string;
+  }) => Promise<WorkspaceConversationSessionRecord>;
+  stopWorkspaceConversationSession: (args: {
+    workspaceId: string;
+    kind: WorkspaceConversationSessionKind;
+    sessionId: string;
+  }) => Promise<WorkspaceConversationSessionRecord>;
 };
 
 function makePreloadKey(queryText: string, variables: unknown): string {
@@ -470,6 +523,67 @@ export function getSimulatorIsographEnvironment(
                   status: "error",
                   error: "verify_batch_run_create_unavailable",
                 }],
+              })),
+        listWorkspaceConversationSessions:
+          operations?.listWorkspaceConversationSessions ??
+            ((args: { workspaceId: string }) =>
+              Promise.resolve([{
+                sessionId: args.workspaceId,
+                workspaceId: args.workspaceId,
+                kind: "build" as const,
+                status: "idle" as const,
+              }])),
+        readWorkspaceConversationSession:
+          operations?.readWorkspaceConversationSession ??
+            ((args: {
+              workspaceId: string;
+              kind: WorkspaceConversationSessionKind;
+              sessionId: string;
+            }) =>
+              Promise.resolve({
+                sessionId: args.sessionId,
+                workspaceId: args.workspaceId,
+                kind: args.kind,
+                status: "idle" as const,
+              })),
+        startWorkspaceConversationSession:
+          operations?.startWorkspaceConversationSession ??
+            ((args: {
+              workspaceId: string;
+              kind: WorkspaceConversationSessionKind;
+            }) =>
+              Promise.resolve({
+                sessionId: args.workspaceId,
+                workspaceId: args.workspaceId,
+                kind: args.kind,
+                status: "idle" as const,
+              })),
+        sendWorkspaceConversationSession:
+          operations?.sendWorkspaceConversationSession ??
+            ((args: {
+              workspaceId: string;
+              kind: WorkspaceConversationSessionKind;
+              sessionId: string;
+              message: string;
+            }) =>
+              Promise.resolve({
+                sessionId: args.sessionId,
+                workspaceId: args.workspaceId,
+                kind: args.kind,
+                status: args.message.trim().length > 0 ? "running" : "idle",
+              })),
+        stopWorkspaceConversationSession:
+          operations?.stopWorkspaceConversationSession ??
+            ((args: {
+              workspaceId: string;
+              kind: WorkspaceConversationSessionKind;
+              sessionId: string;
+            }) =>
+              Promise.resolve({
+                sessionId: args.sessionId,
+                workspaceId: args.workspaceId,
+                kind: args.kind,
+                status: "canceled" as const,
               })),
       },
     );
