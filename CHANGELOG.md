@@ -1,6 +1,6 @@
 +++
 [release]
-since = "37ab29d3ed052117994458704a77b5b0651daf24"
+since = "787990fb4533806fd90b00e28361d5028567ac5f"
 +++
 
 # Changelog
@@ -8,6 +8,65 @@ since = "37ab29d3ed052117994458704a77b5b0651daf24"
 ## Unreleased (v0.8.6)
 
 - TBD
+
+## v0.8.6-rc.2
+
+- chore(gambit): cut 0.8.6-rc.1 release
+- isograph spike
+- isomore
+- fix(simulator-ui): stabilize isograph workspace shell across tab navigation
+- Update test-tab demo runner for /isograph and current test UI selectors
+- Make test-tab demo resilient to flaky scenario propagation
+- lints and such
+- test(gambit): disable leak sanitizers in flaky integration suites
+- fix(simulator-ui): apply dark mode theme on isograph routes
+- fix(lint): recognize useeffect-setstate ignores in gambit simulator UI
+- chore(lint): unblock workspace by file-level gambit ignores
+- feat(gambit): add grade GraphQL backend contract and operations
+- feat(gambit-ui): wire isograph grade tab routes, page, and actions
+- chore(gambit-ui): regenerate isograph artifacts for grade tab
+- chore(gambit-demo): keep non-mutation waits under 10s in grade tab demo
+- fix(gambit-demo): seed grade tab demo with test fixture root deck
+- fix(gambit-demo): add default grader to shared test fixture
+- refactor(simulator-ui): split isograph grade tab into container and
+  presentational view
+- refactor(simulator-ui): share legacy grade tab shell between legacy and
+  isograph
+- chore(simulator-ui): remove unused grade tab view extension prop
+- refactor(simulator-ui): reuse legacy grade runs header across legacy and
+  isograph
+- refactor(simulator-ui): share legacy grade runner and center panels across
+  legacy and isograph
+- test(gambit-demo): exercise grade flag toggle and reason edit flow
+- feat(gambit): add verify GraphQL schema and server operations
+- feat(gambit): add Isograph Verify tab UI and typed client artifacts
+- test(gambit): add verify demo and stabilize full demo flow
+- docs(gambit): add verify-tab migration docs and parity checklist
+- refactor(gambit-demo): reuse shared tab flows in full demo
+- fix(gambit): run downstream CI parity checks in bfmono
+- pin nix v
+- fix(gambit): isolate gambit-core parity checks from bfmono workspace context
+- fix(gambit): align parity check with in-repo gambit-core and load lint plugin
+- fix(gambit): include simulator-ui in JSR publish scope
+- ci(gambit): add publish dry-run to downstream parity suite
+- fix(ci): restore gambit mirror auto-merge and gate binary dispatch by new tags
+- fix(gambit-ci): run publish dry-run in isolated package copy
+- fix(gambit-ci): rewrite core imports for isolated publish parity dry-run
+- fix(gambit-publish): pin JSX runtime specifier for JSR canary publish
+- fix(gambit): restore simulator-ui dnt react typecheck
+- feat(gambit): add conversation session graphql lifecycle
+- fix(gambit): prevent React type-only import rewrites from breaking npm build
+- feat(gambit): unify verify backend execution model
+- feat(gambit): migrate verify tab to scenario/repeat controls
+- chore(gambit): regenerate verify isograph artifacts
+- feat(gambit): restore full verify mutation cache payload
+- fix(gambit): await scenario completion in verify batches
+- fix(gambit): stream verify request progress during scenario generation
+- fix(gambit): pipeline verify grading to reduce burst/pause stalls
+- fix(gambit): honor verify concurrency with parallel scenario producers
+- fix(gambit): address verify batch review feedback on worker wakeups
+- chore(gambit): apply formatter output for verify follow-up code
+- fix(simulator-ui): guard build chat debug localStorage access
 
 ## v0.8.6-rc.1
 
