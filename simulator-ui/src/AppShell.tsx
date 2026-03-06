@@ -123,9 +123,13 @@ export function AppShell(props: {
             className={classNames("sessions-toggle", drawerOpen && "active")}
             variant="secondary"
             onClick={() => setDrawerOpen(true)}
+            aria-label="Open sessions drawer"
           >
-            <Icon name="hamburgerMenu" size={14} />
-            Sessions
+            <Icon
+              name="hamburgerMenu"
+              size={17}
+              style={{ color: "var(--color-text)" }}
+            />
           </Button>
           <div className="top-nav-buttons tab-anchor-group">
             <span className="tab-anchor-indicator" aria-hidden="true" />
@@ -241,8 +245,15 @@ export function AppShell(props: {
             variant="secondary"
             onClick={() => setWorkbenchOpen((prev) => !prev)}
             disabled={!canOpenWorkbench}
+            aria-label={workbenchVisible
+              ? "Close workbench drawer"
+              : "Open workbench drawer"}
           >
-            Workbench
+            <Icon
+              name="chat"
+              size={16}
+              style={{ color: "currentColor" }}
+            />
           </Button>
         </div>
       </header>
