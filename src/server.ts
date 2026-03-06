@@ -42,9 +42,13 @@ import {
   GRAPHQL_STREAMS_PREFIX,
   handleDurableStreamRequest,
 } from "./durable_streams.ts";
-import { type CheckReport, handleCheckCommand } from "./commands/check.ts";
-import { readCodexLoginStatus } from "./codex_preflight.ts";
-import { readClaudeCodeLoginStatus } from "./claude_code_preflight.ts";
+import {
+  type BuildChatProvider,
+  createReadCodexWorkspaceStatus,
+  handleBuildProviderStatusRequest,
+  normalizeBuildChatProvider,
+  persistBuildChatProviderMeta,
+} from "./server_build_chat_provider.ts";
 import { handleGraphqlStreamMultiplexRequest } from "./graphql_stream_multiplex.ts";
 import { handleGraphqlSubscriptionStreamRequest } from "./graphql_subscription_stream.ts";
 import type { GambitID } from "./gambit_id.ts";
@@ -1705,38 +1709,13 @@ export function startWebSocketSimulator(opts: {
     return root;
   };
 
-  const readCodexWorkspaceStatus = async (
-    workspaceId?: string | null,
-    online?: boolean,
-  ): Promise<{
-    trustedPath: string;
-    writeEnabled: boolean;
-    codexLoggedIn: boolean;
-    codexLoginStatus: string;
-    check?: CheckReport;
-  }> => {
-    const trustedPath = await resolveBuildBotRoot(workspaceId);
-    const record = resolveWorkspaceRecord(workspaceId);
-    const deckPath = record?.rootDeckPath ?? resolvedDeckPath;
-    const login = await readCodexLoginStatus();
-    let check: CheckReport | undefined;
-    try {
-      check = await handleCheckCommand({
-        deckPath,
-        checkOnline: Boolean(online),
-        openRouterApiKey: Deno.env.get("OPENROUTER_API_KEY")?.trim() ||
-          undefined,
-        googleApiKey: (Deno.env.get("GOOGLE_API_KEY") ??
-          Deno.env.get("GEMINI_API_KEY"))?.trim() || undefined,
-        ollamaBaseURL: Deno.env.get("OLLAMA_BASE_URL") ?? undefined,
-        json: true,
-      });
-    } catch {
-      // Keep status endpoint resilient even if check cannot run.
-      check = undefined;
-    }
-    return { trustedPath, writeEnabled: true, ...login, check };
-  };
+  const readCodexWorkspaceStatus = createReadCodexWorkspaceStatus({
+    resolveBuildBotRoot,
+    resolveWorkspaceDeckPath: (workspaceId?: string | null) => {
+      const record = resolveWorkspaceRecord(workspaceId);
+      return record?.rootDeckPath ?? resolvedDeckPath;
+    },
+  });
 
   const logWorkspaceBotRoot = async (
     endpoint: string,
@@ -4204,6 +4183,7 @@ export function startWebSocketSimulator(opts: {
   const startWorkspaceBuildRun = (args: {
     workspaceId: string;
     message: string;
+    buildChatProvider?: BuildChatProvider;
   }): BuildBotRunStatus => {
     const workspaceId = args.workspaceId;
     const active = buildBotRuns.get(workspaceId);
@@ -4301,7 +4281,10 @@ export function startWebSocketSimulator(opts: {
           inputProvided: hasInitialContext,
           modelProvider: opts.modelProvider,
           defaultModel: opts.model,
-          modelOverride: opts.modelForce,
+          modelOverride: opts.modelForce ??
+            (!opts.model && args.buildChatProvider
+              ? `${args.buildChatProvider}/default`
+              : undefined),
           trace: tracer,
           stream: true,
           state: entry.state ?? undefined,
@@ -6950,109 +6933,14 @@ export function startWebSocketSimulator(opts: {
         }
         const isLegacyCodexTrustEndpoint =
           url.pathname === "/api/codex/trust-workspace";
-        let provider = "codex-cli";
-        let workspaceId: string | undefined;
-        let online = true;
-        if (req.method === "POST") {
-          try {
-            const body = await req.json() as {
-              workspaceId?: unknown;
-              online?: unknown;
-              provider?: unknown;
-            };
-            if (typeof body.workspaceId === "string") {
-              workspaceId = body.workspaceId;
-            }
-            if (
-              !isLegacyCodexTrustEndpoint &&
-              body.provider === "claude-code-cli"
-            ) {
-              provider = "claude-code-cli";
-            }
-            if (
-              body.online === true ||
-              body.online === "true" ||
-              body.online === 1 ||
-              body.online === "1"
-            ) {
-              online = true;
-            } else if (
-              body.online === false ||
-              body.online === "false" ||
-              body.online === 0 ||
-              body.online === "0" ||
-              body.online === "no"
-            ) {
-              online = false;
-            }
-          } catch {
-            // Ignore malformed body and fall back to query/default workspace.
-          }
-        }
-        if (!workspaceId) {
-          workspaceId = getWorkspaceIdFromQuery(url);
-        }
-        if (
-          !isLegacyCodexTrustEndpoint &&
-          url.searchParams.get("provider") === "claude-code-cli"
-        ) {
-          provider = "claude-code-cli";
-        }
-        const onlineQuery = url.searchParams.get("online");
-        if (
-          onlineQuery === "1" || onlineQuery === "true" ||
-          onlineQuery === "yes"
-        ) {
-          online = true;
-        } else if (
-          onlineQuery === "0" || onlineQuery === "false" ||
-          onlineQuery === "no"
-        ) {
-          online = false;
-        }
-        try {
-          await logWorkspaceBotRoot(url.pathname, workspaceId);
-          if (!isLegacyCodexTrustEndpoint && provider === "claude-code-cli") {
-            const login = await readClaudeCodeLoginStatus();
-            return new Response(
-              JSON.stringify({
-                ok: true,
-                provider,
-                loggedIn: login.claudeCodeLoggedIn,
-                loginStatus: login.claudeCodeLoginStatus,
-                writeEnabled: false,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          const result = await readCodexWorkspaceStatus(workspaceId, online);
-          if (!isLegacyCodexTrustEndpoint) {
-            return new Response(
-              JSON.stringify({
-                ok: true,
-                provider,
-                loggedIn: result.codexLoggedIn,
-                loginStatus: result.codexLoginStatus,
-                writeEnabled: result.writeEnabled,
-                trustedPath: result.trustedPath,
-              }),
-              { headers: { "content-type": "application/json" } },
-            );
-          }
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              ...result,
-            }),
-            { headers: { "content-type": "application/json" } },
-          );
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          return new Response(
-            JSON.stringify({ ok: false, error: message }),
-            { status: 400, headers: { "content-type": "application/json" } },
-          );
-        }
+        return await handleBuildProviderStatusRequest({
+          req,
+          url,
+          isLegacyCodexTrustEndpoint,
+          getWorkspaceIdFromQuery,
+          logWorkspaceBotRoot,
+          readCodexWorkspaceStatus,
+        });
       }
 
       if (url.pathname === "/api/simulator/run") {
@@ -7151,6 +7039,22 @@ export function startWebSocketSimulator(opts: {
           _ensureWorkspaceSession(workspaceId);
           await logWorkspaceBotRoot(url.pathname, workspaceId);
           await activateWorkspaceDeck(workspaceId);
+          const buildChatProvider =
+            normalizeBuildChatProvider(body.buildChatProvider) ?? undefined;
+          if (buildChatProvider) {
+            const state = readSessionStateStrict(workspaceId, {
+              withTraces: true,
+            });
+            if (state) {
+              persistSessionState(
+                persistBuildChatProviderMeta(
+                  state,
+                  workspaceId,
+                  buildChatProvider,
+                ),
+              );
+            }
+          }
           const message = typeof body.message === "string"
             ? body.message
             : typeof body.input === "string"
@@ -7159,6 +7063,7 @@ export function startWebSocketSimulator(opts: {
           const run = startWorkspaceBuildRun({
             workspaceId,
             message,
+            buildChatProvider,
           });
           return new Response(JSON.stringify({ run }), {
             headers: { "content-type": "application/json" },
@@ -7196,6 +7101,47 @@ export function startWebSocketSimulator(opts: {
           return new Response(JSON.stringify({ stopped: wasRunning, run }), {
             headers: { "content-type": "application/json" },
           });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return new Response(JSON.stringify({ error: message }), {
+            status: 400,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      }
+      if (url.pathname === "/api/build/provider") {
+        if (req.method !== "POST") {
+          return new Response("Method not allowed", { status: 405 });
+        }
+        try {
+          const body = await req.json().catch(() => ({})) as Record<
+            string,
+            unknown
+          >;
+          const workspaceId = _getWorkspaceIdFromBody(body);
+          if (!workspaceId) {
+            throw new Error("Missing workspaceId");
+          }
+          const buildChatProvider = normalizeBuildChatProvider(
+            body.buildChatProvider,
+          );
+          if (!buildChatProvider) {
+            throw new Error(
+              "Invalid buildChatProvider; expected codex-cli or claude-code-cli",
+            );
+          }
+          await logWorkspaceBotRoot(url.pathname, workspaceId);
+          const state = readSessionStateStrict(workspaceId, {
+            withTraces: true,
+          });
+          if (!state) throw new Error("Workspace not found");
+          persistSessionState(
+            persistBuildChatProviderMeta(state, workspaceId, buildChatProvider),
+          );
+          return new Response(
+            JSON.stringify({ ok: true, workspaceId, buildChatProvider }),
+            { headers: { "content-type": "application/json" } },
+          );
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           return new Response(JSON.stringify({ error: message }), {
