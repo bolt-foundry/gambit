@@ -647,8 +647,9 @@ Return JSON score/reason.
             workspaceId,
             kind: "verify",
             graderId: "default-grader",
-            scenarioRunId: scenarioSessionId,
-            batchSize: 1,
+            scenarioDeckId: "root",
+            scenarioRuns: 1,
+            graderRepeatsPerScenario: 1,
             concurrency: 1,
           },
         },
@@ -937,7 +938,14 @@ leakTolerantTest(
   async () => {
     const dir = await Deno.makeTempDir();
     const deckPath = path.join(dir, "graphql-verify-tab.deck.md");
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "default",
+      "PROMPT.md",
+    );
     const graderDeckPath = path.join(dir, "graders", "default", "PROMPT.md");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
     await Deno.mkdir(path.dirname(graderDeckPath), { recursive: true });
     await Deno.writeTextFile(
       deckPath,
@@ -951,12 +959,27 @@ schema = "gambit://schemas/responses/assistant_message.zod.ts"
 [modelParams]
 model = ["dummy-model"]
 
+[[scenarios]]
+id = "default-scenario"
+path = "./scenarios/default/PROMPT.md"
+label = "Default scenario"
+maxTurns = 1
+
 [[graders]]
 id = "default-grader"
 path = "./graders/default/PROMPT.md"
 label = "Default grader"
 +++
 Verify test.
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `+++
+[modelParams]
+model = ["dummy-model"]
++++
+Respond with a short user prompt.
 `,
     );
     await Deno.writeTextFile(
@@ -1026,14 +1049,20 @@ Return score and reason.
                 batch {
                   id
                   status
+                  scenarioDeckId
+                  scenarioRuns
+                  graderRepeatsPerScenario
+                  scenarioRunsCompleted
+                  scenarioRunsFailed
                   requested
                   active
                   completed
                   failed
-                  requests(first: 50) {
+                  requests(first: 200) {
                     edges {
                       node {
                         id
+                        scenarioRunId
                         status
                         runId
                         error
@@ -1041,9 +1070,13 @@ Return score and reason.
                     }
                   }
                   metrics {
-                    sampleSize
-                    verdict
-                    verdictReason
+                    scenarioRunCountRequested
+                    scenarioRunCountCompleted
+                    gradeSampleCountRequested
+                    gradeSampleCountCompleted
+                    executionFailureCount
+                    gradingFailureCount
+                    passRate
                   }
                 }
                 workspace {
@@ -1064,8 +1097,10 @@ Return score and reason.
           variables: {
             input: {
               workspaceId,
+              scenarioDeckId: "default-scenario",
               graderId: "default-grader",
-              batchSize: 2,
+              scenarioRuns: 2,
+              graderRepeatsPerScenario: 2,
               concurrency: 1,
             },
           },
@@ -1076,6 +1111,11 @@ Return score and reason.
           batch?: {
             id?: string;
             status?: string;
+            scenarioDeckId?: string | null;
+            scenarioRuns?: number;
+            graderRepeatsPerScenario?: number;
+            scenarioRunsCompleted?: number;
+            scenarioRunsFailed?: number;
             requested?: number;
             active?: number;
             completed?: number;
@@ -1084,6 +1124,7 @@ Return score and reason.
               edges?: Array<{
                 node?: {
                   id?: string;
+                  scenarioRunId?: string | null;
                   status?: string;
                   runId?: string | null;
                   error?: string | null;
@@ -1091,9 +1132,13 @@ Return score and reason.
               }>;
             };
             metrics?: {
-              sampleSize?: number;
-              verdict?: string;
-              verdictReason?: string;
+              scenarioRunCountRequested?: number;
+              scenarioRunCountCompleted?: number;
+              gradeSampleCountRequested?: number;
+              gradeSampleCountCompleted?: number;
+              executionFailureCount?: number;
+              gradingFailureCount?: number;
+              passRate?: number | null;
             } | null;
           };
           workspace?: {
@@ -1111,20 +1156,49 @@ Return score and reason.
           "";
       assert(batchId.length > 0);
       assertEquals(
+        verifyBody.data?.workspaceVerifyBatchRunCreate?.batch?.scenarioDeckId,
+        "default-scenario",
+      );
+      assertEquals(
         verifyBody.data?.workspaceVerifyBatchRunCreate?.batch?.requested,
+        4,
+      );
+      assertEquals(
+        verifyBody.data?.workspaceVerifyBatchRunCreate?.batch?.scenarioRuns,
         2,
       );
+      assertEquals(
+        verifyBody.data?.workspaceVerifyBatchRunCreate?.batch
+          ?.graderRepeatsPerScenario,
+        2,
+      );
+      const scenarioRunsCompleted =
+        verifyBody.data?.workspaceVerifyBatchRunCreate?.batch
+          ?.scenarioRunsCompleted ?? 0;
+      const scenarioRunsFailed =
+        verifyBody.data?.workspaceVerifyBatchRunCreate?.batch
+          ?.scenarioRunsFailed ?? 0;
+      assertEquals(scenarioRunsCompleted + scenarioRunsFailed, 2);
+      assertEquals(scenarioRunsFailed, 0);
       const requestNodes =
         verifyBody.data?.workspaceVerifyBatchRunCreate?.batch?.requests?.edges
           ?.map((edge) => edge?.node)
-          .filter((node): node is { id?: string; status?: string } =>
-            Boolean(node)
-          ) ?? [];
-      assertEquals(requestNodes.length, 2);
+          .filter((node): node is {
+            id?: string;
+            error?: string | null;
+            status?: string;
+          } => Boolean(node)) ?? [];
+      assertEquals(requestNodes.length, 4);
       const statuses = requestNodes.map((request) => request.status ?? "");
       assert(
         statuses.every((status) =>
           status === "COMPLETED" || status === "ERROR"
+        ),
+      );
+      assert(
+        requestNodes.every((request) =>
+          (request.error ?? "").trim() !==
+            "Scenario run ended with status running"
         ),
       );
       const latestBatchId =
@@ -1134,8 +1208,9 @@ Return score and reason.
       const metrics = verifyBody.data?.workspaceVerifyBatchRunCreate?.batch
         ?.metrics;
       if (metrics) {
-        assertEquals(typeof metrics.sampleSize, "number");
-        assertEquals(typeof metrics.verdict, "string");
+        assertEquals(typeof metrics.scenarioRunCountRequested, "number");
+        assertEquals(typeof metrics.gradeSampleCountRequested, "number");
+        assertEquals(typeof metrics.executionFailureCount, "number");
       }
     } finally {
       await server.shutdown();

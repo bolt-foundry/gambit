@@ -50,6 +50,11 @@ const normalizationAst: NormalizationAst = {
               arguments: null,
             },
             {
+              kind: "Scalar",
+              fieldName: "graderRepeatsPerScenario",
+              arguments: null,
+            },
+            {
               kind: "Linked",
               fieldName: "metrics",
               arguments: null,
@@ -57,45 +62,35 @@ const normalizationAst: NormalizationAst = {
               selections: [
                 {
                   kind: "Scalar",
-                  fieldName: "agreementRate",
-                  arguments: null,
-                },
-                {
-                  kind: "Scalar",
-                  fieldName: "instabilityCount",
+                  fieldName: "executionFailureCount",
                   arguments: null,
                 },
                 {
                   kind: "Linked",
-                  fieldName: "outliers",
+                  fieldName: "failureReasons",
                   arguments: [
                     [
                       "first",
                       { kind: "Literal", value: 25 },
                     ],
                   ],
-                  concreteType: "WorkspaceVerifyMetricsOutliersConnection",
+                  concreteType: "WorkspaceVerifyMetricsFailureReasonsConnection",
                   selections: [
                     {
                       kind: "Linked",
                       fieldName: "edges",
                       arguments: null,
-                      concreteType: "WorkspaceVerifyMetricsOutliersConnectionEdge",
+                      concreteType: "WorkspaceVerifyMetricsFailureReasonsConnectionEdge",
                       selections: [
                         {
                           kind: "Linked",
                           fieldName: "node",
                           arguments: null,
-                          concreteType: "WorkspaceVerifyOutlier",
+                          concreteType: "WorkspaceVerifyFailureReasonGroup",
                           selections: [
                             {
                               kind: "Scalar",
-                              fieldName: "agreementRate",
-                              arguments: null,
-                            },
-                            {
-                              kind: "Scalar",
-                              fieldName: "instability",
+                              fieldName: "count",
                               arguments: null,
                             },
                             {
@@ -105,12 +100,106 @@ const normalizationAst: NormalizationAst = {
                             },
                             {
                               kind: "Scalar",
-                              fieldName: "label",
+                              fieldName: "kind",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "reason",
+                              arguments: null,
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "gradeSampleCountCompleted",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "gradeSampleCountFailed",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "gradeSampleCountRequested",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "gradingFailureCount",
+                  arguments: null,
+                },
+                {
+                  kind: "Linked",
+                  fieldName: "outlierScenarioRuns",
+                  arguments: [
+                    [
+                      "first",
+                      { kind: "Literal", value: 25 },
+                    ],
+                  ],
+                  concreteType: "WorkspaceVerifyMetricsOutlierScenarioRunsConnection",
+                  selections: [
+                    {
+                      kind: "Linked",
+                      fieldName: "edges",
+                      arguments: null,
+                      concreteType: "WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge",
+                      selections: [
+                        {
+                          kind: "Linked",
+                          fieldName: "node",
+                          arguments: null,
+                          concreteType: "WorkspaceVerifyScenarioOutlier",
+                          selections: [
+                            {
+                              kind: "Scalar",
+                              fieldName: "averageScore",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "completedSampleCount",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "executionFailureCount",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "failed",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "gradeSampleCount",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "gradingFailureCount",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "key",
                               arguments: null,
                             },
                             {
                               kind: "Scalar",
                               fieldName: "maxRunId",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "maxScore",
                               arguments: null,
                             },
                             {
@@ -125,22 +214,12 @@ const normalizationAst: NormalizationAst = {
                             },
                             {
                               kind: "Scalar",
-                              fieldName: "passFlip",
+                              fieldName: "minScore",
                               arguments: null,
                             },
                             {
                               kind: "Scalar",
-                              fieldName: "sampleSize",
-                              arguments: null,
-                            },
-                            {
-                              kind: "Scalar",
-                              fieldName: "scoreDelta",
-                              arguments: null,
-                            },
-                            {
-                              kind: "Scalar",
-                              fieldName: "turnIndex",
+                              fieldName: "scenarioRunId",
                               arguments: null,
                             },
                           ],
@@ -151,32 +230,42 @@ const normalizationAst: NormalizationAst = {
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "sampleSize",
+                  fieldName: "passRate",
                   arguments: null,
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "scoreSpreadMax",
+                  fieldName: "scenarioRunCountCompleted",
                   arguments: null,
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "scoreSpreadMedian",
+                  fieldName: "scenarioRunCountFailed",
                   arguments: null,
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "scoreSpreadMin",
+                  fieldName: "scenarioRunCountRequested",
                   arguments: null,
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "verdict",
+                  fieldName: "scoreMax",
                   arguments: null,
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "verdictReason",
+                  fieldName: "scoreMean",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "scoreMedian",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "scoreMin",
                   arguments: null,
                 },
               ],
@@ -192,7 +281,7 @@ const normalizationAst: NormalizationAst = {
               arguments: [
                 [
                   "first",
-                  { kind: "Literal", value: 50 },
+                  { kind: "Literal", value: 200 },
                 ],
               ],
               concreteType: "WorkspaceVerifyBatchRequestsConnection",
@@ -226,6 +315,11 @@ const normalizationAst: NormalizationAst = {
                         },
                         {
                           kind: "Scalar",
+                          fieldName: "scenarioRunId",
+                          arguments: null,
+                        },
+                        {
+                          kind: "Scalar",
                           fieldName: "status",
                           arguments: null,
                         },
@@ -237,7 +331,22 @@ const normalizationAst: NormalizationAst = {
             },
             {
               kind: "Scalar",
-              fieldName: "scenarioRunId",
+              fieldName: "scenarioDeckId",
+              arguments: null,
+            },
+            {
+              kind: "Scalar",
+              fieldName: "scenarioRuns",
+              arguments: null,
+            },
+            {
+              kind: "Scalar",
+              fieldName: "scenarioRunsCompleted",
+              arguments: null,
+            },
+            {
+              kind: "Scalar",
+              fieldName: "scenarioRunsFailed",
               arguments: null,
             },
             {
@@ -270,60 +379,29 @@ const normalizationAst: NormalizationAst = {
             },
             {
               kind: "Linked",
-              fieldName: "scenarioRuns",
-              arguments: [
-                [
-                  "first",
-                  { kind: "Literal", value: 50 },
-                ],
-              ],
-              concreteType: "WorkspaceScenarioRunsConnection",
+              fieldName: "scenarioDecks",
+              arguments: null,
+              concreteType: "WorkspaceScenarioDeck",
               selections: [
                 {
-                  kind: "Linked",
-                  fieldName: "edges",
+                  kind: "Scalar",
+                  fieldName: "id",
                   arguments: null,
-                  concreteType: "WorkspaceScenarioRunsConnectionEdge",
-                  selections: [
-                    {
-                      kind: "Linked",
-                      fieldName: "node",
-                      arguments: null,
-                      concreteType: null,
-                      selections: [
-                        {
-                          kind: "Scalar",
-                          fieldName: "__typename",
-                          arguments: null,
-                        },
-                        {
-                          kind: "Scalar",
-                          fieldName: "id",
-                          arguments: null,
-                        },
-                        {
-                          kind: "Scalar",
-                          fieldName: "error",
-                          arguments: null,
-                        },
-                        {
-                          kind: "Scalar",
-                          fieldName: "finishedAt",
-                          arguments: null,
-                        },
-                        {
-                          kind: "Scalar",
-                          fieldName: "startedAt",
-                          arguments: null,
-                        },
-                        {
-                          kind: "Scalar",
-                          fieldName: "status",
-                          arguments: null,
-                        },
-                      ],
-                    },
-                  ],
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "description",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "label",
+                  arguments: null,
+                },
+                {
+                  kind: "Scalar",
+                  fieldName: "path",
+                  arguments: null,
                 },
               ],
             },
@@ -387,6 +465,11 @@ const normalizationAst: NormalizationAst = {
                               arguments: null,
                             },
                             {
+                              kind: "Scalar",
+                              fieldName: "graderRepeatsPerScenario",
+                              arguments: null,
+                            },
+                            {
                               kind: "Linked",
                               fieldName: "metrics",
                               arguments: null,
@@ -394,45 +477,35 @@ const normalizationAst: NormalizationAst = {
                               selections: [
                                 {
                                   kind: "Scalar",
-                                  fieldName: "agreementRate",
-                                  arguments: null,
-                                },
-                                {
-                                  kind: "Scalar",
-                                  fieldName: "instabilityCount",
+                                  fieldName: "executionFailureCount",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Linked",
-                                  fieldName: "outliers",
+                                  fieldName: "failureReasons",
                                   arguments: [
                                     [
                                       "first",
                                       { kind: "Literal", value: 25 },
                                     ],
                                   ],
-                                  concreteType: "WorkspaceVerifyMetricsOutliersConnection",
+                                  concreteType: "WorkspaceVerifyMetricsFailureReasonsConnection",
                                   selections: [
                                     {
                                       kind: "Linked",
                                       fieldName: "edges",
                                       arguments: null,
-                                      concreteType: "WorkspaceVerifyMetricsOutliersConnectionEdge",
+                                      concreteType: "WorkspaceVerifyMetricsFailureReasonsConnectionEdge",
                                       selections: [
                                         {
                                           kind: "Linked",
                                           fieldName: "node",
                                           arguments: null,
-                                          concreteType: "WorkspaceVerifyOutlier",
+                                          concreteType: "WorkspaceVerifyFailureReasonGroup",
                                           selections: [
                                             {
                                               kind: "Scalar",
-                                              fieldName: "agreementRate",
-                                              arguments: null,
-                                            },
-                                            {
-                                              kind: "Scalar",
-                                              fieldName: "instability",
+                                              fieldName: "count",
                                               arguments: null,
                                             },
                                             {
@@ -442,12 +515,106 @@ const normalizationAst: NormalizationAst = {
                                             },
                                             {
                                               kind: "Scalar",
-                                              fieldName: "label",
+                                              fieldName: "kind",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "reason",
+                                              arguments: null,
+                                            },
+                                          ],
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "gradeSampleCountCompleted",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "gradeSampleCountFailed",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "gradeSampleCountRequested",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "gradingFailureCount",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Linked",
+                                  fieldName: "outlierScenarioRuns",
+                                  arguments: [
+                                    [
+                                      "first",
+                                      { kind: "Literal", value: 25 },
+                                    ],
+                                  ],
+                                  concreteType: "WorkspaceVerifyMetricsOutlierScenarioRunsConnection",
+                                  selections: [
+                                    {
+                                      kind: "Linked",
+                                      fieldName: "edges",
+                                      arguments: null,
+                                      concreteType: "WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge",
+                                      selections: [
+                                        {
+                                          kind: "Linked",
+                                          fieldName: "node",
+                                          arguments: null,
+                                          concreteType: "WorkspaceVerifyScenarioOutlier",
+                                          selections: [
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "averageScore",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "completedSampleCount",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "executionFailureCount",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "failed",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "gradeSampleCount",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "gradingFailureCount",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "key",
                                               arguments: null,
                                             },
                                             {
                                               kind: "Scalar",
                                               fieldName: "maxRunId",
+                                              arguments: null,
+                                            },
+                                            {
+                                              kind: "Scalar",
+                                              fieldName: "maxScore",
                                               arguments: null,
                                             },
                                             {
@@ -462,22 +629,12 @@ const normalizationAst: NormalizationAst = {
                                             },
                                             {
                                               kind: "Scalar",
-                                              fieldName: "passFlip",
+                                              fieldName: "minScore",
                                               arguments: null,
                                             },
                                             {
                                               kind: "Scalar",
-                                              fieldName: "sampleSize",
-                                              arguments: null,
-                                            },
-                                            {
-                                              kind: "Scalar",
-                                              fieldName: "scoreDelta",
-                                              arguments: null,
-                                            },
-                                            {
-                                              kind: "Scalar",
-                                              fieldName: "turnIndex",
+                                              fieldName: "scenarioRunId",
                                               arguments: null,
                                             },
                                           ],
@@ -488,32 +645,42 @@ const normalizationAst: NormalizationAst = {
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "sampleSize",
+                                  fieldName: "passRate",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "scoreSpreadMax",
+                                  fieldName: "scenarioRunCountCompleted",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "scoreSpreadMedian",
+                                  fieldName: "scenarioRunCountFailed",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "scoreSpreadMin",
+                                  fieldName: "scenarioRunCountRequested",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "verdict",
+                                  fieldName: "scoreMax",
                                   arguments: null,
                                 },
                                 {
                                   kind: "Scalar",
-                                  fieldName: "verdictReason",
+                                  fieldName: "scoreMean",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "scoreMedian",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "scoreMin",
                                   arguments: null,
                                 },
                               ],
@@ -529,7 +696,7 @@ const normalizationAst: NormalizationAst = {
                               arguments: [
                                 [
                                   "first",
-                                  { kind: "Literal", value: 50 },
+                                  { kind: "Literal", value: 200 },
                                 ],
                               ],
                               concreteType: "WorkspaceVerifyBatchRequestsConnection",
@@ -563,6 +730,11 @@ const normalizationAst: NormalizationAst = {
                                         },
                                         {
                                           kind: "Scalar",
+                                          fieldName: "scenarioRunId",
+                                          arguments: null,
+                                        },
+                                        {
+                                          kind: "Scalar",
                                           fieldName: "status",
                                           arguments: null,
                                         },
@@ -574,7 +746,22 @@ const normalizationAst: NormalizationAst = {
                             },
                             {
                               kind: "Scalar",
-                              fieldName: "scenarioRunId",
+                              fieldName: "scenarioDeckId",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "scenarioRuns",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "scenarioRunsCompleted",
+                              arguments: null,
+                            },
+                            {
+                              kind: "Scalar",
+                              fieldName: "scenarioRunsFailed",
                               arguments: null,
                             },
                             {

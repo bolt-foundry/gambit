@@ -8,16 +8,11 @@ export const EntrypointWorkspaceVerifyLiveWrite = iso(`
   field Query.EntrypointWorkspaceVerifyLiveWrite($workspaceId: ID!) {
     workspace(id: $workspaceId) {
       id
-      scenarioRuns(first: 50) {
-        edges {
-          node {
-            id
-            status
-            startedAt
-            finishedAt
-            error
-          }
-        }
+      scenarioDecks {
+        id
+        label
+        description
+        path
       }
       verification {
         graderDecks(first: 50) {
@@ -35,8 +30,10 @@ export const EntrypointWorkspaceVerifyLiveWrite = iso(`
             node {
               id
               workspaceId
+              scenarioDeckId
               graderId
-              scenarioRunId
+              scenarioRuns
+              graderRepeatsPerScenario
               status
               startedAt
               finishedAt
@@ -44,10 +41,13 @@ export const EntrypointWorkspaceVerifyLiveWrite = iso(`
               active
               completed
               failed
-              requests(first: 50) {
+              scenarioRunsCompleted
+              scenarioRunsFailed
+              requests(first: 200) {
                 edges {
                   node {
                     id
+                    scenarioRunId
                     status
                     runId
                     error
@@ -55,28 +55,45 @@ export const EntrypointWorkspaceVerifyLiveWrite = iso(`
                 }
               }
               metrics {
-                sampleSize
-                agreementRate
-                scoreSpreadMin
-                scoreSpreadMedian
-                scoreSpreadMax
-                instabilityCount
-                verdict
-                verdictReason
-                outliers(first: 25) {
+                scenarioRunCountRequested
+                scenarioRunCountCompleted
+                scenarioRunCountFailed
+                gradeSampleCountRequested
+                gradeSampleCountCompleted
+                gradeSampleCountFailed
+                executionFailureCount
+                gradingFailureCount
+                passRate
+                scoreMin
+                scoreMedian
+                scoreMax
+                scoreMean
+                outlierScenarioRuns(first: 25) {
                   edges {
                     node {
                       key
-                      label
-                      sampleSize
-                      agreementRate
-                      scoreDelta
-                      passFlip
-                      instability
+                      scenarioRunId
+                      gradeSampleCount
+                      completedSampleCount
+                      executionFailureCount
+                      gradingFailureCount
+                      averageScore
+                      minScore
+                      maxScore
+                      failed
                       minRunId
                       maxRunId
-                      turnIndex
                       messageRefId
+                    }
+                  }
+                }
+                failureReasons(first: 25) {
+                  edges {
+                    node {
+                      key
+                      kind
+                      reason
+                      count
                     }
                   }
                 }
