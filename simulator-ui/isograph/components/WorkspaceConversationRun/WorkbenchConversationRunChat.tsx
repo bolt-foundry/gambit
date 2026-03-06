@@ -45,9 +45,14 @@ function isBuildChatDebugEnabled(): boolean {
     const value = new URLSearchParams(search).get("gambitBuildChatDebug");
     if (value === "1" || value === "true") return true;
   }
-  if (typeof globalThis.localStorage === "undefined") return false;
-  const stored = (globalThis.localStorage.getItem("gambit:build-chat-debug") ??
-    "").toLowerCase().trim();
+  let stored = "";
+  try {
+    stored = (globalThis.localStorage?.getItem("gambit:build-chat-debug") ?? "")
+      .toLowerCase()
+      .trim();
+  } catch {
+    return false;
+  }
   return stored === "1" || stored === "true" || stored === "yes";
 }
 
