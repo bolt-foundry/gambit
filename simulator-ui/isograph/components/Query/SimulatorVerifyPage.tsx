@@ -14,17 +14,21 @@ import PageGrid from "../../../src/gds/PageGrid.tsx";
 import PageShell from "../../../src/gds/PageShell.tsx";
 import Panel from "../../../src/gds/Panel.tsx";
 import {
-  classNames,
   formatTimestampShort,
   scenarioNameFromValue,
 } from "../../../src/utils.ts";
-import { VERIFY_CONSISTENCY_THRESHOLDS } from "../../../src/verify_metrics.ts";
+import {
+  sortVerifyOutlierScenarioRuns,
+  VERIFY_DEFAULTS,
+  VERIFY_LIMITS,
+} from "../../../src/verify_unified.ts";
 
-const MAX_BATCH_SIZE = 24;
-const MAX_BATCH_CONCURRENCY = 6;
-const DEFAULT_BATCH_SIZE = 8;
-const DEFAULT_BATCH_CONCURRENCY = 3;
-const NO_SCENARIO_RUN_VALUE = "__workspace_context__";
+const MAX_SCENARIO_RUNS = VERIFY_LIMITS.scenarioRunsMax;
+const MAX_GRADER_REPEATS = VERIFY_LIMITS.graderRepeatsMax;
+const MAX_BATCH_CONCURRENCY = VERIFY_LIMITS.concurrencyMax;
+const DEFAULT_SCENARIO_RUNS = VERIFY_DEFAULTS.scenarioRuns;
+const DEFAULT_GRADER_REPEATS = VERIFY_DEFAULTS.graderRepeatsPerScenario;
+const DEFAULT_BATCH_CONCURRENCY = VERIFY_DEFAULTS.concurrency;
 
 type VerifyBatchStatus = "idle" | "running" | "completed" | "error";
 type VerifyBatchRequestStatus =
@@ -33,36 +37,53 @@ type VerifyBatchRequestStatus =
   | "completed"
   | "error";
 
-type VerifyOutlierView = {
+type VerifyOutlierScenarioRunView = {
   key: string;
-  label: string;
-  sampleSize: number;
-  agreementRate: number | null;
-  scoreDelta: number | null;
-  passFlip: boolean;
-  instability: boolean;
+  scenarioRunId: string;
+  gradeSampleCount: number;
+  completedSampleCount: number;
+  executionFailureCount: number;
+  gradingFailureCount: number;
+  averageScore: number | null;
+  minScore: number | null;
+  maxScore: number | null;
+  failed: boolean;
   minRunId?: string;
   maxRunId?: string;
-  turnIndex?: number;
   messageRefId?: string;
 };
 
+type VerifyFailureReasonView = {
+  key: string;
+  kind: "execution" | "grading";
+  reason: string;
+  count: number;
+};
+
 type VerifyMetricsView = {
-  sampleSize: number;
-  agreementRate: number | null;
-  scoreSpreadMin: number | null;
-  scoreSpreadMedian: number | null;
-  scoreSpreadMax: number | null;
-  instabilityCount: number;
-  verdict: "PASS" | "WARN" | "FAIL";
-  verdictReason: string;
-  outliers: Array<VerifyOutlierView>;
+  scenarioRunCountRequested: number;
+  scenarioRunCountCompleted: number;
+  scenarioRunCountFailed: number;
+  gradeSampleCountRequested: number;
+  gradeSampleCountCompleted: number;
+  gradeSampleCountFailed: number;
+  executionFailureCount: number;
+  gradingFailureCount: number;
+  passRate: number | null;
+  scoreMin: number | null;
+  scoreMedian: number | null;
+  scoreMax: number | null;
+  scoreMean: number | null;
+  outlierScenarioRuns: Array<VerifyOutlierScenarioRunView>;
+  failureReasons: Array<VerifyFailureReasonView>;
 };
 
 type VerifyBatchView = {
   id: string;
+  scenarioDeckId: string | null;
   graderId: string;
-  scenarioRunId: string | null;
+  scenarioRuns: number;
+  graderRepeatsPerScenario: number;
   status: VerifyBatchStatus;
   startedAt: string | null;
   finishedAt: string | null;
@@ -70,8 +91,11 @@ type VerifyBatchView = {
   active: number;
   completed: number;
   failed: number;
+  scenarioRunsCompleted: number;
+  scenarioRunsFailed: number;
   requests: Array<{
     id: string;
+    scenarioRunId?: string;
     status: VerifyBatchRequestStatus;
     runId?: string;
     error?: string;
@@ -110,19 +134,19 @@ function clampInt(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, rounded));
 }
 
+function formatPercent(value: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  return `${Math.round(value * 100)}%`;
+}
+
 export const SimulatorVerifyPage = iso(`
   field Workspace.VerifyTab @component {
     id
-    scenarioRuns(first: 50) {
-      edges {
-        node {
-          id
-          status
-          startedAt
-          finishedAt
-          error
-        }
-      }
+    scenarioDecks {
+      id
+      label
+      description
+      path
     }
     verification {
       graderDecks(first: 50) {
@@ -140,8 +164,10 @@ export const SimulatorVerifyPage = iso(`
           node {
             id
             workspaceId
+            scenarioDeckId
             graderId
-            scenarioRunId
+            scenarioRuns
+            graderRepeatsPerScenario
             status
             startedAt
             finishedAt
@@ -149,10 +175,13 @@ export const SimulatorVerifyPage = iso(`
             active
             completed
             failed
-            requests(first: 50) {
+            scenarioRunsCompleted
+            scenarioRunsFailed
+            requests(first: 200) {
               edges {
                 node {
                   id
+                  scenarioRunId
                   status
                   runId
                   error
@@ -160,28 +189,45 @@ export const SimulatorVerifyPage = iso(`
               }
             }
             metrics {
-              sampleSize
-              agreementRate
-              scoreSpreadMin
-              scoreSpreadMedian
-              scoreSpreadMax
-              instabilityCount
-              verdict
-              verdictReason
-              outliers(first: 25) {
+              scenarioRunCountRequested
+              scenarioRunCountCompleted
+              scenarioRunCountFailed
+              gradeSampleCountRequested
+              gradeSampleCountCompleted
+              gradeSampleCountFailed
+              executionFailureCount
+              gradingFailureCount
+              passRate
+              scoreMin
+              scoreMedian
+              scoreMax
+              scoreMean
+              outlierScenarioRuns(first: 25) {
                 edges {
                   node {
                     key
-                    label
-                    sampleSize
-                    agreementRate
-                    scoreDelta
-                    passFlip
-                    instability
+                    scenarioRunId
+                    gradeSampleCount
+                    completedSampleCount
+                    executionFailureCount
+                    gradingFailureCount
+                    averageScore
+                    minScore
+                    maxScore
+                    failed
                     minRunId
                     maxRunId
-                    turnIndex
                     messageRefId
+                  }
+                }
+              }
+              failureReasons(first: 25) {
+                edges {
+                  node {
+                    key
+                    kind
+                    reason
+                    count
                   }
                 }
               }
@@ -211,6 +257,20 @@ export const SimulatorVerifyPage = iso(`
     workspaceId ? { workspaceId } : null,
   );
 
+  const scenarioDecks = useMemo(
+    () =>
+      data.scenarioDecks?.flatMap((deck) => {
+        if (!deck?.id || !deck.label) return [];
+        return [{
+          id: deck.id,
+          label: deck.label,
+          description: deck.description ?? null,
+          path: deck.path ?? "",
+        }];
+      }) ?? [],
+    [data.scenarioDecks],
+  );
+
   const graders = useMemo(
     () =>
       (data.verification?.graderDecks?.edges ?? []).flatMap((edge) => {
@@ -226,26 +286,6 @@ export const SimulatorVerifyPage = iso(`
     [data.verification?.graderDecks?.edges],
   );
 
-  const scenarioRuns = useMemo(
-    () =>
-      (data.scenarioRuns?.edges ?? []).flatMap((edge) => {
-        const run = edge?.node;
-        if (!run?.id) return [];
-        return [{
-          id: run.id,
-          status: toBatchStatus(run.status),
-          startedAt: run.startedAt ?? null,
-          finishedAt: run.finishedAt ?? null,
-          error: run.error ?? null,
-        }];
-      }).sort((left, right) => {
-        const leftKey = left.finishedAt ?? left.startedAt ?? left.id;
-        const rightKey = right.finishedAt ?? right.startedAt ?? right.id;
-        return rightKey.localeCompare(leftKey);
-      }),
-    [data.scenarioRuns?.edges],
-  );
-
   const batches = useMemo<Array<VerifyBatchView>>(
     () =>
       (data.verification?.batches?.edges ?? []).flatMap((edge) => {
@@ -253,8 +293,10 @@ export const SimulatorVerifyPage = iso(`
         if (!batch?.id || !batch.graderId) return [];
         return [{
           id: batch.id,
+          scenarioDeckId: batch.scenarioDeckId ?? null,
           graderId: batch.graderId,
-          scenarioRunId: batch.scenarioRunId ?? null,
+          scenarioRuns: batch.scenarioRuns ?? 0,
+          graderRepeatsPerScenario: batch.graderRepeatsPerScenario ?? 0,
           status: toBatchStatus(batch.status),
           startedAt: batch.startedAt ?? null,
           finishedAt: batch.finishedAt ?? null,
@@ -262,11 +304,14 @@ export const SimulatorVerifyPage = iso(`
           active: batch.active ?? 0,
           completed: batch.completed ?? 0,
           failed: batch.failed ?? 0,
+          scenarioRunsCompleted: batch.scenarioRunsCompleted ?? 0,
+          scenarioRunsFailed: batch.scenarioRunsFailed ?? 0,
           requests: (batch.requests?.edges ?? []).flatMap((requestEdge) => {
             const request = requestEdge?.node;
             if (!request?.id) return [];
             return [{
               id: request.id,
+              scenarioRunId: request.scenarioRunId ?? undefined,
               status: toBatchRequestStatus(request.status),
               runId: request.runId ?? undefined,
               error: request.error ?? undefined,
@@ -274,53 +319,74 @@ export const SimulatorVerifyPage = iso(`
           }),
           metrics: batch.metrics
             ? {
-              sampleSize: batch.metrics.sampleSize ?? 0,
-              agreementRate: typeof batch.metrics.agreementRate === "number"
-                ? batch.metrics.agreementRate
+              scenarioRunCountRequested:
+                batch.metrics.scenarioRunCountRequested ?? 0,
+              scenarioRunCountCompleted:
+                batch.metrics.scenarioRunCountCompleted ?? 0,
+              scenarioRunCountFailed: batch.metrics.scenarioRunCountFailed ?? 0,
+              gradeSampleCountRequested:
+                batch.metrics.gradeSampleCountRequested ?? 0,
+              gradeSampleCountCompleted:
+                batch.metrics.gradeSampleCountCompleted ?? 0,
+              gradeSampleCountFailed: batch.metrics.gradeSampleCountFailed ?? 0,
+              executionFailureCount: batch.metrics.executionFailureCount ?? 0,
+              gradingFailureCount: batch.metrics.gradingFailureCount ?? 0,
+              passRate: typeof batch.metrics.passRate === "number"
+                ? batch.metrics.passRate
                 : null,
-              scoreSpreadMin: typeof batch.metrics.scoreSpreadMin === "number"
-                ? batch.metrics.scoreSpreadMin
+              scoreMin: typeof batch.metrics.scoreMin === "number"
+                ? batch.metrics.scoreMin
                 : null,
-              scoreSpreadMedian:
-                typeof batch.metrics.scoreSpreadMedian === "number"
-                  ? batch.metrics.scoreSpreadMedian
-                  : null,
-              scoreSpreadMax: typeof batch.metrics.scoreSpreadMax === "number"
-                ? batch.metrics.scoreSpreadMax
+              scoreMedian: typeof batch.metrics.scoreMedian === "number"
+                ? batch.metrics.scoreMedian
                 : null,
-              instabilityCount: batch.metrics.instabilityCount ?? 0,
-              verdict: batch.metrics.verdict === "PASS" ||
-                  batch.metrics.verdict === "WARN" ||
-                  batch.metrics.verdict === "FAIL"
-                ? batch.metrics.verdict
-                : "WARN",
-              verdictReason: batch.metrics.verdictReason ??
-                "Verify batch completed.",
-              outliers: (batch.metrics.outliers?.edges ?? []).flatMap(
-                (outlierEdge) => {
-                  const outlier = outlierEdge?.node;
-                  if (!outlier?.key || !outlier.label) return [];
-                  return [{
-                    key: outlier.key,
-                    label: outlier.label,
-                    sampleSize: outlier.sampleSize ?? 0,
-                    agreementRate: typeof outlier.agreementRate === "number"
-                      ? outlier.agreementRate
-                      : null,
-                    scoreDelta: typeof outlier.scoreDelta === "number"
-                      ? outlier.scoreDelta
-                      : null,
-                    passFlip: Boolean(outlier.passFlip),
-                    instability: Boolean(outlier.instability),
-                    minRunId: outlier.minRunId ?? undefined,
-                    maxRunId: outlier.maxRunId ?? undefined,
-                    turnIndex: typeof outlier.turnIndex === "number"
-                      ? outlier.turnIndex
-                      : undefined,
-                    messageRefId: outlier.messageRefId ?? undefined,
-                  }];
-                },
-              ),
+              scoreMax: typeof batch.metrics.scoreMax === "number"
+                ? batch.metrics.scoreMax
+                : null,
+              scoreMean: typeof batch.metrics.scoreMean === "number"
+                ? batch.metrics.scoreMean
+                : null,
+              outlierScenarioRuns:
+                (batch.metrics.outlierScenarioRuns?.edges ?? []).flatMap(
+                  (outlierEdge) => {
+                    const outlier = outlierEdge?.node;
+                    if (!outlier?.key || !outlier.scenarioRunId) return [];
+                    return [{
+                      key: outlier.key,
+                      scenarioRunId: outlier.scenarioRunId,
+                      gradeSampleCount: outlier.gradeSampleCount ?? 0,
+                      completedSampleCount: outlier.completedSampleCount ?? 0,
+                      executionFailureCount: outlier.executionFailureCount ?? 0,
+                      gradingFailureCount: outlier.gradingFailureCount ?? 0,
+                      averageScore: typeof outlier.averageScore === "number"
+                        ? outlier.averageScore
+                        : null,
+                      minScore: typeof outlier.minScore === "number"
+                        ? outlier.minScore
+                        : null,
+                      maxScore: typeof outlier.maxScore === "number"
+                        ? outlier.maxScore
+                        : null,
+                      failed: Boolean(outlier.failed),
+                      minRunId: outlier.minRunId ?? undefined,
+                      maxRunId: outlier.maxRunId ?? undefined,
+                      messageRefId: outlier.messageRefId ?? undefined,
+                    }];
+                  },
+                ),
+              failureReasons: (batch.metrics.failureReasons?.edges ?? [])
+                .flatMap(
+                  (reasonEdge) => {
+                    const reason = reasonEdge?.node;
+                    if (!reason?.key || !reason.reason) return [];
+                    return [{
+                      key: reason.key,
+                      kind: reason.kind === "GRADING" ? "grading" : "execution",
+                      reason: reason.reason,
+                      count: reason.count ?? 0,
+                    }];
+                  },
+                ),
             }
             : null,
         }];
@@ -328,13 +394,18 @@ export const SimulatorVerifyPage = iso(`
     [data.verification?.batches?.edges],
   );
 
-  const [selectedScenarioRunId, setSelectedScenarioRunId] = useState<
+  const [selectedScenarioDeckId, setSelectedScenarioDeckId] = useState<
     string | null
   >(null);
   const [selectedGraderId, setSelectedGraderId] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
-  const [batchSize, setBatchSize] = useState(DEFAULT_BATCH_SIZE);
-  const [batchConcurrency, setBatchConcurrency] = useState(
+  const [scenarioRuns, setScenarioRuns] = useState<number>(
+    DEFAULT_SCENARIO_RUNS,
+  );
+  const [graderRepeatsPerScenario, setGraderRepeatsPerScenario] = useState<
+    number
+  >(DEFAULT_GRADER_REPEATS);
+  const [batchConcurrency, setBatchConcurrency] = useState<number>(
     DEFAULT_BATCH_CONCURRENCY,
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -351,27 +422,26 @@ export const SimulatorVerifyPage = iso(`
 
   useEffect(() => {
     if (
-      selectedScenarioRunId &&
-      scenarioRuns.some((scenarioRun) =>
-        scenarioRun.id === selectedScenarioRunId
-      )
+      selectedScenarioDeckId &&
+      scenarioDecks.some((deck) => deck.id === selectedScenarioDeckId)
     ) {
       return;
     }
-    setSelectedScenarioRunId(scenarioRuns[0]?.id ?? null);
-  }, [scenarioRuns, selectedScenarioRunId]);
+    setSelectedScenarioDeckId(scenarioDecks[0]?.id ?? null);
+  }, [scenarioDecks, selectedScenarioDeckId]);
 
   const filteredBatches = useMemo(() => {
     return batches.filter((batch) => {
       if (selectedGraderId && batch.graderId !== selectedGraderId) return false;
       if (
-        selectedScenarioRunId && batch.scenarioRunId !== selectedScenarioRunId
+        selectedScenarioDeckId &&
+        batch.scenarioDeckId !== selectedScenarioDeckId
       ) {
         return false;
       }
       return true;
     });
-  }, [batches, selectedGraderId, selectedScenarioRunId]);
+  }, [batches, selectedGraderId, selectedScenarioDeckId]);
 
   const visibleBatches = filteredBatches.length > 0 ? filteredBatches : batches;
 
@@ -400,17 +470,27 @@ export const SimulatorVerifyPage = iso(`
     [graders, selectedGraderId],
   );
 
+  const selectedScenarioDeck = useMemo(
+    () =>
+      scenarioDecks.find((deck) => deck.id === selectedScenarioDeckId) ?? null,
+    [scenarioDecks, selectedScenarioDeckId],
+  );
+
   const queuedCount = useMemo(
     () =>
       (selectedBatch?.requests ?? []).filter((request) =>
         request.status === "queued"
-      )
-        .length,
+      ).length,
     [selectedBatch?.requests],
   );
 
   const metrics = selectedBatch?.metrics ?? null;
-  const topOutliers = (metrics?.outliers ?? []).slice(0, 8);
+  const topOutlierScenarioRuns = useMemo(
+    () =>
+      sortVerifyOutlierScenarioRuns(metrics?.outlierScenarioRuns ?? [])
+        .slice(0, 8),
+    [metrics?.outlierScenarioRuns],
+  );
 
   const hasRunningBatch = visibleBatches.some((batch) =>
     batch.status === "running"
@@ -423,21 +503,27 @@ export const SimulatorVerifyPage = iso(`
   const runBatch = useCallback(() => {
     if (!workspaceId || !selectedGraderId) return;
     setMutationError(null);
-    const nextBatchSize = clampInt(batchSize, 1, MAX_BATCH_SIZE);
+    const nextScenarioRuns = clampInt(scenarioRuns, 1, MAX_SCENARIO_RUNS);
+    const nextRepeats = clampInt(
+      graderRepeatsPerScenario,
+      1,
+      MAX_GRADER_REPEATS,
+    );
     const nextConcurrency = clampInt(
       batchConcurrency,
       1,
-      Math.min(MAX_BATCH_CONCURRENCY, nextBatchSize),
+      MAX_BATCH_CONCURRENCY,
     );
     runBatchMutation.commit(
       {
         input: {
           workspaceId,
-          graderId: selectedGraderId,
-          ...(selectedScenarioRunId
-            ? { scenarioRunId: selectedScenarioRunId }
+          ...(selectedScenarioDeckId
+            ? { scenarioDeckId: selectedScenarioDeckId }
             : {}),
-          batchSize: nextBatchSize,
+          graderId: selectedGraderId,
+          scenarioRuns: nextScenarioRuns,
+          graderRepeatsPerScenario: nextRepeats,
           concurrency: nextConcurrency,
         },
       },
@@ -456,10 +542,11 @@ export const SimulatorVerifyPage = iso(`
     );
   }, [
     batchConcurrency,
-    batchSize,
+    graderRepeatsPerScenario,
     runBatchMutation,
+    scenarioRuns,
     selectedGraderId,
-    selectedScenarioRunId,
+    selectedScenarioDeckId,
     workspaceId,
   ]);
 
@@ -468,48 +555,29 @@ export const SimulatorVerifyPage = iso(`
     navigate(toPrefixedPath(gradePath));
   }, [navigate, toPrefixedPath, workspaceId]);
 
-  const scenarioOptions = useMemo(
-    () => [
-      {
-        value: NO_SCENARIO_RUN_VALUE,
-        label: "Current workspace context",
-        meta: "Run without a prior scenario run binding",
-      },
-      ...scenarioRuns.map((run) => ({
-        value: run.id,
-        label: scenarioNameFromValue(run.id) ?? run.id,
-        meta: [
-          run.status,
-          run.finishedAt ?? run.startedAt,
-        ].filter(Boolean).join(" · "),
-      })),
-    ],
-    [scenarioRuns],
-  );
-
   return (
     <PageShell className="verify-shell">
       <PageGrid as="main" className="verify-layout">
         <Panel className="verify-controls" data-testid="verify-tab-scaffold">
           <div className="verify-controls-header">
-            <strong>Verify consistency</strong>
+            <strong>Verify repeated evidence</strong>
             <span className="secondary-note">
-              Run repeated grading checks against one grader and scenario.
+              Generate scenario runs, then grade each run repeatedly.
             </span>
           </div>
-          {scenarioRuns.length > 0 && (
-            <Listbox
-              label="Scenario run"
-              value={selectedScenarioRunId ?? NO_SCENARIO_RUN_VALUE}
-              onChange={(runId) => {
-                setSelectedScenarioRunId(
-                  runId === NO_SCENARIO_RUN_VALUE ? null : runId,
-                );
-              }}
-              options={scenarioOptions}
-              placeholder="Select scenario run"
-            />
-          )}
+          <Listbox
+            label="Scenario deck"
+            value={selectedScenarioDeckId ?? ""}
+            onChange={(value) =>
+              setSelectedScenarioDeckId(value.length ? value : null)}
+            options={scenarioDecks.map((deck) => ({
+              value: deck.id,
+              label: deck.label,
+              meta: deck.path,
+            }))}
+            placeholder="Select scenario deck"
+            disabled={scenarioDecks.length === 0}
+          />
           <Listbox
             label="Grader"
             value={selectedGraderId ?? ""}
@@ -525,15 +593,32 @@ export const SimulatorVerifyPage = iso(`
           />
           <div className="verify-number-grid">
             <label className="verify-number-field">
-              Batch size
+              Scenario runs
               <input
                 type="number"
                 min={1}
-                max={MAX_BATCH_SIZE}
-                value={batchSize}
+                max={MAX_SCENARIO_RUNS}
+                value={scenarioRuns}
                 onChange={(event) =>
-                  setBatchSize(
-                    clampInt(Number(event.target.value), 1, MAX_BATCH_SIZE),
+                  setScenarioRuns(
+                    clampInt(Number(event.target.value), 1, MAX_SCENARIO_RUNS),
+                  )}
+              />
+            </label>
+            <label className="verify-number-field">
+              Grader repeats per scenario
+              <input
+                type="number"
+                min={1}
+                max={MAX_GRADER_REPEATS}
+                value={graderRepeatsPerScenario}
+                onChange={(event) =>
+                  setGraderRepeatsPerScenario(
+                    clampInt(
+                      Number(event.target.value),
+                      1,
+                      MAX_GRADER_REPEATS,
+                    ),
                   )}
               />
             </label>
@@ -562,14 +647,24 @@ export const SimulatorVerifyPage = iso(`
             disabled={!canRun}
           >
             {hasRunningBatch || runBatchMutation.inFlight
-              ? "Running consistency batch…"
-              : "Run consistency batch"}
+              ? "Running verify batch..."
+              : "Run verify batch"}
           </Button>
+          {scenarioDecks.length === 0 && (
+            <Callout>
+              No scenario decks are available. Add <code>[[testDecks]]</code>
+              {" "}
+              entries to the active root deck.
+            </Callout>
+          )}
           {graders.length === 0 && (
             <Callout>
               No graders are available. Add <code>[[graders]]</code>{" "}
               entries to the active root deck.
             </Callout>
+          )}
+          {selectedScenarioDeck?.description && (
+            <Callout>{selectedScenarioDeck.description}</Callout>
           )}
           {selectedGrader?.description && (
             <Callout>{selectedGrader.description}</Callout>
@@ -600,130 +695,126 @@ export const SimulatorVerifyPage = iso(`
                   : ""}
               </div>
             </div>
-            {metrics && metrics.sampleSize > 0 && (
-              <span
-                className={classNames(
-                  "verify-verdict-badge",
-                  `verify-verdict-badge--${metrics.verdict.toLowerCase()}`,
-                )}
-              >
-                {metrics.verdict}
-              </span>
-            )}
           </div>
-          {selectedBatch && selectedBatch.requested > 0 && (
-            <div className="verify-progress-row">
-              <span>Queued: {queuedCount}</span>
-              <span>Running: {selectedBatch.active}</span>
-              <span>Completed: {selectedBatch.completed}</span>
-              <span>Failed: {selectedBatch.failed}</span>
-            </div>
-          )}
+
           {!selectedBatch && (
             <Callout>
-              Run a consistency batch to compute agreement, spread, and
-              instability for the selected grader.
+              Run a verify batch to generate repeated grading evidence.
             </Callout>
           )}
-          {metrics && metrics.sampleSize > 0 && (
+
+          {selectedBatch && selectedBatch.requested > 0 && (
+            <>
+              <div className="verify-progress-row">
+                <span>
+                  Scenario runs: {selectedBatch.scenarioRunsCompleted}/
+                  {selectedBatch.scenarioRuns}
+                </span>
+                <span>
+                  Scenario failures: {selectedBatch.scenarioRunsFailed}
+                </span>
+                <span>Queued: {queuedCount}</span>
+                <span>Running: {selectedBatch.active}</span>
+                <span>Completed: {selectedBatch.completed}</span>
+                <span>Failed: {selectedBatch.failed}</span>
+              </div>
+            </>
+          )}
+
+          {metrics && (
             <>
               <div className="verify-metric-grid">
                 <div className="verify-metric-card">
-                  <div className="verify-metric-label">Sample size</div>
+                  <div className="verify-metric-label">Scenario runs</div>
                   <div className="verify-metric-value">
-                    {metrics.sampleSize}
+                    {metrics.scenarioRunCountCompleted}/
+                    {metrics.scenarioRunCountRequested}
                   </div>
                 </div>
                 <div className="verify-metric-card">
-                  <div className="verify-metric-label">Agreement rate</div>
+                  <div className="verify-metric-label">Grade samples</div>
                   <div className="verify-metric-value">
-                    {metrics.agreementRate === null
-                      ? "—"
-                      : `${Math.round(metrics.agreementRate * 100)}%`}
+                    {metrics.gradeSampleCountCompleted}/
+                    {metrics.gradeSampleCountRequested}
+                  </div>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">Pass rate</div>
+                  <div className="verify-metric-value">
+                    {formatPercent(metrics.passRate)}
+                  </div>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">Score mean</div>
+                  <div className="verify-metric-value">
+                    {metrics.scoreMean === null ? "-" : metrics.scoreMean}
                   </div>
                 </div>
                 <div className="verify-metric-card">
                   <div className="verify-metric-label">
-                    Score spread (min/median/max)
+                    Score min/median/max
                   </div>
                   <div className="verify-metric-value verify-metric-value--compact">
-                    {metrics.scoreSpreadMin === null
-                      ? "—"
-                      : `${metrics.scoreSpreadMin} / ${
-                        metrics.scoreSpreadMedian ?? "—"
-                      } / ${metrics.scoreSpreadMax ?? "—"}`}
+                    {metrics.scoreMin === null
+                      ? "-"
+                      : `${metrics.scoreMin} / ${
+                        metrics.scoreMedian ?? "-"
+                      } / ${metrics.scoreMax ?? "-"}`}
                   </div>
                 </div>
                 <div className="verify-metric-card">
-                  <div className="verify-metric-label">Instability count</div>
+                  <div className="verify-metric-label">Execution failures</div>
                   <div className="verify-metric-value">
-                    {metrics.instabilityCount}
+                    {metrics.executionFailureCount}
+                  </div>
+                </div>
+                <div className="verify-metric-card">
+                  <div className="verify-metric-label">Grading failures</div>
+                  <div className="verify-metric-value">
+                    {metrics.gradingFailureCount}
                   </div>
                 </div>
               </div>
-              <Callout
-                variant={metrics.verdict === "FAIL"
-                  ? "danger"
-                  : metrics.verdict === "WARN"
-                  ? "emphasis"
-                  : "muted"}
-                title={`Verdict: ${metrics.verdict}`}
-              >
-                {metrics.verdictReason}
-              </Callout>
             </>
           )}
-          <Callout title="Thresholds in code">
-            Min sample size: {VERIFY_CONSISTENCY_THRESHOLDS.minSampleSize}{" "}
-            · PASS requires agreement ≥ {Math.round(
-              VERIFY_CONSISTENCY_THRESHOLDS.pass.agreementMin * 100,
-            )}
-            %, spread ≤{" "}
-            {VERIFY_CONSISTENCY_THRESHOLDS.pass.maxSpread}, instability ≤{" "}
-            {VERIFY_CONSISTENCY_THRESHOLDS.pass.maxInstabilityCount}{" "}
-            · WARN allows agreement ≥ {Math.round(
-              VERIFY_CONSISTENCY_THRESHOLDS.warn.agreementMin * 100,
-            )}
-            %, spread ≤{" "}
-            {VERIFY_CONSISTENCY_THRESHOLDS.warn.maxSpread}, instability ≤{" "}
-            {VERIFY_CONSISTENCY_THRESHOLDS.warn.maxInstabilityCount}.
-          </Callout>
 
           <div className="verify-section">
-            <strong>Most inconsistent examples</strong>
-            {topOutliers.length === 0
+            <strong>Outlier scenario runs</strong>
+            {topOutlierScenarioRuns.length === 0
               ? (
                 <Callout>
-                  Inconsistent examples will appear here as soon as at least one
-                  completed run is available in this batch.
+                  Outlier scenario runs appear as soon as completed grade
+                  samples are available.
                 </Callout>
               )
               : (
                 <div className="verify-outlier-list">
-                  {topOutliers.map((outlier) => {
-                    const runLinks = [outlier.maxRunId, outlier.minRunId]
+                  {topOutlierScenarioRuns.map((outlier) => {
+                    const runLinks = [outlier.minRunId, outlier.maxRunId]
                       .filter((value): value is string => Boolean(value));
                     const uniqueRunLinks = [...new Set(runLinks)];
                     return (
                       <div key={outlier.key} className="verify-outlier-card">
                         <div className="verify-outlier-header">
-                          <strong>{outlier.label}</strong>
+                          <strong>
+                            {scenarioNameFromValue(outlier.scenarioRunId) ??
+                              outlier.scenarioRunId}
+                          </strong>
                           <Badge
-                            variant={outlier.instability
-                              ? "error"
-                              : "completed"}
+                            variant={outlier.failed ? "error" : "completed"}
                           >
-                            {outlier.instability ? "Unstable" : "Stable"}
+                            {outlier.failed ? "Failed" : "Scored"}
                           </Badge>
                         </div>
                         <div className="verify-outlier-meta">
-                          agreement {outlier.agreementRate === null
-                            ? "—"
-                            : `${Math.round(outlier.agreementRate * 100)}%`}
+                          avg {outlier.averageScore ?? "-"} · min/max{" "}
+                          {outlier.minScore ?? "-"}/{outlier.maxScore ?? "-"}
                           {" "}
-                          · delta {outlier.scoreDelta ?? "—"} · samples{" "}
-                          {outlier.sampleSize}
-                          {outlier.passFlip ? " · pass/fail flip" : ""}
+                          · samples {outlier.completedSampleCount}/
+                          {outlier.gradeSampleCount} · execution failures{" "}
+                          {outlier.executionFailureCount} · grading failures
+                          {" "}
+                          {outlier.gradingFailureCount}
                           {outlier.messageRefId
                             ? ` · ref ${outlier.messageRefId}`
                             : ""}
@@ -755,6 +846,29 @@ export const SimulatorVerifyPage = iso(`
               )}
           </div>
 
+          <div className="verify-section">
+            <strong>Failure reasons</strong>
+            {!metrics || metrics.failureReasons.length === 0
+              ? <Callout>No failure reasons captured yet.</Callout>
+              : (
+                <ul className="verify-request-list">
+                  {metrics.failureReasons.map((reason) => (
+                    <li key={reason.key} className="verify-request-row">
+                      <Badge
+                        variant={reason.kind === "execution"
+                          ? "error"
+                          : "running"}
+                      >
+                        {reason.kind}
+                      </Badge>
+                      <span>{reason.reason}</span>
+                      <span className="secondary-note">x{reason.count}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+          </div>
+
           {visibleBatches.length > 0 && (
             <div className="verify-section">
               <strong>Batch history</strong>
@@ -772,7 +886,8 @@ export const SimulatorVerifyPage = iso(`
                       {batch.id}
                     </button>
                     <span className="secondary-note">
-                      {batch.completed}/{batch.requested} complete
+                      {batch.scenarioRuns} runs ×{" "}
+                      {batch.graderRepeatsPerScenario}
                     </span>
                   </li>
                 ))}
@@ -795,6 +910,12 @@ export const SimulatorVerifyPage = iso(`
                       >
                         {request.status}
                       </Badge>
+                      {request.scenarioRunId && (
+                        <span className="secondary-note">
+                          {scenarioNameFromValue(request.scenarioRunId) ??
+                            request.scenarioRunId}
+                        </span>
+                      )}
                       {request.runId
                         ? (
                           <a

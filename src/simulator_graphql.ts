@@ -217,6 +217,7 @@ type WorkspaceVerificationRecord = {
 type WorkspaceVerifyBatchRequestRecord = {
   id: string;
   status: "queued" | "running" | "completed" | "error";
+  scenarioRunId?: string;
   runId?: string;
   error?: string;
 };
@@ -224,42 +225,61 @@ type WorkspaceVerifyBatchRequestRecord = {
 type WorkspaceVerifyBatchRecord = {
   id: string;
   workspaceId: string;
+  scenarioDeckId?: string;
   graderId: string;
-  scenarioRunId?: string;
+  scenarioRuns: number;
+  graderRepeatsPerScenario: number;
   status: "idle" | "running" | "completed" | "error";
   startedAt?: string;
   finishedAt?: string;
-  requested: number;
+  requested: number; // grade samples requested
   active: number;
   completed: number;
   failed: number;
+  scenarioRunsCompleted: number;
+  scenarioRunsFailed: number;
   requests: Array<WorkspaceVerifyBatchRequestRecord>;
 };
 
-type WorkspaceVerifyOutlierRecord = {
+type WorkspaceVerifyScenarioOutlierRecord = {
   key: string;
-  label: string;
-  sampleSize: number;
-  agreementRate: Maybe<number>;
-  scoreDelta: Maybe<number>;
-  passFlip: boolean;
-  instability: boolean;
+  scenarioRunId: string;
+  gradeSampleCount: number;
+  completedSampleCount: number;
+  executionFailureCount: number;
+  gradingFailureCount: number;
+  averageScore: Maybe<number>;
+  minScore: Maybe<number>;
+  maxScore: Maybe<number>;
+  failed: boolean;
   minRunId?: string;
   maxRunId?: string;
-  turnIndex?: number;
   messageRefId?: string;
 };
 
+type WorkspaceVerifyFailureReasonGroupRecord = {
+  key: string;
+  kind: "execution" | "grading";
+  reason: string;
+  count: number;
+};
+
 type WorkspaceVerifyMetricsRecord = {
-  sampleSize: number;
-  agreementRate: Maybe<number>;
-  scoreSpreadMin: Maybe<number>;
-  scoreSpreadMedian: Maybe<number>;
-  scoreSpreadMax: Maybe<number>;
-  instabilityCount: number;
-  verdict: "PASS" | "WARN" | "FAIL";
-  verdictReason: string;
-  outliers: Array<WorkspaceVerifyOutlierRecord>;
+  scenarioRunCountRequested: number;
+  scenarioRunCountCompleted: number;
+  scenarioRunCountFailed: number;
+  gradeSampleCountRequested: number;
+  gradeSampleCountCompleted: number;
+  gradeSampleCountFailed: number;
+  executionFailureCount: number;
+  gradingFailureCount: number;
+  passRate: Maybe<number>;
+  scoreMin: Maybe<number>;
+  scoreMedian: Maybe<number>;
+  scoreMax: Maybe<number>;
+  scoreMean: Maybe<number>;
+  outlierScenarioRuns: Array<WorkspaceVerifyScenarioOutlierRecord>;
+  failureReasons: Array<WorkspaceVerifyFailureReasonGroupRecord>;
 };
 
 type WorkspaceConversationSessionKind =
@@ -393,9 +413,10 @@ export type GambitGraphqlContext = {
   ) => Promise<Array<WorkspaceVerifyBatchRecord>>;
   createWorkspaceVerifyBatchRun?: (args: {
     workspaceId: string;
+    scenarioDeckId?: Maybe<string>;
     graderId: string;
-    scenarioRunId?: Maybe<string>;
-    batchSize: number;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     concurrency: number;
   }) => Promise<WorkspaceVerifyBatchRecord>;
   listWorkspaceConversationSessions?: (args: {
@@ -417,7 +438,8 @@ export type GambitGraphqlContext = {
     assistantInit?: unknown;
     graderId?: Maybe<string>;
     scenarioRunId?: Maybe<string>;
-    batchSize?: Maybe<number>;
+    scenarioRuns?: Maybe<number>;
+    graderRepeatsPerScenario?: Maybe<number>;
     concurrency?: Maybe<number>;
   }) => Promise<WorkspaceConversationSessionRecord>;
   sendWorkspaceConversationSession?: (args: {
@@ -1073,36 +1095,6 @@ function toWorkspaceGradeRunStatus(
   return "ERROR";
 }
 
-const VERIFY_CONSISTENCY_THRESHOLDS = {
-  minSampleSize: 6,
-  instabilityScoreDelta: 1.5,
-  pass: {
-    agreementMin: 0.9,
-    maxSpread: 1,
-    maxInstabilityCount: 0,
-  },
-  warn: {
-    agreementMin: 0.75,
-    maxSpread: 2,
-    maxInstabilityCount: 2,
-  },
-} as const;
-
-type VerifyExamplePointRecord = {
-  runId: string;
-  score?: number;
-  pass?: boolean;
-  reason?: string;
-  turnIndex?: number;
-  messageRefId?: string;
-};
-
-type VerifyExampleBucketRecord = {
-  key: string;
-  label: string;
-  points: Array<VerifyExamplePointRecord>;
-};
-
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -1115,224 +1107,213 @@ function median(values: Array<number>): Maybe<number> {
   return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-function flattenVerifyRunExamples(
+function extractRepresentativeScore(
   run: WorkspaceGradeRunRecord,
-): Array<VerifyExampleBucketRecord> {
-  if (run.turns.length > 0) {
-    return run.turns.map((turn, fallbackIndex) => {
-      const index = typeof turn.turnIndex === "number"
-        ? turn.turnIndex
-        : fallbackIndex;
-      const key = turn.refId && turn.refId.trim().length > 0
-        ? `ref:${turn.refId}`
-        : `turn:${index}`;
-      const pass = typeof turn.score === "number" ? turn.score >= 0 : undefined;
-      return {
-        key,
-        label: `Assistant turn ${turn.turnNumber || fallbackIndex + 1}`,
-        points: [{
-          runId: run.id,
-          score: turn.score,
-          pass,
-          reason: turn.reason,
-          turnIndex: index,
-          messageRefId: turn.refId,
-        }],
-      };
-    });
+): Maybe<number> {
+  const summaryScore = run.summary?.score;
+  if (typeof summaryScore === "number" && Number.isFinite(summaryScore)) {
+    return summaryScore;
   }
-
-  const score = run.summary?.score;
-  const reason = run.summary?.reason;
-  const pass = typeof score === "number" ? score >= 0 : undefined;
-  return [{
-    key: "conversation",
-    label: "Conversation score",
-    points: [{
-      runId: run.id,
-      score,
-      pass,
-      reason,
-    }],
-  }];
+  const turnScores = run.turns
+    .map((turn) => turn.score)
+    .filter((score): score is number =>
+      typeof score === "number" && Number.isFinite(score)
+    );
+  if (turnScores.length === 0) return null;
+  return median(turnScores);
 }
 
-function resolveVerifyVerdict(input: {
-  sampleSize: number;
-  agreementRate: Maybe<number>;
-  spreadMax: Maybe<number>;
-  instabilityCount: number;
-}): { verdict: "PASS" | "WARN" | "FAIL"; reason: string } {
-  if (input.sampleSize < VERIFY_CONSISTENCY_THRESHOLDS.minSampleSize) {
-    return {
-      verdict: "WARN",
-      reason:
-        `Need at least ${VERIFY_CONSISTENCY_THRESHOLDS.minSampleSize} samples before issuing a firm verdict.`,
-    };
-  }
-  if (input.agreementRate === null) {
-    return {
-      verdict: "WARN",
-      reason: "No comparable pass/fail evidence was found in the sampled runs.",
-    };
-  }
-  const spreadMax = input.spreadMax ?? 0;
+function extractRepresentativeReason(
+  run: WorkspaceGradeRunRecord,
+): Maybe<string> {
   if (
-    input.agreementRate >= VERIFY_CONSISTENCY_THRESHOLDS.pass.agreementMin &&
-    spreadMax <= VERIFY_CONSISTENCY_THRESHOLDS.pass.maxSpread &&
-    input.instabilityCount <=
-      VERIFY_CONSISTENCY_THRESHOLDS.pass.maxInstabilityCount
+    typeof run.summary?.reason === "string" &&
+    run.summary.reason.trim().length > 0
   ) {
-    return {
-      verdict: "PASS",
-      reason: "Agreement, spread, and instability all meet PASS thresholds.",
-    };
+    return run.summary.reason.trim();
   }
-  if (
-    input.agreementRate >= VERIFY_CONSISTENCY_THRESHOLDS.warn.agreementMin &&
-    spreadMax <= VERIFY_CONSISTENCY_THRESHOLDS.warn.maxSpread &&
-    input.instabilityCount <=
-      VERIFY_CONSISTENCY_THRESHOLDS.warn.maxInstabilityCount
-  ) {
-    return {
-      verdict: "WARN",
-      reason:
-        "Some variation was detected, but results remain within WARN thresholds.",
-    };
-  }
-  return {
-    verdict: "FAIL",
-    reason: "Agreement/spread instability exceeds WARN thresholds.",
+  const turnReason = run.turns.find((turn) =>
+    typeof turn.reason === "string" && turn.reason.trim().length > 0
+  )?.reason;
+  return typeof turnReason === "string" ? turnReason.trim() : null;
+}
+
+function buildVerifyMetrics(args: {
+  batch: WorkspaceVerifyBatchRecord;
+  runs: Array<WorkspaceGradeRunRecord>;
+}): WorkspaceVerifyMetricsRecord {
+  const runById = new Map(args.runs.map((run) => [run.id, run]));
+  const reasonCounter = new Map<
+    string,
+    WorkspaceVerifyFailureReasonGroupRecord
+  >();
+  const scoreValues: Array<number> = [];
+  let passCount = 0;
+  let scoreCount = 0;
+  let gradingFailureCount = 0;
+
+  const scenarioGroups = new Map<
+    string,
+    {
+      scenarioRunId: string;
+      requests: Array<WorkspaceVerifyBatchRequestRecord>;
+      scores: Array<{ runId: string; value: number; messageRefId?: string }>;
+      executionFailureCount: number;
+      gradingFailureCount: number;
+      completedSampleCount: number;
+    }
+  >();
+
+  const addReason = (
+    kind: "execution" | "grading",
+    reason: string | null | undefined,
+  ) => {
+    const normalized = typeof reason === "string" ? reason.trim() : "";
+    if (!normalized) return;
+    const key = `${kind}:${normalized}`;
+    const existing = reasonCounter.get(key);
+    if (existing) {
+      existing.count += 1;
+      return;
+    }
+    reasonCounter.set(key, { key, kind, reason: normalized, count: 1 });
   };
-}
 
-function buildVerifyMetricsFromRuns(
-  runs: Array<WorkspaceGradeRunRecord>,
-): WorkspaceVerifyMetricsRecord {
-  const completedRuns = runs.filter((run) => run.status === "completed");
-  const sampleSize = completedRuns.length;
-  const bucketsByKey = new Map<string, VerifyExampleBucketRecord>();
+  for (const request of args.batch.requests) {
+    if (!request.scenarioRunId) continue;
+    const existing = scenarioGroups.get(request.scenarioRunId);
+    if (existing) {
+      existing.requests.push(request);
+      continue;
+    }
+    scenarioGroups.set(request.scenarioRunId, {
+      scenarioRunId: request.scenarioRunId,
+      requests: [request],
+      scores: [],
+      executionFailureCount: 0,
+      gradingFailureCount: 0,
+      completedSampleCount: 0,
+    });
+  }
 
-  completedRuns.forEach((run) => {
-    flattenVerifyRunExamples(run).forEach((entry) => {
-      const existing = bucketsByKey.get(entry.key);
-      if (!existing) {
-        bucketsByKey.set(entry.key, {
-          key: entry.key,
-          label: entry.label,
-          points: [...entry.points],
-        });
-        return;
+  for (const request of args.batch.requests) {
+    if (request.status === "error") {
+      addReason("execution", request.error);
+      if (request.scenarioRunId) {
+        const group = scenarioGroups.get(request.scenarioRunId);
+        if (group) group.executionFailureCount += 1;
       }
-      existing.points.push(...entry.points);
-    });
-  });
+      continue;
+    }
+    if (request.status !== "completed" || !request.runId) continue;
+    const run = runById.get(request.runId);
+    if (!run || run.status !== "completed") continue;
+    const score = extractRepresentativeScore(run);
+    if (request.scenarioRunId) {
+      const group = scenarioGroups.get(request.scenarioRunId);
+      if (group) {
+        group.completedSampleCount += 1;
+      }
+    }
+    if (score === null) continue;
+    const rounded = round2(score);
+    scoreValues.push(rounded);
+    scoreCount += 1;
+    if (rounded >= 0) {
+      passCount += 1;
+    } else {
+      gradingFailureCount += 1;
+      addReason("grading", extractRepresentativeReason(run));
+      if (request.scenarioRunId) {
+        const group = scenarioGroups.get(request.scenarioRunId);
+        if (group) group.gradingFailureCount += 1;
+      }
+    }
+    if (request.scenarioRunId) {
+      const group = scenarioGroups.get(request.scenarioRunId);
+      if (group) {
+        const messageRefId = run.turns.find((turn) =>
+          typeof turn.refId === "string" && turn.refId.trim().length > 0
+        )?.refId;
+        group.scores.push({
+          runId: run.id,
+          value: rounded,
+          messageRefId,
+        });
+      }
+    }
+  }
 
-  const outliers: Array<WorkspaceVerifyOutlierRecord> = [];
-  let agreementVotes = 0;
-  let agreementTotal = 0;
-  const scoreDeltas: Array<number> = [];
-
-  bucketsByKey.forEach((bucket) => {
-    const scores = bucket.points
-      .map((point) => point.score)
-      .filter((score): score is number =>
-        typeof score === "number" && Number.isFinite(score)
-      );
-    const minScore = scores.length > 0 ? Math.min(...scores) : null;
-    const maxScore = scores.length > 0 ? Math.max(...scores) : null;
-    const scoreDelta = minScore !== null && maxScore !== null
-      ? round2(maxScore - minScore)
+  const outlierScenarioRuns: Array<WorkspaceVerifyScenarioOutlierRecord> = [
+    ...scenarioGroups.values(),
+  ].map((group) => {
+    const sortedScores = [...group.scores].sort((left, right) =>
+      left.value - right.value
+    );
+    const numericScores = sortedScores.map((entry) => entry.value);
+    const min = numericScores.length > 0 ? numericScores[0] : null;
+    const max = numericScores.length > 0
+      ? numericScores[numericScores.length - 1]
       : null;
-
-    const passVotes = bucket.points
-      .map((point) => point.pass)
-      .filter((pass): pass is boolean => typeof pass === "boolean");
-    const passCount = passVotes.filter((value) => value).length;
-    const failCount = passVotes.length - passCount;
-    const agreementRate = passVotes.length > 0
-      ? round2(Math.max(passCount, failCount) / passVotes.length)
+    const avg = numericScores.length > 0
+      ? round2(
+        numericScores.reduce((sum, value) => sum + value, 0) /
+          numericScores.length,
+      )
       : null;
-
-    if (passVotes.length > 0) {
-      agreementVotes += Math.max(passCount, failCount);
-      agreementTotal += passVotes.length;
-    }
-    if (scoreDelta !== null) {
-      scoreDeltas.push(scoreDelta);
-    }
-
-    const passFlip = passCount > 0 && failCount > 0;
-    const instability = passFlip ||
-      (scoreDelta !== null &&
-        scoreDelta > VERIFY_CONSISTENCY_THRESHOLDS.instabilityScoreDelta);
-
-    const minPoint = minScore === null
-      ? undefined
-      : bucket.points.find((point) => point.score === minScore);
-    const maxPoint = maxScore === null
-      ? undefined
-      : bucket.points.find((point) => point.score === maxScore);
-
-    outliers.push({
-      key: bucket.key,
-      label: bucket.label,
-      sampleSize: bucket.points.length,
-      agreementRate,
-      scoreDelta,
-      passFlip,
-      instability,
-      minRunId: minPoint?.runId,
-      maxRunId: maxPoint?.runId,
-      turnIndex: maxPoint?.turnIndex ?? minPoint?.turnIndex,
-      messageRefId: maxPoint?.messageRefId ?? minPoint?.messageRefId,
-    });
+    return {
+      key: group.scenarioRunId,
+      scenarioRunId: group.scenarioRunId,
+      gradeSampleCount: group.requests.length,
+      completedSampleCount: group.completedSampleCount,
+      executionFailureCount: group.executionFailureCount,
+      gradingFailureCount: group.gradingFailureCount,
+      averageScore: avg,
+      minScore: min === null ? null : round2(min),
+      maxScore: max === null ? null : round2(max),
+      failed: group.executionFailureCount > 0,
+      minRunId: sortedScores[0]?.runId,
+      maxRunId: sortedScores[sortedScores.length - 1]?.runId,
+      messageRefId: sortedScores[0]?.messageRefId ??
+        sortedScores[sortedScores.length - 1]?.messageRefId,
+    };
+  }).sort((left, right) => {
+    if (left.failed !== right.failed) return left.failed ? -1 : 1;
+    const leftScore = left.averageScore ?? Number.POSITIVE_INFINITY;
+    const rightScore = right.averageScore ?? Number.POSITIVE_INFINITY;
+    if (leftScore !== rightScore) return leftScore - rightScore;
+    return left.scenarioRunId.localeCompare(right.scenarioRunId);
   });
 
-  outliers.sort((left, right) => {
-    if (left.instability !== right.instability) {
-      return left.instability ? -1 : 1;
-    }
-    if (left.passFlip !== right.passFlip) return left.passFlip ? -1 : 1;
-    const leftDelta = left.scoreDelta ?? -1;
-    const rightDelta = right.scoreDelta ?? -1;
-    if (leftDelta !== rightDelta) return rightDelta - leftDelta;
-    if (left.sampleSize !== right.sampleSize) {
-      return right.sampleSize - left.sampleSize;
-    }
-    return left.label.localeCompare(right.label);
-  });
-
-  const agreementRate = agreementTotal > 0
-    ? round2(agreementVotes / agreementTotal)
+  const scoreMin = scoreValues.length > 0 ? Math.min(...scoreValues) : null;
+  const scoreMax = scoreValues.length > 0 ? Math.max(...scoreValues) : null;
+  const scoreMedian = median(scoreValues);
+  const scoreMean = scoreValues.length > 0
+    ? round2(
+      scoreValues.reduce((sum, value) => sum + value, 0) / scoreValues.length,
+    )
     : null;
-  const scoreSpreadMin = scoreDeltas.length > 0
-    ? Math.min(...scoreDeltas)
-    : null;
-  const scoreSpreadMax = scoreDeltas.length > 0
-    ? Math.max(...scoreDeltas)
-    : null;
-  const scoreSpreadMedian = median(scoreDeltas);
-  const instabilityCount = outliers.filter((entry) => entry.instability).length;
-  const verdict = resolveVerifyVerdict({
-    sampleSize,
-    agreementRate,
-    spreadMax: scoreSpreadMax,
-    instabilityCount,
-  });
+  const passRate = scoreCount > 0 ? round2(passCount / scoreCount) : null;
 
   return {
-    sampleSize,
-    agreementRate,
-    scoreSpreadMin: scoreSpreadMin === null ? null : round2(scoreSpreadMin),
-    scoreSpreadMedian: scoreSpreadMedian === null
-      ? null
-      : round2(scoreSpreadMedian),
-    scoreSpreadMax: scoreSpreadMax === null ? null : round2(scoreSpreadMax),
-    instabilityCount,
-    verdict: verdict.verdict,
-    verdictReason: verdict.reason,
-    outliers,
+    scenarioRunCountRequested: args.batch.scenarioRuns,
+    scenarioRunCountCompleted: args.batch.scenarioRunsCompleted,
+    scenarioRunCountFailed: args.batch.scenarioRunsFailed,
+    gradeSampleCountRequested: args.batch.requested,
+    gradeSampleCountCompleted: args.batch.completed,
+    gradeSampleCountFailed: args.batch.failed,
+    executionFailureCount: args.batch.failed,
+    gradingFailureCount,
+    passRate,
+    scoreMin: scoreMin === null ? null : round2(scoreMin),
+    scoreMedian: scoreMedian === null ? null : round2(scoreMedian),
+    scoreMax: scoreMax === null ? null : round2(scoreMax),
+    scoreMean,
+    outlierScenarioRuns,
+    failureReasons: [...reasonCounter.values()].sort((left, right) => {
+      if (left.count !== right.count) return right.count - left.count;
+      return left.reason.localeCompare(right.reason);
+    }),
   };
 }
 
@@ -1368,9 +1349,12 @@ const WorkspaceVerifyBatchRequestStatusEnum = builder.enumType(
   },
 );
 
-const WorkspaceVerifyVerdictEnum = builder.enumType("WorkspaceVerifyVerdict", {
-  values: ["PASS", "WARN", "FAIL"] as const,
-});
+const WorkspaceVerifyFailureReasonKindEnum = builder.enumType(
+  "WorkspaceVerifyFailureReasonKind",
+  {
+    values: ["EXECUTION", "GRADING"] as const,
+  },
+);
 
 const WorkspaceGradeTurnType = builder.objectRef<WorkspaceGradeTurnRecord>(
   "WorkspaceGradeTurn",
@@ -1546,6 +1530,10 @@ WorkspaceVerifyBatchRequestType.implement({
       nullable: true,
       resolve: (parent) => parent.runId ?? null,
     }),
+    scenarioRunId: t.id({
+      nullable: true,
+      resolve: (parent) => parent.scenarioRunId ?? null,
+    }),
     error: t.string({
       nullable: true,
       resolve: (parent) => parent.error ?? null,
@@ -1553,26 +1541,36 @@ WorkspaceVerifyBatchRequestType.implement({
   }),
 });
 
-const WorkspaceVerifyOutlierType = builder.objectRef<
-  WorkspaceVerifyOutlierRecord
->(
-  "WorkspaceVerifyOutlier",
-);
-WorkspaceVerifyOutlierType.implement({
+const WorkspaceVerifyScenarioOutlierType = builder.objectRef<
+  WorkspaceVerifyScenarioOutlierRecord
+>("WorkspaceVerifyScenarioOutlier");
+WorkspaceVerifyScenarioOutlierType.implement({
   fields: (t) => ({
     key: t.id({ resolve: (parent) => parent.key }),
-    label: t.string({ resolve: (parent) => parent.label }),
-    sampleSize: t.int({ resolve: (parent) => parent.sampleSize }),
-    agreementRate: t.float({
-      nullable: true,
-      resolve: (parent) => parent.agreementRate,
+    scenarioRunId: t.id({ resolve: (parent) => parent.scenarioRunId }),
+    gradeSampleCount: t.int({ resolve: (parent) => parent.gradeSampleCount }),
+    completedSampleCount: t.int({
+      resolve: (parent) => parent.completedSampleCount,
     }),
-    scoreDelta: t.float({
-      nullable: true,
-      resolve: (parent) => parent.scoreDelta,
+    executionFailureCount: t.int({
+      resolve: (parent) => parent.executionFailureCount,
     }),
-    passFlip: t.boolean({ resolve: (parent) => parent.passFlip }),
-    instability: t.boolean({ resolve: (parent) => parent.instability }),
+    gradingFailureCount: t.int({
+      resolve: (parent) => parent.gradingFailureCount,
+    }),
+    averageScore: t.float({
+      nullable: true,
+      resolve: (parent) => parent.averageScore,
+    }),
+    minScore: t.float({
+      nullable: true,
+      resolve: (parent) => parent.minScore,
+    }),
+    maxScore: t.float({
+      nullable: true,
+      resolve: (parent) => parent.maxScore,
+    }),
+    failed: t.boolean({ resolve: (parent) => parent.failed }),
     minRunId: t.id({
       nullable: true,
       resolve: (parent) => parent.minRunId ?? null,
@@ -1581,14 +1579,26 @@ WorkspaceVerifyOutlierType.implement({
       nullable: true,
       resolve: (parent) => parent.maxRunId ?? null,
     }),
-    turnIndex: t.int({
-      nullable: true,
-      resolve: (parent) => parent.turnIndex ?? null,
-    }),
     messageRefId: t.id({
       nullable: true,
       resolve: (parent) => parent.messageRefId ?? null,
     }),
+  }),
+});
+
+const WorkspaceVerifyFailureReasonGroupType = builder.objectRef<
+  WorkspaceVerifyFailureReasonGroupRecord
+>("WorkspaceVerifyFailureReasonGroup");
+WorkspaceVerifyFailureReasonGroupType.implement({
+  fields: (t) => ({
+    key: t.id({ resolve: (parent) => parent.key }),
+    kind: t.field({
+      type: WorkspaceVerifyFailureReasonKindEnum,
+      resolve: (parent) =>
+        parent.kind === "execution" ? "EXECUTION" : "GRADING",
+    }),
+    reason: t.string({ resolve: (parent) => parent.reason }),
+    count: t.int({ resolve: (parent) => parent.count }),
   }),
 });
 
@@ -1599,41 +1609,67 @@ const WorkspaceVerifyMetricsType = builder.objectRef<
 );
 WorkspaceVerifyMetricsType.implement({
   fields: (t) => ({
-    sampleSize: t.int({ resolve: (parent) => parent.sampleSize }),
-    agreementRate: t.float({
+    scenarioRunCountRequested: t.int({
+      resolve: (parent) => parent.scenarioRunCountRequested,
+    }),
+    scenarioRunCountCompleted: t.int({
+      resolve: (parent) => parent.scenarioRunCountCompleted,
+    }),
+    scenarioRunCountFailed: t.int({
+      resolve: (parent) => parent.scenarioRunCountFailed,
+    }),
+    gradeSampleCountRequested: t.int({
+      resolve: (parent) => parent.gradeSampleCountRequested,
+    }),
+    gradeSampleCountCompleted: t.int({
+      resolve: (parent) => parent.gradeSampleCountCompleted,
+    }),
+    gradeSampleCountFailed: t.int({
+      resolve: (parent) => parent.gradeSampleCountFailed,
+    }),
+    executionFailureCount: t.int({
+      resolve: (parent) => parent.executionFailureCount,
+    }),
+    gradingFailureCount: t.int({
+      resolve: (parent) => parent.gradingFailureCount,
+    }),
+    passRate: t.float({
       nullable: true,
-      resolve: (parent) => parent.agreementRate,
+      resolve: (parent) => parent.passRate,
     }),
-    scoreSpreadMin: t.float({
+    scoreMin: t.float({
       nullable: true,
-      resolve: (parent) => parent.scoreSpreadMin,
+      resolve: (parent) => parent.scoreMin,
     }),
-    scoreSpreadMedian: t.float({
+    scoreMedian: t.float({
       nullable: true,
-      resolve: (parent) => parent.scoreSpreadMedian,
+      resolve: (parent) => parent.scoreMedian,
     }),
-    scoreSpreadMax: t.float({
+    scoreMax: t.float({
       nullable: true,
-      resolve: (parent) => parent.scoreSpreadMax,
+      resolve: (parent) => parent.scoreMax,
     }),
-    instabilityCount: t.int({
-      resolve: (parent) => parent.instabilityCount,
+    scoreMean: t.float({
+      nullable: true,
+      resolve: (parent) => parent.scoreMean,
     }),
-    verdict: t.field({
-      type: WorkspaceVerifyVerdictEnum,
-      resolve: (parent) => parent.verdict,
-    }),
-    verdictReason: t.string({
-      resolve: (parent) => parent.verdictReason,
-    }),
-    outliers: t.connection({
-      type: WorkspaceVerifyOutlierType,
+    outlierScenarioRuns: t.connection({
+      type: WorkspaceVerifyScenarioOutlierType,
       args: {
         first: t.arg.int(),
         after: t.arg.string(),
       },
       resolve: (parent, args) =>
-        resolveArrayConnection({ args }, parent.outliers),
+        resolveArrayConnection({ args }, parent.outlierScenarioRuns),
+    }),
+    failureReasons: t.connection({
+      type: WorkspaceVerifyFailureReasonGroupType,
+      args: {
+        first: t.arg.int(),
+        after: t.arg.string(),
+      },
+      resolve: (parent, args) =>
+        resolveArrayConnection({ args }, parent.failureReasons),
     }),
   }),
 });
@@ -1645,10 +1681,22 @@ WorkspaceVerifyBatchType.implement({
   fields: (t) => ({
     id: t.id({ resolve: (parent) => parent.id }),
     workspaceId: t.id({ resolve: (parent) => parent.workspaceId }),
-    graderId: t.id({ resolve: (parent) => parent.graderId }),
-    scenarioRunId: t.id({
+    scenarioDeckId: t.id({
       nullable: true,
-      resolve: (parent) => parent.scenarioRunId ?? null,
+      resolve: (parent) => parent.scenarioDeckId ?? null,
+    }),
+    graderId: t.id({ resolve: (parent) => parent.graderId }),
+    scenarioRuns: t.int({
+      resolve: (parent) => parent.scenarioRuns,
+    }),
+    graderRepeatsPerScenario: t.int({
+      resolve: (parent) => parent.graderRepeatsPerScenario,
+    }),
+    scenarioRunsCompleted: t.int({
+      resolve: (parent) => parent.scenarioRunsCompleted,
+    }),
+    scenarioRunsFailed: t.int({
+      resolve: (parent) => parent.scenarioRunsFailed,
     }),
     status: t.field({
       type: WorkspaceVerifyBatchStatusEnum,
@@ -1680,21 +1728,21 @@ WorkspaceVerifyBatchType.implement({
       nullable: true,
       resolve: async (parent, _args, context) => {
         if (!context.readWorkspaceGradeRuns) return null;
-        const completedRunIds = parent.requests
+        const runIds = parent.requests
           .filter((request) =>
-            request.status === "completed" &&
             typeof request.runId === "string" &&
             request.runId.trim().length > 0
           )
           .map((request) => request.runId as string);
-        if (completedRunIds.length === 0) return null;
-        const runIdSet = new Set(completedRunIds);
+        const runIdSet = new Set(runIds);
         const allRuns = await context.readWorkspaceGradeRuns(
           parent.workspaceId,
         );
         const selectedRuns = allRuns.filter((run) => runIdSet.has(run.id));
-        if (selectedRuns.length === 0) return null;
-        return buildVerifyMetricsFromRuns(selectedRuns);
+        return buildVerifyMetrics({
+          batch: parent,
+          runs: selectedRuns,
+        });
       },
     }),
   }),
@@ -2738,7 +2786,8 @@ const WorkspaceConversationSessionStartInput = builder.inputType(
       assistantInit: t.field({ type: "JSON" }),
       graderId: t.id(),
       scenarioRunId: t.id(),
-      batchSize: t.int(),
+      scenarioRuns: t.int(),
+      graderRepeatsPerScenario: t.int(),
       concurrency: t.int(),
     }),
   },
@@ -2786,9 +2835,10 @@ const WorkspaceVerifyBatchRunCreateInput = builder.inputType(
   {
     fields: (t) => ({
       workspaceId: t.id({ required: true }),
+      scenarioDeckId: t.id(),
       graderId: t.id({ required: true }),
-      scenarioRunId: t.id(),
-      batchSize: t.int({ required: true }),
+      scenarioRuns: t.int({ required: true }),
+      graderRepeatsPerScenario: t.int({ required: true }),
       concurrency: t.int({ required: true }),
     }),
   },
@@ -3019,7 +3069,8 @@ builder.mutationType({
           assistantInit: args.input.assistantInit,
           graderId: args.input.graderId ?? null,
           scenarioRunId: args.input.scenarioRunId ?? null,
-          batchSize: args.input.batchSize ?? null,
+          scenarioRuns: args.input.scenarioRuns ?? null,
+          graderRepeatsPerScenario: args.input.graderRepeatsPerScenario ?? null,
           concurrency: args.input.concurrency ?? null,
         });
         return {
@@ -3139,9 +3190,10 @@ builder.mutationType({
         }
         const batch = await context.createWorkspaceVerifyBatchRun({
           workspaceId: args.input.workspaceId,
+          scenarioDeckId: args.input.scenarioDeckId ?? null,
           graderId: args.input.graderId,
-          scenarioRunId: args.input.scenarioRunId ?? null,
-          batchSize: args.input.batchSize,
+          scenarioRuns: args.input.scenarioRuns,
+          graderRepeatsPerScenario: args.input.graderRepeatsPerScenario,
           concurrency: args.input.concurrency,
         });
         return {

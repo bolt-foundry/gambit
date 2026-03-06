@@ -191,10 +191,14 @@ export async function runVerifySmokeFlow(
     timeout: 10_000,
   });
 
-  const batchSizeInput = demoTarget.locator(
-    'label.verify-number-field:has-text("Batch size") input',
+  const scenarioRunsInput = demoTarget.locator(
+    'label.verify-number-field:has-text("Scenario runs") input',
   ).first();
-  await batchSizeInput.fill("1");
+  await scenarioRunsInput.fill("1");
+  const graderRepeatsInput = demoTarget.locator(
+    'label.verify-number-field:has-text("Grader repeats per scenario") input',
+  ).first();
+  await graderRepeatsInput.fill("1");
   const concurrencyInput = demoTarget.locator(
     'label.verify-number-field:has-text("Concurrency") input',
   ).first();

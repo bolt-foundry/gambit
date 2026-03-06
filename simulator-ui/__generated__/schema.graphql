@@ -304,14 +304,15 @@ input WorkspaceConversationSessionSendInput {
 
 input WorkspaceConversationSessionStartInput {
   assistantInit: JSON
-  batchSize: Int
   concurrency: Int
   graderId: ID
+  graderRepeatsPerScenario: Int
   inputItems: [OpenResponseInputItemInput!]
   kind: String!
   scenarioDeckId: ID
   scenarioInput: JSON
   scenarioRunId: ID
+  scenarioRuns: Int
   sessionId: ID
   workspaceId: ID!
 }
@@ -645,11 +646,15 @@ type WorkspaceVerifyBatch {
   failed: Int
   finishedAt: String
   graderId: ID
+  graderRepeatsPerScenario: Int
   id: ID
   metrics: WorkspaceVerifyMetrics
   requested: Int
   requests(after: String, before: String, first: Int, last: Int): WorkspaceVerifyBatchRequestsConnection
-  scenarioRunId: ID
+  scenarioDeckId: ID
+  scenarioRuns: Int
+  scenarioRunsCompleted: Int
+  scenarioRunsFailed: Int
   startedAt: String
   status: WorkspaceVerifyBatchStatus
   workspaceId: ID
@@ -659,6 +664,7 @@ type WorkspaceVerifyBatchRequest {
   error: String
   id: ID
   runId: ID
+  scenarioRunId: ID
   status: WorkspaceVerifyBatchRequestStatus
 }
 
@@ -680,10 +686,11 @@ type WorkspaceVerifyBatchRequestsConnectionEdge {
 }
 
 input WorkspaceVerifyBatchRunCreateInput {
-  batchSize: Int!
   concurrency: Int!
   graderId: ID!
-  scenarioRunId: ID
+  graderRepeatsPerScenario: Int!
+  scenarioDeckId: ID
+  scenarioRuns: Int!
   workspaceId: ID!
 }
 
@@ -711,44 +718,68 @@ type WorkspaceVerifyConversationSession implements WorkspaceConversationSession 
   workspaceId: ID
 }
 
-type WorkspaceVerifyMetrics {
-  agreementRate: Float
-  instabilityCount: Int
-  outliers(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsOutliersConnection
-  sampleSize: Int
-  scoreSpreadMax: Float
-  scoreSpreadMedian: Float
-  scoreSpreadMin: Float
-  verdict: WorkspaceVerifyVerdict
-  verdictReason: String
+type WorkspaceVerifyFailureReasonGroup {
+  count: Int
+  key: ID
+  kind: WorkspaceVerifyFailureReasonKind
+  reason: String
 }
 
-type WorkspaceVerifyMetricsOutliersConnection {
-  edges: [WorkspaceVerifyMetricsOutliersConnectionEdge]
+enum WorkspaceVerifyFailureReasonKind {
+  EXECUTION
+  GRADING
+}
+
+type WorkspaceVerifyMetrics {
+  executionFailureCount: Int
+  failureReasons(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsFailureReasonsConnection
+  gradeSampleCountCompleted: Int
+  gradeSampleCountFailed: Int
+  gradeSampleCountRequested: Int
+  gradingFailureCount: Int
+  outlierScenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsOutlierScenarioRunsConnection
+  passRate: Float
+  scenarioRunCountCompleted: Int
+  scenarioRunCountFailed: Int
+  scenarioRunCountRequested: Int
+  scoreMax: Float
+  scoreMean: Float
+  scoreMedian: Float
+  scoreMin: Float
+}
+
+type WorkspaceVerifyMetricsFailureReasonsConnection {
+  edges: [WorkspaceVerifyMetricsFailureReasonsConnectionEdge]
   pageInfo: PageInfo!
 }
 
-type WorkspaceVerifyMetricsOutliersConnectionEdge {
+type WorkspaceVerifyMetricsFailureReasonsConnectionEdge {
   cursor: String!
-  node: WorkspaceVerifyOutlier
+  node: WorkspaceVerifyFailureReasonGroup
 }
 
-type WorkspaceVerifyOutlier {
-  agreementRate: Float
-  instability: Boolean
+type WorkspaceVerifyMetricsOutlierScenarioRunsConnection {
+  edges: [WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge]
+  pageInfo: PageInfo!
+}
+
+type WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge {
+  cursor: String!
+  node: WorkspaceVerifyScenarioOutlier
+}
+
+type WorkspaceVerifyScenarioOutlier {
+  averageScore: Float
+  completedSampleCount: Int
+  executionFailureCount: Int
+  failed: Boolean
+  gradeSampleCount: Int
+  gradingFailureCount: Int
   key: ID
-  label: String
   maxRunId: ID
+  maxScore: Float
   messageRefId: ID
   minRunId: ID
-  passFlip: Boolean
-  sampleSize: Int
-  scoreDelta: Float
-  turnIndex: Int
-}
-
-enum WorkspaceVerifyVerdict {
-  FAIL
-  PASS
-  WARN
+  minScore: Float
+  scenarioRunId: ID
 }

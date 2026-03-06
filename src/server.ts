@@ -198,8 +198,12 @@ const _GRADE_STREAM_ID = "gambit-grade";
 const TEST_STREAM_ID = "gambit-test";
 const WORKSPACE_API_BASE = "/api/workspace";
 const WORKSPACES_API_BASE = "/api/workspaces";
-const VERIFY_BATCH_SIZE_MAX = 24;
+const VERIFY_SCENARIO_RUNS_MAX = 24;
+const VERIFY_GRADER_REPEATS_MAX = 24;
 const VERIFY_BATCH_CONCURRENCY_MAX = 6;
+const DEFAULT_VERIFY_SCENARIO_RUNS = 10;
+const DEFAULT_VERIFY_GRADER_REPEATS = 10;
+const DEFAULT_VERIFY_CONCURRENCY = 4;
 const WORKSPACE_REFRESH_DEBUG = (() => {
   const value = (Deno.env.get("GAMBIT_WORKSPACE_REFRESH_DEBUG") ?? "")
     .toLowerCase()
@@ -2745,6 +2749,7 @@ export function startWebSocketSimulator(opts: {
   type WorkspaceVerifyBatchRequestRecordForGraphql = {
     id: string;
     status: "queued" | "running" | "completed" | "error";
+    scenarioRunId?: string;
     runId?: string;
     error?: string;
   };
@@ -2752,8 +2757,10 @@ export function startWebSocketSimulator(opts: {
   type WorkspaceVerifyBatchRecordForGraphql = {
     id: string;
     workspaceId: string;
+    scenarioDeckId?: string;
     graderId: string;
-    scenarioRunId?: string;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     status: "idle" | "running" | "completed" | "error";
     startedAt?: string;
     finishedAt?: string;
@@ -2761,6 +2768,8 @@ export function startWebSocketSimulator(opts: {
     active: number;
     completed: number;
     failed: number;
+    scenarioRunsCompleted: number;
+    scenarioRunsFailed: number;
     requests: Array<WorkspaceVerifyBatchRequestRecordForGraphql>;
   };
 
@@ -2807,6 +2816,11 @@ export function startWebSocketSimulator(opts: {
               requestRecord.runId.trim().length > 0
             ? requestRecord.runId
             : undefined;
+          const scenarioRunId =
+            typeof requestRecord.scenarioRunId === "string" &&
+              requestRecord.scenarioRunId.trim().length > 0
+              ? requestRecord.scenarioRunId
+              : undefined;
           const error = typeof requestRecord.error === "string" &&
               requestRecord.error.trim().length > 0
             ? requestRecord.error
@@ -2814,6 +2828,7 @@ export function startWebSocketSimulator(opts: {
           return [{
             id: requestId,
             status: normalizeVerifyBatchRequestStatus(requestRecord.status),
+            scenarioRunId,
             runId,
             error,
           }];
@@ -2840,11 +2855,20 @@ export function startWebSocketSimulator(opts: {
           typeof batch.workspaceId === "string" && batch.workspaceId.trim()
             ? batch.workspaceId
             : "",
-        graderId: batch.graderId,
-        scenarioRunId: typeof batch.scenarioRunId === "string" &&
-            batch.scenarioRunId.trim().length > 0
-          ? batch.scenarioRunId
+        scenarioDeckId: typeof batch.scenarioDeckId === "string" &&
+            batch.scenarioDeckId.trim().length > 0
+          ? batch.scenarioDeckId
           : undefined,
+        graderId: batch.graderId,
+        scenarioRuns: typeof batch.scenarioRuns === "number" &&
+            Number.isFinite(batch.scenarioRuns)
+          ? Math.max(0, Math.round(batch.scenarioRuns))
+          : 0,
+        graderRepeatsPerScenario:
+          typeof batch.graderRepeatsPerScenario === "number" &&
+            Number.isFinite(batch.graderRepeatsPerScenario)
+            ? Math.max(0, Math.round(batch.graderRepeatsPerScenario))
+            : 0,
         status: normalizeVerifyBatchStatus(batch.status),
         startedAt:
           typeof batch.startedAt === "string" && batch.startedAt.trim().length >
@@ -2859,6 +2883,15 @@ export function startWebSocketSimulator(opts: {
         active,
         completed,
         failed,
+        scenarioRunsCompleted:
+          typeof batch.scenarioRunsCompleted === "number" &&
+            Number.isFinite(batch.scenarioRunsCompleted)
+            ? Math.max(0, Math.round(batch.scenarioRunsCompleted))
+            : 0,
+        scenarioRunsFailed: typeof batch.scenarioRunsFailed === "number" &&
+            Number.isFinite(batch.scenarioRunsFailed)
+          ? Math.max(0, Math.round(batch.scenarioRunsFailed))
+          : 0,
         requests,
       }];
     });
@@ -5242,8 +5275,10 @@ export function startWebSocketSimulator(opts: {
   ): Array<{
     id: string;
     workspaceId: string;
+    scenarioDeckId?: string;
     graderId: string;
-    scenarioRunId?: string;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     status: "idle" | "running" | "completed" | "error";
     startedAt?: string;
     finishedAt?: string;
@@ -5251,9 +5286,12 @@ export function startWebSocketSimulator(opts: {
     active: number;
     completed: number;
     failed: number;
+    scenarioRunsCompleted: number;
+    scenarioRunsFailed: number;
     requests: Array<{
       id: string;
       status: "queued" | "running" | "completed" | "error";
+      scenarioRunId?: string;
       runId?: string;
       error?: string;
     }>;
@@ -5268,15 +5306,18 @@ export function startWebSocketSimulator(opts: {
 
   const createWorkspaceVerifyBatchRunForGraphql = async (args: {
     workspaceId: string;
+    scenarioDeckId?: string | null;
     graderId: string;
-    scenarioRunId?: string | null;
-    batchSize: number;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     concurrency: number;
   }): Promise<{
     id: string;
     workspaceId: string;
+    scenarioDeckId?: string;
     graderId: string;
-    scenarioRunId?: string;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     status: "idle" | "running" | "completed" | "error";
     startedAt?: string;
     finishedAt?: string;
@@ -5284,9 +5325,12 @@ export function startWebSocketSimulator(opts: {
     active: number;
     completed: number;
     failed: number;
+    scenarioRunsCompleted: number;
+    scenarioRunsFailed: number;
     requests: Array<{
       id: string;
       status: "queued" | "running" | "completed" | "error";
+      scenarioRunId?: string;
       runId?: string;
       error?: string;
     }>;
@@ -5306,37 +5350,37 @@ export function startWebSocketSimulator(opts: {
       throw new Error(`Workspace ${args.workspaceId} not found`);
     }
 
-    const explicitScenarioRunId = typeof args.scenarioRunId === "string" &&
-        args.scenarioRunId.trim().length > 0
-      ? args.scenarioRunId.trim()
-      : null;
-    const runFromState =
-      state.meta && typeof state.meta.scenarioRunId === "string"
-        ? state.meta.scenarioRunId
-        : null;
-    const selectedScenarioRunId = explicitScenarioRunId ?? runFromState;
-    const scenarioRun = selectedScenarioRunId
-      ? readWorkspaceScenarioRunsForGraphql(args.workspaceId).find((entry) =>
-        entry.id === selectedScenarioRunId
-      )
-      : null;
-    if (selectedScenarioRunId && !scenarioRun) {
-      throw new Error(`Scenario run ${selectedScenarioRunId} not found`);
-    }
-
-    const normalizedBatchSize = Math.max(
+    const selectedScenarioDeckId = typeof args.scenarioDeckId === "string" &&
+        args.scenarioDeckId.trim().length > 0
+      ? args.scenarioDeckId.trim()
+      : undefined;
+    const normalizedScenarioRuns = Math.max(
       1,
       Math.min(
-        VERIFY_BATCH_SIZE_MAX,
-        Number.isFinite(args.batchSize) ? Math.round(args.batchSize) : 1,
+        VERIFY_SCENARIO_RUNS_MAX,
+        Number.isFinite(args.scenarioRuns)
+          ? Math.round(args.scenarioRuns)
+          : DEFAULT_VERIFY_SCENARIO_RUNS,
       ),
     );
+    const normalizedRepeats = Math.max(
+      1,
+      Math.min(
+        VERIFY_GRADER_REPEATS_MAX,
+        Number.isFinite(args.graderRepeatsPerScenario)
+          ? Math.round(args.graderRepeatsPerScenario)
+          : DEFAULT_VERIFY_GRADER_REPEATS,
+      ),
+    );
+    const requestedSamples = normalizedScenarioRuns * normalizedRepeats;
     const normalizedConcurrency = Math.max(
       1,
       Math.min(
         VERIFY_BATCH_CONCURRENCY_MAX,
-        normalizedBatchSize,
-        Number.isFinite(args.concurrency) ? Math.round(args.concurrency) : 1,
+        requestedSamples,
+        Number.isFinite(args.concurrency)
+          ? Math.round(args.concurrency)
+          : DEFAULT_VERIFY_CONCURRENCY,
       ),
     );
 
@@ -5345,22 +5389,78 @@ export function startWebSocketSimulator(opts: {
     let batch: WorkspaceVerifyBatchRecordForGraphql = {
       id: batchId,
       workspaceId: args.workspaceId,
+      scenarioDeckId: selectedScenarioDeckId,
       graderId: grader.id,
-      scenarioRunId: selectedScenarioRunId ?? undefined,
+      scenarioRuns: normalizedScenarioRuns,
+      graderRepeatsPerScenario: normalizedRepeats,
       status: "running",
       startedAt: now,
       finishedAt: undefined,
-      requested: normalizedBatchSize,
+      requested: requestedSamples,
       active: 0,
       completed: 0,
       failed: 0,
+      scenarioRunsCompleted: 0,
+      scenarioRunsFailed: 0,
       requests: Array.from(
-        { length: normalizedBatchSize },
-        (_value, index) => ({
-          id: `${batchId}:${index + 1}`,
-          status: "queued",
-        }),
-      ),
+        { length: normalizedScenarioRuns },
+        (_value, scenarioIndex) =>
+          Array.from({ length: normalizedRepeats }, (_repeat, repeatIndex) => ({
+            id: `${batchId}:s${scenarioIndex + 1}:r${repeatIndex + 1}`,
+            status: "queued" as const,
+          })),
+      ).flat(),
+    };
+
+    const recomputeBatchState = (
+      baseBatch: WorkspaceVerifyBatchRecordForGraphql,
+      nextRequests: Array<WorkspaceVerifyBatchRequestRecordForGraphql>,
+      options?: {
+        scenarioRunsCompleted?: number;
+        scenarioRunsFailed?: number;
+      },
+    ): WorkspaceVerifyBatchRecordForGraphql => {
+      const active =
+        nextRequests.filter((request) => request.status === "running").length;
+      const completed =
+        nextRequests.filter((request) => request.status === "completed").length;
+      const failed =
+        nextRequests.filter((request) => request.status === "error")
+          .length;
+      const terminal = completed + failed === requestedSamples && active === 0;
+      return {
+        ...baseBatch,
+        requests: nextRequests,
+        active,
+        completed,
+        failed,
+        scenarioRunsCompleted: options?.scenarioRunsCompleted ??
+          baseBatch.scenarioRunsCompleted,
+        scenarioRunsFailed: options?.scenarioRunsFailed ??
+          baseBatch.scenarioRunsFailed,
+        status: terminal ? (failed > 0 ? "error" : "completed") : "running",
+        finishedAt: terminal ? new Date().toISOString() : undefined,
+      };
+    };
+    const awaitScenarioRunTerminal = async (
+      run: Awaited<ReturnType<typeof startWorkspaceScenarioRunForGraphql>>,
+    ): Promise<
+      Awaited<ReturnType<typeof startWorkspaceScenarioRunForGraphql>>
+    > => {
+      if (run.status !== "running" && run.status !== "idle") {
+        return run;
+      }
+      const active = testBotRuns.get(run.id);
+      if (active?.promise) {
+        try {
+          await active.promise;
+        } catch {
+          // Run status/error is projected on the run record.
+        }
+      }
+      const latest = readWorkspaceScenarioRunsForGraphql(args.workspaceId)
+        .find((entry) => entry.id === run.id);
+      return latest ?? run;
     };
 
     let persistedState = persistSessionState(
@@ -5388,13 +5488,27 @@ export function startWebSocketSimulator(opts: {
     persistAndBroadcastBatch("created");
 
     let updateQueue = Promise.resolve();
+    const queueBatchUpdate = async (
+      reason: string,
+      updater: (
+        current: WorkspaceVerifyBatchRecordForGraphql,
+      ) => WorkspaceVerifyBatchRecordForGraphql,
+    ) => {
+      updateQueue = updateQueue.then(() => {
+        batch = updater(batch);
+        persistAndBroadcastBatch(reason);
+      });
+      await updateQueue;
+    };
     const updateBatchRequest = async (
       requestIndex: number,
       patch: Partial<WorkspaceVerifyBatchRequestRecordForGraphql>,
     ) => {
-      updateQueue = updateQueue.then(() => {
-        if (requestIndex < 0 || requestIndex >= batch.requests.length) return;
-        const nextRequests = batch.requests.map((request, index) =>
+      await queueBatchUpdate("request-update", (current) => {
+        if (requestIndex < 0 || requestIndex >= current.requests.length) {
+          return current;
+        }
+        const nextRequests = current.requests.map((request, index) =>
           index === requestIndex ? { ...request, ...patch } : request
         );
         const active = nextRequests.filter((request) =>
@@ -5405,9 +5519,10 @@ export function startWebSocketSimulator(opts: {
             .length;
         const failed =
           nextRequests.filter((request) => request.status === "error").length;
-        const terminal = completed + failed === batch.requested && active === 0;
-        batch = {
-          ...batch,
+        const terminal = completed + failed === current.requested &&
+          active === 0;
+        return {
+          ...current,
           requests: nextRequests,
           active,
           completed,
@@ -5415,36 +5530,69 @@ export function startWebSocketSimulator(opts: {
           status: terminal ? (failed > 0 ? "error" : "completed") : "running",
           finishedAt: terminal ? new Date().toISOString() : undefined,
         };
-        persistAndBroadcastBatch("request-update");
       });
-      await updateQueue;
     };
-
-    let cursor = 0;
-    const workers = Array.from(
+    const queuedGradeRequestIndexes: Array<number> = [];
+    let gradeQueueClosed = false;
+    const gradeQueueWaiters: Array<() => void> = [];
+    const wakeGradeWorkers = (count: number) => {
+      let remaining = Math.max(0, count);
+      while (remaining > 0 && gradeQueueWaiters.length > 0) {
+        const notify = gradeQueueWaiters.shift();
+        if (notify) notify();
+        remaining -= 1;
+      }
+    };
+    const enqueueGradeRequestIndexes = (requestIndexes: Array<number>) => {
+      if (requestIndexes.length === 0) return;
+      queuedGradeRequestIndexes.push(...requestIndexes);
+      wakeGradeWorkers(requestIndexes.length);
+    };
+    const closeGradeQueue = () => {
+      gradeQueueClosed = true;
+      while (gradeQueueWaiters.length > 0) {
+        const notify = gradeQueueWaiters.shift();
+        if (notify) notify();
+      }
+    };
+    const nextQueuedGradeRequestIndex = async (): Promise<
+      number | undefined
+    > => {
+      while (queuedGradeRequestIndexes.length === 0) {
+        if (gradeQueueClosed) return undefined;
+        await new Promise<void>((resolve) => {
+          gradeQueueWaiters.push(resolve);
+        });
+      }
+      return queuedGradeRequestIndexes.shift();
+    };
+    const gradeWorkers = Array.from(
       { length: normalizedConcurrency },
       () =>
         (async () => {
           while (true) {
-            const requestIndex = cursor;
-            cursor += 1;
-            if (requestIndex >= normalizedBatchSize) return;
+            const requestIndex = await nextQueuedGradeRequestIndex();
+            if (requestIndex === undefined) return;
+            const scenarioRunId = batch.requests[requestIndex]?.scenarioRunId;
+            if (!scenarioRunId) continue;
             await updateBatchRequest(requestIndex, { status: "running" });
             try {
               const run = await createWorkspaceGradeRunForGraphql({
                 workspaceId: args.workspaceId,
                 graderId: grader.id,
-                scenarioRunId: selectedScenarioRunId,
+                scenarioRunId,
               });
               if (run.status === "completed") {
                 await updateBatchRequest(requestIndex, {
                   status: "completed",
+                  scenarioRunId,
                   runId: run.id,
                   error: undefined,
                 });
               } else {
                 await updateBatchRequest(requestIndex, {
                   status: "error",
+                  scenarioRunId,
                   runId: run.id,
                   error: run.error ??
                     `Grade run ended with status ${run.status}`,
@@ -5453,6 +5601,7 @@ export function startWebSocketSimulator(opts: {
             } catch (error) {
               await updateBatchRequest(requestIndex, {
                 status: "error",
+                scenarioRunId,
                 error: error instanceof Error ? error.message : String(error),
               });
             }
@@ -5460,7 +5609,105 @@ export function startWebSocketSimulator(opts: {
         })(),
     );
 
-    await Promise.all(workers);
+    let scenarioCursor = 0;
+    const nextScenarioIndex = (): number | undefined => {
+      if (scenarioCursor >= normalizedScenarioRuns) return undefined;
+      const current = scenarioCursor;
+      scenarioCursor += 1;
+      return current;
+    };
+    const scenarioWorkerCount = Math.max(
+      1,
+      Math.min(normalizedScenarioRuns, normalizedConcurrency),
+    );
+    const scenarioWorkers = Array.from(
+      { length: scenarioWorkerCount },
+      () =>
+        (async () => {
+          while (true) {
+            const scenarioIndex = nextScenarioIndex();
+            if (scenarioIndex === undefined) return;
+            const requestStart = scenarioIndex * normalizedRepeats;
+            const requestEndExclusive = requestStart + normalizedRepeats;
+            try {
+              const startedRun = await startWorkspaceScenarioRunForGraphql({
+                workspaceId: args.workspaceId,
+                scenarioDeckId: selectedScenarioDeckId,
+              });
+              const run = await awaitScenarioRunTerminal(startedRun);
+              if (run.status !== "completed") {
+                const scenarioError = run.error ??
+                  `Scenario run ended with status ${run.status}`;
+                await queueBatchUpdate("scenario-run-failed", (current) =>
+                  recomputeBatchState(
+                    current,
+                    current.requests.map((request, requestIndex) =>
+                      requestIndex >= requestStart &&
+                        requestIndex < requestEndExclusive
+                        ? {
+                          ...request,
+                          scenarioRunId: run.id,
+                          status: "error",
+                          error: scenarioError,
+                        }
+                        : request
+                    ),
+                    {
+                      scenarioRunsFailed: current.scenarioRunsFailed + 1,
+                    },
+                  ));
+                continue;
+              }
+              await queueBatchUpdate("scenario-run-completed", (current) =>
+                recomputeBatchState(
+                  current,
+                  current.requests.map((request, requestIndex) =>
+                    requestIndex >= requestStart &&
+                      requestIndex < requestEndExclusive
+                      ? {
+                        ...request,
+                        scenarioRunId: run.id,
+                      }
+                      : request
+                  ),
+                  {
+                    scenarioRunsCompleted: current.scenarioRunsCompleted + 1,
+                  },
+                ));
+              const requestIndexes = Array.from(
+                { length: normalizedRepeats },
+                (_value, repeatIndex) =>
+                  requestStart + repeatIndex,
+              );
+              enqueueGradeRequestIndexes(requestIndexes);
+            } catch (error) {
+              const scenarioError = error instanceof Error
+                ? error.message
+                : String(error);
+              await queueBatchUpdate("scenario-run-error", (current) =>
+                recomputeBatchState(
+                  current,
+                  current.requests.map((request, requestIndex) =>
+                    requestIndex >= requestStart &&
+                      requestIndex < requestEndExclusive
+                      ? {
+                        ...request,
+                        status: "error",
+                        error: scenarioError,
+                      }
+                      : request
+                  ),
+                  {
+                    scenarioRunsFailed: current.scenarioRunsFailed + 1,
+                  },
+                ));
+            }
+          }
+        })(),
+    );
+    await Promise.all(scenarioWorkers);
+    closeGradeQueue();
+    await Promise.all(gradeWorkers);
     await updateQueue;
     return batch;
   };
@@ -5864,7 +6111,8 @@ export function startWebSocketSimulator(opts: {
     assistantInit?: unknown;
     graderId?: string | null;
     scenarioRunId?: string | null;
-    batchSize?: number | null;
+    scenarioRuns?: number | null;
+    graderRepeatsPerScenario?: number | null;
     concurrency?: number | null;
   }): Promise<WorkspaceConversationSessionRecordForGraphql> => {
     if (args.kind === "build") {
@@ -5896,10 +6144,12 @@ export function startWebSocketSimulator(opts: {
     if (!args.graderId) throw new Error("graderId is required");
     const batch = await createWorkspaceVerifyBatchRunForGraphql({
       workspaceId: args.workspaceId,
+      scenarioDeckId: args.scenarioDeckId ?? null,
       graderId: args.graderId,
-      scenarioRunId: args.scenarioRunId ?? null,
-      batchSize: args.batchSize ?? 1,
-      concurrency: args.concurrency ?? 1,
+      scenarioRuns: args.scenarioRuns ?? DEFAULT_VERIFY_SCENARIO_RUNS,
+      graderRepeatsPerScenario: args.graderRepeatsPerScenario ??
+        DEFAULT_VERIFY_GRADER_REPEATS,
+      concurrency: args.concurrency ?? DEFAULT_VERIFY_CONCURRENCY,
     });
     return toVerifyConversationSessionForGraphql(args.workspaceId, batch);
   };
@@ -7198,9 +7448,10 @@ export function startWebSocketSimulator(opts: {
           await readWorkspaceVerifyBatchesForGraphql(workspaceId),
         createWorkspaceVerifyBatchRun: async (args: {
           workspaceId: string;
+          scenarioDeckId?: string | null;
           graderId: string;
-          scenarioRunId?: string | null;
-          batchSize: number;
+          scenarioRuns: number;
+          graderRepeatsPerScenario: number;
           concurrency: number;
         }) => await createWorkspaceVerifyBatchRunForGraphql(args),
         listWorkspaceConversationSessions: async (args: {
@@ -7222,7 +7473,8 @@ export function startWebSocketSimulator(opts: {
           assistantInit?: unknown;
           graderId?: string | null;
           scenarioRunId?: string | null;
-          batchSize?: number | null;
+          scenarioRuns?: number | null;
+          graderRepeatsPerScenario?: number | null;
           concurrency?: number | null;
         }) => await startWorkspaceConversationSessionForGraphql(args),
         sendWorkspaceConversationSession: async (args: {

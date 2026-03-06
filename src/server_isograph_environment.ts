@@ -124,6 +124,7 @@ type WorkspaceGradingFlagRecord = {
 type WorkspaceVerifyBatchRequestRecord = {
   id: string;
   status: "queued" | "running" | "completed" | "error";
+  scenarioRunId?: string;
   runId?: string;
   error?: string;
 };
@@ -131,8 +132,10 @@ type WorkspaceVerifyBatchRequestRecord = {
 type WorkspaceVerifyBatchRecord = {
   id: string;
   workspaceId: string;
+  scenarioDeckId?: string;
   graderId: string;
-  scenarioRunId?: string;
+  scenarioRuns: number;
+  graderRepeatsPerScenario: number;
   status: "idle" | "running" | "completed" | "error";
   startedAt?: string;
   finishedAt?: string;
@@ -140,6 +143,8 @@ type WorkspaceVerifyBatchRecord = {
   active: number;
   completed: number;
   failed: number;
+  scenarioRunsCompleted: number;
+  scenarioRunsFailed: number;
   requests: Array<WorkspaceVerifyBatchRequestRecord>;
 };
 
@@ -267,9 +272,10 @@ export type SimulatorGraphqlOperations = {
   ) => Promise<Array<WorkspaceVerifyBatchRecord>>;
   createWorkspaceVerifyBatchRun: (args: {
     workspaceId: string;
+    scenarioDeckId?: Maybe<string>;
     graderId: string;
-    scenarioRunId?: Maybe<string>;
-    batchSize: number;
+    scenarioRuns: number;
+    graderRepeatsPerScenario: number;
     concurrency: number;
   }) => Promise<WorkspaceVerifyBatchRecord>;
   listWorkspaceConversationSessions: (args: {
@@ -291,7 +297,8 @@ export type SimulatorGraphqlOperations = {
     assistantInit?: unknown;
     graderId?: Maybe<string>;
     scenarioRunId?: Maybe<string>;
-    batchSize?: Maybe<number>;
+    scenarioRuns?: Maybe<number>;
+    graderRepeatsPerScenario?: Maybe<number>;
     concurrency?: Maybe<number>;
   }) => Promise<WorkspaceConversationSessionRecord>;
   sendWorkspaceConversationSession: (args: {
@@ -504,20 +511,26 @@ export function getSimulatorIsographEnvironment(
           operations?.createWorkspaceVerifyBatchRun ??
             ((args: {
               workspaceId: string;
+              scenarioDeckId?: Maybe<string>;
               graderId: string;
-              scenarioRunId?: Maybe<string>;
-              batchSize: number;
+              scenarioRuns: number;
+              graderRepeatsPerScenario: number;
               concurrency: number;
             }) =>
               Promise.resolve({
                 id: `${args.workspaceId}:verify-batch`,
                 workspaceId: args.workspaceId,
+                scenarioDeckId: args.scenarioDeckId ?? undefined,
                 graderId: args.graderId,
+                scenarioRuns: args.scenarioRuns,
+                graderRepeatsPerScenario: args.graderRepeatsPerScenario,
                 status: "error",
                 requested: 0,
                 active: 0,
                 completed: 0,
                 failed: 0,
+                scenarioRunsCompleted: 0,
+                scenarioRunsFailed: 0,
                 requests: [{
                   id: `${args.workspaceId}:verify-batch:request:1`,
                   status: "error",

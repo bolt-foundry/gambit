@@ -7,16 +7,11 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
     workspaceVerifyBatchRunCreate(input: $input) {
       workspace {
         id
-        scenarioRuns(first: 50) {
-          edges {
-            node {
-              id
-              status
-              startedAt
-              finishedAt
-              error
-            }
-          }
+        scenarioDecks {
+          id
+          label
+          description
+          path
         }
         verification {
           graderDecks(first: 50) {
@@ -34,8 +29,10 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
               node {
                 id
                 workspaceId
+                scenarioDeckId
                 graderId
-                scenarioRunId
+                scenarioRuns
+                graderRepeatsPerScenario
                 status
                 startedAt
                 finishedAt
@@ -43,10 +40,13 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
                 active
                 completed
                 failed
-                requests(first: 50) {
+                scenarioRunsCompleted
+                scenarioRunsFailed
+                requests(first: 200) {
                   edges {
                     node {
                       id
+                      scenarioRunId
                       status
                       runId
                       error
@@ -54,28 +54,45 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
                   }
                 }
                 metrics {
-                  sampleSize
-                  agreementRate
-                  scoreSpreadMin
-                  scoreSpreadMedian
-                  scoreSpreadMax
-                  instabilityCount
-                  verdict
-                  verdictReason
-                  outliers(first: 25) {
+                  scenarioRunCountRequested
+                  scenarioRunCountCompleted
+                  scenarioRunCountFailed
+                  gradeSampleCountRequested
+                  gradeSampleCountCompleted
+                  gradeSampleCountFailed
+                  executionFailureCount
+                  gradingFailureCount
+                  passRate
+                  scoreMin
+                  scoreMedian
+                  scoreMax
+                  scoreMean
+                  outlierScenarioRuns(first: 25) {
                     edges {
                       node {
                         key
-                        label
-                        sampleSize
-                        agreementRate
-                        scoreDelta
-                        passFlip
-                        instability
+                        scenarioRunId
+                        gradeSampleCount
+                        completedSampleCount
+                        executionFailureCount
+                        gradingFailureCount
+                        averageScore
+                        minScore
+                        maxScore
+                        failed
                         minRunId
                         maxRunId
-                        turnIndex
                         messageRefId
+                      }
+                    }
+                  }
+                  failureReasons(first: 25) {
+                    edges {
+                      node {
+                        key
+                        kind
+                        reason
+                        count
                       }
                     }
                   }
@@ -88,8 +105,10 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
       batch {
         id
         workspaceId
+        scenarioDeckId
         graderId
-        scenarioRunId
+        scenarioRuns
+        graderRepeatsPerScenario
         status
         startedAt
         finishedAt
@@ -97,10 +116,13 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
         active
         completed
         failed
-        requests(first: 50) {
+        scenarioRunsCompleted
+        scenarioRunsFailed
+        requests(first: 200) {
           edges {
             node {
               id
+              scenarioRunId
               status
               runId
               error
@@ -108,28 +130,45 @@ export const GambitWorkspaceVerifyBatchRunCreateMutation = iso(`
           }
         }
         metrics {
-          sampleSize
-          agreementRate
-          scoreSpreadMin
-          scoreSpreadMedian
-          scoreSpreadMax
-          instabilityCount
-          verdict
-          verdictReason
-          outliers(first: 25) {
+          scenarioRunCountRequested
+          scenarioRunCountCompleted
+          scenarioRunCountFailed
+          gradeSampleCountRequested
+          gradeSampleCountCompleted
+          gradeSampleCountFailed
+          executionFailureCount
+          gradingFailureCount
+          passRate
+          scoreMin
+          scoreMedian
+          scoreMax
+          scoreMean
+          outlierScenarioRuns(first: 25) {
             edges {
               node {
                 key
-                label
-                sampleSize
-                agreementRate
-                scoreDelta
-                passFlip
-                instability
+                scenarioRunId
+                gradeSampleCount
+                completedSampleCount
+                executionFailureCount
+                gradingFailureCount
+                averageScore
+                minScore
+                maxScore
+                failed
                 minRunId
                 maxRunId
-                turnIndex
                 messageRefId
+              }
+            }
+          }
+          failureReasons(first: 25) {
+            edges {
+              node {
+                key
+                kind
+                reason
+                count
               }
             }
           }

@@ -117,10 +117,14 @@ async function main(): Promise<void> {
         );
         await screenshot("02-verify-tab-loaded");
 
-        const batchSizeInput = demoTarget.locator(
-          'label.verify-number-field:has-text("Batch size") input',
+        const scenarioRunsInput = demoTarget.locator(
+          'label.verify-number-field:has-text("Scenario runs") input',
         ).first();
-        await batchSizeInput.fill("4");
+        await scenarioRunsInput.fill("2");
+        const graderRepeatsInput = demoTarget.locator(
+          'label.verify-number-field:has-text("Grader repeats per scenario") input',
+        ).first();
+        await graderRepeatsInput.fill("2");
         const concurrencyInput = demoTarget.locator(
           'label.verify-number-field:has-text("Concurrency") input',
         ).first();
