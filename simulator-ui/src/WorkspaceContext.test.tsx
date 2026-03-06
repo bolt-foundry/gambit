@@ -1288,12 +1288,13 @@ Deno.test("WorkspaceContext build chat stream/status lifecycle", async () => {
   }
 });
 
-Deno.test("WorkspaceContext build chat provider falls back to default when workspace metadata has none", async () => {
+Deno.test("WorkspaceContext build chat provider falls back to stored preference when workspace metadata has none", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;
 
   let hook: any = null;
   let setWorkspaceId: ((value: string) => void) | null = null;
+  globalThis.localStorage?.removeItem("gambit:build-chat-provider");
 
   globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -1347,7 +1348,7 @@ Deno.test("WorkspaceContext build chat provider falls back to default when works
       setWorkspaceId!("ws-2");
     });
 
-    assertEquals(hook.buildChatProvider, defaultBuildChatProvider);
+    assertEquals(hook.buildChatProvider, "claude-code-cli");
   } finally {
     if (renderer) {
       await act(async () => {
@@ -1356,6 +1357,7 @@ Deno.test("WorkspaceContext build chat provider falls back to default when works
     }
     globalThis.fetch = originalFetch;
     globalThis.EventSource = originalEventSource;
+    globalThis.localStorage?.removeItem("gambit:build-chat-provider");
     FakeEventSource.connections.clear();
   }
 });
