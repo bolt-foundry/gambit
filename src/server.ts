@@ -44,6 +44,7 @@ import {
 } from "./durable_streams.ts";
 import { type CheckReport, handleCheckCommand } from "./commands/check.ts";
 import { readCodexLoginStatus } from "./codex_preflight.ts";
+import { readClaudeCodeLoginStatus } from "./claude_code_preflight.ts";
 import { handleGraphqlStreamMultiplexRequest } from "./graphql_stream_multiplex.ts";
 import { handleGraphqlSubscriptionStreamRequest } from "./graphql_subscription_stream.ts";
 import type { GambitID } from "./gambit_id.ts";
@@ -7012,13 +7013,13 @@ export function startWebSocketSimulator(opts: {
         try {
           await logWorkspaceBotRoot(url.pathname, workspaceId);
           if (!isLegacyCodexTrustEndpoint && provider === "claude-code-cli") {
+            const login = await readClaudeCodeLoginStatus();
             return new Response(
               JSON.stringify({
                 ok: true,
                 provider,
-                loggedIn: false,
-                loginStatus:
-                  "Claude Code status check is not yet supported in this build.",
+                loggedIn: login.claudeCodeLoggedIn,
+                loginStatus: login.claudeCodeLoginStatus,
                 writeEnabled: false,
               }),
               { headers: { "content-type": "application/json" } },

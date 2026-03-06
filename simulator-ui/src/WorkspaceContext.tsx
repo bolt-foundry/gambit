@@ -188,6 +188,35 @@ type WorkspaceContextValue = {
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
+const BUILD_CHAT_PROVIDER_STORAGE_KEY = "gambit:build-chat-provider";
+
+function normalizeBuildChatProvider(
+  value: unknown,
+): BuildChatProvider | null {
+  if (value === "claude-code-cli") return "claude-code-cli";
+  if (value === "codex-cli") return "codex-cli";
+  return null;
+}
+
+function readStoredBuildChatProvider(): BuildChatProvider | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return normalizeBuildChatProvider(
+      globalThis.localStorage.getItem(BUILD_CHAT_PROVIDER_STORAGE_KEY),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function storeBuildChatProvider(provider: BuildChatProvider) {
+  if (typeof window === "undefined") return;
+  try {
+    globalThis.localStorage.setItem(BUILD_CHAT_PROVIDER_STORAGE_KEY, provider);
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function isGradeDebugEnabled(): boolean {
   if (typeof window === "undefined") return false;
@@ -277,7 +306,14 @@ export function WorkspaceProvider(
 
   const [buildChatDraft, setBuildChatDraft] = useState("");
   const [buildChatProvider, setBuildChatProvider] = useState<BuildChatProvider>(
-    defaultBuildChatProvider,
+    () => readStoredBuildChatProvider() ?? defaultBuildChatProvider,
+  );
+  const setAndPersistBuildChatProvider = useCallback(
+    (provider: BuildChatProvider) => {
+      storeBuildChatProvider(provider);
+      setBuildChatProvider(provider);
+    },
+    [],
   );
   const [buildChatSending, setBuildChatSending] = useState(false);
   const [buildChatError, setBuildChatError] = useState<string | null>(null);
@@ -474,9 +510,7 @@ export function WorkspaceProvider(
     (meta?: Record<string, unknown> | null): BuildChatProvider | null => {
       if (!meta) return null;
       const raw = (meta as { buildChatProvider?: unknown }).buildChatProvider;
-      if (raw === "claude-code-cli") return "claude-code-cli";
-      if (raw === "codex-cli") return "codex-cli";
-      return null;
+      return normalizeBuildChatProvider(raw);
     },
     [],
   );
@@ -488,7 +522,10 @@ export function WorkspaceProvider(
         const persistedProvider = resolvePersistedBuildChatProvider(
           data.session?.meta,
         );
-        setBuildChatProvider(persistedProvider ?? defaultBuildChatProvider);
+        setAndPersistBuildChatProvider(
+          persistedProvider ?? readStoredBuildChatProvider() ??
+            defaultBuildChatProvider,
+        );
         if (!data.build.run) return;
         setBuildRun((prev) =>
           mergeBuildRunSnapshot(prev, data.build.run as BuildRun)
@@ -512,6 +549,7 @@ export function WorkspaceProvider(
       loadWorkspaceSnapshot,
       mergeBuildRunSnapshot,
       resolvePersistedBuildChatProvider,
+      setAndPersistBuildChatProvider,
     ],
   );
 
@@ -1144,11 +1182,11 @@ export function WorkspaceProvider(
   }, []);
 
   const updateBuildChatProvider = useCallback((provider: BuildChatProvider) => {
-    setBuildChatProvider(provider);
+    setAndPersistBuildChatProvider(provider);
     const targetWorkspaceId = buildRunIdRef.current || workspaceId || "";
     if (!targetWorkspaceId) return;
     void persistBuildChatProvider(targetWorkspaceId, provider).catch(() => {});
-  }, [persistBuildChatProvider, workspaceId]);
+  }, [persistBuildChatProvider, setAndPersistBuildChatProvider, workspaceId]);
 
   const loadBuildChat = useCallback(async (runId: string) => {
     setBuildChatSending(true);
@@ -1158,7 +1196,10 @@ export function WorkspaceProvider(
       const persistedProvider = resolvePersistedBuildChatProvider(
         snapshot.session?.meta,
       );
-      setBuildChatProvider(persistedProvider ?? defaultBuildChatProvider);
+      setAndPersistBuildChatProvider(
+        persistedProvider ?? readStoredBuildChatProvider() ??
+          defaultBuildChatProvider,
+      );
       const data = snapshot.build;
       if (!data.run) return;
       buildIgnoredStreamRunIdsRef.current.delete(runId);
@@ -1179,6 +1220,7 @@ export function WorkspaceProvider(
     mergeBuildRunSnapshot,
     onWorkspaceChange,
     resolvePersistedBuildChatProvider,
+    setAndPersistBuildChatProvider,
   ]);
 
   const refreshTestStatus = useCallback(async (
