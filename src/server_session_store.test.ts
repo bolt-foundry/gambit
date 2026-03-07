@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
+import { createSessionStore } from "./server_session_store.ts";
 import {
   modImportPath,
   readJsonLines,
@@ -10,6 +12,516 @@ import {
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for predicate");
+}
+
+leakTolerantTest(
+  "openresponses run-event store validates append payload, replays from sequence, supports idempotency, and streams live updates",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsRoot = path.join(dir, "sessions");
+    const workspaceId = "workspace-run-events";
+    const sessionDir = path.join(sessionsRoot, workspaceId);
+    const statePath = path.join(sessionDir, "state.json");
+    const eventsPath = path.join(sessionDir, "events.jsonl");
+    const store = createSessionStore({
+      sessionsRoot,
+      randomId: (prefix: string) => `${prefix}-${crypto.randomUUID()}`,
+      logger: { warn: () => {} },
+      enrichStateWithSession: (state: SavedState) => {
+        const meta = { ...(state.meta ?? {}) };
+        meta.sessionId = typeof meta.sessionId === "string"
+          ? meta.sessionId
+          : workspaceId;
+        meta.workspaceId = typeof meta.workspaceId === "string"
+          ? meta.workspaceId
+          : workspaceId;
+        meta.sessionDir = typeof meta.sessionDir === "string"
+          ? meta.sessionDir
+          : sessionDir;
+        meta.sessionStatePath = typeof meta.sessionStatePath === "string"
+          ? meta.sessionStatePath
+          : statePath;
+        meta.sessionEventsPath = typeof meta.sessionEventsPath === "string"
+          ? meta.sessionEventsPath
+          : eventsPath;
+        meta.workspaceSchemaVersion = "workspace-state.v1";
+        return {
+          state: { ...state, meta },
+          dir: sessionDir,
+        };
+      },
+      workspaceStateSchemaVersion: "workspace-state.v1",
+      workspaceSchemaError: (id, found) =>
+        `Unsupported workspace state schema for ${id}: ${found}`,
+    });
+
+    const initialState = store.persistSessionState({
+      runId: workspaceId,
+      messages: [],
+      meta: { workspaceId, sessionId: workspaceId },
+    });
+    assert(initialState.meta?.sessionStatePath);
+    assert(initialState.meta?.sessionEventsPath);
+
+    let validationError: Error | null = null;
+    try {
+      await store.appendOpenResponsesRunEvent(initialState, {
+        workspace_id: workspaceId,
+        run_id: "run-1",
+        event_type: "response.created",
+        payload: {} as Record<string, unknown>,
+        idempotency_key: "bad-payload",
+      });
+    } catch (err) {
+      validationError = err as Error;
+    }
+    assert(validationError);
+
+    const appendedA = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.created",
+      payload: {
+        type: "response.created",
+        response: {
+          id: "resp-1",
+          object: "response",
+          status: "in_progress",
+          output: [],
+        },
+      },
+      idempotency_key: "run-1:event-1",
+    });
+    assert(appendedA);
+    const appendedADupe = await store.appendOpenResponsesRunEvent(
+      initialState,
+      {
+        workspace_id: workspaceId,
+        run_id: "run-1",
+        event_type: "response.created",
+        payload: {
+          type: "response.created",
+          response: {
+            id: "resp-1",
+            object: "response",
+            status: "in_progress",
+            output: [],
+          },
+        },
+        idempotency_key: "run-1:event-1",
+      },
+    );
+    assertEquals(appendedADupe?.sequence, appendedA?.sequence);
+    const appendedOtherRunSameIdempotency = await store
+      .appendOpenResponsesRunEvent(
+        initialState,
+        {
+          workspace_id: workspaceId,
+          run_id: "run-2",
+          event_type: "response.created",
+          payload: {
+            type: "response.created",
+            response: {
+              id: "resp-2",
+              object: "response",
+              status: "in_progress",
+              output: [],
+            },
+          },
+          idempotency_key: "run-1:event-1",
+        },
+      );
+    assert(appendedOtherRunSameIdempotency);
+    assertEquals(appendedOtherRunSameIdempotency.run_id, "run-2");
+    assertEquals(appendedOtherRunSameIdempotency.sequence, 0);
+
+    const appendedB = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "input.item",
+      payload: {
+        type: "input.item",
+        role: "user",
+        content: [{ type: "input_text", text: "hello" }],
+      },
+      idempotency_key: "run-1:event-2",
+    });
+    assert(appendedB);
+    const appendedC = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.output_text.delta",
+      payload: {
+        type: "response.output_text.delta",
+        output_index: 0,
+        delta: "hello",
+      },
+      idempotency_key: "run-1:event-3",
+    });
+    assert(appendedC);
+
+    await waitFor(() =>
+      store.listOpenResponsesRunEvents({
+        workspaceId,
+        runId: "run-1",
+      }).length === 3
+    );
+    await waitFor(() =>
+      store.listOpenResponsesRunEvents({
+        workspaceId,
+        runId: "run-2",
+      }).length === 1
+    );
+
+    const replayAll = store.listOpenResponsesRunEvents({
+      workspaceId,
+      runId: "run-1",
+    });
+    assertEquals(replayAll.map((entry) => entry.sequence), [0, 1, 2]);
+    assertEquals(replayAll[1].payload, {
+      type: "input.item",
+      role: "user",
+      content: [{ type: "input_text", text: "hello" }],
+    });
+    const replayFromOne = store.listOpenResponsesRunEvents({
+      workspaceId,
+      runId: "run-1",
+      fromSequence: 1,
+    });
+    assertEquals(replayFromOne.length, 2);
+    assertEquals(replayFromOne[0].sequence, 1);
+
+    const sqlitePath = path.join(sessionDir, "workspace.sqlite");
+    await waitFor(() =>
+      Deno.stat(sqlitePath).then(() => true).catch(() => false)
+    );
+    const db = new DatabaseSync(sqlitePath);
+    const schemaVersionRow = db.prepare("PRAGMA user_version;").get() as {
+      user_version?: number;
+    };
+    assertEquals(schemaVersionRow.user_version, 3);
+    const sqliteRows = db.prepare(`
+      SELECT workspace_id, run_id, sequence, event_type
+      FROM openresponses_run_events_v0
+      WHERE workspace_id = ? AND run_id = ?
+      ORDER BY sequence ASC
+    `).all(workspaceId, "run-1") as Array<
+      {
+        workspace_id: string;
+        run_id: string;
+        sequence: number;
+        event_type: string;
+      }
+    >;
+    assertEquals(
+      sqliteRows.map((row) => row.sequence),
+      [0, 1, 2],
+    );
+    const outputRows = db.prepare(`
+      SELECT item_kind, role, content
+      FROM openresponses_output_items_v0
+      WHERE workspace_id = ? AND run_id = ?
+      ORDER BY sequence ASC
+    `).all(workspaceId, "run-1") as Array<
+      { item_kind: string; role: string | null; content: string | null }
+    >;
+    assertEquals(outputRows[0], {
+      item_kind: "message",
+      role: "user",
+      content: "hello",
+    });
+    db.close();
+
+    const liveAbort = new AbortController();
+    const liveEvents: Array<number> = [];
+    const liveTask = (async () => {
+      for await (
+        const event of store.subscribeOpenResponsesRunEvents({
+          workspaceId,
+          runId: "run-1",
+          fromSequence: 3,
+          signal: liveAbort.signal,
+        })
+      ) {
+        liveEvents.push(event.sequence);
+        if (liveEvents.length >= 2) {
+          liveAbort.abort();
+        }
+      }
+    })();
+
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.reasoning_summary_text.delta",
+      payload: {
+        type: "response.reasoning_summary_text.delta",
+        delta: "thinking",
+      },
+      idempotency_key: "run-1:event-4",
+    });
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.reasoning.done",
+      payload: {
+        type: "response.reasoning.done",
+        output_index: 0,
+        item_id: "reasoning-done-1",
+        content_index: 0,
+        text: "deep thought",
+      },
+      idempotency_key: "run-1:event-4b",
+    });
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.output_item.done",
+      payload: {
+        type: "response.output_item.done",
+        output_index: 0,
+        item: {
+          type: "function_call",
+          call_id: "call-1",
+          name: "lookup",
+          arguments: "{}",
+        },
+      },
+      idempotency_key: "run-1:event-5",
+    });
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.output_item.done",
+      payload: {
+        type: "response.output_item.done",
+        output_index: 1,
+        item: {
+          type: "function_call_output",
+          call_id: "call-1",
+          output: "lookup-result",
+        },
+      },
+      idempotency_key: "run-1:event-6",
+    });
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      event_type: "response.reasoning_summary_part.added",
+      payload: {
+        type: "response.reasoning_summary_part.added",
+        output_index: 2,
+        item_id: "reasoning-part-1",
+        summary_index: 0,
+        part: {
+          type: "summary_text",
+          text: " +part",
+        },
+      },
+      idempotency_key: "run-1:event-7",
+    });
+
+    await liveTask;
+    assertEquals(liveEvents, [3, 4]);
+
+    await waitFor(() => {
+      const items = store.listOpenResponsesOutputItems({
+        workspaceId,
+        runId: "run-1",
+      });
+      return items.some((item) =>
+        item.__typename === "OutputToolCall" &&
+        item.toolCallId === "call-1" &&
+        item.resultText === "lookup-result"
+      ) &&
+        items.some((item) =>
+          item.__typename === "OutputReasoning" &&
+          item.id.endsWith("reasoning-part-1") &&
+          item.summary.includes("+part")
+        );
+    }, 5_000);
+    const outputItems = store.listOpenResponsesOutputItems({
+      workspaceId,
+      runId: "run-1",
+    });
+    assert(
+      outputItems.some((item) =>
+        item.__typename === "OutputMessage" &&
+        item.role === "user" &&
+        item.content === "hello"
+      ),
+    );
+    assert(
+      outputItems.some((item) =>
+        item.__typename === "OutputReasoning" &&
+        item.summary.includes("thinking")
+      ),
+    );
+    assert(
+      outputItems.some((item) =>
+        item.__typename === "OutputReasoning" &&
+        item.id.endsWith("reasoning-done-1") &&
+        item.summary.includes("deep thought")
+      ),
+    );
+    assert(
+      outputItems.some((item) =>
+        item.__typename === "OutputToolCall" &&
+        item.toolCallId === "call-1" &&
+        item.resultText === "lookup-result"
+      ),
+    );
+    assert(
+      outputItems.some((item) =>
+        item.__typename === "OutputReasoning" &&
+        item.id.endsWith("reasoning-part-1") &&
+        item.summary.includes("+part")
+      ),
+    );
+
+    const legacyInjectedWithoutOffset = {
+      type: "gambit.openresponses.run_event",
+      workspace_id: workspaceId,
+      run_id: "run-1",
+      sequence: 5,
+      event_type: "response.reasoning_summary_text.delta",
+      payload: {
+        type: "response.reasoning_summary_text.delta",
+        delta: "from-jsonl",
+      },
+      idempotency_key: "run-1:legacy-jsonl:5",
+      created_at: new Date().toISOString(),
+      _gambit: {
+        kind: "openresponses.run_event.v0",
+        domain: "session",
+      },
+    };
+    await Deno.writeTextFile(
+      eventsPath,
+      `${JSON.stringify(legacyInjectedWithoutOffset)}\n`,
+      { append: true },
+    );
+    await waitFor(() =>
+      store.listOpenResponsesRunEvents({
+        workspaceId,
+        runId: "run-1",
+      }).length === 8
+    );
+    const replayAfterLegacyBackfill = store.listOpenResponsesRunEvents({
+      workspaceId,
+      runId: "run-1",
+    });
+    assertEquals(replayAfterLegacyBackfill.map((entry) => entry.sequence), [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+    ]);
+  },
+);
+
+leakTolerantTest(
+  "openresponses append returns committed sequences for burst writes",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsRoot = path.join(dir, "sessions");
+    const workspaceId = "workspace-committed-sequence";
+    const sessionDir = path.join(sessionsRoot, workspaceId);
+    const statePath = path.join(sessionDir, "state.json");
+    const eventsPath = path.join(sessionDir, "events.jsonl");
+    const store = createSessionStore({
+      sessionsRoot,
+      randomId: (prefix: string) => `${prefix}-${crypto.randomUUID()}`,
+      logger: { warn: () => {} },
+      enrichStateWithSession: (state: SavedState) => {
+        const meta = { ...(state.meta ?? {}) };
+        meta.sessionId = workspaceId;
+        meta.workspaceId = workspaceId;
+        meta.sessionDir = sessionDir;
+        meta.sessionStatePath = statePath;
+        meta.sessionEventsPath = eventsPath;
+        meta.workspaceSchemaVersion = "workspace-state.v1";
+        return { state: { ...state, meta }, dir: sessionDir };
+      },
+      workspaceStateSchemaVersion: "workspace-state.v1",
+      workspaceSchemaError: (id, found) =>
+        `Unsupported workspace state schema for ${id}: ${found}`,
+    });
+    const initialState = store.persistSessionState({
+      runId: workspaceId,
+      messages: [],
+      meta: { workspaceId, sessionId: workspaceId },
+    });
+
+    const runId = "run-committed-sequence";
+    const first = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: runId,
+      event_type: "response.created",
+      payload: {
+        type: "response.created",
+        response: {
+          id: "resp-1",
+          object: "response",
+          status: "in_progress",
+          output: [],
+        },
+      },
+      idempotency_key: `${runId}:1`,
+    });
+    const second = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: runId,
+      event_type: "response.output_text.delta",
+      payload: {
+        type: "response.output_text.delta",
+        output_index: 0,
+        delta: "A",
+      },
+      idempotency_key: `${runId}:2`,
+    });
+    const third = await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: runId,
+      event_type: "response.output_text.delta",
+      payload: {
+        type: "response.output_text.delta",
+        output_index: 0,
+        delta: "B",
+      },
+      idempotency_key: `${runId}:3`,
+    });
+    assert(first);
+    assert(second);
+    assert(third);
+    assertEquals([first.sequence, second.sequence, third.sequence], [0, 1, 2]);
+
+    await waitFor(() =>
+      store.listOpenResponsesRunEvents({ workspaceId, runId }).length === 3
+    );
+    assertEquals(
+      store.listOpenResponsesRunEvents({ workspaceId, runId }).map((event) =>
+        event.sequence
+      ),
+      [0, 1, 2],
+    );
+  },
+);
 
 leakTolerantTest(
   "simulator persists snapshot + events and hydrates traces",

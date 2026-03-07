@@ -208,17 +208,38 @@ Deno.test({
   );
   assertEquals(reasoningDone?.item_id, "think-1");
   assertEquals(reasoningDone?.text, "Working through it.");
+  const reasoningSummaryDone = streamEvents.find((event) =>
+    event.type === "response.reasoning_summary_text.done"
+  );
+  assertEquals(reasoningSummaryDone?.item_id, "think-1");
+  assertEquals(reasoningSummaryDone?.text, "Working through it.");
 
   const toolCall = streamEvents.find((event) => event.type === "tool.call");
   assertEquals(toolCall?.actionCallId, "call-1");
   assertEquals(toolCall?.name, "list_files");
   assertEquals(toolCall?.args, { path: "." });
+  const toolCallOutputItem = streamEvents.find((event) =>
+    event.type === "response.output_item.done" &&
+    ((event as { item?: { type?: string } }).item?.type === "function_call")
+  ) as { item?: { call_id?: string; name?: string } } | undefined;
+  assertEquals(toolCallOutputItem?.item?.call_id, "call-1");
+  assertEquals(toolCallOutputItem?.item?.name, "list_files");
 
   const toolResult = streamEvents.find((event) => event.type === "tool.result");
   assertEquals(toolResult?.actionCallId, "call-1");
   assertEquals(
     toolResult?.result,
     [{ type: "text", text: "README.md" }],
+  );
+  const toolResultOutputItem = streamEvents.find((event) =>
+    event.type === "response.output_item.done" &&
+    ((event as { item?: { type?: string } }).item?.type ===
+      "function_call_output")
+  ) as { item?: { call_id?: string; output?: string } } | undefined;
+  assertEquals(toolResultOutputItem?.item?.call_id, "call-1");
+  assertEquals(
+    toolResultOutputItem?.item?.output,
+    JSON.stringify([{ type: "text", text: "README.md" }]),
   );
 
   assertEquals(traceEvents.some((event) => event.type === "tool.call"), true);

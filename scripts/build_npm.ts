@@ -268,6 +268,14 @@ try {
           return false;
         }
       }
+      if (diagnostic.code === 2307) {
+        const text = typeof diagnostic.messageText === "string"
+          ? diagnostic.messageText
+          : diagnostic.messageText.messageText;
+        if (text.includes("'node:sqlite'")) {
+          return false;
+        }
+      }
       if (
         diagnostic.code === 2686 &&
         fileName.includes("/simulator-ui/")

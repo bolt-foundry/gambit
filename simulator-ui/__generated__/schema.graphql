@@ -3,18 +3,7 @@ type BuildState {
   canSend: Boolean
   canStop: Boolean
   runStatus: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): BuildStateTranscriptConnection
   workspaceId: ID
-}
-
-type BuildStateTranscriptConnection {
-  edges: [BuildStateTranscriptConnectionEdge]
-  pageInfo: PageInfo!
-}
-
-type BuildStateTranscriptConnectionEdge {
-  cursor: String!
-  node: OpenResponseOutputItem
 }
 
 type GambitDurableStreamEvent {
@@ -174,6 +163,7 @@ type SimulatorStopRunPayload {
 type Subscription {
   workspaceBuildLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
   workspaceGradeLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+  workspaceOpenResponseEventsLive(fromSequence: Int, runId: ID!, workspaceId: ID!): WorkspaceOpenResponseEventsLiveEdge
   workspaceTestLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
   workspaceUpdates(fromOffset: Int, workspaceId: ID!): WorkspaceUpdate
   workspaceVerifyLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
@@ -218,7 +208,6 @@ type WorkspaceBuildConversationSession implements WorkspaceConversationSession {
   sessionId: ID
   startedAt: String
   status: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   workspaceId: ID
 }
 
@@ -286,7 +275,6 @@ interface WorkspaceConversationSession {
   sessionId: ID
   startedAt: String
   status: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   workspaceId: ID
 }
 
@@ -321,16 +309,6 @@ input WorkspaceConversationSessionStopInput {
   kind: String!
   sessionId: ID!
   workspaceId: ID!
-}
-
-type WorkspaceConversationSessionTranscriptConnection {
-  edges: [WorkspaceConversationSessionTranscriptConnectionEdge]
-  pageInfo: PageInfo!
-}
-
-type WorkspaceConversationSessionTranscriptConnectionEdge {
-  cursor: String!
-  node: OpenResponseOutputItem
 }
 
 type WorkspaceConversationSessionsConnection {
@@ -476,7 +454,6 @@ type WorkspaceGraderConversationSession implements WorkspaceConversationSession 
   sessionId: ID
   startedAt: String
   status: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   workspaceId: ID
 }
 
@@ -502,6 +479,14 @@ type WorkspaceModels {
   codex(checkOnline: Boolean): WorkspaceModelStatus
 }
 
+type WorkspaceOpenResponseEventsLiveEdge {
+  event: OpenResponseEvent
+  occurredAt: String
+  runId: ID
+  sourceSequence: Int
+  workspaceId: ID
+}
+
 scalar WorkspaceRelativePath
 
 interface WorkspaceRun {
@@ -524,7 +509,6 @@ type WorkspaceScenarioConversationSession implements WorkspaceConversationSessio
   sessionId: ID
   startedAt: String
   status: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   workspaceId: ID
 }
 
@@ -713,7 +697,6 @@ type WorkspaceVerifyConversationSession implements WorkspaceConversationSession 
   sessionId: ID
   startedAt: String
   status: OpenResponseStatus
-  transcript(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionTranscriptConnection
   verifyBatch: WorkspaceVerifyBatch
   workspaceId: ID
 }

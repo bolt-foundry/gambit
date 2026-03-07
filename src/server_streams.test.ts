@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
 import type {
   JSONValue,
@@ -11,6 +12,18 @@ import {
   readDurableStreamEvents,
   runSimulator,
 } from "./server_test_utils.ts";
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for predicate");
+}
 
 async function waitForAbortCount(
   getAbortCount: () => number,
@@ -1729,6 +1742,264 @@ leakTolerantTest("build reset aborts in-flight runtime execution", async () => {
   await server.shutdown();
   await server.finished;
 });
+
+leakTolerantTest(
+  "build uses build-owned run identity for canonical OpenResponses storage",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "build-authority.deck.ts");
+    const scenarioDeckPath = path.join(dir, "scenarios", "default.deck.ts");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "default-scenario",
+        path: "./scenarios/default.deck.ts",
+        label: "Default scenario",
+        maxTurns: 2,
+      }],
+    });
+    `,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    const provider: ModelProvider = {
+      chat(input) {
+        const runId = input.state?.runId ?? "unknown-run";
+        const latestUser = [...(input.state?.messages ?? [])]
+          .reverse()
+          .find((message) => message.role === "user")?.content ?? "";
+        const assistantText = `assistant reply (${runId}) to ${latestUser}`;
+        const updatedState: SavedState = {
+          runId,
+          messages: [
+            ...(input.state?.messages ?? []),
+            { role: "assistant", content: assistantText },
+          ],
+          traces: input.state?.traces ?? [],
+          meta: input.state?.meta,
+        };
+        input.onStreamEvent?.({
+          type: "response.created",
+          response: {
+            id: `resp-${updatedState.runId}`,
+            object: "response",
+            output: [],
+            status: "in_progress",
+          },
+        });
+        input.onStreamEvent?.({
+          type: "response.output_item.done",
+          output_index: 0,
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{
+              type: "output_text",
+              text: assistantText,
+            }],
+          },
+        });
+        input.onStreamEvent?.({
+          type: "response.completed",
+          response: {
+            id: `resp-${updatedState.runId}`,
+            object: "response",
+            output: [],
+            status: "completed",
+          },
+        });
+        return Promise.resolve({
+          message: { role: "assistant", content: assistantText },
+          finishReason: "stop",
+          updatedState,
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = (server.addr as Deno.NetAddr).port;
+      const createRes = await fetch(
+        `http://127.0.0.1:${port}/api/workspace/new`,
+        { method: "POST" },
+      );
+      assertEquals(createRes.status, 200);
+      const createBody = await createRes.json() as { workspaceId?: string };
+      const workspaceId = createBody.workspaceId ?? "";
+      assert(workspaceId.length > 0);
+
+      const scenarioRunId = "scenario-authority-run";
+      const scenarioStart = await fetch(
+        `http://127.0.0.1:${port}/api/test/message`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspaceId,
+            runId: scenarioRunId,
+            message: "scenario seed",
+            stream: true,
+          }),
+        },
+      );
+      assertEquals(scenarioStart.status, 200);
+      await scenarioStart.text();
+      const scenarioTerminal = await waitForTestRunTerminalStatus(
+        port,
+        workspaceId,
+        scenarioRunId,
+        5_000,
+      );
+      assertEquals(scenarioTerminal.status, "completed");
+
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
+      );
+      await waitFor(
+        () => Deno.stat(sqlitePath).then(() => true).catch(() => false),
+        5_000,
+      );
+
+      const readSummary = (buildRunId: string) => {
+        const db = new DatabaseSync(sqlitePath);
+        try {
+          const scenarioEvents = db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM openresponses_run_events_v0
+            WHERE workspace_id = ? AND run_id = ?
+          `).get(workspaceId, scenarioRunId) as { count?: number };
+          const scenarioOutputItems = db.prepare(`
+            SELECT content
+            FROM openresponses_output_items_v0
+            WHERE workspace_id = ? AND run_id = ?
+          `).all(workspaceId, scenarioRunId) as Array<
+            { content: string | null }
+          >;
+          const buildEvents = db.prepare(`
+            SELECT event_type
+            FROM openresponses_run_events_v0
+            WHERE workspace_id = ? AND run_id = ?
+            ORDER BY sequence ASC
+          `).all(workspaceId, buildRunId) as Array<{ event_type: string }>;
+          const buildOutputItems = db.prepare(`
+            SELECT role, content
+            FROM openresponses_output_items_v0
+            WHERE workspace_id = ? AND run_id = ?
+            ORDER BY sequence ASC
+          `).all(workspaceId, buildRunId) as Array<
+            { role: string | null; content: string | null }
+          >;
+          return {
+            scenarioEventCount: scenarioEvents.count ?? 0,
+            scenarioOutputItemContents: scenarioOutputItems
+              .map((item) => item.content ?? "")
+              .filter((content) => content.length > 0),
+            buildEventTypes: buildEvents.map((row) => row.event_type),
+            buildOutputItems,
+          };
+        } finally {
+          db.close();
+        }
+      };
+
+      await waitFor(() => {
+        const summary = readSummary("build-not-started");
+        return summary.scenarioEventCount > 0 &&
+          summary.scenarioOutputItemContents.length > 0;
+      }, 5_000);
+      const beforeBuild = readSummary("build-not-started");
+
+      const buildStart = await fetch(
+        `http://127.0.0.1:${port}/api/build/message`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            workspaceId,
+            message: "build seed",
+          }),
+        },
+      );
+      assertEquals(buildStart.status, 200);
+      const buildBody = await buildStart.json() as {
+        run?: { id?: string };
+      };
+      const buildRunId = buildBody.run?.id ?? "";
+      assert(buildRunId.length > 0);
+
+      await waitForWorkspaceStatus(port, workspaceId, "completed", 5_000);
+      await waitFor(() => {
+        const summary = readSummary(buildRunId);
+        return summary.buildEventTypes.includes("input.item") &&
+          summary.buildEventTypes.some((type) =>
+            type.startsWith("response.")
+          ) &&
+          summary.buildOutputItems.some((item) =>
+            item.role === "user" && item.content === "build seed"
+          ) &&
+          summary.buildOutputItems.some((item) =>
+            item.role === "assistant" &&
+            (item.content ?? "").includes(buildRunId)
+          );
+      }, 5_000);
+
+      const afterBuild = readSummary(buildRunId);
+      assert(afterBuild.scenarioEventCount >= beforeBuild.scenarioEventCount);
+      assert(
+        !afterBuild.scenarioOutputItemContents.some((content) =>
+          content.includes("build seed")
+        ),
+      );
+      assert(afterBuild.buildEventTypes.includes("input.item"));
+      assert(
+        afterBuild.buildEventTypes.some((type) => type.startsWith("response.")),
+      );
+      assert(
+        afterBuild.buildOutputItems.some((item) =>
+          item.role === "user" && item.content === "build seed"
+        ),
+      );
+      assert(
+        afterBuild.buildOutputItems.some((item) =>
+          item.role === "assistant" &&
+          (item.content ?? "").includes(buildRunId)
+        ),
+      );
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
 
 leakTolerantTest(
   "workspace test run endpoint safely serializes circular trace payloads",

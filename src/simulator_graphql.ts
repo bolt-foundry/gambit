@@ -2,6 +2,7 @@ import SchemaBuilder from "@pothos/core";
 import RelayPlugin, { resolveArrayConnection } from "@pothos/plugin-relay";
 import { createYoga } from "graphql-yoga";
 import { Kind, type ValueNode } from "graphql";
+import type { OpenResponsesRunEventV0 } from "@bolt-foundry/gambit-core";
 import {
   asGambitID,
   asGambitStreamID,
@@ -345,6 +346,21 @@ export type GambitGraphqlContext = {
     workspaceId: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   readWorkspaceBuildRun?: (workspaceId: string) => Promise<BuildRunRecord>;
+  readWorkspaceOpenResponseEvents?: (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+  }) => Promise<Array<OpenResponsesRunEventV0>>;
+  readWorkspaceOpenResponseOutputItems?: (args: {
+    workspaceId: string;
+    runId: string;
+  }) => Promise<Array<OpenResponseOutputItemRecord>>;
+  subscribeWorkspaceOpenResponseEvents?: (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+    signal?: AbortSignal;
+  }) => AsyncIterable<OpenResponsesRunEventV0>;
   createWorkspaceBuildRun?: (
     workspaceId: string,
     message: string,
@@ -566,29 +582,32 @@ function isWorkspaceConversationSessionRecord(
     typeof (value as { kind?: unknown }).kind === "string";
 }
 
-function materializeOpenResponseOutputItems(
-  run: BuildRunRecord,
-): Array<OpenResponseOutputItemRecord> {
-  const materialized = run.messages.flatMap<OpenResponseOutputItemRecord>((
-    message,
-    index,
-  ) => {
-    const content = typeof message.content === "string" ? message.content : "";
-    if (!content.trim()) return [];
-    return [{
-      __typename: "OutputMessage",
-      id: `${run.id}:item:${index}`,
-      role: message.role,
-      content,
-      messageRefId: message.messageRefId,
-    }];
-  });
-  logBuildChatDebug("materialize.outputItems", {
-    runId: run.id,
-    messageCount: run.messages.length,
-    outputCount: materialized.length,
-  });
-  return materialized;
+function asRecord(value: unknown): Maybe<Record<string, unknown>> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function toEventMessageText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      const record = asRecord(entry);
+      if (!record) return "";
+      const text = asString(record.text);
+      if (text.length > 0) return text;
+      return toEventMessageText(record.content);
+    }).join("");
+  }
+  const record = asRecord(value);
+  if (!record) return "";
+  const recordText = asString(record.text);
+  if (recordText.length > 0) return recordText;
+  return toEventMessageText(record.content);
 }
 
 const WorkspaceSessionMetaType = builder.objectRef<SessionMetaRecord>(
@@ -933,6 +952,30 @@ OpenResponseEventType.implement({
   }),
 });
 
+const WorkspaceOpenResponseEventsLiveEdgeType = builder.objectRef<{
+  workspaceId: string;
+  runId: string;
+  sourceSequence: number;
+  occurredAt: string;
+  event: {
+    id: string;
+    type: string;
+    data: unknown;
+  };
+}>("WorkspaceOpenResponseEventsLiveEdge");
+WorkspaceOpenResponseEventsLiveEdgeType.implement({
+  fields: (t) => ({
+    workspaceId: t.id({ resolve: (parent) => asGambitID(parent.workspaceId) }),
+    runId: t.id({ resolve: (parent) => parent.runId }),
+    sourceSequence: t.int({ resolve: (parent) => parent.sourceSequence }),
+    occurredAt: t.string({ resolve: (parent) => parent.occurredAt }),
+    event: t.field({
+      type: OpenResponseEventType,
+      resolve: (parent) => parent.event,
+    }),
+  }),
+});
+
 const OpenResponseType = builder.objectRef<BuildRunRecord>("OpenResponse");
 OpenResponseType.implement({
   fields: (t) => ({
@@ -948,8 +991,18 @@ OpenResponseType.implement({
         first: t.arg.int(),
         after: t.arg.string(),
       },
-      resolve: (parent, args) => {
-        const items = materializeOpenResponseOutputItems(parent);
+      resolve: async (parent, args, ctx) => {
+        const workspaceId = typeof parent.workspaceId === "string" &&
+            parent.workspaceId.trim().length > 0
+          ? parent.workspaceId
+          : null;
+        if (!workspaceId || !ctx.readWorkspaceOpenResponseOutputItems) {
+          return resolveArrayConnection({ args }, []);
+        }
+        const items = await ctx.readWorkspaceOpenResponseOutputItems({
+          workspaceId,
+          runId: parent.id,
+        });
         logBuildChatDebug("resolver.openResponse.outputItems", {
           runId: parent.id,
           itemCount: items.length,
@@ -963,12 +1016,29 @@ OpenResponseType.implement({
         first: t.arg.int(),
         after: t.arg.string(),
       },
-      resolve: (parent, args) => {
+      resolve: async (parent, args, ctx) => {
+        const workspaceId = typeof parent.workspaceId === "string" &&
+            parent.workspaceId.trim().length > 0
+          ? parent.workspaceId
+          : null;
+        if (!workspaceId || !ctx.readWorkspaceOpenResponseEvents) {
+          return resolveArrayConnection({ args }, []);
+        }
+        const records = await ctx.readWorkspaceOpenResponseEvents({
+          workspaceId,
+          runId: parent.id,
+          fromSequence: 0,
+        });
+        const events = records.map((event) => ({
+          id: `${parent.id}:event:${event.sequence}`,
+          type: event.event_type,
+          data: event.payload,
+        }));
         logBuildChatDebug("resolver.openResponse.events", {
           runId: parent.id,
-          eventCount: 0,
+          eventCount: events.length,
         });
-        return resolveArrayConnection({ args }, []);
+        return resolveArrayConnection({ args }, events);
       },
     }),
   }),
@@ -1001,21 +1071,6 @@ const BuildStateType = builder.objectRef<BuildStateRecord>("BuildState");
 BuildStateType.implement({
   fields: (t) => ({
     workspaceId: t.id({ resolve: (parent) => asGambitID(parent.workspaceId) }),
-    transcript: t.connection({
-      type: OpenResponseOutputItemType,
-      args: {
-        first: t.arg.int(),
-        after: t.arg.string(),
-      },
-      resolve: (parent, args) => {
-        const outputItems = materializeOpenResponseOutputItems(parent.run);
-        logBuildChatDebug("resolver.buildState.transcript", {
-          runId: parent.run.id,
-          itemCount: outputItems.length,
-        });
-        return resolveArrayConnection({ args }, outputItems);
-      },
-    }),
     runStatus: t.field({
       type: OpenResponseStatusEnum,
       resolve: (parent) => toOpenResponseStatus(parent.run.status),
@@ -1781,27 +1836,6 @@ WorkspaceConversationSessionInterface.implement({
     finishedAt: t.string({
       nullable: true,
       resolve: (parent) => parent.finishedAt ?? null,
-    }),
-    transcript: t.connection({
-      type: OpenResponseOutputItemType,
-      args: {
-        first: t.arg.int(),
-        after: t.arg.string(),
-      },
-      resolve: (parent, args) => {
-        const run = parent.buildRun ?? parent.scenarioRun;
-        if (!run) return resolveArrayConnection({ args }, []);
-        const normalizedRun = {
-          ...run,
-          conversationRunKind: parent.kind === "scenario"
-            ? "scenario"
-            : "build",
-        } satisfies BuildRunRecord;
-        return resolveArrayConnection(
-          { args },
-          materializeOpenResponseOutputItems(normalizedRun),
-        );
-      },
     }),
   }),
 });
@@ -3295,6 +3329,73 @@ builder.mutationType({
 
 builder.subscriptionType({
   fields: (t) => ({
+    workspaceOpenResponseEventsLive: t.field({
+      type: WorkspaceOpenResponseEventsLiveEdgeType,
+      args: {
+        workspaceId: t.arg.id({ required: true }),
+        runId: t.arg.id({ required: true }),
+        fromSequence: t.arg.int(),
+      },
+      subscribe: async function* (_parent, args, context) {
+        const workspaceId = normalizeWorkspaceId(args.workspaceId);
+        const runId = typeof args.runId === "string" ? args.runId.trim() : "";
+        if (!workspaceId || !runId) return;
+        const fromSequence = typeof args.fromSequence === "number" &&
+            Number.isFinite(args.fromSequence)
+          ? Math.max(0, Math.floor(args.fromSequence))
+          : 0;
+
+        if (context.subscribeWorkspaceOpenResponseEvents) {
+          const abortController = new AbortController();
+          try {
+            for await (
+              const event of context.subscribeWorkspaceOpenResponseEvents({
+                workspaceId,
+                runId,
+                fromSequence,
+                signal: abortController.signal,
+              })
+            ) {
+              yield {
+                workspaceId,
+                runId,
+                sourceSequence: event.sequence,
+                occurredAt: event.created_at,
+                event: {
+                  id: `${runId}:event:${event.sequence}`,
+                  type: event.event_type,
+                  data: event.payload,
+                },
+              };
+            }
+          } finally {
+            abortController.abort();
+          }
+          return;
+        }
+
+        if (!context.readWorkspaceOpenResponseEvents) return;
+        const replay = await context.readWorkspaceOpenResponseEvents({
+          workspaceId,
+          runId,
+          fromSequence,
+        });
+        for (const event of replay) {
+          yield {
+            workspaceId,
+            runId,
+            sourceSequence: event.sequence,
+            occurredAt: event.created_at,
+            event: {
+              id: `${runId}:event:${event.sequence}`,
+              type: event.event_type,
+              data: event.payload,
+            },
+          };
+        }
+      },
+      resolve: (parent) => parent,
+    }),
     workspaceUpdates: t.field({
       type: WorkspaceUpdateType,
       args: {

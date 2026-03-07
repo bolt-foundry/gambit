@@ -214,5 +214,7 @@ fi
     config.imports = rewritten;
     await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2) + "\n");
   '
-  deno publish --dry-run --allow-dirty
+  # Local/CI typecheck already runs earlier in this script against source-coordinated
+  # gambit-core. Keep publish dry-run focused on package graph/publishability.
+  deno publish --dry-run --allow-dirty --no-check
 )

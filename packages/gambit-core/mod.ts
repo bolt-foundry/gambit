@@ -41,6 +41,20 @@ export type {
   ResponseToolDefinition,
   ResponseUsage,
 } from "./src/types.ts";
+export type {
+  AppendOpenResponsesRunEventV0Input,
+  ListOpenResponsesRunEventsV0Input,
+  OpenResponsesRunEventPayload,
+  OpenResponsesRunEventStoreV0,
+  OpenResponsesRunEventV0,
+  SubscribeOpenResponsesRunEventsV0Input,
+} from "./src/openresponses_run_events.ts";
+export {
+  isOpenResponsesRunEventPayload,
+  isOpenResponsesRunEventV0,
+  serializeOpenResponsesRunEventV0,
+  toOpenResponsesRunEventV0,
+} from "./src/openresponses_run_events.ts";
 /** Test deck definition shape. */
 export type { TestDeckDefinition } from "./src/types.ts";
 /** Permission declaration shape used by deck metadata and config layers. */

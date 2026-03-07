@@ -83,6 +83,15 @@ function parseJsonValue(text: string): JSONValue {
   }
 }
 
+function stringifyJsonValue(value: JSONValue): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -329,6 +338,17 @@ function buildClaudeStreamHandler(input: {
   const emittedCalls = new Set<string>();
   const emittedResults = new Set<string>();
   const reasoningTextById = new Map<string, string>();
+  const toolOutputIndexByCallId = new Map<string, number>();
+  let nextOutputIndex = 0;
+
+  const getToolOutputIndex = (actionCallId: string): number => {
+    const existing = toolOutputIndexByCallId.get(actionCallId);
+    if (typeof existing === "number") return existing;
+    const created = nextOutputIndex;
+    nextOutputIndex += 1;
+    toolOutputIndexByCallId.set(actionCallId, created);
+    return created;
+  };
 
   const emitToolCall = (value: Record<string, unknown>) => {
     const actionCallId = asString(value.id || value.call_id);
@@ -336,16 +356,28 @@ function buildClaudeStreamHandler(input: {
     const name = asString(value.name || value.tool) || "tool";
     emittedCalls.add(actionCallId);
     toolNames.set(actionCallId, name);
+    const args = (() => {
+      const rawArgs = value.input ?? value.arguments ?? {};
+      if (typeof rawArgs === "string") return parseJsonValue(rawArgs);
+      return rawArgs as JSONValue;
+    })();
     input.emitNormalized({
       type: "tool.call",
       actionCallId,
       name,
-      args: (() => {
-        const rawArgs = value.input ?? value.arguments ?? {};
-        if (typeof rawArgs === "string") return parseJsonValue(rawArgs);
-        return rawArgs as JSONValue;
-      })(),
+      args,
       toolKind: "mcp_bridge",
+    });
+    input.emitNormalized({
+      type: "response.output_item.done",
+      output_index: getToolOutputIndex(actionCallId),
+      item: {
+        type: "function_call",
+        id: `${actionCallId}:call`,
+        call_id: actionCallId,
+        name,
+        arguments: stringifyJsonValue(args),
+      },
     });
   };
 
@@ -362,6 +394,18 @@ function buildClaudeStreamHandler(input: {
       name,
       result: (value.content ?? value.result ?? value) as JSONValue,
       toolKind: "mcp_bridge",
+    });
+    input.emitNormalized({
+      type: "response.output_item.done",
+      output_index: getToolOutputIndex(actionCallId),
+      item: {
+        type: "function_call_output",
+        id: `${actionCallId}:output`,
+        call_id: actionCallId,
+        output: stringifyJsonValue(
+          (value.content ?? value.result ?? value) as JSONValue,
+        ),
+      },
     });
   };
 
@@ -388,6 +432,22 @@ function buildClaudeStreamHandler(input: {
       output_index: 0,
       item_id: reasoningId,
       content_index: 0,
+      text,
+    });
+    if (text !== previous && text.startsWith(previous) && previous.length > 0) {
+      input.emitNormalized({
+        type: "response.reasoning_summary_text.delta",
+        output_index: 0,
+        item_id: reasoningId,
+        summary_index: 0,
+        delta: text.slice(previous.length),
+      });
+    }
+    input.emitNormalized({
+      type: "response.reasoning_summary_text.done",
+      output_index: 0,
+      item_id: reasoningId,
+      summary_index: 0,
       text,
     });
   };

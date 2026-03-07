@@ -21,6 +21,7 @@ import {
 } from "../../../src/utils.ts";
 import { buildTestBotChatDisplay } from "../../../src/testBotChatDisplay.ts";
 import { buildTestRunHistoryDisplayOptions } from "../../../src/testBotSidebarDisplay.ts";
+import { runAwaitsAssistantKickoff } from "../../../src/test_tab_start_gate.ts";
 import TestBotSidebarPanels from "../../../src/TestBotSidebarPanels.tsx";
 import Button from "../../../src/gds/Button.tsx";
 import PageShell from "../../../src/gds/PageShell.tsx";
@@ -73,6 +74,7 @@ type ScenarioRunSnapshot = {
   finishedAt: string | null;
   error: string | null;
   openResponseId: string | null;
+  outputItemCount: number;
   messages: Array<{ role: string; content: string; messageRefId?: string }>;
 };
 
@@ -419,6 +421,9 @@ export const SimulatorTestPage = iso(`
         const firstOpenResponse = (node.openResponses?.edges ?? []).flatMap((
           openResponseEdge,
         ) => openResponseEdge?.node ? [openResponseEdge.node] : [])[0] ?? null;
+        const outputItemCount = (firstOpenResponse?.outputItems?.edges ?? [])
+          .flatMap((outputEdge) => outputEdge?.node ? [outputEdge.node] : [])
+          .length;
         const messageRows = (firstOpenResponse?.outputItems?.edges ?? [])
           .flatMap((
             outputEdge,
@@ -459,6 +464,7 @@ export const SimulatorTestPage = iso(`
           finishedAt: node.finishedAt ?? null,
           error: node.error ?? null,
           openResponseId: firstOpenResponse?.id ?? null,
+          outputItemCount,
           messages,
         }];
       }),
@@ -713,10 +719,10 @@ export const SimulatorTestPage = iso(`
     : selectedRunState.status === "canceled"
     ? "Stopped"
     : "Idle";
+  const selectedRunNeedsAssistantStart = runAwaitsAssistantKickoff(selectedRun);
   const showStartOverlay = Boolean(
     assistantDeck?.startMode !== "user" &&
-      selectedRunState.status !== "running" &&
-      selectedRunState.messages.length === 0,
+      selectedRunNeedsAssistantStart,
   );
   const handleStopRun = useCallback(async () => {
     if (!selectedRun?.id || !workspaceId) return;
@@ -817,11 +823,7 @@ export const SimulatorTestPage = iso(`
   ]);
   const handleStartAssistant = useCallback(async () => {
     if (!workspaceId) return;
-    if (
-      selectedRun?.id &&
-      selectedRunState.status !== "running" &&
-      selectedRunState.messages.length === 0
-    ) {
+    if (selectedRun?.id && selectedRunNeedsAssistantStart) {
       const kickedSelected = await kickoffAssistantTurn(selectedRun.id);
       if (kickedSelected) return;
     }
@@ -833,8 +835,7 @@ export const SimulatorTestPage = iso(`
   }, [
     kickoffAssistantTurn,
     selectedRun?.id,
-    selectedRunState.messages.length,
-    selectedRunState.status,
+    selectedRunNeedsAssistantStart,
     startAssistantChatRun,
     workspaceId,
   ]);

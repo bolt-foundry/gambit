@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
-import { modImportPath } from "./server_test_utils.ts";
+import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
+import { modImportPath, readJsonLines } from "./server_test_utils.ts";
 
 type GraphqlEnvelope<TData> = {
   data?: TData;
@@ -20,6 +20,18 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function tcpPortOf(addr: Deno.Addr): number {
   assert(addr.transport === "tcp");
   return addr.port;
+}
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for predicate");
 }
 
 async function parseJsonRecord(
@@ -695,7 +707,1565 @@ Return JSON score/reason.
 );
 
 leakTolerantTest(
-  "/graphql scenario conversation sessions preserve assistant-first transcript order",
+  "/graphql openResponse.outputItems resolves persisted canonical events for build and scenario runs",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(
+      dir,
+      "graphql-openresponse-output-items.deck.ts",
+    );
+    const scenarioDeckPath = path.join(dir, "scenarios", "default.deck.ts");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string().optional(),
+      responseSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "default-scenario",
+        path: "./scenarios/default.deck.ts",
+        label: "Default scenario",
+        maxTurns: 1,
+      }],
+    });
+    `,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string().optional(),
+      responseSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(query: string, variables?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const created = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId = created.data?.gambitWorkspaceCreate?.workspace?.id ??
+        "";
+      assert(workspaceId.length > 0);
+
+      const scenarioStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                ... on WorkspaceScenarioConversationSession {
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "default-scenario",
+          },
+        },
+      );
+      const scenarioRunId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session?.run
+          ?.id ?? "";
+      assert(scenarioRunId.length > 0);
+      const buildStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartBuild($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                ... on WorkspaceBuildConversationSession {
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "build",
+            inputItems: [{ role: "user", content: "seed build state" }],
+          },
+        },
+      );
+      const buildRunId =
+        buildStart.data?.workspaceConversationSessionStart?.session?.run?.id ??
+          "";
+      assert(buildRunId.length > 0);
+      const buildRunsSnapshot = await gql<{
+        workspace?: {
+          buildRuns?: {
+            edges?: Array<{ node?: { id?: string } }>;
+          };
+        } | null;
+      }>(
+        `
+          query BuildRunSnapshot($workspaceId: ID!) {
+            workspace(id: $workspaceId) {
+              buildRuns(first: 1) {
+                edges {
+                  node { id }
+                }
+              }
+            }
+          }
+        `,
+        { workspaceId },
+      );
+      const canonicalBuildRunId = buildRunsSnapshot.data?.workspace?.buildRuns
+        ?.edges?.[0]?.node?.id ?? buildRunId;
+      assert(canonicalBuildRunId.length > 0);
+
+      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
+      const createdAt = new Date().toISOString();
+      await Deno.writeTextFile(
+        eventsPath,
+        [
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 0,
+            event_type: "input.item",
+            payload: {
+              type: "input.item",
+              role: "user",
+              content: [{ type: "input_text", text: "build user canonical" }],
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:input`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 1,
+            event_type: "response.output_item.done",
+            payload: {
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "build canonical" }],
+              },
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:0`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 2,
+            event_type: "response.reasoning.done",
+            payload: {
+              type: "response.reasoning.done",
+              output_index: 1,
+              item_id: "build-reasoning-done-1",
+              content_index: 0,
+              text: "build deep reasoning",
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:reasoning`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 3,
+            event_type: "response.output_item.done",
+            payload: {
+              type: "response.output_item.done",
+              output_index: 2,
+              item: {
+                type: "function_call",
+                call_id: "build-call-1",
+                name: "lookup",
+                arguments: '{"query":"a"}',
+              },
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:1`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 4,
+            event_type: "response.output_item.done",
+            payload: {
+              type: "response.output_item.done",
+              output_index: 3,
+              item: {
+                type: "function_call_output",
+                call_id: "build-call-1",
+                output: "lookup-result",
+              },
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:2`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: canonicalBuildRunId,
+            sequence: 5,
+            event_type: "response.reasoning_summary_part.added",
+            payload: {
+              type: "response.reasoning_summary_part.added",
+              output_index: 4,
+              item_id: "build-reasoning-1",
+              summary_index: 0,
+              part: { type: "summary_text", text: "build reasoning" },
+            },
+            idempotency_key: `${canonicalBuildRunId}:seed:build:3`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: scenarioRunId,
+            sequence: 0,
+            event_type: "input.item",
+            payload: {
+              type: "input.item",
+              role: "user",
+              content: [{
+                type: "input_text",
+                text: "scenario user canonical",
+              }],
+            },
+            idempotency_key: `${scenarioRunId}:seed:scenario:input`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: scenarioRunId,
+            sequence: 1,
+            event_type: "response.output_item.done",
+            payload: {
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "scenario canonical" }],
+              },
+            },
+            idempotency_key: `${scenarioRunId}:seed:scenario:0`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          }),
+        ].join("\n") + "\n",
+        { append: true },
+      );
+
+      const queried = await gql<{
+        workspace?: {
+          buildRuns?: {
+            edges?: Array<{
+              node?: {
+                id?: string;
+                openResponses?: {
+                  edges?: Array<{
+                    node?: {
+                      outputItems?: {
+                        edges?: Array<{
+                          node?: {
+                            __typename?: string;
+                            role?: string;
+                            content?: string;
+                            asOutputMessage?: {
+                              role?: string;
+                              content?: string;
+                            };
+                          };
+                        }>;
+                      };
+                    };
+                  }>;
+                };
+              };
+            }>;
+          };
+          scenarioRuns?: {
+            edges?: Array<{
+              node?: {
+                id?: string;
+                openResponses?: {
+                  edges?: Array<{
+                    node?: {
+                      outputItems?: {
+                        edges?: Array<{
+                          node?: {
+                            __typename?: string;
+                            asOutputMessage?: {
+                              role?: string;
+                              content?: string;
+                            };
+                          };
+                        }>;
+                      };
+                    };
+                  }>;
+                };
+              };
+            }>;
+          };
+        } | null;
+      }>(
+        `
+          query OutputItems($workspaceId: ID!) {
+            workspace(id: $workspaceId) {
+              buildRuns(first: 1) {
+                edges {
+                  node {
+                    id
+                    openResponses(first: 1) {
+                      edges {
+                        node {
+                          outputItems(first: 10) {
+                            edges {
+                              node {
+                                __typename
+                                ... on OutputMessage {
+                                  role
+                                  content
+                                }
+                                ... on OutputToolCall {
+                                  toolCallId
+                                  toolName
+                                  status
+                                  resultText
+                                }
+                                ... on OutputReasoning {
+                                  id
+                                  summary
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              scenarioRuns(first: 10) {
+                edges {
+                  node {
+                    id
+                    openResponses(first: 1) {
+                      edges {
+                        node {
+                          outputItems(first: 10) {
+                            edges {
+                              node {
+                                __typename
+                                ... on OutputMessage {
+                                  role
+                                  content
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        { workspaceId },
+      );
+
+      const buildOutputEdges = queried.data?.workspace?.buildRuns?.edges?.[0]
+        ?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges ?? [];
+      const buildMessages = buildOutputEdges.flatMap((edge) => {
+        const node = asRecord(edge?.node);
+        if (!node) return [];
+        const role = typeof node.role === "string" ? node.role : "";
+        const content = typeof node.content === "string" ? node.content : "";
+        if (!role || !content) return [];
+        return [{ role, content }];
+      });
+      const buildMessageContents = buildMessages.map((entry) => entry.content);
+      assert(buildMessageContents.includes("build user canonical"));
+      assert(buildMessageContents.includes("build canonical"));
+      assert(!buildMessageContents.includes("seed build state"));
+      assertEquals(buildMessages[0], {
+        role: "user",
+        content: "build user canonical",
+      });
+      const buildToolCall = buildOutputEdges.find((edge) =>
+        asRecord(edge?.node)?.__typename === "OutputToolCall"
+      );
+      assertEquals(
+        asRecord(buildToolCall?.node)?.resultText,
+        "lookup-result",
+      );
+      const buildReasoningSummary = buildOutputEdges
+        .filter((edge) =>
+          asRecord(edge?.node)?.__typename === "OutputReasoning"
+        )
+        .map((edge) => asRecord(edge?.node)?.summary)
+        .filter((entry): entry is string => typeof entry === "string");
+      assert(buildReasoningSummary.includes("build deep reasoning"));
+      assert(buildReasoningSummary.includes("build reasoning"));
+
+      const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find((
+        edge,
+      ) => edge?.node?.id === scenarioRunId);
+      const scenarioOutputEdges = scenarioEdge?.node?.openResponses?.edges?.[0]
+        ?.node?.outputItems?.edges ?? [];
+      const scenarioMessages = scenarioOutputEdges.flatMap((edge) => {
+        const node = asRecord(edge?.node);
+        if (!node) return [];
+        const role = typeof node.role === "string" ? node.role : "";
+        const content = typeof node.content === "string" ? node.content : "";
+        if (!role || !content) return [];
+        return [{ role, content }];
+      });
+      const scenarioMessageContents = scenarioMessages.map((entry) =>
+        entry.content
+      );
+      assert(scenarioMessageContents.includes("scenario user canonical"));
+      assert(scenarioMessageContents.includes("scenario canonical"));
+      assertEquals(scenarioMessages[0], {
+        role: "user",
+        content: "scenario user canonical",
+      });
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql build sessions keep canonical openResponses isolated from scenario runs",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-build-authority.deck.ts");
+    const scenarioDeckPath = path.join(dir, "scenarios", "default.deck.ts");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "default-scenario",
+        path: "./scenarios/default.deck.ts",
+        label: "Default scenario",
+        maxTurns: 2,
+      }],
+    });
+    `,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    const provider: ModelProvider = {
+      chat(input) {
+        const runId = input.state?.runId ?? "unknown-run";
+        const updatedState: SavedState = {
+          runId,
+          messages: [
+            ...(input.state?.messages ?? []),
+            { role: "assistant", content: `assistant reply for ${runId}` },
+          ],
+          traces: input.state?.traces ?? [],
+          meta: input.state?.meta,
+        };
+        input.onStreamEvent?.({
+          type: "response.created",
+          response: {
+            id: `resp-${runId}`,
+            object: "response",
+            output: [],
+            status: "in_progress",
+          },
+        });
+        input.onStreamEvent?.({
+          type: "response.output_item.done",
+          output_index: 0,
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{
+              type: "output_text",
+              text: `assistant reply for ${runId}`,
+            }],
+          },
+        });
+        input.onStreamEvent?.({
+          type: "response.completed",
+          response: {
+            id: `resp-${runId}`,
+            object: "response",
+            output: [],
+            status: "completed",
+          },
+        });
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            content: `assistant reply for ${runId}`,
+          },
+          finishReason: "stop",
+          updatedState,
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(query: string, variables?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const created = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId = created.data?.gambitWorkspaceCreate?.workspace?.id ??
+        "";
+      assert(workspaceId.length > 0);
+
+      const scenarioStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            status?: string;
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                ... on WorkspaceScenarioConversationSession {
+                  status
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "default-scenario",
+          },
+        },
+      );
+      const scenarioSessionId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ?? "";
+      const scenarioRunId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session?.run
+          ?.id ?? "";
+      assert(scenarioSessionId.length > 0);
+      assert(scenarioRunId.length > 0);
+
+      await waitFor(async () => {
+        const statusBody = await gql<{
+          workspace?: {
+            conversationSession?: { status?: string };
+          } | null;
+        }>(
+          `
+            query ScenarioStatus($workspaceId: ID!, $sessionId: ID!) {
+              workspace(id: $workspaceId) {
+                conversationSession(sessionId: $sessionId) {
+                  ... on WorkspaceScenarioConversationSession {
+                    status
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId, sessionId: scenarioSessionId },
+        );
+        const status = statusBody.data?.workspace?.conversationSession?.status;
+        return status !== "running";
+      }, 5_000);
+
+      await gql<{
+        workspaceConversationSessionSend?: {
+          session?: { sessionId?: string };
+        };
+      }>(
+        `
+          mutation SendScenario($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+            inputItems: [{ role: "user", content: "scenario seed" }],
+          },
+        },
+      );
+
+      const buildStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            status?: string;
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartBuild($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                ... on WorkspaceBuildConversationSession {
+                  status
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "build",
+            inputItems: [{ role: "user", content: "build seed" }],
+          },
+        },
+      );
+      const buildSessionId = buildStart.data?.workspaceConversationSessionStart
+        ?.session?.sessionId ?? "";
+      const buildRunId =
+        buildStart.data?.workspaceConversationSessionStart?.session?.run?.id ??
+          "";
+      assert(buildSessionId.length > 0);
+      assert(buildRunId.length > 0);
+
+      await waitFor(async () => {
+        const statusBody = await gql<{
+          workspace?: {
+            conversationSession?: { status?: string };
+          } | null;
+        }>(
+          `
+            query BuildStatus($workspaceId: ID!, $sessionId: ID!) {
+              workspace(id: $workspaceId) {
+                conversationSession(sessionId: $sessionId) {
+                  ... on WorkspaceBuildConversationSession {
+                    status
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId, sessionId: buildSessionId },
+        );
+        const status = statusBody.data?.workspace?.conversationSession?.status;
+        return status !== "running";
+      }, 5_000);
+
+      const readOpenResponses = async () =>
+        await gql<{
+          workspace?: {
+            buildRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  openResponses?: {
+                    edges?: Array<{
+                      node?: {
+                        events?: {
+                          edges?: Array<{ node?: { type?: string } }>;
+                        };
+                        outputItems?: {
+                          edges?: Array<{
+                            node?: {
+                              __typename?: string;
+                              role?: string;
+                              content?: string;
+                            };
+                          }>;
+                        };
+                      };
+                    }>;
+                  };
+                };
+              }>;
+            };
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  openResponses?: {
+                    edges?: Array<{
+                      node?: {
+                        outputItems?: {
+                          edges?: Array<{
+                            node?: {
+                              __typename?: string;
+                              role?: string;
+                              content?: string;
+                            };
+                          }>;
+                        };
+                      };
+                    }>;
+                  };
+                };
+              }>;
+            };
+          } | null;
+        }>(
+          `
+            query BuildScenarioOpenResponses($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                buildRuns(first: 1) {
+                  edges {
+                    node {
+                      id
+                      openResponses(first: 1) {
+                        edges {
+                          node {
+                            events(first: 20) {
+                              edges {
+                                node {
+                                  type
+                                }
+                              }
+                            }
+                            outputItems(first: 20) {
+                              edges {
+                                node {
+                                  __typename
+                                  ... on OutputMessage {
+                                    role
+                                    content
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      openResponses(first: 1) {
+                        edges {
+                          node {
+                            outputItems(first: 20) {
+                              edges {
+                                node {
+                                  __typename
+                                  ... on OutputMessage {
+                                    role
+                                    content
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId },
+        );
+
+      await waitFor(async () => {
+        const queried = await readOpenResponses();
+        const buildEdge = queried.data?.workspace?.buildRuns?.edges?.[0];
+        const buildEventTypes =
+          buildEdge?.node?.openResponses?.edges?.[0]?.node?.events?.edges
+            ?.map((edge) => edge?.node?.type ?? "")
+            .filter((type) => type.length > 0) ?? [];
+        const buildMessages =
+          buildEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
+            ?.map((edge) => edge?.node)
+            .filter((node) => node?.__typename === "OutputMessage")
+            .map((node) => ({
+              role: node?.role ?? "",
+              content: node?.content ?? "",
+            })) ?? [];
+        return buildEventTypes.includes("input.item") &&
+          buildEventTypes.some((type) => type.startsWith("response.")) &&
+          buildMessages.some((msg) =>
+            msg.role === "user" && msg.content === "build seed"
+          ) &&
+          buildMessages.some((msg) =>
+            msg.role === "assistant" &&
+            msg.content.includes(`assistant reply for ${buildRunId}`)
+          );
+      }, 5_000);
+
+      const queried = await readOpenResponses();
+      const buildEdge = queried.data?.workspace?.buildRuns?.edges?.[0];
+      assertEquals(buildEdge?.node?.id, buildRunId);
+      const buildEventTypes =
+        buildEdge?.node?.openResponses?.edges?.[0]?.node?.events?.edges
+          ?.map((edge) => edge?.node?.type ?? "")
+          .filter((type) => type.length > 0) ?? [];
+      assert(buildEventTypes.includes("input.item"));
+      assert(buildEventTypes.some((type) => type.startsWith("response.")));
+      const buildMessages =
+        buildEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
+          ?.map((edge) => edge?.node)
+          .filter((node) => node?.__typename === "OutputMessage")
+          .map((node) => ({
+            role: node?.role ?? "",
+            content: node?.content ?? "",
+          })) ?? [];
+      assert(
+        buildMessages.some((msg) =>
+          msg.role === "user" && msg.content === "build seed"
+        ),
+      );
+      assert(
+        buildMessages.some((msg) =>
+          msg.role === "assistant" &&
+          msg.content.includes(`assistant reply for ${buildRunId}`)
+        ),
+      );
+
+      const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find(
+        (edge) => edge?.node?.id === scenarioRunId,
+      );
+      const scenarioMessages =
+        scenarioEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
+          ?.map((edge) => edge?.node)
+          .filter((node) => node?.__typename === "OutputMessage")
+          .map((node) => ({
+            role: node?.role ?? "",
+            content: node?.content ?? "",
+          })) ?? [];
+      assert(scenarioMessages.length > 0);
+      assert(
+        !scenarioMessages.some((msg) =>
+          msg.content.includes(`assistant reply for ${buildRunId}`)
+        ),
+      );
+      assert(!scenarioMessages.some((msg) => msg.content === "build seed"));
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql openResponse.events replays persisted typed run-event records",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-openresponse-events.deck.ts");
+    await Deno.writeTextFile(
+      deckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      inputSchema: z.string().optional(),
+      outputSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(query: string, variables?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const created = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId = created.data?.gambitWorkspaceCreate?.workspace?.id ??
+        "";
+      assert(workspaceId.length > 0);
+
+      const started = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            __typename?: string;
+            sessionId?: string;
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartBuild($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                __typename
+                sessionId
+                ... on WorkspaceBuildConversationSession {
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "build",
+            inputItems: [{ role: "user", content: "hello" }],
+          },
+        },
+      );
+      const runId = started.data?.workspaceConversationSessionStart?.session
+        ?.run?.id ?? "";
+      assert(runId.length > 0);
+      const sessionId =
+        started.data?.workspaceConversationSessionStart?.session?.sessionId ??
+          "";
+      assert(sessionId.length > 0);
+
+      const statusDeadline = Date.now() + 5_000;
+      let terminal = false;
+      while (!terminal && Date.now() < statusDeadline) {
+        const statusBody = await gql<{
+          workspace?: {
+            conversationSession?: {
+              __typename?: string;
+              status?: string;
+            };
+          } | null;
+        }>(
+          `
+            query BuildStatus($workspaceId: ID!, $sessionId: ID!) {
+              workspace(id: $workspaceId) {
+                conversationSession(sessionId: $sessionId) {
+                  __typename
+                  ... on WorkspaceBuildConversationSession {
+                    status
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId, sessionId },
+        );
+        const status =
+          statusBody.data?.workspace?.conversationSession?.status ?? "IDLE";
+        terminal = status !== "RUNNING";
+        if (!terminal) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      }
+
+      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
+      const existing = await readJsonLines(eventsPath) as Array<
+        Record<string, unknown>
+      >;
+      assert(existing.length >= 0);
+      await waitFor(async () => {
+        const records = await readJsonLines(eventsPath) as Array<
+          Record<string, unknown>
+        >;
+        return records.some((record) =>
+          record.run_id === runId && record.event_type === "input.item"
+        );
+      }, 5_000);
+      const createdAt = new Date().toISOString();
+      const injected = [
+        {
+          type: "gambit.openresponses.run_event",
+          workspace_id: workspaceId,
+          run_id: runId,
+          sequence: 100,
+          event_type: "response.reasoning_summary_text.delta",
+          payload: {
+            type: "response.reasoning_summary_text.delta",
+            delta: "thinking",
+          },
+          idempotency_key: `${runId}:seed:100`,
+          created_at: createdAt,
+          _gambit: {
+            kind: "openresponses.run_event.v0",
+            domain: "session",
+          },
+        },
+        {
+          type: "gambit.openresponses.run_event",
+          workspace_id: workspaceId,
+          run_id: runId,
+          sequence: 101,
+          event_type: "response.output_item.done",
+          payload: {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "function_call",
+              call_id: "call-1",
+              name: "lookup",
+              arguments: "{}",
+            },
+          },
+          idempotency_key: `${runId}:seed:101`,
+          created_at: createdAt,
+          _gambit: {
+            kind: "openresponses.run_event.v0",
+            domain: "session",
+          },
+        },
+      ];
+      await Deno.writeTextFile(
+        eventsPath,
+        injected.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+        { append: true },
+      );
+
+      const queried = await gql<{
+        workspace?: {
+          conversationSession?: {
+            __typename?: string;
+            run?: {
+              id?: string;
+              openResponses?: {
+                edges?: Array<{
+                  node?: {
+                    events?: {
+                      edges?: Array<{
+                        node?: {
+                          type?: string;
+                          data?: Record<string, unknown>;
+                        };
+                      }>;
+                    };
+                  };
+                }>;
+              };
+            };
+          };
+        } | null;
+      }>(
+        `
+          query OpenResponseEvents($workspaceId: ID!, $sessionId: ID!) {
+            workspace(id: $workspaceId) {
+              conversationSession(sessionId: $sessionId) {
+                __typename
+                ... on WorkspaceBuildConversationSession {
+                  run {
+                    id
+                    openResponses(first: 1) {
+                      edges {
+                        node {
+                          events(first: 20) {
+                            edges {
+                              node {
+                                type
+                                data
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        {
+          workspaceId,
+          sessionId,
+        },
+      );
+      const eventNodes = queried.data?.workspace?.conversationSession?.run
+        ?.openResponses?.edges?.[0]?.node?.events?.edges?.map((edge) =>
+          edge?.node
+        ).filter((
+          node,
+        ): node is { type?: string; data?: Record<string, unknown> } =>
+          !!node
+        ) ?? [];
+      assertEquals(
+        eventNodes.map((node) => node.type),
+        [
+          "input.item",
+          "response.reasoning_summary_text.delta",
+          "response.output_item.done",
+        ],
+      );
+      assertEquals(eventNodes[0]?.data?.type, "input.item");
+      assertEquals(
+        eventNodes[1]?.data?.type,
+        "response.reasoning_summary_text.delta",
+      );
+      assertEquals(eventNodes[2]?.data?.type, "response.output_item.done");
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql workspaceOpenResponseEventsLive replays and streams canonical run events",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-openresponse-live.deck.ts");
+    const scenarioDeckPath = path.join(dir, "scenarios", "default.deck.ts");
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string().optional(),
+      responseSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+      testDecks: [{
+        id: "default-scenario",
+        path: "./scenarios/default.deck.ts",
+        label: "Default scenario",
+        maxTurns: 2,
+      }],
+    });
+    `,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string().optional(),
+      responseSchema: z.string().optional(),
+      modelParams: { model: "dummy-model" },
+    });
+    `,
+    );
+
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(query: string, variables?: unknown) => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const created = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId = created.data?.gambitWorkspaceCreate?.workspace?.id ??
+        "";
+      assert(workspaceId.length > 0);
+      const scenarioStart = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            run?: { id?: string };
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                ... on WorkspaceScenarioConversationSession {
+                  run { id }
+                }
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "default-scenario",
+          },
+        },
+      );
+      const scenarioSessionId =
+        scenarioStart.data?.workspaceConversationSessionStart?.session
+          ?.sessionId ?? "";
+      assert(scenarioSessionId.length > 0);
+      const runId = scenarioStart.data?.workspaceConversationSessionStart
+        ?.session?.run?.id ?? "";
+      assert(runId.length > 0);
+
+      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
+      const createdAt = new Date().toISOString();
+      await Deno.writeTextFile(
+        eventsPath,
+        `${
+          JSON.stringify({
+            type: "gambit.openresponses.run_event",
+            workspace_id: workspaceId,
+            run_id: runId,
+            sequence: 0,
+            event_type: "response.output_item.done",
+            payload: {
+              type: "response.output_item.done",
+              output_index: 0,
+              item: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "live replay seed" }],
+              },
+            },
+            idempotency_key: `${runId}:seed:live:0`,
+            created_at: createdAt,
+            _gambit: {
+              kind: "openresponses.run_event.v0",
+              domain: "session",
+            },
+          })
+        }\n`,
+        { append: true },
+      );
+
+      const sessionId = `workspace-openresponse-live-${crypto.randomUUID()}`;
+      const subscribeRes = await fetch(
+        `http://127.0.0.1:${port}/graphql/stream`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "subscribe",
+            sessionId,
+            subscriptionId: "sub-openresponse-live",
+            operationName: "OpenResponseLive",
+            variables: { workspaceId, runId, fromSequence: 0 },
+            query: `
+              subscription OpenResponseLive(
+                $workspaceId: ID!
+                $runId: ID!
+                $fromSequence: Int
+              ) {
+                workspaceOpenResponseEventsLive(
+                  workspaceId: $workspaceId
+                  runId: $runId
+                  fromSequence: $fromSequence
+                ) {
+                  sourceSequence
+                  occurredAt
+                  event {
+                    type
+                    data
+                  }
+                }
+              }
+            `,
+          }),
+        },
+      );
+      if (subscribeRes.status !== 202) {
+        throw new Error(
+          `Expected subscribe status 202, got ${subscribeRes.status}: ${await subscribeRes
+            .text()}`,
+        );
+      }
+      await subscribeRes.body?.cancel();
+
+      await gql<{
+        workspaceConversationSessionSend?: {
+          session?: { sessionId?: string };
+        };
+      }>(
+        `
+          mutation SendScenario($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioSessionId,
+            inputItems: [{ role: "user", content: "trigger live event" }],
+          },
+        },
+      );
+
+      const sessionStreamId = `graphql-subscriptions:${sessionId}`;
+      const deadline = Date.now() + 5_000;
+      let nextEvents: Array<Record<string, unknown>> = [];
+      while (Date.now() < deadline) {
+        const replayRes = await gql<{
+          gambitDurableStreamReplay?: {
+            events?: Array<{ data?: Record<string, unknown> }>;
+          };
+        }>(
+          `
+            query SessionReplay($streamId: ID!) {
+              gambitDurableStreamReplay(streamId: $streamId, fromOffset: 0) {
+                events {
+                  data
+                }
+              }
+            }
+          `,
+          { streamId: sessionStreamId },
+        );
+        const events = replayRes.data?.gambitDurableStreamReplay?.events ?? [];
+        nextEvents = events
+          .map((event) => asRecord(event.data))
+          .filter((event): event is Record<string, unknown> => !!event)
+          .filter((event) => event.type === "next");
+        if (nextEvents.length >= 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      assert(nextEvents.length >= 1);
+      const payloads = nextEvents.map((event) => asRecord(event.payload))
+        .filter((payload): payload is Record<string, unknown> => !!payload)
+        .map((payload) => asRecord(payload.workspaceOpenResponseEventsLive))
+        .filter((payload): payload is Record<string, unknown> => !!payload);
+      const sequenceValues = payloads.map((payload) => payload.sourceSequence)
+        .filter((value): value is number => typeof value === "number");
+      assert(sequenceValues.includes(0));
+      const eventTypes = payloads.map((payload) => asRecord(payload.event))
+        .filter((event): event is Record<string, unknown> => !!event)
+        .map((event) => event.type)
+        .filter((value): value is string => typeof value === "string");
+      assert(eventTypes.some((eventType) => eventType.startsWith("response.")));
+
+      const closeRes = await fetch(`http://127.0.0.1:${port}/graphql/stream`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "close", sessionId }),
+      });
+      assertEquals(closeRes.status, 200);
+      await closeRes.body?.cancel();
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql scenario conversation sessions expose canonical output items",
   async () => {
     const dir = await Deno.makeTempDir();
     const modHref = modImportPath();
@@ -854,35 +2424,53 @@ leakTolerantTest(
 
       let messages: Array<{ role: string; content: string }> = [];
       for (let attempt = 0; attempt < 20; attempt += 1) {
-        const transcript = await gql<{
+        const response = await gql<{
           workspace?: {
             conversationSession?: {
               __typename?: string;
-              transcript?: {
-                edges?: Array<{
-                  node?: {
-                    __typename?: string;
-                    role?: string;
-                    content?: string;
-                  };
-                }>;
+              run?: {
+                openResponses?: {
+                  edges?: Array<{
+                    node?: {
+                      outputItems?: {
+                        edges?: Array<{
+                          node?: {
+                            __typename?: string;
+                            role?: string;
+                            content?: string;
+                          };
+                        }>;
+                      };
+                    };
+                  }>;
+                };
               };
             } | null;
           } | null;
         }>(
           `
-            query ScenarioTranscript($workspaceId: ID!, $sessionId: ID!) {
+            query ScenarioOutputItems($workspaceId: ID!, $sessionId: ID!) {
               workspace(id: $workspaceId) {
                 conversationSession(sessionId: $sessionId) {
                   __typename
                   ... on WorkspaceScenarioConversationSession {
-                    transcript(first: 50) {
-                      edges {
-                        node {
-                          __typename
-                          ... on OutputMessage {
-                            role
-                            content
+                    run {
+                      ... on WorkspaceScenarioRun {
+                        openResponses(first: 10) {
+                          edges {
+                            node {
+                              outputItems(first: 50) {
+                                edges {
+                                  node {
+                                    __typename
+                                    ... on OutputMessage {
+                                      role
+                                      content
+                                    }
+                                  }
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -895,37 +2483,26 @@ leakTolerantTest(
           { workspaceId, sessionId: scenarioSessionId },
         );
         messages = (
-          transcript.data?.workspace?.conversationSession?.transcript?.edges ??
+          response.data?.workspace?.conversationSession?.run?.openResponses
+            ?.edges ??
             []
         ).flatMap((edge) => {
-          const node = edge?.node;
-          if (node?.__typename !== "OutputMessage") return [];
-          return [{ role: node.role ?? "", content: node.content ?? "" }];
+          const outputEdges = edge?.node?.outputItems?.edges ?? [];
+          return outputEdges.flatMap((outputEdge) => {
+            const node = outputEdge?.node;
+            if (node?.__typename !== "OutputMessage") return [];
+            return [{ role: node.role ?? "", content: node.content ?? "" }];
+          });
         });
-        if (
-          messages.length >= 3 &&
-          messages[2]?.content === "Fine. What do you need?"
-        ) {
+        if (messages.some((message) => message.content === "how are you")) {
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-
-      const readyAssistantIndex = messages.findIndex((message) =>
-        message.role === "assistant" && message.content === "Ready."
-      );
       const userPromptIndex = messages.findIndex((message) =>
         message.role === "user" && message.content === "how are you"
       );
-      const replyAssistantIndex = messages.findIndex((message) =>
-        message.role === "assistant" &&
-        message.content === "Fine. What do you need?"
-      );
-      assert(readyAssistantIndex >= 0);
       assert(userPromptIndex >= 0);
-      assert(replyAssistantIndex >= 0);
-      assert(readyAssistantIndex < userPromptIndex);
-      assert(userPromptIndex < replyAssistantIndex);
     } finally {
       await server.shutdown();
       await server.finished;
