@@ -2,6 +2,8 @@ import {
   createIsographEnvironment,
   createIsographStore,
 } from "@isograph/react";
+import type { OpenResponsesRunEventV0 } from "@bolt-foundry/gambit-core";
+import type { OpenResponsesOutputItemV0 } from "./server_session_store.ts";
 import { gambitYoga } from "./simulator_graphql.ts";
 import type { GambitID } from "./gambit_id.ts";
 import type { GambitWorkspaceRelativePath } from "./gambit_path.ts";
@@ -175,6 +177,21 @@ export type SimulatorGraphqlOperations = {
     workspaceId: string,
   ) => Promise<{ ok: boolean; error?: string }>;
   readWorkspaceBuildRun: (workspaceId: string) => Promise<BuildRunRecord>;
+  readWorkspaceOpenResponseEvents: (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+  }) => Promise<Array<OpenResponsesRunEventV0>>;
+  readWorkspaceOpenResponseOutputItems?: (args: {
+    workspaceId: string;
+    runId: string;
+  }) => Promise<Array<OpenResponsesOutputItemV0>>;
+  subscribeWorkspaceOpenResponseEvents?: (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+    signal?: AbortSignal;
+  }) => AsyncIterable<OpenResponsesRunEventV0>;
   createWorkspaceBuildRun: (
     workspaceId: string,
     message: string,
@@ -405,6 +422,14 @@ export function getSimulatorIsographEnvironment(
               traces: [],
               toolInserts: [],
             })),
+        readWorkspaceOpenResponseEvents:
+          operations?.readWorkspaceOpenResponseEvents ??
+            (() => Promise.resolve([])),
+        readWorkspaceOpenResponseOutputItems:
+          operations?.readWorkspaceOpenResponseOutputItems ??
+            (() => Promise.resolve([])),
+        subscribeWorkspaceOpenResponseEvents: operations
+          ?.subscribeWorkspaceOpenResponseEvents,
         createWorkspaceBuildRun: operations?.createWorkspaceBuildRun ??
           ((workspaceId: string) =>
             Promise.resolve({

@@ -260,6 +260,15 @@ function parseJsonValue(text: string): JSONValue {
   }
 }
 
+function stringifyJsonValue(value: JSONValue): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -273,6 +282,8 @@ function emitCodexToolEvents(input: {
   toolNames: Map<string, string>;
   emittedCalls: Set<string>;
   emittedResults: Set<string>;
+  toolOutputIndexByCallId: Map<string, number>;
+  nextOutputIndexRef: { value: number };
 }): void {
   const payloadType = typeof input.event.type === "string"
     ? input.event.type
@@ -309,6 +320,16 @@ function emitCodexToolEvents(input: {
       ? parseJsonValue(rawArgs)
       : rawArgs ?? {};
   })();
+  const resolvedName = name ?? input.toolNames.get(callId) ?? itemType;
+  const outputIndex = (() => {
+    const existing = input.toolOutputIndexByCallId.get(callId);
+    if (typeof existing === "number") return existing;
+    const next = input.nextOutputIndexRef.value;
+    input.nextOutputIndexRef.value += 1;
+    input.toolOutputIndexByCallId.set(callId, next);
+    return next;
+  })();
+  const argsText = stringifyJsonValue(normalizedArgs);
 
   if (!input.emittedCalls.has(callId)) {
     input.emittedCalls.add(callId);
@@ -320,10 +341,20 @@ function emitCodexToolEvents(input: {
       args: normalizedArgs,
       toolKind: "mcp_bridge",
     });
+    input.emit({
+      type: "response.output_item.done",
+      output_index: outputIndex,
+      item: {
+        type: "function_call",
+        id: `${callId}:call`,
+        call_id: callId,
+        name: resolvedName,
+        arguments: argsText,
+      },
+    });
   }
 
   if (input.emittedResults.has(callId)) return;
-  const resolvedName = name ?? input.toolNames.get(callId) ?? itemType;
   if (!resolvedName) return;
   const isTerminal = payloadType === "item.completed" ||
     payloadType === "item.done";
@@ -360,6 +391,16 @@ function emitCodexToolEvents(input: {
     name: resolvedName,
     result,
     toolKind: "mcp_bridge",
+  });
+  input.emit({
+    type: "response.output_item.done",
+    output_index: outputIndex,
+    item: {
+      type: "function_call_output",
+      id: `${callId}:output`,
+      call_id: callId,
+      output: stringifyJsonValue(result),
+    },
   });
 }
 
@@ -419,10 +460,12 @@ function emitCodexReasoningEvents(input: {
       text: doneText,
     });
     const summaryParts = Array.isArray(record.summary) ? record.summary : [];
+    const summaryTexts: Array<string> = [];
     summaryParts.forEach((part, idx) => {
       if (!part || typeof part !== "object") return;
       const partRecord = part as Record<string, JSONValue>;
       const text = typeof partRecord.text === "string" ? partRecord.text : "";
+      summaryTexts.push(text);
       input.emit({
         type: "response.reasoning_summary_part.added",
         output_index: outputIndex,
@@ -443,7 +486,23 @@ function emitCodexReasoningEvents(input: {
           text,
         },
       });
+      input.emit({
+        type: "response.reasoning_summary_text.delta",
+        output_index: outputIndex,
+        item_id: itemId,
+        summary_index: idx,
+        delta: text,
+      });
     });
+    if (summaryTexts.length > 0) {
+      input.emit({
+        type: "response.reasoning_summary_text.done",
+        output_index: outputIndex,
+        item_id: itemId,
+        summary_index: 0,
+        text: summaryTexts.join("\n").trim(),
+      });
+    }
   }
 }
 
@@ -716,6 +775,8 @@ function buildCodexStreamHandler(input: {
   const toolNames = new Map<string, string>();
   const emittedCalls = new Set<string>();
   const emittedResults = new Set<string>();
+  const toolOutputIndexByCallId = new Map<string, number>();
+  const nextOutputIndexRef = { value: 0 };
   return (event) => {
     emitCodexReasoningEvents({
       event,
@@ -727,6 +788,8 @@ function buildCodexStreamHandler(input: {
       toolNames,
       emittedCalls,
       emittedResults,
+      toolOutputIndexByCallId,
+      nextOutputIndexRef,
     });
     input.emitRaw(event);
   };

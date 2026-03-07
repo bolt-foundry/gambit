@@ -1,9 +1,16 @@
 import * as path from "@std/path";
 import { existsSync } from "@std/fs";
+import { DatabaseSync } from "node:sqlite";
 import type {
+  AppendOpenResponsesRunEventV0Input,
   FeedbackEntry,
+  OpenResponsesRunEventV0,
   SavedState,
   TraceEvent,
+} from "@bolt-foundry/gambit-core";
+import {
+  isOpenResponsesRunEventPayload,
+  toOpenResponsesRunEventV0,
 } from "@bolt-foundry/gambit-core";
 
 export type ScenarioRunSummary = {
@@ -59,6 +66,16 @@ export type BuildProjectionState = {
   lastAppliedOffset: number;
   run: BuildProjectionRun;
   state?: SavedState;
+};
+
+type OpenResponsesRunEventSubscriptionListener = (
+  event: OpenResponsesRunEventV0,
+) => void;
+
+type OpenResponsesRunEventStore = {
+  byIdempotencyKey: Map<string, OpenResponsesRunEventV0>;
+  byRunId: Map<string, Array<OpenResponsesRunEventV0>>;
+  hydrated: boolean;
 };
 
 type SessionStoreDeps = {
@@ -215,6 +232,270 @@ const safeStringify = (value: unknown, space?: number): string => {
   );
 };
 
+const OPENRESPONSES_RUN_EVENT_RECORD_TYPE = "gambit.openresponses.run_event";
+const OPENRESPONSES_RUN_EVENT_RECORD_KIND = "openresponses.run_event.v0";
+const SESSION_SQLITE_DB_FILENAME = "workspace.sqlite";
+const SESSION_SQLITE_SCHEMA_VERSION = 3;
+const OPENRESPONSES_EVENTS_SQLITE_TABLE = "openresponses_run_events_v0";
+const OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE = "openresponses_output_items_v0";
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function ensureDirSync(dir: string): void {
+  try {
+    Deno.mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    if (!(error instanceof Deno.errors.AlreadyExists)) {
+      throw error;
+    }
+  }
+}
+
+function ensureSessionSqliteSchema(db: DatabaseSync): void {
+  const row = db.prepare("PRAGMA user_version;").get() as
+    | { user_version?: number }
+    | undefined;
+  const current = typeof row?.user_version === "number" ? row.user_version : 0;
+  if (current < 1) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${OPENRESPONSES_EVENTS_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        offset INTEGER NOT NULL UNIQUE,
+        UNIQUE (workspace_id, run_id, idempotency_key),
+        PRIMARY KEY (workspace_id, run_id, sequence)
+      );
+      CREATE INDEX IF NOT EXISTS ${OPENRESPONSES_EVENTS_SQLITE_TABLE}_workspace_run_sequence_idx
+        ON ${OPENRESPONSES_EVENTS_SQLITE_TABLE}(workspace_id, run_id, sequence);
+      CREATE INDEX IF NOT EXISTS ${OPENRESPONSES_EVENTS_SQLITE_TABLE}_workspace_run_idempotency_idx
+        ON ${OPENRESPONSES_EVENTS_SQLITE_TABLE}(workspace_id, run_id, idempotency_key);
+    `);
+  }
+  if (current < 2) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        item_key TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        item_kind TEXT NOT NULL,
+        role TEXT,
+        content TEXT,
+        message_ref_id TEXT,
+        reasoning_type TEXT,
+        summary TEXT,
+        tool_call_id TEXT,
+        tool_name TEXT,
+        tool_status TEXT,
+        arguments_text TEXT,
+        result_text TEXT,
+        error_text TEXT,
+        output_index INTEGER,
+        sequence INTEGER NOT NULL,
+        PRIMARY KEY (workspace_id, run_id, item_key)
+      );
+      CREATE INDEX IF NOT EXISTS ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}_workspace_run_sequence_idx
+        ON ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}(workspace_id, run_id, sequence);
+    `);
+  }
+  if (current >= 1 && current < 3) {
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const migratedTable = `${OPENRESPONSES_EVENTS_SQLITE_TABLE}__v3_migrated`;
+      db.exec(`
+        DROP TABLE IF EXISTS ${migratedTable};
+        CREATE TABLE ${migratedTable} (
+          workspace_id TEXT NOT NULL,
+          run_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          event_type TEXT NOT NULL,
+          payload_json TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          offset INTEGER NOT NULL UNIQUE,
+          UNIQUE (workspace_id, run_id, idempotency_key),
+          PRIMARY KEY (workspace_id, run_id, sequence)
+        );
+        INSERT INTO ${migratedTable} (
+          workspace_id,
+          run_id,
+          sequence,
+          event_type,
+          payload_json,
+          idempotency_key,
+          created_at,
+          offset
+        )
+        SELECT
+          workspace_id,
+          run_id,
+          sequence,
+          event_type,
+          payload_json,
+          idempotency_key,
+          created_at,
+          offset
+        FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+        ORDER BY offset ASC;
+        DROP TABLE ${OPENRESPONSES_EVENTS_SQLITE_TABLE};
+        ALTER TABLE ${migratedTable} RENAME TO ${OPENRESPONSES_EVENTS_SQLITE_TABLE};
+        CREATE INDEX IF NOT EXISTS ${OPENRESPONSES_EVENTS_SQLITE_TABLE}_workspace_run_sequence_idx
+          ON ${OPENRESPONSES_EVENTS_SQLITE_TABLE}(workspace_id, run_id, sequence);
+        CREATE INDEX IF NOT EXISTS ${OPENRESPONSES_EVENTS_SQLITE_TABLE}_workspace_run_idempotency_idx
+          ON ${OPENRESPONSES_EVENTS_SQLITE_TABLE}(workspace_id, run_id, idempotency_key);
+      `);
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+  if (current < SESSION_SQLITE_SCHEMA_VERSION) {
+    db.exec(`PRAGMA user_version = ${SESSION_SQLITE_SCHEMA_VERSION};`);
+  }
+}
+
+function parseOpenResponsesRunEventRecord(
+  value: unknown,
+): OpenResponsesRunEventV0 | null {
+  if (!isObjectRecord(value)) return null;
+  if (value.type !== OPENRESPONSES_RUN_EVENT_RECORD_TYPE) return null;
+  const meta = isObjectRecord(value._gambit) ? value._gambit : null;
+  if (
+    meta?.kind !== OPENRESPONSES_RUN_EVENT_RECORD_KIND ||
+    !isOpenResponsesRunEventPayload(value.payload)
+  ) {
+    return null;
+  }
+  const sequence = typeof value.sequence === "number" &&
+      Number.isInteger(value.sequence)
+    ? value.sequence
+    : null;
+  if (sequence === null || sequence < 0) return null;
+  const workspaceId = typeof value.workspace_id === "string"
+    ? value.workspace_id.trim()
+    : "";
+  const runId = typeof value.run_id === "string" ? value.run_id.trim() : "";
+  const eventType = typeof value.event_type === "string"
+    ? value.event_type.trim()
+    : "";
+  const idempotencyKey = typeof value.idempotency_key === "string"
+    ? value.idempotency_key.trim()
+    : "";
+  const createdAt = typeof value.created_at === "string"
+    ? value.created_at
+    : "";
+  if (
+    !workspaceId || !runId || !eventType || !idempotencyKey || !createdAt
+  ) {
+    return null;
+  }
+  return {
+    workspace_id: workspaceId,
+    run_id: runId,
+    sequence,
+    event_type: eventType,
+    payload: value.payload,
+    idempotency_key: idempotencyKey,
+    created_at: createdAt,
+  };
+}
+
+type PersistedOpenResponsesRunEventRecord = OpenResponsesRunEventV0 & {
+  offset: number | null;
+};
+
+function parsePersistedOpenResponsesRunEventRecord(
+  value: unknown,
+): PersistedOpenResponsesRunEventRecord | null {
+  const parsed = parseOpenResponsesRunEventRecord(value);
+  if (!parsed || !isObjectRecord(value)) return null;
+  const offset = typeof value.offset === "number" &&
+      Number.isInteger(value.offset) &&
+      value.offset >= 0
+    ? value.offset
+    : typeof (value._gambit as { offset?: unknown } | undefined)?.offset ===
+          "number" &&
+        Number.isInteger(
+          (value._gambit as { offset?: number } | undefined)?.offset,
+        ) &&
+        ((value._gambit as { offset?: number } | undefined)?.offset ?? -1) >= 0
+    ? (value._gambit as { offset: number }).offset
+    : null;
+  return { ...parsed, offset };
+}
+
+type OpenResponsesOutputMessageV0 = {
+  __typename: "OutputMessage";
+  id: string;
+  role: string;
+  content: string;
+  messageRefId?: string;
+};
+
+type OpenResponsesOutputReasoningV0 = {
+  __typename: "OutputReasoning";
+  id: string;
+  summary: string;
+  reasoningType?: string;
+};
+
+type OpenResponsesOutputToolCallV0 = {
+  __typename: "OutputToolCall";
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  status: "RUNNING" | "COMPLETED" | "ERROR";
+  argumentsText?: string;
+  resultText?: string;
+  error?: string;
+};
+
+export type OpenResponsesOutputItemV0 =
+  | OpenResponsesOutputMessageV0
+  | OpenResponsesOutputReasoningV0
+  | OpenResponsesOutputToolCallV0;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toEventMessageText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((entry) => {
+      if (typeof entry === "string") return entry;
+      const record = asRecord(entry);
+      if (!record) return "";
+      const text = asString(record.text);
+      if (text.length > 0) return text;
+      return toEventMessageText(record.content);
+    }).join("");
+  }
+  const record = asRecord(value);
+  if (!record) return "";
+  const text = asString(record.text);
+  if (text.length > 0) return text;
+  return toEventMessageText(record.content);
+}
+
 export const createSessionStore = (deps: SessionStoreDeps) => {
   const {
     sessionsRoot,
@@ -234,6 +515,15 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   const sessionOffsetById = new Map<string, number>();
   const buildProjectionCache = new Map<string, BuildProjectionState>();
   const buildProjectionRefreshInFlight = new Map<string, Promise<void>>();
+  const openResponsesRunEventsBySession = new Map<
+    string,
+    OpenResponsesRunEventStore
+  >();
+  const sessionSqliteById = new Map<string, DatabaseSync>();
+  const openResponsesRunEventListenersBySessionRun = new Map<
+    string,
+    Set<OpenResponsesRunEventSubscriptionListener>
+  >();
 
   const drainSessionWriteQueue = async (sessionId: string) => {
     let shouldContinueDrain = false;
@@ -280,6 +570,20 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     void drainSessionWriteQueue(sessionId);
   };
 
+  const enqueueSessionWriteResult = <T>(
+    sessionId: string,
+    task: () => Promise<T> | T,
+  ): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      enqueueSessionWrite(sessionId, async () => {
+        try {
+          resolve(await task());
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+
   const mergeSessionState = (
     current: SavedState | undefined,
     next: SavedState,
@@ -308,6 +612,37 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
     if (!Number.isInteger(value)) return undefined;
     return value;
+  };
+
+  const getSessionSqlitePath = (
+    sessionId: string,
+    state?: SavedState,
+  ): string => {
+    const stateMeta = state?.meta as Record<string, unknown> | undefined;
+    const fromMeta = typeof stateMeta?.sessionSqlitePath === "string"
+      ? stateMeta.sessionSqlitePath
+      : "";
+    if (fromMeta.trim().length > 0) return fromMeta;
+    const sessionDir = typeof stateMeta?.sessionDir === "string"
+      ? stateMeta.sessionDir
+      : path.join(sessionsRoot, sessionId);
+    return path.join(sessionDir, SESSION_SQLITE_DB_FILENAME);
+  };
+
+  const getSessionSqliteDb = (
+    sessionId: string,
+    state?: SavedState,
+  ): DatabaseSync => {
+    const existing = sessionSqliteById.get(sessionId);
+    if (existing) return existing;
+    const sqlitePath = getSessionSqlitePath(sessionId, state);
+    ensureDirSync(path.dirname(sqlitePath));
+    const db = new DatabaseSync(sqlitePath);
+    db.exec("PRAGMA busy_timeout=5000;");
+    db.exec("PRAGMA journal_mode=WAL;");
+    ensureSessionSqliteSchema(db);
+    sessionSqliteById.set(sessionId, db);
+    return db;
   };
 
   const normalizeBuildProjectionRun = (
@@ -489,6 +824,609 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       expected = record.offset + 1;
     }
     return highest;
+  };
+
+  const openResponsesRunEventListenerKey = (
+    workspaceId: string,
+    runId: string,
+  ): string => `${workspaceId}::${runId}`;
+  const openResponsesRunEventIdempotencyKey = (
+    workspaceId: string,
+    runId: string,
+    idempotencyKey: string,
+  ): string => `${workspaceId}::${runId}::${idempotencyKey}`;
+
+  const getOpenResponsesRunEventStore = (
+    sessionId: string,
+  ): OpenResponsesRunEventStore => {
+    const existing = openResponsesRunEventsBySession.get(sessionId);
+    if (existing) return existing;
+    const created: OpenResponsesRunEventStore = {
+      byIdempotencyKey: new Map(),
+      byRunId: new Map(),
+      hydrated: false,
+    };
+    openResponsesRunEventsBySession.set(sessionId, created);
+    return created;
+  };
+
+  const indexOpenResponsesRunEvent = (
+    store: OpenResponsesRunEventStore,
+    event: OpenResponsesRunEventV0,
+  ) => {
+    const idempotencyStoreKey = openResponsesRunEventIdempotencyKey(
+      event.workspace_id,
+      event.run_id,
+      event.idempotency_key,
+    );
+    if (store.byIdempotencyKey.has(idempotencyStoreKey)) {
+      return;
+    }
+    store.byIdempotencyKey.set(idempotencyStoreKey, event);
+    const runStoreKey = openResponsesRunEventListenerKey(
+      event.workspace_id,
+      event.run_id,
+    );
+    const byRun = store.byRunId.get(runStoreKey) ?? [];
+    byRun.push(event);
+    byRun.sort((a, b) => a.sequence - b.sequence);
+    store.byRunId.set(runStoreKey, byRun);
+  };
+
+  const resetOpenResponsesRunEventStore = (sessionId: string) => {
+    const store = getOpenResponsesRunEventStore(sessionId);
+    store.byIdempotencyKey.clear();
+    store.byRunId.clear();
+    store.hydrated = false;
+  };
+
+  type OutputItemUpsertRow = {
+    workspaceId: string;
+    runId: string;
+    itemKey: string;
+    itemId: string;
+    itemKind: "message" | "reasoning" | "tool_call";
+    role: string | null;
+    content: string | null;
+    messageRefId: string | null;
+    reasoningType: string | null;
+    summary: string | null;
+    summaryMode: "replace" | "append";
+    toolCallId: string | null;
+    toolName: string | null;
+    toolStatus: "RUNNING" | "COMPLETED" | "ERROR" | null;
+    argumentsText: string | null;
+    resultText: string | null;
+    errorText: string | null;
+    outputIndex: number | null;
+    sequence: number;
+  };
+
+  const projectOutputItemRowsFromEvent = (
+    event: OpenResponsesRunEventV0,
+  ): Array<OutputItemUpsertRow> => {
+    const payload = asRecord(event.payload);
+    if (!payload) return [];
+    const payloadType = asString(payload.type) || event.event_type;
+    if (payloadType === "input.item") {
+      const role = asString(payload.role).trim() || "user";
+      const text = toEventMessageText(payload.content).trim() ||
+        asString(payload.text).trim();
+      if (!text || role !== "user") return [];
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `input:event:${event.sequence}`,
+        itemId: `${event.run_id}:input:event:${event.sequence}`,
+        itemKind: "message",
+        role,
+        content: text,
+        messageRefId: asString(payload.message_id).trim() ||
+          asString(payload.messageRefId).trim() ||
+          null,
+        reasoningType: null,
+        summary: null,
+        summaryMode: "replace",
+        toolCallId: null,
+        toolName: null,
+        toolStatus: null,
+        argumentsText: null,
+        resultText: null,
+        errorText: null,
+        outputIndex: null,
+        sequence: event.sequence,
+      }];
+    }
+    if (
+      payloadType === "response.reasoning.delta" ||
+      payloadType === "response.reasoning.done" ||
+      payloadType === "response.reasoning_summary_text.delta" ||
+      payloadType === "response.reasoning_summary_text.done" ||
+      payloadType === "response.reasoning_summary_part.added" ||
+      payloadType === "response.reasoning_summary_part.done"
+    ) {
+      const outputIndex = asFiniteNumber(payload.output_index);
+      const itemId = asString(payload.item_id).trim() ||
+        `reasoning-${outputIndex ?? event.sequence}`;
+      const text = asString(payload.delta).trim() ||
+        asString(payload.text).trim() ||
+        toEventMessageText(payload.part).trim() ||
+        toEventMessageText(payload.summary).trim();
+      if (!text) return [];
+      const appendMode = payloadType.endsWith(".delta") ||
+        payloadType.endsWith(".added");
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `reasoning:${itemId}`,
+        itemId: `${event.run_id}:reasoning:${itemId}`,
+        itemKind: "reasoning",
+        role: null,
+        content: null,
+        messageRefId: null,
+        reasoningType: payloadType,
+        summary: text,
+        summaryMode: appendMode ? "append" : "replace",
+        toolCallId: null,
+        toolName: null,
+        toolStatus: null,
+        argumentsText: null,
+        resultText: null,
+        errorText: null,
+        outputIndex,
+        sequence: event.sequence,
+      }];
+    }
+    if (payloadType !== "response.output_item.done") return [];
+    const item = asRecord(payload.item);
+    if (!item) return [];
+    const itemType = asString(item.type);
+    const outputIndex = asFiniteNumber(payload.output_index);
+    if (itemType === "function_call" || itemType === "tool_call") {
+      const toolCallId = asString(item.call_id).trim() ||
+        asString(item.id).trim() ||
+        `tool-${outputIndex ?? event.sequence}`;
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `tool:${toolCallId}`,
+        itemId: `${event.run_id}:tool:${toolCallId}`,
+        itemKind: "tool_call",
+        role: null,
+        content: null,
+        messageRefId: null,
+        reasoningType: null,
+        summary: null,
+        summaryMode: "replace",
+        toolCallId,
+        toolName: asString(item.name).trim() || "tool_call",
+        toolStatus: "RUNNING",
+        argumentsText: asString(item.arguments).trim() || null,
+        resultText: asString(item.output).trim() || null,
+        errorText: asString(item.error).trim() || null,
+        outputIndex,
+        sequence: event.sequence,
+      }];
+    }
+    if (itemType === "function_call_output") {
+      const toolCallId = asString(item.call_id).trim() ||
+        asString(item.id).trim() ||
+        `tool-${outputIndex ?? event.sequence}`;
+      const resultText = asString(item.output).trim() ||
+        toEventMessageText(item.output).trim();
+      const errorText = asString(item.error).trim() || null;
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `tool:${toolCallId}`,
+        itemId: `${event.run_id}:tool:${toolCallId}`,
+        itemKind: "tool_call",
+        role: null,
+        content: null,
+        messageRefId: null,
+        reasoningType: null,
+        summary: null,
+        summaryMode: "replace",
+        toolCallId,
+        toolName: asString(item.name).trim() || null,
+        toolStatus: errorText ? "ERROR" : "COMPLETED",
+        argumentsText: asString(item.arguments).trim() || null,
+        resultText: resultText || null,
+        errorText,
+        outputIndex,
+        sequence: event.sequence,
+      }];
+    }
+    if (
+      itemType === "message" || itemType === "agent_message" ||
+      itemType === "assistant_message"
+    ) {
+      const text = toEventMessageText(item.content).trim() ||
+        toEventMessageText(item.text).trim();
+      if (!text) return [];
+      const role = asString(item.role).trim() || "assistant";
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `output:${outputIndex ?? "na"}:${event.sequence}`,
+        itemId: `${event.run_id}:output:${
+          outputIndex ?? "na"
+        }:${event.sequence}`,
+        itemKind: "message",
+        role,
+        content: text,
+        messageRefId: asString(item.messageRefId).trim() || null,
+        reasoningType: null,
+        summary: null,
+        summaryMode: "replace",
+        toolCallId: null,
+        toolName: null,
+        toolStatus: null,
+        argumentsText: null,
+        resultText: null,
+        errorText: null,
+        outputIndex,
+        sequence: event.sequence,
+      }];
+    }
+    if (itemType === "reasoning") {
+      const summary = toEventMessageText(item.summary).trim() ||
+        asString(item.text).trim();
+      if (!summary) return [];
+      const itemId = asString(item.id).trim() ||
+        `reasoning-${outputIndex ?? event.sequence}`;
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `reasoning:${itemId}`,
+        itemId: `${event.run_id}:reasoning:${itemId}`,
+        itemKind: "reasoning",
+        role: null,
+        content: null,
+        messageRefId: null,
+        reasoningType: itemType,
+        summary,
+        summaryMode: "replace",
+        toolCallId: null,
+        toolName: null,
+        toolStatus: null,
+        argumentsText: null,
+        resultText: null,
+        errorText: null,
+        outputIndex,
+        sequence: event.sequence,
+      }];
+    }
+    return [];
+  };
+
+  const upsertOutputItemRow = (
+    db: DatabaseSync,
+    row: OutputItemUpsertRow,
+  ) => {
+    let summary = row.summary;
+    if (row.itemKind === "reasoning" && row.summaryMode === "append") {
+      const existing = db.prepare(`
+        SELECT summary
+        FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
+        WHERE workspace_id = ? AND run_id = ? AND item_key = ?
+        LIMIT 1
+      `).get(row.workspaceId, row.runId, row.itemKey) as
+        | { summary?: string | null }
+        | undefined;
+      summary = `${existing?.summary ?? ""}${row.summary ?? ""}`;
+    }
+    db.prepare(`
+      INSERT INTO ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE} (
+        workspace_id,
+        run_id,
+        item_key,
+        item_id,
+        item_kind,
+        role,
+        content,
+        message_ref_id,
+        reasoning_type,
+        summary,
+        tool_call_id,
+        tool_name,
+        tool_status,
+        arguments_text,
+        result_text,
+        error_text,
+        output_index,
+        sequence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, run_id, item_key) DO UPDATE SET
+        item_id = excluded.item_id,
+        item_kind = excluded.item_kind,
+        role = excluded.role,
+        content = excluded.content,
+        message_ref_id = excluded.message_ref_id,
+        reasoning_type = excluded.reasoning_type,
+        summary = excluded.summary,
+        tool_call_id = excluded.tool_call_id,
+        tool_name = COALESCE(excluded.tool_name, ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}.tool_name),
+        tool_status = excluded.tool_status,
+        arguments_text = COALESCE(excluded.arguments_text, ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}.arguments_text),
+        result_text = excluded.result_text,
+        error_text = excluded.error_text,
+        output_index = COALESCE(${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}.output_index, excluded.output_index),
+        sequence = CASE
+          WHEN excluded.sequence > ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}.sequence THEN excluded.sequence
+          ELSE ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}.sequence
+        END
+    `).run(
+      row.workspaceId,
+      row.runId,
+      row.itemKey,
+      row.itemId,
+      row.itemKind,
+      row.role,
+      row.content,
+      row.messageRefId,
+      row.reasoningType,
+      summary,
+      row.toolCallId,
+      row.toolName,
+      row.toolStatus,
+      row.argumentsText,
+      row.resultText,
+      row.errorText,
+      row.outputIndex,
+      row.sequence,
+    );
+  };
+
+  const persistOutputItemsFromRunEvent = (
+    db: DatabaseSync,
+    event: OpenResponsesRunEventV0,
+  ) => {
+    const rows = projectOutputItemRowsFromEvent(event);
+    for (const row of rows) {
+      upsertOutputItemRow(db, row);
+    }
+  };
+
+  const importOpenResponsesRunEventsFromJsonl = (
+    sessionId: string,
+    eventsPath: string,
+    db: DatabaseSync,
+  ): number => {
+    let text = "";
+    try {
+      text = Deno.readTextFileSync(eventsPath);
+    } catch {
+      return 0;
+    }
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO ${OPENRESPONSES_EVENTS_SQLITE_TABLE} (
+        workspace_id,
+        run_id,
+        sequence,
+        event_type,
+        payload_json,
+        idempotency_key,
+        created_at,
+        offset
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const maxOffsetRow = db.prepare(`
+      SELECT MAX(offset) AS offset
+      FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+    `).get() as { offset?: number };
+    let nextSyntheticOffset = typeof maxOffsetRow.offset === "number"
+      ? maxOffsetRow.offset + 1
+      : 0;
+    let inserted = 0;
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const record = parsePersistedOpenResponsesRunEventRecord(parsed);
+        if (!record) continue;
+        const event: OpenResponsesRunEventV0 = {
+          workspace_id: record.workspace_id,
+          run_id: record.run_id,
+          sequence: record.sequence,
+          event_type: record.event_type,
+          payload: record.payload,
+          idempotency_key: record.idempotency_key,
+          created_at: record.created_at,
+        };
+        const offset = record.offset ?? nextSyntheticOffset;
+        if (record.offset === null) {
+          nextSyntheticOffset += 1;
+        } else if (record.offset >= nextSyntheticOffset) {
+          nextSyntheticOffset = record.offset + 1;
+        }
+        const result = insert.run(
+          record.workspace_id,
+          record.run_id,
+          record.sequence,
+          record.event_type,
+          safeStringify(record.payload),
+          record.idempotency_key,
+          record.created_at,
+          offset,
+        );
+        const changes = Number(result.changes ?? 0);
+        if (changes > 0) {
+          persistOutputItemsFromRunEvent(db, event);
+        }
+        inserted += changes;
+      }
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+    if (inserted > 0) {
+      resetOpenResponsesRunEventStore(sessionId);
+    }
+    return inserted;
+  };
+
+  const hydrateOpenResponsesRunEvents = (
+    sessionId: string,
+    state: SavedState | undefined,
+    eventsPath: string,
+  ) => {
+    const store = getOpenResponsesRunEventStore(sessionId);
+    if (store.hydrated) return;
+    const db = getSessionSqliteDb(sessionId, state);
+    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
+    const rows = db.prepare(`
+      SELECT
+        workspace_id,
+        run_id,
+        sequence,
+        event_type,
+        payload_json,
+        idempotency_key,
+        created_at
+      FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+      ORDER BY run_id ASC, sequence ASC
+    `).all() as Array<{
+      workspace_id: string;
+      run_id: string;
+      sequence: number;
+      event_type: string;
+      payload_json: string;
+      idempotency_key: string;
+      created_at: string;
+    }>;
+    for (const row of rows) {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(row.payload_json);
+      } catch {
+        continue;
+      }
+      if (!isOpenResponsesRunEventPayload(payload)) continue;
+      indexOpenResponsesRunEvent(store, {
+        workspace_id: row.workspace_id,
+        run_id: row.run_id,
+        sequence: row.sequence,
+        event_type: row.event_type,
+        payload,
+        idempotency_key: row.idempotency_key,
+        created_at: row.created_at,
+      });
+    }
+    store.hydrated = true;
+  };
+
+  const appendOpenResponsesRunEventSqlite = (args: {
+    sessionId: string;
+    state: SavedState;
+    eventsPath: string;
+    input: AppendOpenResponsesRunEventV0Input;
+    workspaceId: string;
+    offset: number;
+  }): { event: OpenResponsesRunEventV0; inserted: boolean } => {
+    const db = getSessionSqliteDb(args.sessionId, args.state);
+    importOpenResponsesRunEventsFromJsonl(args.sessionId, args.eventsPath, db);
+    const existing = db.prepare(`
+      SELECT
+        workspace_id,
+        run_id,
+        sequence,
+        event_type,
+        payload_json,
+        idempotency_key,
+        created_at
+      FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+      WHERE workspace_id = ? AND run_id = ? AND idempotency_key = ?
+      LIMIT 1
+    `).get(args.workspaceId, args.input.run_id, args.input.idempotency_key) as
+      | {
+        workspace_id: string;
+        run_id: string;
+        sequence: number;
+        event_type: string;
+        payload_json: string;
+        idempotency_key: string;
+        created_at: string;
+      }
+      | undefined;
+    if (existing) {
+      // JSON.parse returns `any`; force a runtime-validation path via unknown first.
+      const payload = JSON.parse(existing.payload_json) as unknown;
+      if (isOpenResponsesRunEventPayload(payload)) {
+        return {
+          event: {
+            workspace_id: existing.workspace_id,
+            run_id: existing.run_id,
+            sequence: existing.sequence,
+            event_type: existing.event_type,
+            payload,
+            idempotency_key: existing.idempotency_key,
+            created_at: existing.created_at,
+          },
+          inserted: false,
+        };
+      }
+    }
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      const sequenceRow = db.prepare(`
+        SELECT MAX(sequence) AS sequence
+        FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+        WHERE workspace_id = ? AND run_id = ?
+      `).get(args.workspaceId, args.input.run_id) as { sequence?: number };
+      const sequence = typeof sequenceRow.sequence === "number"
+        ? sequenceRow.sequence + 1
+        : 0;
+      const event = toOpenResponsesRunEventV0({
+        ...args.input,
+        workspace_id: args.workspaceId,
+        sequence,
+      });
+      db.prepare(`
+        INSERT INTO ${OPENRESPONSES_EVENTS_SQLITE_TABLE} (
+          workspace_id,
+          run_id,
+          sequence,
+          event_type,
+          payload_json,
+          idempotency_key,
+          created_at,
+          offset
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        event.workspace_id,
+        event.run_id,
+        event.sequence,
+        event.event_type,
+        safeStringify(event.payload),
+        event.idempotency_key,
+        event.created_at,
+        args.offset,
+      );
+      persistOutputItemsFromRunEvent(db, event);
+      db.exec("COMMIT;");
+      return { event, inserted: true };
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+  };
+
+  const publishOpenResponsesRunEvent = (event: OpenResponsesRunEventV0) => {
+    const listeners = openResponsesRunEventListenersBySessionRun.get(
+      openResponsesRunEventListenerKey(event.workspace_id, event.run_id),
+    );
+    if (!listeners || listeners.size === 0) return;
+    for (const listener of listeners) {
+      listener(event);
+    }
   };
 
   const getCurrentSessionOffset = (
@@ -902,6 +1840,307 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     return envelope;
   };
 
+  const appendOpenResponsesRunEvent = async (
+    state: SavedState,
+    input: AppendOpenResponsesRunEventV0Input,
+  ): Promise<OpenResponsesRunEventV0 | null> => {
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : undefined;
+    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : undefined;
+    const statePath = typeof state.meta?.sessionStatePath === "string"
+      ? state.meta.sessionStatePath
+      : undefined;
+    const workspaceId = typeof state.meta?.workspaceId === "string"
+      ? state.meta.workspaceId
+      : sessionId;
+    if (!sessionId || !eventsPath || !workspaceId) return null;
+    if (!isOpenResponsesRunEventPayload(input.payload)) {
+      throw new Error("OpenResponses run event payload must include a type");
+    }
+
+    importOpenResponsesRunEventsFromJsonl(
+      sessionId,
+      eventsPath,
+      getSessionSqliteDb(sessionId, state),
+    );
+    const store = getOpenResponsesRunEventStore(sessionId);
+    hydrateOpenResponsesRunEvents(sessionId, state, eventsPath);
+    const idempotencyStoreKey = openResponsesRunEventIdempotencyKey(
+      workspaceId,
+      input.run_id,
+      input.idempotency_key,
+    );
+    const existing = store.byIdempotencyKey.get(idempotencyStoreKey);
+    if (existing) return existing;
+    return await enqueueSessionWriteResult(sessionId, async () => {
+      importOpenResponsesRunEventsFromJsonl(
+        sessionId,
+        eventsPath,
+        getSessionSqliteDb(sessionId, state),
+      );
+      const localStore = getOpenResponsesRunEventStore(sessionId);
+      hydrateOpenResponsesRunEvents(sessionId, state, eventsPath);
+      const idempotent = localStore.byIdempotencyKey.get(idempotencyStoreKey);
+      if (idempotent) {
+        publishOpenResponsesRunEvent(idempotent);
+        return idempotent;
+      }
+      const offset = nextSessionOffsetCandidate(sessionId, state);
+      const { event, inserted } = appendOpenResponsesRunEventSqlite({
+        sessionId,
+        state,
+        eventsPath,
+        input,
+        workspaceId,
+        offset,
+      });
+      if (!inserted) {
+        indexOpenResponsesRunEvent(localStore, event);
+        publishOpenResponsesRunEvent(event);
+        return event;
+      }
+      const record = {
+        ...event,
+        offset,
+        type: OPENRESPONSES_RUN_EVENT_RECORD_TYPE,
+        _gambit: {
+          kind: OPENRESPONSES_RUN_EVENT_RECORD_KIND,
+          domain: "session",
+          offset,
+        },
+      };
+      await appendJsonl(eventsPath, record);
+      sessionOffsetById.set(sessionId, offset);
+      if (state.meta && typeof state.meta === "object") {
+        (state.meta as Record<string, unknown>).lastAppliedOffset = offset;
+        (state.meta as Record<string, unknown>).lastAppliedEventSeq = offset;
+      }
+      await updateSnapshotBoundary(sessionId, statePath, offset);
+      indexOpenResponsesRunEvent(localStore, event);
+      publishOpenResponsesRunEvent(event);
+      return event;
+    });
+  };
+
+  const listOpenResponsesRunEvents = (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+  }): Array<OpenResponsesRunEventV0> => {
+    const state = readSessionState(args.workspaceId);
+    if (!state) return [];
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : args.workspaceId;
+    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : path.join(sessionsRoot, sessionId, "events.jsonl");
+    const fromSequence = parseFiniteInteger(args.fromSequence) ?? 0;
+    const db = getSessionSqliteDb(sessionId, state);
+    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
+    const rows = db.prepare(`
+      SELECT
+        workspace_id,
+        run_id,
+        sequence,
+        event_type,
+        payload_json,
+        idempotency_key,
+        created_at
+      FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
+      WHERE workspace_id = ? AND run_id = ? AND sequence >= ?
+      ORDER BY sequence ASC
+    `).all(args.workspaceId, args.runId, fromSequence) as Array<{
+      workspace_id: string;
+      run_id: string;
+      sequence: number;
+      event_type: string;
+      payload_json: string;
+      idempotency_key: string;
+      created_at: string;
+    }>;
+    return rows.flatMap((row) => {
+      let payload: unknown = {};
+      try {
+        payload = JSON.parse(row.payload_json);
+      } catch {
+        return [];
+      }
+      if (!isOpenResponsesRunEventPayload(payload)) return [];
+      return toOpenResponsesRunEventV0({
+        workspace_id: row.workspace_id,
+        run_id: row.run_id,
+        sequence: row.sequence,
+        event_type: row.event_type,
+        payload,
+        idempotency_key: row.idempotency_key,
+        created_at: row.created_at,
+      });
+    });
+  };
+
+  const listOpenResponsesOutputItems = (args: {
+    workspaceId: string;
+    runId: string;
+  }): Array<OpenResponsesOutputItemV0> => {
+    const state = readSessionState(args.workspaceId);
+    if (!state) return [];
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : args.workspaceId;
+    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
+      ? state.meta.sessionEventsPath
+      : path.join(sessionsRoot, sessionId, "events.jsonl");
+    const db = getSessionSqliteDb(sessionId, state);
+    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
+    const rows = db.prepare(`
+      SELECT
+        item_id,
+        item_kind,
+        role,
+        content,
+        message_ref_id,
+        reasoning_type,
+        summary,
+        tool_call_id,
+        tool_name,
+        tool_status,
+        arguments_text,
+        result_text,
+        error_text
+      FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
+      WHERE workspace_id = ? AND run_id = ?
+      ORDER BY sequence ASC, output_index ASC, item_key ASC
+    `).all(args.workspaceId, args.runId) as Array<{
+      item_id: string;
+      item_kind: string;
+      role: string | null;
+      content: string | null;
+      message_ref_id: string | null;
+      reasoning_type: string | null;
+      summary: string | null;
+      tool_call_id: string | null;
+      tool_name: string | null;
+      tool_status: string | null;
+      arguments_text: string | null;
+      result_text: string | null;
+      error_text: string | null;
+    }>;
+    return rows.flatMap<OpenResponsesOutputItemV0>((row) => {
+      if (row.item_kind === "message") {
+        return [{
+          __typename: "OutputMessage" as const,
+          id: row.item_id,
+          role: row.role ?? "assistant",
+          content: row.content ?? "",
+          messageRefId: row.message_ref_id ?? undefined,
+        }];
+      }
+      if (row.item_kind === "reasoning") {
+        if (!(row.summary ?? "").trim()) return [];
+        return [{
+          __typename: "OutputReasoning" as const,
+          id: row.item_id,
+          summary: row.summary ?? "",
+          reasoningType: row.reasoning_type ?? undefined,
+        }];
+      }
+      if (row.item_kind === "tool_call") {
+        const status = row.tool_status === "RUNNING" ||
+            row.tool_status === "ERROR"
+          ? row.tool_status
+          : "COMPLETED";
+        return [{
+          __typename: "OutputToolCall" as const,
+          id: row.item_id,
+          toolCallId: row.tool_call_id ?? row.item_id,
+          toolName: row.tool_name ?? "tool_call",
+          status,
+          argumentsText: row.arguments_text ?? undefined,
+          resultText: row.result_text ?? undefined,
+          error: row.error_text ?? undefined,
+        }];
+      }
+      return [];
+    });
+  };
+
+  const subscribeOpenResponsesRunEvents = (args: {
+    workspaceId: string;
+    runId: string;
+    fromSequence?: number;
+    signal?: AbortSignal;
+  }): AsyncIterable<OpenResponsesRunEventV0> => {
+    const replayFrom = parseFiniteInteger(args.fromSequence) ?? 0;
+    return {
+      async *[Symbol.asyncIterator]() {
+        const listenerKey = openResponsesRunEventListenerKey(
+          args.workspaceId,
+          args.runId,
+        );
+        const listeners = openResponsesRunEventListenersBySessionRun.get(
+          listenerKey,
+        ) ??
+          new Set<OpenResponsesRunEventSubscriptionListener>();
+        openResponsesRunEventListenersBySessionRun.set(listenerKey, listeners);
+
+        const pending: Array<OpenResponsesRunEventV0> = [];
+        let wake: (() => void) | null = null;
+        let highWatermark = replayFrom - 1;
+        const wakeNow = () => {
+          if (!wake) return;
+          const resolve = wake;
+          wake = null;
+          resolve();
+        };
+        const listener: OpenResponsesRunEventSubscriptionListener = (event) => {
+          if (event.sequence <= highWatermark) return;
+          pending.push(event);
+          pending.sort((a, b) => a.sequence - b.sequence);
+          wakeNow();
+        };
+        listeners.add(listener);
+        const abortListener = () => wakeNow();
+        args.signal?.addEventListener("abort", abortListener, { once: true });
+
+        try {
+          const replay = listOpenResponsesRunEvents({
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            fromSequence: replayFrom,
+          });
+          for (const event of replay) {
+            if (event.sequence <= highWatermark) continue;
+            highWatermark = event.sequence;
+            yield event;
+          }
+
+          while (!args.signal?.aborted) {
+            if (pending.length === 0) {
+              await new Promise<void>((resolve) => {
+                wake = resolve;
+              });
+              continue;
+            }
+            const next = pending.shift();
+            if (!next || next.sequence <= highWatermark) continue;
+            highWatermark = next.sequence;
+            yield next;
+          }
+        } finally {
+          args.signal?.removeEventListener("abort", abortListener);
+          listeners.delete(listener);
+          if (listeners.size === 0) {
+            openResponsesRunEventListenersBySessionRun.delete(listenerKey);
+          }
+        }
+      },
+    };
+  };
+
   const appendSessionEvent = (
     state: SavedState,
     payload: Record<string, unknown>,
@@ -993,9 +2232,19 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       const statePath = typeof snapshot.meta?.sessionStatePath === "string"
         ? snapshot.meta.sessionStatePath
         : path.join(dir, "state.json");
+      const sqlitePath = typeof snapshot.meta?.sessionSqlitePath === "string"
+        ? snapshot.meta.sessionSqlitePath
+        : path.join(dir, SESSION_SQLITE_DB_FILENAME);
       enqueueSessionWrite(sessionId, async () => {
         try {
           await ensureDirAsync(dir);
+          getSessionSqliteDb(sessionId, {
+            ...snapshot,
+            meta: {
+              ...(snapshot.meta ?? {}),
+              sessionSqlitePath: sqlitePath,
+            },
+          });
           let firstWrite = false;
           try {
             await Deno.stat(eventsPath);
@@ -1040,6 +2289,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
               ...(snapshot.meta ?? {}),
               lastAppliedOffset: snapshotOffset,
               lastAppliedEventSeq: snapshotOffset,
+              sessionSqlitePath: sqlitePath,
             },
           };
           await appendJsonl(
@@ -1125,6 +2375,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     }
     if (typeof meta.sessionBuildStatePath !== "string") {
       meta.sessionBuildStatePath = path.join(dir, "build_state.json");
+    }
+    if (typeof meta.sessionSqlitePath !== "string") {
+      meta.sessionSqlitePath = path.join(dir, SESSION_SQLITE_DB_FILENAME);
     }
 
     const eventsPath = typeof meta.sessionEventsPath === "string"
@@ -1219,6 +2472,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     parseFiniteInteger,
     selectCanonicalScenarioRunSummary,
     appendWorkspaceEnvelope,
+    appendOpenResponsesRunEvent,
     appendSessionEvent,
     appendFeedbackLog,
     appendGradingLog,
@@ -1228,6 +2482,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     readSessionStateStrict,
     readSessionState,
     readBuildState,
+    listOpenResponsesRunEvents,
+    listOpenResponsesOutputItems,
+    subscribeOpenResponsesRunEvents,
     replayBuildProjection,
   };
 };

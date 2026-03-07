@@ -255,6 +255,15 @@ const _safeJsonStringify = (value: unknown): string => {
     return candidate;
   });
 };
+const sanitizeJsonRecord = (
+  value: Record<string, unknown>,
+): Record<string, unknown> => {
+  const parsed = JSON.parse(_safeJsonStringify(value));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+  return parsed as Record<string, unknown>;
+};
 const GAMBIT_BOT_SOURCE_DECK_URL = new URL(
   "./decks/gambit-bot/PROMPT.md",
   import.meta.url,
@@ -1851,12 +1860,16 @@ export function startWebSocketSimulator(opts: {
   const {
     selectCanonicalScenarioRunSummary,
     appendWorkspaceEnvelope,
+    appendOpenResponsesRunEvent,
     appendSessionEvent,
     appendGradingLog,
     persistSessionState,
     readSessionStateStrict,
     readSessionState,
     readBuildState,
+    listOpenResponsesRunEvents,
+    listOpenResponsesOutputItems,
+    subscribeOpenResponsesRunEvents,
   } = createSessionStore({
     sessionsRoot,
     randomId,
@@ -1887,6 +1900,94 @@ export function startWebSocketSimulator(opts: {
         return "lifecycle";
       default:
         return "trace";
+    }
+  };
+  const hashStringFNV1a = (value: string): string => {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, "0");
+  };
+  const tracePayloadFingerprint = (payload: Record<string, unknown>): string =>
+    hashStringFNV1a(JSON.stringify(asJsonValue(payload)));
+  const persistOpenResponsesTraceEvent = (
+    state: SavedState | null | undefined,
+    trace: TraceEvent,
+    fallbackRunId?: string,
+  ) => {
+    if (!state) return;
+    // TraceEvent is a broad union; we persist by reading dynamic keys at runtime.
+    const rawPayload = trace as unknown as Record<string, unknown>;
+    const eventType = typeof rawPayload.type === "string"
+      ? rawPayload.type
+      : "";
+    if (!eventType.startsWith("response.")) return;
+    const runId = typeof rawPayload.runId === "string" &&
+        rawPayload.runId.length > 0
+      ? rawPayload.runId
+      : fallbackRunId;
+    if (!runId) return;
+    const eventTs = typeof rawPayload.ts === "number" &&
+        Number.isFinite(rawPayload.ts)
+      ? rawPayload.ts
+      : Date.now();
+    const eventScope = typeof rawPayload.item_id === "string"
+      ? rawPayload.item_id
+      : typeof rawPayload.actionCallId === "string"
+      ? rawPayload.actionCallId
+      : typeof rawPayload.output_index === "number"
+      ? String(rawPayload.output_index)
+      : typeof rawPayload.sequence_number === "number"
+      ? String(rawPayload.sequence_number)
+      : "event";
+    const payload = sanitizeJsonRecord(rawPayload);
+    const payloadFingerprint = tracePayloadFingerprint(payload);
+    void appendOpenResponsesRunEvent(state, {
+      workspace_id: "",
+      run_id: runId,
+      event_type: eventType,
+      payload: payload,
+      idempotency_key:
+        `${runId}:${eventType}:${eventTs}:${eventScope}:${payloadFingerprint}`,
+      created_at: new Date(eventTs).toISOString(),
+    });
+  };
+
+  const persistCanonicalUserInputEvent = (args: {
+    state: SavedState | null | undefined;
+    runId: string;
+    message: string;
+    source: "build" | "scenario";
+  }) => {
+    if (!args.state) return;
+    const content = args.message.trim();
+    if (!content) return;
+    const eventTs = Date.now();
+    void appendOpenResponsesRunEvent(args.state, {
+      workspace_id: "",
+      run_id: args.runId,
+      event_type: "input.item",
+      payload: {
+        type: "input.item",
+        role: "user",
+        content: [{ type: "input_text", text: content }],
+        source: args.source,
+      },
+      idempotency_key: `${args.runId}:input.item:${args.source}:${eventTs}:${
+        content.slice(0, 64)
+      }`,
+      created_at: new Date(eventTs).toISOString(),
+    });
+  };
+  const persistOpenResponsesTracesFromState = (
+    state: SavedState | null | undefined,
+    fallbackRunId?: string,
+  ) => {
+    if (!state || !Array.isArray(state.traces)) return;
+    for (const trace of state.traces) {
+      persistOpenResponsesTraceEvent(state, trace, fallbackRunId);
     }
   };
   const buildWorkspaceMeta = (
@@ -3616,6 +3717,7 @@ export function startWebSocketSimulator(opts: {
     const flushPendingTraceEvents = (state: SavedState) => {
       if (!pendingTraceEvents.length) return;
       for (const pending of pendingTraceEvents) {
+        persistOpenResponsesTraceEvent(state, pending, runId);
         appendSessionEvent(state, {
           ...pending,
           kind: "trace",
@@ -3629,6 +3731,7 @@ export function startWebSocketSimulator(opts: {
       capturedTraces.push(stamped);
       consoleTracer?.(stamped);
       if (savedState?.meta?.sessionId) {
+        persistOpenResponsesTraceEvent(savedState, stamped, runId);
         appendSessionEvent(savedState, {
           ...stamped,
           kind: "trace",
@@ -4169,6 +4272,48 @@ export function startWebSocketSimulator(opts: {
     return state;
   };
 
+  const buildAuthorityMeta = (
+    sessionState: SavedState,
+    workspaceId: string,
+  ): Record<string, unknown> => {
+    const sessionMeta =
+      sessionState.meta && typeof sessionState.meta === "object"
+        ? sessionState.meta as Record<string, unknown>
+        : {};
+    const next: Record<string, unknown> = { workspaceId };
+    for (
+      const key of [
+        "sessionId",
+        "sessionDir",
+        "sessionStatePath",
+        "sessionEventsPath",
+        "sessionBuildStatePath",
+        "sessionSqlitePath",
+        "workspaceSchemaVersion",
+      ]
+    ) {
+      const value = sessionMeta[key];
+      if (typeof value === "string" && value.trim().length > 0) {
+        next[key] = value;
+      }
+    }
+    return next;
+  };
+
+  const normalizeBuildAuthorityState = (args: {
+    state: SavedState;
+    workspaceId: string;
+    runId: string;
+    sessionState: SavedState;
+  }): SavedState => ({
+    ...args.state,
+    runId: args.runId,
+    meta: {
+      ...(args.state.meta ?? {}),
+      ...buildAuthorityMeta(args.sessionState, args.workspaceId),
+    },
+  });
+
   const broadcastBuild = (
     workspaceId: string,
     payload: Record<string, unknown>,
@@ -4191,12 +4336,47 @@ export function startWebSocketSimulator(opts: {
       throw new Error("Build run already in progress for this workspace.");
     }
 
-    const state = ensureWorkspaceStateForBuild(workspaceId);
+    const sessionState = ensureWorkspaceStateForBuild(workspaceId);
     const projection = readBuildState(workspaceId);
     const seedRun = projection?.run;
     const runId = seedRun?.id && seedRun.id.trim().length > 0
       ? seedRun.id
       : randomId("build");
+    const seededMessages = (() => {
+      if (
+        projection?.state?.messages && Array.isArray(projection.state.messages)
+      ) {
+        return projection.state.messages;
+      }
+      return Array.isArray(seedRun?.messages)
+        ? seedRun.messages.map((message) => {
+          const role: "assistant" | "user" | "system" | "tool" =
+            message.role === "assistant" || message.role === "system" ||
+              message.role === "tool"
+              ? message.role
+              : "user";
+          return {
+            role,
+            content: message.content,
+          };
+        })
+        : [];
+    })();
+    const seedState = normalizeBuildAuthorityState({
+      state: projection?.state && typeof projection.state === "object"
+        ? projection.state
+        : {
+          runId,
+          messages: seededMessages,
+          messageRefs: [],
+          traces: Array.isArray(seedRun?.traces) ? [...seedRun.traces] : [],
+          items: [],
+          meta: {},
+        },
+      workspaceId,
+      runId,
+      sessionState,
+    });
     const trimmedMessage = args.message.trim();
     const run: BuildBotRunStatus = {
       id: runId,
@@ -4215,31 +4395,37 @@ export function startWebSocketSimulator(opts: {
         ...run.messages,
         { role: "user", content: trimmedMessage, messageSource: "manual" },
       ];
+      persistCanonicalUserInputEvent({
+        state: sessionState,
+        runId,
+        message: trimmedMessage,
+        source: "build",
+      });
     }
 
     const controller = new AbortController();
     const entry: BuildBotRunEntry = {
       run,
-      state,
+      state: seedState,
       promise: null,
       abort: controller,
     };
     buildBotRuns.set(workspaceId, entry);
 
     const onStateUpdate = (next: SavedState) => {
-      const enriched = persistSessionState({
-        ...next,
-        meta: {
-          ...(next.meta ?? {}),
-          workspaceId,
-        },
+      const buildState = normalizeBuildAuthorityState({
+        state: next,
+        workspaceId,
+        runId,
+        sessionState,
       });
-      entry.state = enriched;
-      const snapshot = buildTestBotSnapshot(enriched);
+      persistOpenResponsesTracesFromState(buildState, runId);
+      entry.state = buildState;
+      const snapshot = buildTestBotSnapshot(buildState);
       run.messages = snapshot.messages;
       run.toolInserts = snapshot.toolInserts;
-      const nextTraces = Array.isArray(enriched.traces)
-        ? [...enriched.traces]
+      const nextTraces = Array.isArray(buildState.traces)
+        ? [...buildState.traces]
         : [];
       if (nextTraces.length > 0) {
         run.traces = nextTraces;
@@ -4250,6 +4436,7 @@ export function startWebSocketSimulator(opts: {
         type: "buildBotStatus",
         workspaceId,
         run,
+        state: buildState,
       });
     };
 
@@ -4257,6 +4444,7 @@ export function startWebSocketSimulator(opts: {
       const event = trace.ts ? trace : { ...trace, ts: Date.now() };
       const currentTraces = Array.isArray(run.traces) ? run.traces : [];
       run.traces = [...currentTraces, event];
+      persistOpenResponsesTraceEvent(entry.state, event, runId);
       broadcastBuild(workspaceId, {
         type: "buildBotTrace",
         workspaceId,
@@ -4274,6 +4462,7 @@ export function startWebSocketSimulator(opts: {
           type: "buildBotStatus",
           workspaceId,
           run,
+          state: entry.state ?? undefined,
         });
         await runDeck({
           path: buildAssistantDeckPath,
@@ -4287,6 +4476,7 @@ export function startWebSocketSimulator(opts: {
               : undefined),
           trace: tracer,
           stream: true,
+          runId,
           state: entry.state ?? undefined,
           allowRootStringInput: true,
           initialUserMessage: trimmedMessage.length > 0 ? trimmedMessage : "",
@@ -4360,6 +4550,7 @@ export function startWebSocketSimulator(opts: {
           type: "buildBotStatus",
           workspaceId,
           run,
+          state: entry.state ?? undefined,
         });
       }
     })();
@@ -4395,14 +4586,6 @@ export function startWebSocketSimulator(opts: {
       // Ignore aborted in-flight run.
     }
 
-    const state = ensureWorkspaceStateForBuild(workspaceId);
-    const reset = persistSessionState({
-      ...state,
-      messages: [],
-      messageRefs: [],
-      traces: [],
-      items: [],
-    });
     const run: BuildBotRunStatus = {
       id: randomId("build"),
       status: "idle",
@@ -4410,10 +4593,24 @@ export function startWebSocketSimulator(opts: {
       traces: [],
       toolInserts: [],
     };
-    appendWorkspaceEnvelope(reset, "build", {
+    const sessionState = ensureWorkspaceStateForBuild(workspaceId);
+    const reset = normalizeBuildAuthorityState({
+      state: {
+        runId: run.id,
+        messages: [],
+        messageRefs: [],
+        traces: [],
+        items: [],
+      },
+      workspaceId,
+      runId: run.id,
+      sessionState,
+    });
+    appendWorkspaceEnvelope(sessionState, "build", {
       type: "buildBotStatus",
       workspaceId,
       run,
+      state: reset,
     });
     appendDurableStreamEvent(WORKSPACE_STREAM_ID, {
       type: "buildBotStatus",
@@ -4775,6 +4972,9 @@ export function startWebSocketSimulator(opts: {
     const tracer = (event: TraceEvent) => {
       const stamped = event.ts ? event : { ...event, ts: Date.now() };
       capturedTraces.push(stamped);
+      if (savedState) {
+        persistOpenResponsesTraceEvent(savedState, stamped, args.runId);
+      }
       emitTestBot({
         type: "testBotTrace",
         workspaceId: args.workspaceId,
@@ -4791,6 +4991,12 @@ export function startWebSocketSimulator(opts: {
         ...run.messages,
         { role: "user", content: trimmedMessage },
       ];
+      persistCanonicalUserInputEvent({
+        state: savedState,
+        runId: args.runId,
+        message: trimmedMessage,
+        source: "scenario",
+      });
     }
     let hasStartedAssistantStreamMessage = false;
     entry.promise = (async () => {
@@ -4850,6 +5056,7 @@ export function startWebSocketSimulator(opts: {
               meta: nextMeta,
               traces: capturedTraces,
             });
+            persistOpenResponsesTracesFromState(enriched, args.runId);
             savedState = enriched;
             entry.state = enriched;
             appendFromState(enriched);
@@ -7304,6 +7511,40 @@ export function startWebSocketSimulator(opts: {
         },
         readWorkspaceBuildRun: (workspaceId: string) =>
           Promise.resolve(readWorkspaceBuildRunForGraphql(workspaceId)),
+        readWorkspaceOpenResponseEvents: (args: {
+          workspaceId: string;
+          runId: string;
+          fromSequence?: number;
+        }) =>
+          Promise.resolve(
+            listOpenResponsesRunEvents({
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              fromSequence: args.fromSequence,
+            }),
+          ),
+        readWorkspaceOpenResponseOutputItems: (args: {
+          workspaceId: string;
+          runId: string;
+        }) =>
+          Promise.resolve(
+            listOpenResponsesOutputItems({
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+            }),
+          ),
+        subscribeWorkspaceOpenResponseEvents: (args: {
+          workspaceId: string;
+          runId: string;
+          fromSequence?: number;
+          signal?: AbortSignal;
+        }) =>
+          subscribeOpenResponsesRunEvents({
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            fromSequence: args.fromSequence,
+            signal: args.signal,
+          }),
         createWorkspaceBuildRun: async (
           workspaceId: string,
           message: string,
