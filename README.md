@@ -167,7 +167,7 @@ It also serves:
 ```
 http://localhost:8000/test
 http://localhost:8000/grade
-http://localhost:8000/verify (when GAMBIT_SIMULATOR_VERIFY_TAB=1)
+http://localhost:8000/verify (enabled by default; disable with GAMBIT_SIMULATOR_VERIFY_TAB=0)
 ```
 
 To seed deterministic Verify fixtures for local iteration:

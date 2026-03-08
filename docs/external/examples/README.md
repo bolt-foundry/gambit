@@ -14,9 +14,10 @@ Per-example docs:
 
 Notes:
 
-- Repo assets live under `init/examples/` (advanced demos in
-  `init/examples/advanced/`, FAQ bot in `init/examples/faq-bot-example/`); init
-  templates live under `init/` for CLI scaffolding.
+- Source templates live under `packages/gambit/scaffolds/demo/examples/`
+  (advanced demos in `.../advanced/`, FAQ bot in `.../faq-bot-example/`).
+- When `gambit demo` seeds a workspace, generated copies live under
+  `gambit/examples/`.
 - Examples show how to use Gambit as an agent harness for workflow execution and
   verification.
 - Routing examples rely on tight action descriptions and schemas so the model
