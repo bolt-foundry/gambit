@@ -72,8 +72,10 @@ export function matchRouteWithParams(
 export const isographAppRoutes = new Map<string, unknown>([
   ["/", entrypointSimulatorRedirect],
   ["/build", entrypointSimulatorRedirect],
+  ["/docs", entrypointSimulatorWorkspaces],
   ["/isograph", entrypointSimulatorRedirect],
   ["/isograph/build", entrypointSimulatorRedirect],
+  ["/isograph/docs", entrypointSimulatorWorkspaces],
   ["/workspaces", entrypointSimulatorWorkspaces],
   ["/workspaces/new", entrypointSimulatorWorkspaces],
   ["/workspaces/:workspaceId", entrypointSimulatorRedirect],
