@@ -6,9 +6,9 @@ export type Query__EntrypointChatOptimisticPlaceholder__param = {
 A discriminant for the Query type
     */
     readonly optimisticMessageCarrier: "Query",
-    readonly optimisticMessageWorkspaceProbe: ({
-      readonly id: (string | null),
-    } | null),
+    readonly optimisticMessageWorkspaceProbe: {
+      readonly id: string,
+    },
   },
   readonly parameters: Query__EntrypointChatOptimisticPlaceholder__parameters,
 };

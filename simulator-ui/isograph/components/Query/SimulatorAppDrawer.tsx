@@ -1,7 +1,8 @@
 import { iso } from "@iso-gambit-sim";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Button from "../../../src/gds/Button.tsx";
 import Icon from "../../../src/gds/Icon.tsx";
+import Listbox from "../../../src/gds/Listbox.tsx";
 import { GambitLogo } from "../../../src/GambitLogo.tsx";
 import {
   classNames,
@@ -29,11 +30,17 @@ export const SimulatorAppDrawer = iso(`
 `)(function SimulatorAppDrawer({ data }, componentProps: {
   open: boolean;
   onSelect: (workspaceId: string) => void;
+  onDelete: (workspaceId: string) => Promise<void>;
+  onDeleteAll: (workspaceIds: Array<string>) => Promise<void>;
   onClose: () => void;
   activeWorkspaceId?: string | null;
   bundleStamp: string | null;
   onCreateWorkspace?: () => void;
   creatingWorkspace?: boolean;
+  deletingWorkspaceId?: string | null;
+  deletingAll?: boolean;
+  appearance: "light" | "dark" | "system";
+  onAppearanceChange: (appearance: "light" | "dark" | "system") => void;
 }) {
   const workspaces: Array<SessionMeta> = (data.gambitWorkspaces?.edges ?? [])
     .flatMap((edge) => {
@@ -50,6 +57,17 @@ export const SimulatorAppDrawer = iso(`
         statePath: node.statePath ?? undefined,
       }];
     });
+  const [hiddenWorkspaceIds, setHiddenWorkspaceIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const visibleWorkspaces = useMemo(
+    () =>
+      workspaces.filter((workspace) => !hiddenWorkspaceIds.has(workspace.id)),
+    [hiddenWorkspaceIds, workspaces],
+  );
+
   useEffect(() => {
     if (!componentProps.open) return;
     const handler = (event: KeyboardEvent) => {
@@ -60,6 +78,7 @@ export const SimulatorAppDrawer = iso(`
     globalThis.addEventListener("keydown", handler);
     return () => globalThis.removeEventListener("keydown", handler);
   }, [componentProps.open, componentProps.onClose]);
+
   if (!componentProps.open) return null;
 
   return (
@@ -81,22 +100,53 @@ export const SimulatorAppDrawer = iso(`
           <div className="flex-row items-center gap-8">
             <h3 className="flex-1">Workspaces</h3>
             {componentProps.onCreateWorkspace && (
-              <Button
-                variant="primary"
-                size="small"
-                data-testid="workspace-create-cta"
-                onClick={componentProps.onCreateWorkspace}
-                disabled={componentProps.creatingWorkspace}
-              >
-                New workspace
-              </Button>
+              <div className="sessions-drawer-actions">
+                <Button
+                  variant="primary"
+                  size="small"
+                  data-testid="workspace-create-cta"
+                  onClick={componentProps.onCreateWorkspace}
+                  disabled={componentProps.creatingWorkspace}
+                >
+                  New workspace
+                </Button>
+                <Button
+                  variant="danger"
+                  size="small"
+                  onClick={async () => {
+                    setDeleteError(null);
+                    try {
+                      const workspaceIds = visibleWorkspaces.map((workspace) =>
+                        workspace.id
+                      );
+                      await componentProps.onDeleteAll(workspaceIds);
+                      setHiddenWorkspaceIds(
+                        new Set(workspaceIds),
+                      );
+                    } catch (error) {
+                      setDeleteError(
+                        error instanceof Error
+                          ? error.message
+                          : "Failed to delete all workspaces",
+                      );
+                    }
+                  }}
+                  disabled={componentProps.deletingAll ||
+                    visibleWorkspaces.length === 0}
+                >
+                  Delete all
+                </Button>
+              </div>
             )}
           </div>
           <div className="sessions-drawer-body">
+            {deleteError && <p className="error">{deleteError}</p>}
             <ul className="sessions-list">
-              {workspaces.map((workspace) => {
+              {visibleWorkspaces.map((workspace) => {
                 const isActive =
                   componentProps.activeWorkspaceId === workspace.id;
+                const isDeleting =
+                  componentProps.deletingWorkspaceId === workspace.id;
                 return (
                   <li key={workspace.id}>
                     <button
@@ -116,14 +166,58 @@ export const SimulatorAppDrawer = iso(`
                       <span>{formatTimestamp(workspace.createdAt)}</span>
                       <code>{workspace.id}</code>
                     </button>
+                    <Button
+                      variant="ghost-danger"
+                      className="session-delete-button"
+                      onClick={async () => {
+                        setDeleteError(null);
+                        try {
+                          await componentProps.onDelete(workspace.id);
+                          setHiddenWorkspaceIds((prev) => {
+                            const next = new Set(prev);
+                            next.add(workspace.id);
+                            return next;
+                          });
+                        } catch (error) {
+                          setDeleteError(
+                            error instanceof Error
+                              ? error.message
+                              : "Failed to delete workspace",
+                          );
+                        }
+                      }}
+                      disabled={isDeleting || componentProps.deletingAll}
+                      aria-label="Delete workspace"
+                      title="Delete workspace"
+                    >
+                      <Icon name="trash" size={14} />
+                    </Button>
                   </li>
                 );
               })}
             </ul>
-            {workspaces.length === 0 && <p>No saved workspaces yet.</p>}
+            {visibleWorkspaces.length === 0 && <p>No saved workspaces yet.</p>}
           </div>
         </section>
         <div className="sessions-drawer-footer">
+          <div className="appearance-row">
+            <span className="appearance-row-label">Display appearance</span>
+            <div className="appearance-row-select">
+              <Listbox
+                value={componentProps.appearance}
+                onChange={(next) =>
+                  componentProps.onAppearanceChange(
+                    next as "light" | "dark" | "system",
+                  )}
+                options={[
+                  { value: "system", label: "System" },
+                  { value: "light", label: "Light" },
+                  { value: "dark", label: "Dark" },
+                ]}
+                size="small"
+              />
+            </div>
+          </div>
           {gambitVersion
             ? <span className="bundle-stamp">Gambit v{gambitVersion}</span>
             : componentProps.bundleStamp

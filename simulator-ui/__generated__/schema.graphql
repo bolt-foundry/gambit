@@ -1,73 +1,73 @@
 ### @generated 
 type BuildState {
-  canSend: Boolean
-  canStop: Boolean
-  runStatus: OpenResponseStatus
-  workspaceId: ID
+  canSend: Boolean!
+  canStop: Boolean!
+  runStatus: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type GambitDurableStreamEvent {
-  createdAt: String
-  data: JSON
-  offset: Int
-  type: String
+  createdAt: String!
+  data: JSON!
+  offset: Int!
+  type: String!
 }
 
 type GambitDurableStreamReplay {
-  events: [GambitDurableStreamEvent!]
-  fromOffset: Int
-  nextOffset: Int
-  streamId: ID
+  events: [GambitDurableStreamEvent!]!
+  fromOffset: Int!
+  nextOffset: Int!
+  streamId: ID!
 }
 
 scalar JSON
 
 type Mutation {
-  gambitWorkspaceCreate: WorkspaceCreatePayload
-  gambitWorkspaceDelete(workspaceId: ID!): WorkspaceDeletePayload
-  simulatorResetWorkspace(input: SimulatorResetWorkspaceInput!): SimulatorResetWorkspacePayload
-  simulatorStopRun(input: SimulatorStopRunInput!): SimulatorStopRunPayload
-  workspaceBuildRunCreate(input: WorkspaceBuildRunCreateInput!): WorkspaceBuildRunCreatePayload
-  workspaceConversationSessionSend(input: WorkspaceConversationSessionSendInput!): WorkspaceConversationSessionPayload
-  workspaceConversationSessionStart(input: WorkspaceConversationSessionStartInput!): WorkspaceConversationSessionPayload
-  workspaceConversationSessionStop(input: WorkspaceConversationSessionStopInput!): WorkspaceConversationSessionPayload
-  workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload
-  workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload
-  workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload
-  workspaceScenarioRunSend(input: WorkspaceScenarioRunSendInput!): WorkspaceScenarioRunSendPayload
-  workspaceScenarioRunStart(input: WorkspaceScenarioRunStartInput!): WorkspaceScenarioRunStartPayload
-  workspaceScenarioRunStop(input: WorkspaceScenarioRunStopInput!): WorkspaceScenarioRunStopPayload
-  workspaceVerifyBatchRunCreate(input: WorkspaceVerifyBatchRunCreateInput!): WorkspaceVerifyBatchRunCreatePayload
+  gambitWorkspaceCreate: WorkspaceCreatePayload!
+  gambitWorkspaceDelete(workspaceId: ID!): WorkspaceDeletePayload!
+  simulatorResetWorkspace(input: SimulatorResetWorkspaceInput!): SimulatorResetWorkspacePayload!
+  simulatorStopRun(input: SimulatorStopRunInput!): SimulatorStopRunPayload!
+  workspaceBuildRunCreate(input: WorkspaceBuildRunCreateInput!): WorkspaceBuildRunCreatePayload!
+  workspaceConversationSessionSend(input: WorkspaceConversationSessionSendInput!): WorkspaceConversationSessionPayload!
+  workspaceConversationSessionStart(input: WorkspaceConversationSessionStartInput!): WorkspaceConversationSessionPayload!
+  workspaceConversationSessionStop(input: WorkspaceConversationSessionStopInput!): WorkspaceConversationSessionPayload!
+  workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload!
+  workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload!
+  workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload!
+  workspaceScenarioRunSend(input: WorkspaceScenarioRunSendInput!): WorkspaceScenarioRunSendPayload!
+  workspaceScenarioRunStart(input: WorkspaceScenarioRunStartInput!): WorkspaceScenarioRunStartPayload!
+  workspaceScenarioRunStop(input: WorkspaceScenarioRunStopInput!): WorkspaceScenarioRunStopPayload!
+  workspaceVerifyBatchRunCreate(input: WorkspaceVerifyBatchRunCreateInput!): WorkspaceVerifyBatchRunCreatePayload!
 }
 
 type OpenResponse {
-  events(after: String, before: String, first: Int, last: Int): OpenResponseEventsConnection
-  id: ID
-  outputItems(after: String, before: String, first: Int, last: Int): OpenResponseOutputItemsConnection
-  runId: ID
-  status: OpenResponseStatus
+  events(after: String, before: String, first: Int, last: Int): OpenResponseEventsConnection!
+  id: ID!
+  outputItems(after: String, before: String, first: Int, last: Int): OpenResponseOutputItemsConnection!
+  runId: ID!
+  status: OpenResponseStatus!
 }
 
 type OpenResponseEvent {
-  data: JSON
-  id: ID
-  type: String
+  data: JSON!
+  id: ID!
+  type: String!
 }
 
 type OpenResponseEventUpdate {
   eventType: String
   runId: ID
-  workspaceId: ID
+  workspaceId: ID!
 }
 
 type OpenResponseEventsConnection {
-  edges: [OpenResponseEventsConnectionEdge]
+  edges: [OpenResponseEventsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type OpenResponseEventsConnectionEdge {
   cursor: String!
-  node: OpenResponseEvent
+  node: OpenResponseEvent!
 }
 
 input OpenResponseInputItemInput {
@@ -78,13 +78,13 @@ input OpenResponseInputItemInput {
 union OpenResponseOutputItem = OutputMessage | OutputReasoning | OutputToolCall
 
 type OpenResponseOutputItemsConnection {
-  edges: [OpenResponseOutputItemsConnectionEdge]
+  edges: [OpenResponseOutputItemsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type OpenResponseOutputItemsConnectionEdge {
   cursor: String!
-  node: OpenResponseOutputItem
+  node: OpenResponseOutputItem!
 }
 
 enum OpenResponseStatus {
@@ -96,26 +96,26 @@ enum OpenResponseStatus {
 }
 
 type OutputMessage {
-  content: String
-  id: ID
+  content: String!
+  id: ID!
   messageRefId: ID
-  role: String
+  role: String!
 }
 
 type OutputReasoning {
-  id: ID
+  id: ID!
   reasoningType: String
-  summary: String
+  summary: String!
 }
 
 type OutputToolCall {
   argumentsText: String
   error: String
-  id: ID
+  id: ID!
   resultText: String
-  status: ToolCallStatus
-  toolCallId: ID
-  toolName: String
+  status: ToolCallStatus!
+  toolCallId: ID!
+  toolName: String!
 }
 
 type PageInfo {
@@ -126,19 +126,19 @@ type PageInfo {
 }
 
 type Query {
-  gambitDurableStreamReplay(fromOffset: Int, streamId: ID!): GambitDurableStreamReplay
-  gambitWorkspaces(after: String, before: String, first: Int, last: Int): QueryGambitWorkspacesConnection
-  workspace(id: ID!): Workspace
+  gambitDurableStreamReplay(fromOffset: Int, streamId: ID!): GambitDurableStreamReplay!
+  gambitWorkspaces(after: String, before: String, first: Int, last: Int): QueryGambitWorkspacesConnection!
+  workspace(id: ID!): Workspace!
 }
 
 type QueryGambitWorkspacesConnection {
-  edges: [QueryGambitWorkspacesConnectionEdge]
+  edges: [QueryGambitWorkspacesConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type QueryGambitWorkspacesConnectionEdge {
   cursor: String!
-  node: WorkspaceSessionMeta
+  node: WorkspaceSessionMeta!
 }
 
 input SimulatorResetWorkspaceInput {
@@ -146,8 +146,8 @@ input SimulatorResetWorkspaceInput {
 }
 
 type SimulatorResetWorkspacePayload {
-  build: BuildState
-  workspace: Workspace
+  build: BuildState!
+  workspace: Workspace!
 }
 
 input SimulatorStopRunInput {
@@ -156,17 +156,17 @@ input SimulatorStopRunInput {
 }
 
 type SimulatorStopRunPayload {
-  run: WorkspaceBuildRun
-  workspace: Workspace
+  run: WorkspaceBuildRun!
+  workspace: Workspace!
 }
 
 type Subscription {
-  workspaceBuildLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
-  workspaceGradeLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
-  workspaceOpenResponseEventsLive(fromSequence: Int, runId: ID!, workspaceId: ID!): WorkspaceOpenResponseEventsLiveEdge
-  workspaceTestLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
-  workspaceUpdates(fromOffset: Int, workspaceId: ID!): WorkspaceUpdate
-  workspaceVerifyLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge
+  workspaceBuildLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge!
+  workspaceGradeLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge!
+  workspaceOpenResponseEventsLive(fromSequence: Int, runId: ID!, workspaceId: ID!): WorkspaceOpenResponseEventsLiveEdge!
+  workspaceTestLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge!
+  workspaceUpdates(fromOffset: Int, workspaceId: ID!): WorkspaceUpdate!
+  workspaceVerifyLive(fromOffset: Int, workspaceId: ID!): WorkspaceBuildLiveEdge!
 }
 
 enum ToolCallStatus {
@@ -177,17 +177,17 @@ enum ToolCallStatus {
 
 type Workspace {
   assistantDeck: WorkspaceAssistantDeck
-  build: BuildState
-  buildRuns(after: String, before: String, first: Int, last: Int): WorkspaceBuildRunsConnection
+  build: BuildState!
+  buildRuns(after: String, before: String, first: Int, last: Int): WorkspaceBuildRunsConnection!
   conversationSession(sessionId: ID!): WorkspaceConversationSession
-  conversationSessions(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionsConnection
-  files(after: String, before: String, first: Int, id: ID, last: Int, pathPrefix: WorkspaceRelativePath): WorkspaceFilesConnection
-  gradeTab: WorkspaceGradeTab
-  id: ID
-  models: WorkspaceModels
-  scenarioDecks: [WorkspaceScenarioDeck!]
-  scenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceScenarioRunsConnection
-  verification: WorkspaceVerification
+  conversationSessions(after: String, before: String, first: Int, last: Int): WorkspaceConversationSessionsConnection!
+  files(after: String, before: String, first: Int, id: ID, last: Int, pathPrefix: WorkspaceRelativePath): WorkspaceFilesConnection!
+  gradeTab: WorkspaceGradeTab!
+  id: ID!
+  models: WorkspaceModels!
+  scenarioDecks: [WorkspaceScenarioDeck!]!
+  scenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceScenarioRunsConnection!
+  verification: WorkspaceVerification!
 }
 
 type WorkspaceAssistantDeck {
@@ -203,29 +203,29 @@ type WorkspaceAssistantDeck {
 type WorkspaceBuildConversationSession implements WorkspaceConversationSession {
   error: String
   finishedAt: String
-  id: ID
-  run: WorkspaceConversationRun
-  sessionId: ID
+  id: ID!
+  run: WorkspaceConversationRun!
+  sessionId: ID!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceBuildLiveEdge {
-  cursor: String
-  node: Workspace
-  occurredAt: String
-  sourceOffset: Int
+  cursor: String!
+  node: Workspace!
+  occurredAt: String!
+  sourceOffset: Int!
 }
 
 type WorkspaceBuildRun implements WorkspaceConversationRun & WorkspaceRun {
   error: String
   finishedAt: String
-  id: ID
-  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  id: ID!
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 input WorkspaceBuildRunCreateInput {
@@ -234,53 +234,53 @@ input WorkspaceBuildRunCreateInput {
 }
 
 type WorkspaceBuildRunCreatePayload {
-  run: WorkspaceBuildRun
-  workspace: Workspace
+  run: WorkspaceBuildRun!
+  workspace: Workspace!
 }
 
 type WorkspaceBuildRunsConnection {
-  edges: [WorkspaceBuildRunsConnectionEdge]
+  edges: [WorkspaceBuildRunsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceBuildRunsConnectionEdge {
   cursor: String!
-  node: WorkspaceConversationRun
+  node: WorkspaceConversationRun!
 }
 
 interface WorkspaceConversationRun {
   error: String
   finishedAt: String
-  id: ID
-  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  id: ID!
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceConversationRunOpenResponsesConnection {
-  edges: [WorkspaceConversationRunOpenResponsesConnectionEdge]
+  edges: [WorkspaceConversationRunOpenResponsesConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceConversationRunOpenResponsesConnectionEdge {
   cursor: String!
-  node: OpenResponse
+  node: OpenResponse!
 }
 
 interface WorkspaceConversationSession {
   error: String
   finishedAt: String
-  id: ID
-  sessionId: ID
+  id: ID!
+  sessionId: ID!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceConversationSessionPayload {
-  session: WorkspaceConversationSession
-  workspace: Workspace
+  session: WorkspaceConversationSession!
+  workspace: Workspace!
 }
 
 input WorkspaceConversationSessionSendInput {
@@ -312,59 +312,59 @@ input WorkspaceConversationSessionStopInput {
 }
 
 type WorkspaceConversationSessionsConnection {
-  edges: [WorkspaceConversationSessionsConnectionEdge]
+  edges: [WorkspaceConversationSessionsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceConversationSessionsConnectionEdge {
   cursor: String!
-  node: WorkspaceConversationSession
+  node: WorkspaceConversationSession!
 }
 
 type WorkspaceCreatePayload {
-  workspace: Workspace
-  workspaces(after: String, before: String, first: Int, last: Int): WorkspaceCreatePayloadWorkspacesConnection
+  workspace: Workspace!
+  workspaces(after: String, before: String, first: Int, last: Int): WorkspaceCreatePayloadWorkspacesConnection!
 }
 
 type WorkspaceCreatePayloadWorkspacesConnection {
-  edges: [WorkspaceCreatePayloadWorkspacesConnectionEdge]
+  edges: [WorkspaceCreatePayloadWorkspacesConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceCreatePayloadWorkspacesConnectionEdge {
   cursor: String!
-  node: WorkspaceSessionMeta
+  node: WorkspaceSessionMeta!
 }
 
 type WorkspaceDeletePayload {
-  deleted: Boolean
+  deleted: Boolean!
   error: String
-  workspaceId: ID
+  workspaceId: ID!
 }
 
 type WorkspaceFile {
   content: String
-  id: ID
+  id: ID!
   modifiedAt: String
-  path: WorkspaceRelativePath
+  path: WorkspaceRelativePath!
   size: Int
 }
 
 type WorkspaceFilesConnection {
-  edges: [WorkspaceFilesConnectionEdge]
+  edges: [WorkspaceFilesConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceFilesConnectionEdge {
   cursor: String!
-  node: WorkspaceFile
+  node: WorkspaceFile!
 }
 
 type WorkspaceGradeFlag {
-  createdAt: String
-  id: ID
+  createdAt: String!
+  id: ID!
   reason: String
-  refId: ID
+  refId: ID!
   runId: ID
   turnIndex: Int
 }
@@ -376,8 +376,8 @@ input WorkspaceGradeFlagReasonUpdateInput {
 }
 
 type WorkspaceGradeFlagReasonUpdatePayload {
-  flags: [WorkspaceGradeFlag!]
-  workspace: Workspace
+  flags: [WorkspaceGradeFlag!]!
+  workspace: Workspace!
 }
 
 input WorkspaceGradeFlagToggleInput {
@@ -388,22 +388,22 @@ input WorkspaceGradeFlagToggleInput {
 }
 
 type WorkspaceGradeFlagTogglePayload {
-  flags: [WorkspaceGradeFlag!]
-  workspace: Workspace
+  flags: [WorkspaceGradeFlag!]!
+  workspace: Workspace!
 }
 
 type WorkspaceGradeRun {
   error: String
-  graderId: ID
+  graderId: ID!
   graderLabel: String
-  graderPath: String
-  id: ID
+  graderPath: String!
+  id: ID!
   runAt: String
   scenarioRunId: ID
-  status: WorkspaceGradeRunStatus
+  status: WorkspaceGradeRunStatus!
   summary: WorkspaceGradeRunSummary
-  turns: [WorkspaceGradeTurn!]
-  workspaceId: ID
+  turns: [WorkspaceGradeTurn!]!
+  workspaceId: ID!
 }
 
 input WorkspaceGradeRunCreateInput {
@@ -413,8 +413,8 @@ input WorkspaceGradeRunCreateInput {
 }
 
 type WorkspaceGradeRunCreatePayload {
-  run: WorkspaceGradeRun
-  workspace: Workspace
+  run: WorkspaceGradeRun!
+  workspace: Workspace!
 }
 
 enum WorkspaceGradeRunStatus {
@@ -429,108 +429,108 @@ type WorkspaceGradeRunSummary {
 }
 
 type WorkspaceGradeTab {
-  flags: [WorkspaceGradeFlag!]
-  graderDecks: [WorkspaceGraderDeck!]
-  runs: [WorkspaceGradeRun!]
+  flags: [WorkspaceGradeFlag!]!
+  graderDecks: [WorkspaceGraderDeck!]!
+  runs: [WorkspaceGradeRun!]!
 }
 
 type WorkspaceGradeTurn {
   gradedAssistant: String
-  id: ID
+  id: ID!
   priorUser: String
   reason: String
-  refId: ID
-  runId: ID
+  refId: ID!
+  runId: ID!
   score: Float
-  turnIndex: Int
-  turnNumber: Int
+  turnIndex: Int!
+  turnNumber: Int!
 }
 
 type WorkspaceGraderConversationSession implements WorkspaceConversationSession {
   error: String
   finishedAt: String
-  gradeRun: WorkspaceGradeRun
-  id: ID
-  sessionId: ID
+  gradeRun: WorkspaceGradeRun!
+  id: ID!
+  sessionId: ID!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceGraderDeck {
   description: String
-  id: ID
-  label: String
-  path: String
+  id: ID!
+  label: String!
+  path: String!
 }
 
 type WorkspaceModelStatus {
-  available: Boolean
-  loggedIn: Boolean
-  model: String
-  requiresLogin: Boolean
-  statusText: String
+  available: Boolean!
+  loggedIn: Boolean!
+  model: String!
+  requiresLogin: Boolean!
+  statusText: String!
   trustedPath: String
-  workspaceId: ID
-  writeEnabled: Boolean
+  workspaceId: ID!
+  writeEnabled: Boolean!
 }
 
 type WorkspaceModels {
-  codex(checkOnline: Boolean): WorkspaceModelStatus
+  codex(checkOnline: Boolean): WorkspaceModelStatus!
 }
 
 type WorkspaceOpenResponseEventsLiveEdge {
-  event: OpenResponseEvent
-  occurredAt: String
-  runId: ID
-  sourceSequence: Int
-  workspaceId: ID
+  event: OpenResponseEvent!
+  occurredAt: String!
+  runId: ID!
+  sourceSequence: Int!
+  workspaceId: ID!
 }
 
 scalar WorkspaceRelativePath
 
 interface WorkspaceRun {
-  id: ID
-  status: OpenResponseStatus
-  workspaceId: ID
+  id: ID!
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceRunLifecycleUpdate {
   runId: ID
   status: String
-  workspaceId: ID
+  workspaceId: ID!
 }
 
 type WorkspaceScenarioConversationSession implements WorkspaceConversationSession {
   error: String
   finishedAt: String
-  id: ID
-  run: WorkspaceConversationRun
-  sessionId: ID
+  id: ID!
+  run: WorkspaceConversationRun!
+  sessionId: ID!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceScenarioDeck {
   defaults: String
   description: String
-  id: ID
+  id: ID!
   inputSchema: String
   inputSchemaError: String
-  label: String
+  label: String!
   maxTurns: Int
-  path: String
+  path: String!
 }
 
 type WorkspaceScenarioRun implements WorkspaceConversationRun {
   error: String
   finishedAt: String
-  id: ID
-  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection
+  id: ID!
+  openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
-  status: OpenResponseStatus
-  workspaceId: ID
+  status: OpenResponseStatus!
+  workspaceId: ID!
 }
 
 input WorkspaceScenarioRunSendInput {
@@ -540,8 +540,8 @@ input WorkspaceScenarioRunSendInput {
 }
 
 type WorkspaceScenarioRunSendPayload {
-  run: WorkspaceScenarioRun
-  workspace: Workspace
+  run: WorkspaceScenarioRun!
+  workspace: Workspace!
 }
 
 input WorkspaceScenarioRunStartInput {
@@ -552,8 +552,8 @@ input WorkspaceScenarioRunStartInput {
 }
 
 type WorkspaceScenarioRunStartPayload {
-  run: WorkspaceScenarioRun
-  workspace: Workspace
+  run: WorkspaceScenarioRun!
+  workspace: Workspace!
 }
 
 input WorkspaceScenarioRunStopInput {
@@ -562,94 +562,94 @@ input WorkspaceScenarioRunStopInput {
 }
 
 type WorkspaceScenarioRunStopPayload {
-  run: WorkspaceScenarioRun
-  workspace: Workspace
+  run: WorkspaceScenarioRun!
+  workspace: Workspace!
 }
 
 type WorkspaceScenarioRunsConnection {
-  edges: [WorkspaceScenarioRunsConnectionEdge]
+  edges: [WorkspaceScenarioRunsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceScenarioRunsConnectionEdge {
   cursor: String!
-  node: WorkspaceConversationRun
+  node: WorkspaceConversationRun!
 }
 
 type WorkspaceSessionMeta {
   createdAt: String
   deck: String
   deckSlug: String
-  id: ID
+  id: ID!
   sessionDir: String
   statePath: String
   testBotName: String
 }
 
 type WorkspaceSnapshotUpdate {
-  workspaceId: ID
+  workspaceId: ID!
 }
 
 type WorkspaceUpdate {
-  occurredAt: String
-  offset: Int
-  payload: WorkspaceUpdatePayload
-  workspaceId: ID
+  occurredAt: String!
+  offset: Int!
+  payload: WorkspaceUpdatePayload!
+  workspaceId: ID!
 }
 
 union WorkspaceUpdatePayload = OpenResponseEventUpdate | WorkspaceRunLifecycleUpdate | WorkspaceSnapshotUpdate
 
 type WorkspaceVerification {
-  batches(after: String, before: String, first: Int, last: Int): WorkspaceVerificationBatchesConnection
-  graderDecks(after: String, before: String, first: Int, last: Int): WorkspaceVerificationGraderDecksConnection
+  batches(after: String, before: String, first: Int, last: Int): WorkspaceVerificationBatchesConnection!
+  graderDecks(after: String, before: String, first: Int, last: Int): WorkspaceVerificationGraderDecksConnection!
 }
 
 type WorkspaceVerificationBatchesConnection {
-  edges: [WorkspaceVerificationBatchesConnectionEdge]
+  edges: [WorkspaceVerificationBatchesConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceVerificationBatchesConnectionEdge {
   cursor: String!
-  node: WorkspaceVerifyBatch
+  node: WorkspaceVerifyBatch!
 }
 
 type WorkspaceVerificationGraderDecksConnection {
-  edges: [WorkspaceVerificationGraderDecksConnectionEdge]
+  edges: [WorkspaceVerificationGraderDecksConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceVerificationGraderDecksConnectionEdge {
   cursor: String!
-  node: WorkspaceGraderDeck
+  node: WorkspaceGraderDeck!
 }
 
 type WorkspaceVerifyBatch {
-  active: Int
-  completed: Int
-  failed: Int
+  active: Int!
+  completed: Int!
+  failed: Int!
   finishedAt: String
-  graderId: ID
-  graderRepeatsPerScenario: Int
-  id: ID
+  graderId: ID!
+  graderRepeatsPerScenario: Int!
+  id: ID!
   metrics: WorkspaceVerifyMetrics
-  requested: Int
-  requests(after: String, before: String, first: Int, last: Int): WorkspaceVerifyBatchRequestsConnection
+  requested: Int!
+  requests(after: String, before: String, first: Int, last: Int): WorkspaceVerifyBatchRequestsConnection!
   scenarioDeckId: ID
-  scenarioRuns: Int
-  scenarioRunsCompleted: Int
-  scenarioRunsFailed: Int
+  scenarioRuns: Int!
+  scenarioRunsCompleted: Int!
+  scenarioRunsFailed: Int!
   startedAt: String
-  status: WorkspaceVerifyBatchStatus
-  workspaceId: ID
+  status: WorkspaceVerifyBatchStatus!
+  workspaceId: ID!
 }
 
 type WorkspaceVerifyBatchRequest {
   error: String
-  id: ID
+  id: ID!
   runId: ID
   scenarioRunId: ID
-  status: WorkspaceVerifyBatchRequestStatus
+  status: WorkspaceVerifyBatchRequestStatus!
 }
 
 enum WorkspaceVerifyBatchRequestStatus {
@@ -660,13 +660,13 @@ enum WorkspaceVerifyBatchRequestStatus {
 }
 
 type WorkspaceVerifyBatchRequestsConnection {
-  edges: [WorkspaceVerifyBatchRequestsConnectionEdge]
+  edges: [WorkspaceVerifyBatchRequestsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceVerifyBatchRequestsConnectionEdge {
   cursor: String!
-  node: WorkspaceVerifyBatchRequest
+  node: WorkspaceVerifyBatchRequest!
 }
 
 input WorkspaceVerifyBatchRunCreateInput {
@@ -679,8 +679,8 @@ input WorkspaceVerifyBatchRunCreateInput {
 }
 
 type WorkspaceVerifyBatchRunCreatePayload {
-  batch: WorkspaceVerifyBatch
-  workspace: Workspace
+  batch: WorkspaceVerifyBatch!
+  workspace: Workspace!
 }
 
 enum WorkspaceVerifyBatchStatus {
@@ -693,19 +693,19 @@ enum WorkspaceVerifyBatchStatus {
 type WorkspaceVerifyConversationSession implements WorkspaceConversationSession {
   error: String
   finishedAt: String
-  id: ID
-  sessionId: ID
+  id: ID!
+  sessionId: ID!
   startedAt: String
-  status: OpenResponseStatus
-  verifyBatch: WorkspaceVerifyBatch
-  workspaceId: ID
+  status: OpenResponseStatus!
+  verifyBatch: WorkspaceVerifyBatch!
+  workspaceId: ID!
 }
 
 type WorkspaceVerifyFailureReasonGroup {
-  count: Int
-  key: ID
-  kind: WorkspaceVerifyFailureReasonKind
-  reason: String
+  count: Int!
+  key: ID!
+  kind: WorkspaceVerifyFailureReasonKind!
+  reason: String!
 }
 
 enum WorkspaceVerifyFailureReasonKind {
@@ -714,17 +714,17 @@ enum WorkspaceVerifyFailureReasonKind {
 }
 
 type WorkspaceVerifyMetrics {
-  executionFailureCount: Int
-  failureReasons(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsFailureReasonsConnection
-  gradeSampleCountCompleted: Int
-  gradeSampleCountFailed: Int
-  gradeSampleCountRequested: Int
-  gradingFailureCount: Int
-  outlierScenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsOutlierScenarioRunsConnection
+  executionFailureCount: Int!
+  failureReasons(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsFailureReasonsConnection!
+  gradeSampleCountCompleted: Int!
+  gradeSampleCountFailed: Int!
+  gradeSampleCountRequested: Int!
+  gradingFailureCount: Int!
+  outlierScenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceVerifyMetricsOutlierScenarioRunsConnection!
   passRate: Float
-  scenarioRunCountCompleted: Int
-  scenarioRunCountFailed: Int
-  scenarioRunCountRequested: Int
+  scenarioRunCountCompleted: Int!
+  scenarioRunCountFailed: Int!
+  scenarioRunCountRequested: Int!
   scoreMax: Float
   scoreMean: Float
   scoreMedian: Float
@@ -732,37 +732,37 @@ type WorkspaceVerifyMetrics {
 }
 
 type WorkspaceVerifyMetricsFailureReasonsConnection {
-  edges: [WorkspaceVerifyMetricsFailureReasonsConnectionEdge]
+  edges: [WorkspaceVerifyMetricsFailureReasonsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceVerifyMetricsFailureReasonsConnectionEdge {
   cursor: String!
-  node: WorkspaceVerifyFailureReasonGroup
+  node: WorkspaceVerifyFailureReasonGroup!
 }
 
 type WorkspaceVerifyMetricsOutlierScenarioRunsConnection {
-  edges: [WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge]
+  edges: [WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge!]!
   pageInfo: PageInfo!
 }
 
 type WorkspaceVerifyMetricsOutlierScenarioRunsConnectionEdge {
   cursor: String!
-  node: WorkspaceVerifyScenarioOutlier
+  node: WorkspaceVerifyScenarioOutlier!
 }
 
 type WorkspaceVerifyScenarioOutlier {
   averageScore: Float
-  completedSampleCount: Int
-  executionFailureCount: Int
-  failed: Boolean
-  gradeSampleCount: Int
-  gradingFailureCount: Int
-  key: ID
+  completedSampleCount: Int!
+  executionFailureCount: Int!
+  failed: Boolean!
+  gradeSampleCount: Int!
+  gradingFailureCount: Int!
+  key: ID!
   maxRunId: ID
   maxScore: Float
   messageRefId: ID
   minRunId: ID
   minScore: Float
-  scenarioRunId: ID
+  scenarioRunId: ID!
 }

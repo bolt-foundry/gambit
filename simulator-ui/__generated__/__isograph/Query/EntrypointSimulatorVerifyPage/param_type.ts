@@ -3,9 +3,9 @@ import type { Query__EntrypointSimulatorVerifyPage__parameters } from './paramet
 
 export type Query__EntrypointSimulatorVerifyPage__param = {
   readonly data: {
-    readonly workspace: ({
+    readonly workspace: {
       readonly VerifyTab: Workspace__VerifyTab__output_type,
-    } | null),
+    },
   },
   readonly parameters: Query__EntrypointSimulatorVerifyPage__parameters,
 };

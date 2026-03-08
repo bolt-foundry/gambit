@@ -3,37 +3,37 @@ import type { Query__EntrypointWorkspaceBuildLiveWrite__parameters } from './par
 
 export type Query__EntrypointWorkspaceBuildLiveWrite__param = {
   readonly data: {
-    readonly workspace: ({
-      readonly id: (string | null),
-      readonly scenarioDecks: (ReadonlyArray<{
-        readonly id: (string | null),
-        readonly label: (string | null),
+    readonly workspace: {
+      readonly id: string,
+      readonly scenarioDecks: ReadonlyArray<{
+        readonly id: string,
+        readonly label: string,
         readonly description: (string | null),
-        readonly path: (string | null),
+        readonly path: string,
         readonly maxTurns: (number | null),
-      }> | null),
-      readonly files: ({
-        readonly edges: (ReadonlyArray<({
-          readonly node: ({
-            readonly id: (string | null),
-            readonly path: (string | null),
+      }>,
+      readonly files: {
+        readonly edges: ReadonlyArray<{
+          readonly node: {
+            readonly id: string,
+            readonly path: string,
             readonly PreviewFile: WorkspaceFile__PreviewFile__output_type,
-          } | null),
-        } | null)> | null),
-      } | null),
-      readonly buildRuns: ({
-        readonly edges: (ReadonlyArray<({
-          readonly node: ({
-            readonly id: (string | null),
-            readonly status: (string | null),
-            readonly openResponses: ({
-              readonly edges: (ReadonlyArray<({
-                readonly node: ({
-                  readonly id: (string | null),
-                  readonly status: (string | null),
-                  readonly outputItems: ({
-                    readonly edges: (ReadonlyArray<({
-                      readonly node: ({
+          },
+        }>,
+      },
+      readonly buildRuns: {
+        readonly edges: ReadonlyArray<{
+          readonly node: {
+            readonly id: string,
+            readonly status: string,
+            readonly openResponses: {
+              readonly edges: ReadonlyArray<{
+                readonly node: {
+                  readonly id: string,
+                  readonly status: string,
+                  readonly outputItems: {
+                    readonly edges: ReadonlyArray<{
+                      readonly node: {
                         /**
 A discriminant for the OpenResponseOutputItem type
                         */
@@ -42,55 +42,55 @@ A discriminant for the OpenResponseOutputItem type
 A client pointer for the OutputMessage type.
                         */
                         readonly asOutputMessage: ({
-                          readonly id: (string | null),
-                          readonly role: (string | null),
-                          readonly content: (string | null),
+                          readonly id: string,
+                          readonly role: string,
+                          readonly content: string,
                         } | null),
                         /**
 A client pointer for the OutputReasoning type.
                         */
                         readonly asOutputReasoning: ({
-                          readonly id: (string | null),
-                          readonly summary: (string | null),
+                          readonly id: string,
+                          readonly summary: string,
                           readonly reasoningType: (string | null),
                         } | null),
                         /**
 A client pointer for the OutputToolCall type.
                         */
                         readonly asOutputToolCall: ({
-                          readonly id: (string | null),
-                          readonly toolCallId: (string | null),
-                          readonly toolName: (string | null),
-                          readonly status: (string | null),
+                          readonly id: string,
+                          readonly toolCallId: string,
+                          readonly toolName: string,
+                          readonly status: string,
                           readonly argumentsText: (string | null),
                           readonly resultText: (string | null),
                           readonly error: (string | null),
                         } | null),
-                      } | null),
-                    } | null)> | null),
-                  } | null),
-                } | null),
-              } | null)> | null),
-            } | null),
-          } | null),
-        } | null)> | null),
-      } | null),
-      readonly scenarioRuns: ({
-        readonly edges: (ReadonlyArray<({
-          readonly node: ({
-            readonly id: (string | null),
-            readonly status: (string | null),
+                      },
+                    }>,
+                  },
+                },
+              }>,
+            },
+          },
+        }>,
+      },
+      readonly scenarioRuns: {
+        readonly edges: ReadonlyArray<{
+          readonly node: {
+            readonly id: string,
+            readonly status: string,
             readonly startedAt: (string | null),
             readonly finishedAt: (string | null),
             readonly error: (string | null),
-            readonly openResponses: ({
-              readonly edges: (ReadonlyArray<({
-                readonly node: ({
-                  readonly id: (string | null),
-                  readonly status: (string | null),
-                  readonly outputItems: ({
-                    readonly edges: (ReadonlyArray<({
-                      readonly node: ({
+            readonly openResponses: {
+              readonly edges: ReadonlyArray<{
+                readonly node: {
+                  readonly id: string,
+                  readonly status: string,
+                  readonly outputItems: {
+                    readonly edges: ReadonlyArray<{
+                      readonly node: {
                         /**
 A discriminant for the OpenResponseOutputItem type
                         */
@@ -99,40 +99,40 @@ A discriminant for the OpenResponseOutputItem type
 A client pointer for the OutputMessage type.
                         */
                         readonly asOutputMessage: ({
-                          readonly id: (string | null),
-                          readonly role: (string | null),
-                          readonly content: (string | null),
+                          readonly id: string,
+                          readonly role: string,
+                          readonly content: string,
                         } | null),
                         /**
 A client pointer for the OutputReasoning type.
                         */
                         readonly asOutputReasoning: ({
-                          readonly id: (string | null),
-                          readonly summary: (string | null),
+                          readonly id: string,
+                          readonly summary: string,
                           readonly reasoningType: (string | null),
                         } | null),
                         /**
 A client pointer for the OutputToolCall type.
                         */
                         readonly asOutputToolCall: ({
-                          readonly id: (string | null),
-                          readonly toolCallId: (string | null),
-                          readonly toolName: (string | null),
-                          readonly status: (string | null),
+                          readonly id: string,
+                          readonly toolCallId: string,
+                          readonly toolName: string,
+                          readonly status: string,
                           readonly argumentsText: (string | null),
                           readonly resultText: (string | null),
                           readonly error: (string | null),
                         } | null),
-                      } | null),
-                    } | null)> | null),
-                  } | null),
-                } | null),
-              } | null)> | null),
-            } | null),
-          } | null),
-        } | null)> | null),
-      } | null),
-    } | null),
+                      },
+                    }>,
+                  },
+                },
+              }>,
+            },
+          },
+        }>,
+      },
+    },
   },
   readonly parameters: Query__EntrypointWorkspaceBuildLiveWrite__parameters,
 };

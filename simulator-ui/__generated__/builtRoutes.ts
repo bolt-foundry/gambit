@@ -8,12 +8,14 @@ export type RouteEntrypoint = {
   headers?: Record<string, string>;
 };
 
+iso(`entrypoint Mutation.GambitSimulatorResetWorkspace`)
 iso(`entrypoint Mutation.GambitSimulatorStopRun`)
 iso(`entrypoint Mutation.GambitWorkspaceBuildRunCreate`)
 iso(`entrypoint Mutation.GambitWorkspaceConversationSessionSend`)
 iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStart`)
 iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStop`)
 iso(`entrypoint Mutation.GambitWorkspaceCreate`)
+iso(`entrypoint Mutation.GambitWorkspaceDelete`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagReasonUpdate`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagToggle`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeRunCreate`)
@@ -50,12 +52,14 @@ import entrypointWorkspaceBuildTabLiveWrite from "@iso-gambit-sim/Query/Entrypoi
 import entrypointWorkspaceGradeLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceGradeLiveWrite/entrypoint.ts"
 import entrypointWorkspaceVerifyLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceVerifyLiveWrite/entrypoint.ts"
 import entrypointWorkspaceWorkbenchLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceWorkbenchLiveWrite/entrypoint.ts"
+import gambitSimulatorResetWorkspace from "@iso-gambit-sim/Mutation/GambitSimulatorResetWorkspace/entrypoint.ts"
 import gambitSimulatorStopRun from "@iso-gambit-sim/Mutation/GambitSimulatorStopRun/entrypoint.ts"
 import gambitWorkspaceBuildRunCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceBuildRunCreate/entrypoint.ts"
 import gambitWorkspaceConversationSessionSend from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionSend/entrypoint.ts"
 import gambitWorkspaceConversationSessionStart from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionStart/entrypoint.ts"
 import gambitWorkspaceConversationSessionStop from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionStop/entrypoint.ts"
 import gambitWorkspaceCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceCreate/entrypoint.ts"
+import gambitWorkspaceDelete from "@iso-gambit-sim/Mutation/GambitWorkspaceDelete/entrypoint.ts"
 import gambitWorkspaceGradeFlagReasonUpdate from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagReasonUpdate/entrypoint.ts"
 import gambitWorkspaceGradeFlagToggle from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagToggle/entrypoint.ts"
 import gambitWorkspaceGradeRunCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeRunCreate/entrypoint.ts"
@@ -78,12 +82,14 @@ export {entrypointWorkspaceBuildTabLiveWrite};
 export {entrypointWorkspaceGradeLiveWrite};
 export {entrypointWorkspaceVerifyLiveWrite};
 export {entrypointWorkspaceWorkbenchLiveWrite};
+export {gambitSimulatorResetWorkspace};
 export {gambitSimulatorStopRun};
 export {gambitWorkspaceBuildRunCreate};
 export {gambitWorkspaceConversationSessionSend};
 export {gambitWorkspaceConversationSessionStart};
 export {gambitWorkspaceConversationSessionStop};
 export {gambitWorkspaceCreate};
+export {gambitWorkspaceDelete};
 export {gambitWorkspaceGradeFlagReasonUpdate};
 export {gambitWorkspaceGradeFlagToggle};
 export {gambitWorkspaceGradeRunCreate};

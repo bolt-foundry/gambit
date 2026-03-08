@@ -1,78 +1,78 @@
 export type Mutation__GambitWorkspaceScenarioRunSend__raw_response_type = {
-  workspaceScenarioRunSend____input___v_input?: ({
-    run?: ({
-      id?: string,
+  workspaceScenarioRunSend____input___v_input: {
+    run: {
+      id: string,
       error?: (string | null),
       finishedAt?: (string | null),
-      openResponses____first___l_1?: ({
-        edges?: (ReadonlyArray<({
-          node?: ({
-            id?: string,
-            outputItems____first___l_200?: ({
-              edges?: (ReadonlyArray<({
-                node?: ({
+      openResponses____first___l_1: {
+        edges: ReadonlyArray<{
+          node: {
+            id: string,
+            outputItems____first___l_200: {
+              edges: ReadonlyArray<{
+                node: {
                   __typename: "OutputMessage",
-                  id?: string,
-                  content?: (string | null),
-                  role?: (string | null),
+                  id: string,
+                  content: string,
+                  role: string,
                 } | {
                   __typename: "OutputReasoning",
-                  id?: string,
+                  id: string,
                   reasoningType?: (string | null),
-                  summary?: (string | null),
+                  summary: string,
                 } | {
                   __typename: "OutputToolCall",
-                  id?: string,
+                  id: string,
                   argumentsText?: (string | null),
                   error?: (string | null),
                   resultText?: (string | null),
-                  status?: (string | null),
-                  toolCallId?: (string | null),
-                  toolName?: (string | null),
-                } | null),
-              } | null)> | null),
-            } | null),
-            status?: (string | null),
-          } | null),
-        } | null)> | null),
-      } | null),
+                  status: string,
+                  toolCallId: string,
+                  toolName: string,
+                },
+              }>,
+            },
+            status: string,
+          },
+        }>,
+      },
       startedAt?: (string | null),
-      status?: (string | null),
-      workspaceId?: (string | null),
-    } | null),
-    workspace?: ({
-      id?: string,
-      scenarioRuns____first___l_25?: ({
-        edges?: (ReadonlyArray<({
-          node?: ({
+      status: string,
+      workspaceId: string,
+    },
+    workspace: {
+      id: string,
+      scenarioRuns____first___l_25: {
+        edges: ReadonlyArray<{
+          node: {
             __typename: string,
-            id?: string,
+            id: string,
             error?: (string | null),
             finishedAt?: (string | null),
-            openResponses____first___l_1?: ({
-              edges?: (ReadonlyArray<({
-                node?: ({
-                  id?: string,
-                  outputItems____first___l_200?: ({
-                    edges?: (ReadonlyArray<({
-                      node?: ({
+            openResponses____first___l_1: {
+              edges: ReadonlyArray<{
+                node: {
+                  id: string,
+                  outputItems____first___l_200: {
+                    edges: ReadonlyArray<{
+                      node: {
                         __typename: "OutputMessage",
-                        id?: string,
-                        content?: (string | null),
-                        role?: (string | null),
-                      } | null),
-                    } | null)> | null),
-                  } | null),
-                  status?: (string | null),
-                } | null),
-              } | null)> | null),
-            } | null),
+                        id: string,
+                        content: string,
+                        role: string,
+                      },
+                    }>,
+                  },
+                  status: string,
+                },
+              }>,
+            },
             startedAt?: (string | null),
-            status?: (string | null),
-          } | null),
-        } | null)> | null),
-      } | null),
-    } | null),
-  } | null),
+            status: string,
+          },
+        }>,
+      },
+    },
+  },
 }
 

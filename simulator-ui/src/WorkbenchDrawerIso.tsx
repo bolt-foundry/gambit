@@ -18,6 +18,10 @@ type WorkbenchDrawerIsoProps = {
   open?: boolean;
   runStatus?: WorkbenchChatRunStatus;
   chatBody?: React.ReactNode;
+  chatHeaderActions?: React.ReactNode;
+  chatHistoryOpen?: boolean;
+  chatHistoryContent?: React.ReactNode;
+  onToggleChatHistory?: () => void;
 };
 
 function toBadgeStatus(status: WorkbenchChatRunStatus): string {
@@ -55,7 +59,12 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
     open = true,
     runStatus = "IDLE",
     chatBody = null,
+    chatHeaderActions = null,
+    chatHistoryOpen = false,
+    chatHistoryContent = null,
+    onToggleChatHistory,
   } = props;
+  const hasChatHistory = chatHistoryContent !== null;
 
   if (!open) return null;
 
@@ -66,18 +75,55 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
           <header className="gds-accordion-header">
             <div className="gds-accordion-title">
               <div className="workbench-accordion-title">
+                {hasChatHistory && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="workbench-chat-history-toggle"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onToggleChatHistory?.();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onToggleChatHistory?.();
+                    }}
+                    aria-label={chatHistoryOpen
+                      ? "Hide chat history"
+                      : "Show chat history"}
+                  >
+                    <span className="workbench-chat-history-arrow">▶</span>
+                  </span>
+                )}
                 <span>Chat</span>
                 <Badge status={toBadgeStatus(runStatus)}>
                   {toBadgeLabel(runStatus)}
                 </Badge>
               </div>
             </div>
+            {chatHeaderActions && (
+              <div className="workbench-chat-header-actions gds-accordion-open-only">
+                {chatHeaderActions}
+              </div>
+            )}
           </header>
           <div className="gds-accordion-content workbench-chat-content">
             <div className="gds-accordion-content-inner">
               <div className="workbench-chat-panel">
                 <div className="workbench-chat-overlay">
-                  <div className="workbench-chat-current">
+                  {hasChatHistory && (
+                    <div className="workbench-chat-history">
+                      {chatHistoryContent}
+                    </div>
+                  )}
+                  <div
+                    className={`workbench-chat-current${
+                      chatHistoryOpen ? " is-history" : ""
+                    }`}
+                  >
                     {chatBody}
                   </div>
                 </div>

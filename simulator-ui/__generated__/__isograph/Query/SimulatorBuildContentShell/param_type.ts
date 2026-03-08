@@ -5,9 +5,9 @@ import type { Query__SimulatorBuildContentShell__parameters } from './parameters
 export type Query__SimulatorBuildContentShell__param = {
   readonly data: {
     readonly SimulatorAppDrawer: Query__SimulatorAppDrawer__output_type,
-    readonly workspace: ({
+    readonly workspace: {
       readonly WorkbenchChatDrawer: Workspace__WorkbenchChatDrawer__output_type,
-    } | null),
+    },
   },
   readonly parameters: Query__SimulatorBuildContentShell__parameters,
 };

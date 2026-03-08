@@ -473,6 +473,7 @@ export type GambitGraphqlContext = {
 
 const builder = new SchemaBuilder<{
   Context: GambitGraphqlContext;
+  DefaultFieldNullability: false;
   Scalars: {
     JSON: {
       Input: unknown;
@@ -486,6 +487,7 @@ const builder = new SchemaBuilder<{
 }>({
   plugins: [RelayPlugin],
   relay: {},
+  defaultFieldNullability: false,
 });
 
 const WorkspaceRelativePathScalar = builder.scalarType(

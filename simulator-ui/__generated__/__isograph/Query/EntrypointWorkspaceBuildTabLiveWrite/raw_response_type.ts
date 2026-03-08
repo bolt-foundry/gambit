@@ -1,17 +1,17 @@
 export type Query__EntrypointWorkspaceBuildTabLiveWrite__raw_response_type = {
-  workspace____id___v_workspaceId?: ({
-    id?: string,
-    files____first___l_200?: ({
-      edges?: (ReadonlyArray<({
-        node?: ({
-          id?: string,
+  workspace____id___v_workspaceId: {
+    id: string,
+    files____first___l_200: {
+      edges: ReadonlyArray<{
+        node: {
+          id: string,
           content?: (string | null),
           modifiedAt?: (string | null),
-          path?: (string | null),
+          path: string,
           size?: (number | null),
-        } | null),
-      } | null)> | null),
-    } | null),
-  } | null),
+        },
+      }>,
+    },
+  },
 }
 

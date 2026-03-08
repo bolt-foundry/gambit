@@ -4,9 +4,9 @@ import type { Query__EntrypointSimulatorWorkspaceShell__parameters } from './par
 export type Query__EntrypointSimulatorWorkspaceShell__param = {
   readonly data: {
     readonly SimulatorBuildContentShell: Query__SimulatorBuildContentShell__output_type,
-    readonly workspace: ({
-      readonly id: (string | null),
-    } | null),
+    readonly workspace: {
+      readonly id: string,
+    },
   },
   readonly parameters: Query__EntrypointSimulatorWorkspaceShell__parameters,
 };

@@ -3,9 +3,9 @@ import type { Query__EntrypointSimulatorBuildPage__parameters } from './paramete
 
 export type Query__EntrypointSimulatorBuildPage__param = {
   readonly data: {
-    readonly workspace: ({
+    readonly workspace: {
       readonly BuildTab: Workspace__BuildTab__output_type,
-    } | null),
+    },
   },
   readonly parameters: Query__EntrypointSimulatorBuildPage__parameters,
 };
