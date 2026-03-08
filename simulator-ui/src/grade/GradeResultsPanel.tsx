@@ -415,11 +415,9 @@ export function GradeResultsPanel(props: {
                                 Raw input
                               </div>
                               <pre className="trace-json">
-                                    {JSON.stringify(
-                                      item.input ?? null,
-                                      null,
-                                      2,
-                                    )}
+                                {item.input === undefined
+                                  ? "Raw input unavailable for this grade result."
+                                  : JSON.stringify(item.input, null, 2)}
                               </pre>
                             </div>
                           )}

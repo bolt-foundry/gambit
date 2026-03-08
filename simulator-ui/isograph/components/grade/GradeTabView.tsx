@@ -90,6 +90,13 @@ export function GradeTabView(props: {
   expandedResults: Record<string, boolean>;
   onToggleExpandedResult: (itemKey: string) => void;
 }) {
+  const selectedGrader = useMemo(
+    () =>
+      props.graders.find((grader) => grader.id === props.selectedGraderId) ??
+        null,
+    [props.graders, props.selectedGraderId],
+  );
+
   const runSections = useMemo<Array<GradeRunSection>>(
     () =>
       props.filteredRuns.map((run) => {
@@ -189,7 +196,7 @@ export function GradeTabView(props: {
           graders={graderOptions}
           selectedGraderId={props.selectedGraderId}
           onSelectGrader={props.onSelectGrader}
-          selectedGraderDescription={undefined}
+          selectedGraderDescription={selectedGrader?.description ?? null}
           sessionsCount={props.scenarioRuns.length}
           onRunGrader={props.onRunGrader}
           canRun={props.canRunGrader}

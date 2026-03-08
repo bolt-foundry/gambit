@@ -131,105 +131,105 @@ export function AppShell(props: {
               style={{ color: "var(--color-text)" }}
             />
           </Button>
-          <div className="top-nav-buttons tab-anchor-group">
-            <span className="tab-anchor-indicator" aria-hidden="true" />
-            <Button
-              data-testid="nav-workspaces"
-              tab
-              variant={isWorkspacesPath ? "primary" : "secondary"}
-              className={classNames(
-                "tab-anchor",
-                isWorkspacesPath && "tab-anchor--active",
-              )}
-              onClick={() => navigate(toPrefixedPath("/workspaces"))}
-            >
-              Workspaces
-            </Button>
-            <Button
-              data-testid="nav-build"
-              tab
-              variant={activeWorkspaceTab === "build" ? "primary" : "secondary"}
-              className={classNames(
-                "tab-anchor",
-                activeWorkspaceTab === "build" && "tab-anchor--active",
-              )}
-              onClick={() => {
-                if (!activeWorkspaceId) return;
-                navigate(
-                  toPrefixedPath(
-                    buildWorkspacePath("build", activeWorkspaceId),
-                  ),
-                );
-              }}
-              disabled={!activeWorkspaceId}
-            >
-              {buildTabLabel}
-            </Button>
-            <Button
-              data-testid="nav-test"
-              tab
-              variant={activeWorkspaceTab === "test" ? "primary" : "secondary"}
-              className={classNames(
-                "tab-anchor",
-                activeWorkspaceTab === "test" && "tab-anchor--active",
-              )}
-              onClick={() => {
-                if (!activeWorkspaceId) return;
-                navigate(
-                  toPrefixedPath(
-                    buildWorkspacePath("test", activeWorkspaceId),
-                  ),
-                );
-              }}
-              disabled={!activeWorkspaceId}
-            >
-              Test
-            </Button>
-            <Button
-              data-testid="nav-grade"
-              tab
-              variant={activeWorkspaceTab === "grade" ? "primary" : "secondary"}
-              className={classNames(
-                "tab-anchor",
-                activeWorkspaceTab === "grade" && "tab-anchor--active",
-              )}
-              onClick={() => {
-                if (!activeWorkspaceId) return;
-                navigate(
-                  toPrefixedPath(
-                    buildWorkspacePath("grade", activeWorkspaceId),
-                  ),
-                );
-              }}
-              disabled={!activeWorkspaceId}
-            >
-              Grade
-            </Button>
-            {verifyTabEnabled && (
-              <Button
-                data-testid="nav-verify"
-                tab
-                variant={activeWorkspaceTab === "verify"
-                  ? "primary"
-                  : "secondary"}
-                className={classNames(
-                  "tab-anchor",
-                  activeWorkspaceTab === "verify" && "tab-anchor--active",
-                )}
-                onClick={() => {
-                  if (!activeWorkspaceId) return;
-                  navigate(
-                    toPrefixedPath(
-                      buildWorkspacePath("verify", activeWorkspaceId),
-                    ),
-                  );
-                }}
-                disabled={!activeWorkspaceId}
-              >
-                Verify
-              </Button>
+        </div>
+        <div className="top-nav-buttons tab-anchor-group">
+          <span className="tab-anchor-indicator" aria-hidden="true" />
+          <Button
+            data-testid="nav-workspaces"
+            tab
+            variant={isWorkspacesPath ? "primary" : "secondary"}
+            className={classNames(
+              "tab-anchor",
+              isWorkspacesPath && "tab-anchor--active",
             )}
-          </div>
+            onClick={() => navigate(toPrefixedPath("/workspaces"))}
+          >
+            Workspaces
+          </Button>
+          <Button
+            data-testid="nav-build"
+            tab
+            variant={activeWorkspaceTab === "build" ? "primary" : "secondary"}
+            className={classNames(
+              "tab-anchor",
+              activeWorkspaceTab === "build" && "tab-anchor--active",
+            )}
+            onClick={() => {
+              if (!activeWorkspaceId) return;
+              navigate(
+                toPrefixedPath(
+                  buildWorkspacePath("build", activeWorkspaceId),
+                ),
+              );
+            }}
+            disabled={!activeWorkspaceId}
+          >
+            {buildTabLabel}
+          </Button>
+          <Button
+            data-testid="nav-test"
+            tab
+            variant={activeWorkspaceTab === "test" ? "primary" : "secondary"}
+            className={classNames(
+              "tab-anchor",
+              activeWorkspaceTab === "test" && "tab-anchor--active",
+            )}
+            onClick={() => {
+              if (!activeWorkspaceId) return;
+              navigate(
+                toPrefixedPath(
+                  buildWorkspacePath("test", activeWorkspaceId),
+                ),
+              );
+            }}
+            disabled={!activeWorkspaceId}
+          >
+            Test
+          </Button>
+          <Button
+            data-testid="nav-grade"
+            tab
+            variant={activeWorkspaceTab === "grade" ? "primary" : "secondary"}
+            className={classNames(
+              "tab-anchor",
+              activeWorkspaceTab === "grade" && "tab-anchor--active",
+            )}
+            onClick={() => {
+              if (!activeWorkspaceId) return;
+              navigate(
+                toPrefixedPath(
+                  buildWorkspacePath("grade", activeWorkspaceId),
+                ),
+              );
+            }}
+            disabled={!activeWorkspaceId}
+          >
+            Grade
+          </Button>
+          {verifyTabEnabled && (
+            <Button
+              data-testid="nav-verify"
+              tab
+              variant={activeWorkspaceTab === "verify"
+                ? "primary"
+                : "secondary"}
+              className={classNames(
+                "tab-anchor",
+                activeWorkspaceTab === "verify" && "tab-anchor--active",
+              )}
+              onClick={() => {
+                if (!activeWorkspaceId) return;
+                navigate(
+                  toPrefixedPath(
+                    buildWorkspacePath("verify", activeWorkspaceId),
+                  ),
+                );
+              }}
+              disabled={!activeWorkspaceId}
+            >
+              Verify
+            </Button>
+          )}
         </div>
         <div className="top-nav-center">
           <span className="top-nav-deck">{deckLabel}</span>
