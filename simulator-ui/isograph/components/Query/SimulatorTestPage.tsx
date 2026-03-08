@@ -895,6 +895,7 @@ export const SimulatorTestPage = iso(`
               (prefer the Build tab) to enable Test runs.
             </Callout>
           }
+          botDescription={selectedScenarioDeck?.description ?? null}
           scenarioInputSchemaError={selectedScenarioDeck?.inputSchemaError ??
             null}
           hasScenarioInputSchema={Boolean(selectedScenarioDeck?.inputSchema)}
