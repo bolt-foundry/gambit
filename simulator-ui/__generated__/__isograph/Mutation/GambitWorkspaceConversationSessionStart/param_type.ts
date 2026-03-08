@@ -2,51 +2,51 @@ import type { Mutation__GambitWorkspaceConversationSessionStart__parameters } fr
 
 export type Mutation__GambitWorkspaceConversationSessionStart__param = {
   readonly data: {
-    readonly workspaceConversationSessionStart: ({
-      readonly session: ({
+    readonly workspaceConversationSessionStart: {
+      readonly session: {
         /**
 A discriminant for the WorkspaceConversationSession type
         */
         readonly __typename: string,
-        readonly sessionId: (string | null),
-        readonly status: (string | null),
+        readonly sessionId: string,
+        readonly status: string,
         /**
 A client pointer for the WorkspaceBuildConversationSession type.
         */
         readonly asWorkspaceBuildConversationSession: ({
-          readonly run: ({
-            readonly id: (string | null),
-          } | null),
+          readonly run: {
+            readonly id: string,
+          },
         } | null),
         /**
 A client pointer for the WorkspaceScenarioConversationSession type.
         */
         readonly asWorkspaceScenarioConversationSession: ({
-          readonly run: ({
-            readonly id: (string | null),
-          } | null),
+          readonly run: {
+            readonly id: string,
+          },
         } | null),
         /**
 A client pointer for the WorkspaceGraderConversationSession type.
         */
         readonly asWorkspaceGraderConversationSession: ({
-          readonly gradeRun: ({
-            readonly id: (string | null),
-          } | null),
+          readonly gradeRun: {
+            readonly id: string,
+          },
         } | null),
         /**
 A client pointer for the WorkspaceVerifyConversationSession type.
         */
         readonly asWorkspaceVerifyConversationSession: ({
-          readonly verifyBatch: ({
-            readonly id: (string | null),
-          } | null),
+          readonly verifyBatch: {
+            readonly id: string,
+          },
         } | null),
-      } | null),
-      readonly workspace: ({
-        readonly id: (string | null),
-      } | null),
-    } | null),
+      },
+      readonly workspace: {
+        readonly id: string,
+      },
+    },
   },
   readonly parameters: Mutation__GambitWorkspaceConversationSessionStart__parameters,
 };

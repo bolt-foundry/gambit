@@ -3,9 +3,9 @@ import type { Query__EntrypointSimulatorTestPage__parameters } from './parameter
 
 export type Query__EntrypointSimulatorTestPage__param = {
   readonly data: {
-    readonly workspace: ({
+    readonly workspace: {
       readonly TestTab: Workspace__TestTab__output_type,
-    } | null),
+    },
   },
   readonly parameters: Query__EntrypointSimulatorTestPage__parameters,
 };

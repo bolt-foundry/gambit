@@ -2,25 +2,25 @@ import type { Mutation__GambitWorkspaceScenarioRunStart__parameters } from './pa
 
 export type Mutation__GambitWorkspaceScenarioRunStart__param = {
   readonly data: {
-    readonly workspaceScenarioRunStart: ({
-      readonly workspace: ({
-        readonly id: (string | null),
-        readonly scenarioRuns: ({
-          readonly edges: (ReadonlyArray<({
-            readonly node: ({
-              readonly id: (string | null),
-              readonly status: (string | null),
+    readonly workspaceScenarioRunStart: {
+      readonly workspace: {
+        readonly id: string,
+        readonly scenarioRuns: {
+          readonly edges: ReadonlyArray<{
+            readonly node: {
+              readonly id: string,
+              readonly status: string,
               readonly startedAt: (string | null),
               readonly finishedAt: (string | null),
               readonly error: (string | null),
-              readonly openResponses: ({
-                readonly edges: (ReadonlyArray<({
-                  readonly node: ({
-                    readonly id: (string | null),
-                    readonly status: (string | null),
-                    readonly outputItems: ({
-                      readonly edges: (ReadonlyArray<({
-                        readonly node: ({
+              readonly openResponses: {
+                readonly edges: ReadonlyArray<{
+                  readonly node: {
+                    readonly id: string,
+                    readonly status: string,
+                    readonly outputItems: {
+                      readonly edges: ReadonlyArray<{
+                        readonly node: {
                           /**
 A discriminant for the OpenResponseOutputItem type
                           */
@@ -29,29 +29,29 @@ A discriminant for the OpenResponseOutputItem type
 A client pointer for the OutputMessage type.
                           */
                           readonly asOutputMessage: ({
-                            readonly id: (string | null),
-                            readonly role: (string | null),
-                            readonly content: (string | null),
+                            readonly id: string,
+                            readonly role: string,
+                            readonly content: string,
                           } | null),
-                        } | null),
-                      } | null)> | null),
-                    } | null),
-                  } | null),
-                } | null)> | null),
-              } | null),
-            } | null),
-          } | null)> | null),
-        } | null),
-      } | null),
-      readonly run: ({
-        readonly id: (string | null),
-        readonly workspaceId: (string | null),
-        readonly status: (string | null),
+                        },
+                      }>,
+                    },
+                  },
+                }>,
+              },
+            },
+          }>,
+        },
+      },
+      readonly run: {
+        readonly id: string,
+        readonly workspaceId: string,
+        readonly status: string,
         readonly startedAt: (string | null),
         readonly finishedAt: (string | null),
         readonly error: (string | null),
-      } | null),
-    } | null),
+      },
+    },
   },
   readonly parameters: Mutation__GambitWorkspaceScenarioRunStart__parameters,
 };

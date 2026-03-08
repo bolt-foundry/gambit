@@ -1,5 +1,6 @@
 import { iso } from "@iso-gambit-sim";
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -425,6 +426,10 @@ export const WorkbenchConversationRunChat = iso(`
   isStopping: boolean;
   canStartNewChat?: boolean;
   onNewChat?: () => void;
+  chatHeaderActions?: ReactNode;
+  chatHistoryOpen?: boolean;
+  onToggleChatHistory?: () => void;
+  chatHistoryContent?: ReactNode;
 }) {
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedCodexLoginCommand, setCopiedCodexLoginCommand] = useState(false);
@@ -841,6 +846,10 @@ export const WorkbenchConversationRunChat = iso(`
     <WorkbenchDrawerIso
       open={componentProps.open}
       runStatus={runStatus}
+      chatHeaderActions={componentProps.chatHeaderActions}
+      chatHistoryOpen={componentProps.chatHistoryOpen}
+      onToggleChatHistory={componentProps.onToggleChatHistory}
+      chatHistoryContent={componentProps.chatHistoryContent}
       chatBody={chatBody}
     />
   );

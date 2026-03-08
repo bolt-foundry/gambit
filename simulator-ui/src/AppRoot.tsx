@@ -1,6 +1,6 @@
 import type { IsographEnvironment } from "@isograph/react";
 import { IsographEnvironmentProvider } from "@isograph/react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { RouterProvider } from "./RouterContext.tsx";
 import { MinimalRouterRoot } from "./MinimalRouterRoot.tsx";
 import { getEnvironment } from "./isographEnvironment.ts";
@@ -51,12 +51,28 @@ function subscribeToSystemColorScheme(onStoreChange: () => void): () => void {
   return () => {};
 }
 
+function subscribeToAppearance(onStoreChange: () => void): () => void {
+  globalThis.addEventListener("storage", onStoreChange);
+  globalThis.addEventListener("gambit-simulator-theme-change", onStoreChange);
+  return () => {
+    globalThis.removeEventListener("storage", onStoreChange);
+    globalThis.removeEventListener(
+      "gambit-simulator-theme-change",
+      onStoreChange,
+    );
+  };
+}
+
 export function AppRoot(props: {
   environment?: IsographEnvironment;
   initialPath?: string;
 }) {
   const environment = props.environment ?? getEnvironment();
-  const [appearance] = useState<AppearanceSetting>(readStoredAppearance);
+  const appearance = useSyncExternalStore(
+    subscribeToAppearance,
+    readStoredAppearance,
+    readStoredAppearance,
+  );
   const systemPrefersDark = useSyncExternalStore(
     subscribeToSystemColorScheme,
     getSystemPrefersDark,

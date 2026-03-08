@@ -2,15 +2,15 @@ import { type WorkspaceFile__PreviewFile__output_type } from '../../WorkspaceFil
 
 export type Workspace__BuildTab__param = {
   readonly data: {
-    readonly files: ({
-      readonly edges: (ReadonlyArray<({
-        readonly node: ({
-          readonly id: (string | null),
-          readonly path: (string | null),
+    readonly files: {
+      readonly edges: ReadonlyArray<{
+        readonly node: {
+          readonly id: string,
+          readonly path: string,
           readonly PreviewFile: WorkspaceFile__PreviewFile__output_type,
-        } | null),
-      } | null)> | null),
-    } | null),
+        },
+      }>,
+    },
   },
   readonly parameters: Record<PropertyKey, never>,
 };

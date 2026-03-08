@@ -1,76 +1,76 @@
 export type Mutation__GambitWorkspaceGradeRunCreate__raw_response_type = {
-  workspaceGradeRunCreate____input___v_input?: ({
-    run?: ({
-      id?: string,
+  workspaceGradeRunCreate____input___v_input: {
+    run: {
+      id: string,
       error?: (string | null),
-      graderId?: (string | null),
+      graderId: string,
       graderLabel?: (string | null),
-      graderPath?: (string | null),
+      graderPath: string,
       runAt?: (string | null),
       scenarioRunId?: (string | null),
-      status?: (string | null),
+      status: string,
       summary?: ({
         reason?: (string | null),
         score?: (number | null),
       } | null),
-      turns?: (ReadonlyArray<{
-        id?: string,
+      turns: ReadonlyArray<{
+        id: string,
         gradedAssistant?: (string | null),
         priorUser?: (string | null),
         reason?: (string | null),
-        refId?: (string | null),
-        runId?: (string | null),
+        refId: string,
+        runId: string,
         score?: (number | null),
-        turnIndex?: (number | null),
-        turnNumber?: (number | null),
-      }> | null),
-      workspaceId?: (string | null),
-    } | null),
-    workspace?: ({
-      id?: string,
-      gradeTab?: ({
-        flags?: (ReadonlyArray<{
-          id?: string,
-          createdAt?: (string | null),
+        turnIndex: number,
+        turnNumber: number,
+      }>,
+      workspaceId: string,
+    },
+    workspace: {
+      id: string,
+      gradeTab: {
+        flags: ReadonlyArray<{
+          id: string,
+          createdAt: string,
           reason?: (string | null),
-          refId?: (string | null),
+          refId: string,
           runId?: (string | null),
           turnIndex?: (number | null),
-        }> | null),
-        graderDecks?: (ReadonlyArray<{
-          id?: string,
+        }>,
+        graderDecks: ReadonlyArray<{
+          id: string,
           description?: (string | null),
-          label?: (string | null),
-          path?: (string | null),
-        }> | null),
-        runs?: (ReadonlyArray<{
-          id?: string,
+          label: string,
+          path: string,
+        }>,
+        runs: ReadonlyArray<{
+          id: string,
           error?: (string | null),
-          graderId?: (string | null),
+          graderId: string,
           graderLabel?: (string | null),
-          graderPath?: (string | null),
+          graderPath: string,
           runAt?: (string | null),
           scenarioRunId?: (string | null),
-          status?: (string | null),
+          status: string,
           summary?: ({
             reason?: (string | null),
             score?: (number | null),
           } | null),
-          turns?: (ReadonlyArray<{
-            id?: string,
+          turns: ReadonlyArray<{
+            id: string,
             gradedAssistant?: (string | null),
             priorUser?: (string | null),
             reason?: (string | null),
-            refId?: (string | null),
-            runId?: (string | null),
+            refId: string,
+            runId: string,
             score?: (number | null),
-            turnIndex?: (number | null),
-            turnNumber?: (number | null),
-          }> | null),
-          workspaceId?: (string | null),
-        }> | null),
-      } | null),
-    } | null),
-  } | null),
+            turnIndex: number,
+            turnNumber: number,
+          }>,
+          workspaceId: string,
+        }>,
+      },
+    },
+  },
 }
 

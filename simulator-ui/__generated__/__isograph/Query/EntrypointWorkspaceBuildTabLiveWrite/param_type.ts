@@ -3,18 +3,18 @@ import type { Query__EntrypointWorkspaceBuildTabLiveWrite__parameters } from './
 
 export type Query__EntrypointWorkspaceBuildTabLiveWrite__param = {
   readonly data: {
-    readonly workspace: ({
-      readonly id: (string | null),
-      readonly files: ({
-        readonly edges: (ReadonlyArray<({
-          readonly node: ({
-            readonly id: (string | null),
-            readonly path: (string | null),
+    readonly workspace: {
+      readonly id: string,
+      readonly files: {
+        readonly edges: ReadonlyArray<{
+          readonly node: {
+            readonly id: string,
+            readonly path: string,
             readonly PreviewFile: WorkspaceFile__PreviewFile__output_type,
-          } | null),
-        } | null)> | null),
-      } | null),
-    } | null),
+          },
+        }>,
+      },
+    },
   },
   readonly parameters: Query__EntrypointWorkspaceBuildTabLiveWrite__parameters,
 };
