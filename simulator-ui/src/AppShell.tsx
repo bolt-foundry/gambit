@@ -8,10 +8,11 @@ import { useRouter } from "./RouterContext.tsx";
 import Button from "./gds/Button.tsx";
 import Icon from "./gds/Icon.tsx";
 import WorkbenchDrawer from "./WorkbenchDrawer.tsx";
-import { classNames } from "./utils.ts";
+import { classNames, DOCS_PATH } from "./utils.ts";
 import { useGambitTypedMutation } from "./hooks/useGambitTypedMutation.tsx";
 import gambitWorkspaceCreateMutation from "../mutations/GambitWorkspaceCreateMutation.ts";
 import gambitWorkspaceDeleteMutation from "../mutations/GambitWorkspaceDeleteMutation.ts";
+import DocsPage from "./DocsPage.tsx";
 
 function getDeckLabelForShell(): string {
   const globals = globalThis as typeof globalThis & {
@@ -123,6 +124,7 @@ export function AppShell(props: {
       workspaceRoutePath === "/workspaces/new",
     [workspaceRoutePath],
   );
+  const isDocsPath = workspaceRoutePath === "/docs";
   const canOpenWorkbench = Boolean(activeWorkspaceId);
   const workbenchVisible = workbenchOpen && canOpenWorkbench;
 
@@ -236,16 +238,16 @@ export function AppShell(props: {
         <div className="top-nav-buttons tab-anchor-group">
           <span className="tab-anchor-indicator" aria-hidden="true" />
           <Button
-            data-testid="nav-workspaces"
+            data-testid="nav-docs"
             tab
-            variant={isWorkspacesPath ? "primary" : "secondary"}
+            variant={isDocsPath ? "primary" : "secondary"}
             className={classNames(
               "tab-anchor",
-              isWorkspacesPath && "tab-anchor--active",
+              isDocsPath && "tab-anchor--active",
             )}
-            onClick={() => navigate(toPrefixedPath("/workspaces"))}
+            onClick={() => navigate(toPrefixedPath(DOCS_PATH))}
           >
-            Workspaces
+            Docs
           </Button>
           <Button
             data-testid="nav-build"
@@ -376,7 +378,7 @@ export function AppShell(props: {
           <Suspense
             fallback={<div style={{ padding: "12px 16px" }}>Loading...</div>}
           >
-            {props.children}
+            {isDocsPath ? <DocsPage /> : props.children}
           </Suspense>
         </main>
         <Workbench open={workbenchVisible} />
