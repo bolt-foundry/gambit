@@ -618,13 +618,9 @@ async function main(): Promise<void> {
         } = await waitForScenarioOption(scenarioLabel, 30_000);
         await screenshot("04-test-scenario-list-after-build-add");
         if (!hasNewScenarioOption) {
-          logTestTabDemo("scenario-missing-nonfatal", {
-            scenarioLabel,
-            scenarioOptionCount,
-            reason:
-              "new scenario did not become selectable in time; accepting non-fatal for now",
-          });
-          return;
+          throw new Error(
+            `Expected new scenario "${scenarioLabel}" to appear in the Test tab selector after build edits, but it was still missing after refresh wait. Visible option count: ${scenarioOptionCount}.`,
+          );
         }
         await demoTarget.locator(".gds-listbox-popover .gds-listbox-option", {
           hasText: fixture.brokenScenarioLabel,

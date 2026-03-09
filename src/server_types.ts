@@ -15,6 +15,31 @@ export type AvailableGraderDeck = {
   path: string;
 };
 
+export type PersistedAssistantDeck = {
+  deck: string;
+  startMode: "assistant" | "user";
+  modelParams?: Record<string, unknown>;
+  inputSchema?: unknown;
+  defaults?: unknown;
+  tools?: Array<DeckToolDescription>;
+  inputSchemaError?: string;
+};
+
+export type PersistedScenarioDeck = AvailableTestDeck & {
+  inputSchema?: unknown;
+  defaults?: unknown;
+  inputSchemaError?: string;
+};
+
+export type WorkspaceDeckState = {
+  workspaceId: string;
+  rootDeckPath: string;
+  assistantDeck: PersistedAssistantDeck;
+  scenarioDecks: Array<PersistedScenarioDeck>;
+  graderDecks: Array<AvailableGraderDeck>;
+  updatedAt: string;
+};
+
 export type NormalizedSchema = {
   kind:
     | "string"

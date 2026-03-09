@@ -210,7 +210,7 @@ leakTolerantTest(
     const schemaVersionRow = db.prepare("PRAGMA user_version;").get() as {
       user_version?: number;
     };
-    assertEquals(schemaVersionRow.user_version, 3);
+    assertEquals(schemaVersionRow.user_version, 4);
     const sqliteRows = db.prepare(`
       SELECT workspace_id, run_id, sequence, event_type
       FROM openresponses_run_events_v0

@@ -386,7 +386,12 @@ leakTolerantTest(
       // Ensure server B loads its own deck registry before server A resolves A's scenario path.
       const warmupRes = await fetch(`http://127.0.0.1:${portB}/api/test`);
       assertEquals(warmupRes.ok, true);
-      await warmupRes.arrayBuffer();
+      const warmupBody = await warmupRes.json() as {
+        testDecks?: Array<{ id?: string; path?: string }>;
+      };
+      assertEquals(warmupBody.testDecks?.length, 1);
+      assertEquals(warmupBody.testDecks?.[0]?.id, "b-scenario");
+      assertEquals(warmupBody.testDecks?.[0]?.path, b.scenarioDeckPath);
 
       const runRes = await fetch(`http://127.0.0.1:${portA}/api/test/run`, {
         method: "POST",

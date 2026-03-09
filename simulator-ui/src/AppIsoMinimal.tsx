@@ -50,11 +50,16 @@ function IsoMinimalRenderer(props: {
   entrypoint: any;
   params: Record<string, string>;
   onNavigate?: (path: string) => void;
+  shouldFetch?: "IfNecessary" | "No" | "Yes";
 }) {
   const redirectInFlightRef = useRef<string | null>(null);
+  const fetchOptions = props.shouldFetch
+    ? { shouldFetch: props.shouldFetch }
+    : undefined;
   const { fragmentReference } = useLazyReference(
     props.entrypoint,
     props.params,
+    fetchOptions,
   ) as {
     fragmentReference: unknown;
   };
@@ -133,6 +138,7 @@ export function AppIsoMinimal(props: {
   onNavigate?: (nextPath: string) => void;
   fallback?: React.ReactNode;
   rendererKey?: string;
+  shouldFetch?: "IfNecessary" | "No" | "Yes";
 }) {
   const {
     entrypoint,
@@ -140,6 +146,7 @@ export function AppIsoMinimal(props: {
     onNavigate,
     fallback = null,
     rendererKey,
+    shouldFetch,
   } = props;
 
   return (
@@ -150,6 +157,7 @@ export function AppIsoMinimal(props: {
           entrypoint={entrypoint}
           params={params}
           onNavigate={onNavigate}
+          shouldFetch={shouldFetch}
         />
       </Suspense>
     </IsoErrorBoundary>
