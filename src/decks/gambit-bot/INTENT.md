@@ -96,4 +96,4 @@
 ### Related
 
 - `packages/gambit/src/decks/gambit-bot/policy/README.md`
-- `memos/cross-company/projects/gambit-product-command-launch/INTENT.md`
+- `memos/initiatives/gambit-product-command-launch/INTENT.md`
