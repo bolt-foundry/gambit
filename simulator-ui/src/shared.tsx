@@ -333,12 +333,13 @@ export function FeedbackControls(props: {
     (feedback?.reason !== undefined && feedback.reason.length > 0);
 
   return (
-    <div className="feedback-controls">
+    <div className="feedback-controls" data-testid="feedback-controls">
       <div className="feedback-scores">
         {SCORE_VALUES.map((value) => (
           <button
             key={value}
             type="button"
+            data-testid={`feedback-score-${value}`}
             className={classNames(
               "score-button",
               effectiveScore === value && "score-button-active",
@@ -364,6 +365,7 @@ export function FeedbackControls(props: {
         <>
           <textarea
             className="feedback-reason"
+            data-testid="feedback-reason"
             placeholder="Why?"
             value={reason}
             onChange={(e) => {

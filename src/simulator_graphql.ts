@@ -2,7 +2,10 @@ import SchemaBuilder from "@pothos/core";
 import RelayPlugin, { resolveArrayConnection } from "@pothos/plugin-relay";
 import { createYoga } from "graphql-yoga";
 import { Kind, type ValueNode } from "graphql";
-import type { OpenResponsesRunEventV0 } from "@bolt-foundry/gambit-core";
+import type {
+  FeedbackEntry,
+  OpenResponsesRunEventV0,
+} from "@bolt-foundry/gambit-core";
 import {
   asGambitID,
   asGambitStreamID,
@@ -303,12 +306,15 @@ type WorkspaceConversationSessionRecord = {
   verifyBatch?: WorkspaceVerifyBatchRecord;
 };
 
+type FeedbackRecord = FeedbackEntry;
+
 type OutputMessageRecord = {
   __typename: "OutputMessage";
   id: string;
   role: string;
   content: string;
   messageRefId?: string;
+  feedback?: FeedbackEntry;
 };
 
 type OutputReasoningRecord = {
@@ -394,6 +400,17 @@ export type GambitGraphqlContext = {
   readWorkspaceScenarioRuns?: (
     workspaceId: string,
   ) => Promise<Array<ScenarioRunRecord>>;
+  saveWorkspaceFeedback?: (args: {
+    workspaceId: string;
+    runId?: Maybe<string>;
+    messageRefId: string;
+    score: Maybe<number>;
+    reason?: Maybe<string>;
+  }) => Promise<{
+    feedback?: FeedbackRecord;
+    deleted: boolean;
+    run: ScenarioRunRecord;
+  }>;
   readWorkspaceModelStatus?: (args: {
     workspaceId: string;
     model: "codex";
@@ -873,6 +890,24 @@ const ToolCallStatusEnum = builder.enumType("ToolCallStatus", {
   values: ["RUNNING", "COMPLETED", "ERROR"] as const,
 });
 
+const FeedbackType = builder.objectRef<FeedbackRecord>("Feedback");
+FeedbackType.implement({
+  fields: (t) => ({
+    id: t.id({ resolve: (parent) => parent.id }),
+    runId: t.id({ resolve: (parent) => parent.runId }),
+    messageRefId: t.id({ resolve: (parent) => parent.messageRefId }),
+    score: t.int({ resolve: (parent) => parent.score }),
+    reason: t.string({
+      nullable: true,
+      resolve: (parent) => parent.reason ?? null,
+    }),
+    createdAt: t.string({
+      nullable: true,
+      resolve: (parent) => parent.createdAt ?? null,
+    }),
+  }),
+});
+
 const OutputMessageType = builder.objectRef<OutputMessageRecord>(
   "OutputMessage",
 );
@@ -884,6 +919,11 @@ OutputMessageType.implement({
     messageRefId: t.id({
       nullable: true,
       resolve: (parent) => parent.messageRefId ?? null,
+    }),
+    feedback: t.field({
+      type: FeedbackType,
+      nullable: true,
+      resolve: (parent) => parent.feedback ?? null,
     }),
   }),
 });
@@ -2231,6 +2271,31 @@ WorkspaceScenarioRunStopPayloadType.implement({
   }),
 });
 
+const WorkspaceFeedbackSavePayloadType = builder.objectRef<{
+  workspace: WorkspaceRecord;
+  run: ScenarioRunRecord;
+  feedback?: FeedbackRecord;
+  deleted: boolean;
+}>("WorkspaceFeedbackSavePayload");
+WorkspaceFeedbackSavePayloadType.implement({
+  fields: (t) => ({
+    workspace: t.field({
+      type: WorkspaceType,
+      resolve: (parent) => parent.workspace,
+    }),
+    run: t.field({
+      type: WorkspaceScenarioRunType,
+      resolve: (parent) => parent.run,
+    }),
+    feedback: t.field({
+      type: FeedbackType,
+      nullable: true,
+      resolve: (parent) => parent.feedback ?? null,
+    }),
+    deleted: t.boolean({ resolve: (parent) => parent.deleted }),
+  }),
+});
+
 const WorkspaceConversationSessionPayloadType = builder.objectRef<{
   workspace: WorkspaceRecord;
   session: WorkspaceConversationSessionRecord;
@@ -2809,6 +2874,19 @@ const WorkspaceScenarioRunStopInput = builder.inputType(
   },
 );
 
+const WorkspaceFeedbackSaveInput = builder.inputType(
+  "WorkspaceFeedbackSaveInput",
+  {
+    fields: (t) => ({
+      workspaceId: t.id({ required: true }),
+      runId: t.id(),
+      messageRefId: t.id({ required: true }),
+      score: t.int(),
+      reason: t.string(),
+    }),
+  },
+);
+
 const WorkspaceConversationSessionStartInput = builder.inputType(
   "WorkspaceConversationSessionStartInput",
   {
@@ -3073,6 +3151,33 @@ builder.mutationType({
         return {
           workspace: { id: asGambitID(args.input.workspaceId) },
           run,
+        };
+      },
+    }),
+    workspaceFeedbackSave: t.field({
+      type: WorkspaceFeedbackSavePayloadType,
+      args: {
+        input: t.arg({
+          type: WorkspaceFeedbackSaveInput,
+          required: true,
+        }),
+      },
+      resolve: async (_parent, args, context) => {
+        if (!context.saveWorkspaceFeedback) {
+          throw new Error("workspace feedback save is unavailable");
+        }
+        const result = await context.saveWorkspaceFeedback({
+          workspaceId: args.input.workspaceId,
+          runId: args.input.runId ?? null,
+          messageRefId: args.input.messageRefId,
+          score: args.input.score ?? null,
+          reason: args.input.reason ?? null,
+        });
+        return {
+          workspace: { id: asGambitID(args.input.workspaceId) },
+          run: result.run,
+          feedback: result.feedback,
+          deleted: result.deleted,
         };
       },
     }),

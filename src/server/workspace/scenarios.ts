@@ -5,6 +5,7 @@ import {
   runDeck,
 } from "@bolt-foundry/gambit-core";
 import type {
+  FeedbackEntry,
   ModelMessage,
   ModelProvider,
   SavedState,
@@ -17,6 +18,7 @@ import type {
   WorkspaceDeckState,
 } from "../../server_types.ts";
 import type { WorkspaceRecord } from "../../server_workspace_runtime.ts";
+import type { Maybe } from "../../utility_types.ts";
 import { cloneValue, deriveInitialFromSchema } from "./schema.ts";
 import type {
   TestBotInitFill,
@@ -90,7 +92,7 @@ export const createWorkspaceScenarioService = (deps: {
   ) => Record<string, unknown>;
   selectCanonicalScenarioRunSummary: (
     meta: Record<string, unknown>,
-  ) => { scenarioRunId: string } | null;
+  ) => Maybe<{ scenarioRunId: string }>;
   persistSessionState: (state: SavedState) => SavedState;
   appendSessionEvent: (
     state: SavedState,
@@ -105,15 +107,15 @@ export const createWorkspaceScenarioService = (deps: {
   workspaceStreamId: string;
   testStreamId: string;
   persistOpenResponsesTraceEvent: (
-    state: SavedState | null | undefined,
+    state: Maybe<SavedState>,
     trace: TraceEvent,
     fallbackRunId?: string,
   ) => void;
-  persistCanonicalUserInputEvent: (args: {
-    state: SavedState | null | undefined;
+  persistCanonicalStateMessages: (args: {
+    state: Maybe<SavedState>;
     runId: string;
-    message: string;
-    source: "build" | "scenario";
+    startIndex?: number;
+    source: "build" | "scenario" | "manual" | "artifact";
   }) => void;
   readSessionState: (workspaceId: string) => SavedState | undefined;
   readSessionStateStrict: (
@@ -121,7 +123,7 @@ export const createWorkspaceScenarioService = (deps: {
     options?: { withTraces?: boolean },
   ) => SavedState | undefined;
   activateWorkspaceDeck: (
-    workspaceId?: string | null,
+    workspaceId?: Maybe<string>,
     options?: {
       forceReload?: boolean;
       source?: string;
@@ -130,11 +132,11 @@ export const createWorkspaceScenarioService = (deps: {
   ) => Promise<void>;
   resolveWorkspaceRecord: (
     workspaceId: string,
-  ) => WorkspaceRecord | null | undefined;
+  ) => Maybe<WorkspaceRecord>;
   readWorkspaceDeckStateStrict: (workspaceId: string) => WorkspaceDeckState;
   buildRootScenarioFallback: (
     deckState: WorkspaceDeckState,
-  ) => WorkspaceDeckState["scenarioDecks"][number] | null;
+  ) => Maybe<WorkspaceDeckState["scenarioDecks"][number]>;
   resolveScenarioDeckFromState: (
     deckState: WorkspaceDeckState,
     identifier: string,
@@ -252,6 +254,9 @@ export const createWorkspaceScenarioService = (deps: {
       broadcastTestBot(payload, run.workspaceId ?? runOpts.workspaceId);
     if (runOpts.initFill) run.initFill = runOpts.initFill;
     let savedState: SavedState | undefined = undefined;
+    const openResponsesStartIndex = runOpts.workspaceId
+      ? (deps.readSessionState(runOpts.workspaceId)?.messages?.length ?? 0)
+      : 0;
     const baseMeta = runOpts.baseMeta ?? {};
     const workspaceMeta = runOpts.workspaceRecord
       ? deps.buildWorkspaceMeta(runOpts.workspaceRecord, baseMeta)
@@ -341,7 +346,7 @@ export const createWorkspaceScenarioService = (deps: {
     let sessionEnded = false;
 
     const getLastAssistantMessage = (
-      history: Array<ModelMessage | null | undefined>,
+      history: Array<Maybe<ModelMessage>>,
     ): string | undefined => {
       for (let i = history.length - 1; i >= 0; i--) {
         const msg = history[i];
@@ -353,7 +358,7 @@ export const createWorkspaceScenarioService = (deps: {
     };
 
     const generateDeckBotUserMessage = async (
-      history: Array<ModelMessage | null | undefined>,
+      history: Array<Maybe<ModelMessage>>,
       streamOptions?: {
         onStreamText?: (chunk: string) => void;
         allowEmptyAssistant?: boolean;
@@ -581,6 +586,12 @@ export const createWorkspaceScenarioService = (deps: {
           ? [...(savedState?.traces ?? [])]
           : undefined;
         if (savedState) {
+          deps.persistCanonicalStateMessages({
+            state: savedState,
+            runId,
+            startIndex: openResponsesStartIndex,
+            source: "scenario",
+          });
           entry.state = savedState;
         }
         run.finishedAt = new Date().toISOString();
@@ -598,7 +609,7 @@ export const createWorkspaceScenarioService = (deps: {
   const startWorkspaceScenarioRunForGraphql = async (args: {
     workspaceId: string;
     runId?: string;
-    scenarioDeckId?: string | null;
+    scenarioDeckId?: Maybe<string>;
     scenarioInput?: unknown;
     assistantInit?: unknown;
   }): Promise<TestBotRunStatus> => {
@@ -852,6 +863,7 @@ export const createWorkspaceScenarioService = (deps: {
       ? Math.round(stateMeta.testBotMaxTurns)
       : undefined;
     const existingRun = active?.run;
+    const openResponsesStartIndex = state.messages?.length ?? 0;
     const run: TestBotRunStatus = {
       id: args.runId,
       status: "running",
@@ -926,12 +938,6 @@ export const createWorkspaceScenarioService = (deps: {
         ...run.messages,
         { role: "user", content: trimmedMessage },
       ];
-      deps.persistCanonicalUserInputEvent({
-        state: savedState,
-        runId: args.runId,
-        message: trimmedMessage,
-        source: "scenario",
-      });
     }
     let hasStartedAssistantStreamMessage = false;
     entry.promise = (async () => {
@@ -1051,6 +1057,12 @@ export const createWorkspaceScenarioService = (deps: {
             : run.traces;
         }
         if (savedState) {
+          deps.persistCanonicalStateMessages({
+            state: savedState,
+            runId: args.runId,
+            startIndex: openResponsesStartIndex,
+            source: userMessageSource,
+          });
           entry.state = savedState;
         }
         run.finishedAt = new Date().toISOString();
@@ -1162,12 +1174,139 @@ export const createWorkspaceScenarioService = (deps: {
     );
   };
 
+  const saveWorkspaceFeedbackForGraphql = (args: {
+    workspaceId: string;
+    runId?: Maybe<string>;
+    messageRefId: string;
+    score: Maybe<number>;
+    reason?: Maybe<string>;
+  }): {
+    feedback?: FeedbackEntry;
+    deleted: boolean;
+    run: TestBotRunStatus;
+  } => {
+    const workspaceId = args.workspaceId.trim();
+    if (!workspaceId) throw new Error("Missing workspaceId");
+    const messageRefId = args.messageRefId.trim();
+    if (!messageRefId) throw new Error("Missing messageRefId");
+    if (
+      args.score !== null &&
+      (typeof args.score !== "number" || Number.isNaN(args.score))
+    ) {
+      throw new Error("Invalid score");
+    }
+    const state = deps.readSessionState(workspaceId);
+    if (!state) throw new Error("Workspace not found");
+    const requestedRunId = typeof args.runId === "string" &&
+        args.runId.trim().length > 0
+      ? args.runId.trim()
+      : undefined;
+    const feedbackEligible =
+      isFeedbackEligibleMessageRef(state, messageRefId) ||
+      (requestedRunId
+        ? isFeedbackEligiblePersistedTestRunMessageRef(
+          state,
+          requestedRunId,
+          messageRefId,
+        )
+        : false);
+    if (!feedbackEligible) {
+      throw new Error("Feedback target is not eligible");
+    }
+    const existing = state.feedback ?? [];
+    const idx = existing.findIndex((entry) =>
+      entry.messageRefId === messageRefId
+    );
+    let feedback: Array<FeedbackEntry> = existing;
+    let entry: FeedbackEntry | undefined;
+    let deleted = false;
+    if (args.score === null) {
+      if (idx >= 0) {
+        feedback = existing.filter((_, index) => index !== idx);
+        deleted = true;
+      }
+    } else {
+      const clamped = Math.max(-3, Math.min(3, Math.round(args.score)));
+      const reason = typeof args.reason === "string"
+        ? args.reason
+        : idx >= 0
+        ? existing[idx]?.reason
+        : undefined;
+      const runId = requestedRunId ??
+        (typeof state.runId === "string" ? state.runId : "session");
+      const scenarioRunId = requestedRunId ??
+        (typeof state.meta?.scenarioRunId === "string"
+          ? state.meta.scenarioRunId
+          : runId);
+      const now = new Date().toISOString();
+      entry = idx >= 0
+        ? {
+          ...existing[idx],
+          score: clamped,
+          reason,
+          runId: existing[idx]?.runId ?? runId,
+        }
+        : {
+          id: deps.randomId("fb"),
+          runId,
+          messageRefId,
+          score: clamped,
+          reason,
+          createdAt: now,
+        };
+      if (entry) {
+        (entry as Record<string, unknown>).workspaceId = workspaceId;
+        (entry as Record<string, unknown>).scenarioRunId = scenarioRunId;
+      }
+      feedback = idx >= 0
+        ? existing.map((item, index) => index === idx ? entry! : item)
+        : [...existing, entry];
+    }
+    const nextState = deps.persistSessionState({ ...state, feedback });
+    deps.appendSessionEvent(nextState, {
+      type: "feedback.update",
+      kind: "artifact",
+      category: "feedback",
+      workspaceId,
+      scenarioRunId: typeof nextState.meta?.scenarioRunId === "string"
+        ? nextState.meta.scenarioRunId
+        : nextState.runId,
+      messageRefId,
+      feedback: entry,
+      deleted,
+    });
+    const liveRunId = typeof nextState.meta?.testBotRunId === "string"
+      ? nextState.meta.testBotRunId
+      : undefined;
+    if (liveRunId) {
+      const liveEntry = testBotRuns.get(liveRunId);
+      if (liveEntry) {
+        syncTestBotRunFromState(liveEntry.run, nextState);
+        broadcastTestBot(
+          { type: "testBotStatus", run: liveEntry.run },
+          workspaceId,
+        );
+      }
+    }
+    const effectiveRunId = requestedRunId ??
+      (entry?.runId ??
+        (typeof nextState.meta?.scenarioRunId === "string"
+          ? nextState.meta.scenarioRunId
+          : nextState.runId));
+    const run = readWorkspaceScenarioRunForGraphql(workspaceId, effectiveRunId);
+    if (!run) {
+      throw new Error(`Scenario run ${effectiveRunId} not found`);
+    }
+    return { feedback: entry, deleted, run };
+  };
+
   return {
     broadcastTestBot,
     startWorkspaceScenarioRunForGraphql,
     sendWorkspaceScenarioRunForGraphql,
     readWorkspaceScenarioRunsForGraphql,
     readWorkspaceScenarioRunForGraphql,
+    saveWorkspaceFeedbackForGraphql,
     stopWorkspaceScenarioRunForGraphql,
     getLiveTestRunEntry: (runId: string) => testBotRuns.get(runId),
     getLiveTestRunEntryByWorkspaceId: findTestRunByWorkspaceId,

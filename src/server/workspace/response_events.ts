@@ -34,6 +34,21 @@ const hashStringFNV1a = (value: string): string => {
 const tracePayloadFingerprint = (payload: Record<string, unknown>): string =>
   hashStringFNV1a(JSON.stringify(asJsonValue(payload)));
 
+const messageContentFingerprint = (content: unknown): string =>
+  hashStringFNV1a(JSON.stringify(asJsonValue(content)));
+
+const stringifyMessageContent = (content: unknown): string => {
+  if (typeof content === "string") return content;
+  if (content === null || content === undefined) return "";
+  const normalized = asJsonValue(content);
+  if (typeof normalized === "string") return normalized;
+  try {
+    return JSON.stringify(normalized);
+  } catch {
+    return String(content);
+  }
+};
+
 const traceToRecord = (trace: TraceEvent): Record<string, unknown> => {
   return !trace || typeof trace !== "object" || Array.isArray(trace)
     ? {}
@@ -125,6 +140,77 @@ export const createOpenResponsesEventPersistence = (deps: {
     });
   };
 
+  const persistCanonicalStateMessages = (args: {
+    state: SavedState | null | undefined;
+    runId: string;
+    startIndex?: number;
+    source: "build" | "scenario" | "manual" | "artifact";
+  }) => {
+    if (!args.state || !Array.isArray(args.state.messages)) return;
+    const refs = Array.isArray(args.state.messageRefs)
+      ? args.state.messageRefs
+      : [];
+    const startIndex = Math.max(0, args.startIndex ?? 0);
+    for (
+      let index = startIndex;
+      index < args.state.messages.length;
+      index += 1
+    ) {
+      const message = args.state.messages[index];
+      if (
+        !message || (message.role !== "user" && message.role !== "assistant")
+      ) {
+        continue;
+      }
+      const content = stringifyMessageContent(message.content).trim();
+      if (!content) continue;
+      const ref = refs[index];
+      const messageRefId =
+        typeof ref?.id === "string" && ref.id.trim().length > 0
+          ? ref.id.trim()
+          : undefined;
+      const fingerprint = messageContentFingerprint(message.content);
+      if (message.role === "user") {
+        void deps.appendOpenResponsesRunEvent(args.state, {
+          workspace_id: "",
+          run_id: args.runId,
+          event_type: "input.item",
+          payload: {
+            type: "input.item",
+            role: "user",
+            content: [{ type: "input_text", text: content }],
+            source: args.source,
+            ...(messageRefId ? { message_id: messageRefId, messageRefId } : {}),
+          },
+          idempotency_key: `${args.runId}:input.item:canonical:${
+            messageRefId ?? index
+          }:${fingerprint}`,
+          created_at: new Date().toISOString(),
+        });
+        continue;
+      }
+      void deps.appendOpenResponsesRunEvent(args.state, {
+        workspace_id: "",
+        run_id: args.runId,
+        event_type: "response.output_item.done",
+        payload: {
+          type: "response.output_item.done",
+          output_index: index,
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: content }],
+            ...(messageRefId ? { messageRefId } : {}),
+          },
+        },
+        idempotency_key: `${args.runId}:response.output_item.done:canonical:${
+          messageRefId ?? index
+        }:${fingerprint}`,
+        created_at: new Date().toISOString(),
+      });
+    }
+  };
+
   const persistOpenResponsesTracesFromState = (
     state: SavedState | null | undefined,
     fallbackRunId?: string,
@@ -138,6 +224,7 @@ export const createOpenResponsesEventPersistence = (deps: {
   return {
     persistOpenResponsesTraceEvent,
     persistCanonicalUserInputEvent,
+    persistCanonicalStateMessages,
     persistOpenResponsesTracesFromState,
   };
 };

@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
 import { modImportPath, readJsonLines } from "./server_test_utils.ts";
@@ -2503,6 +2504,360 @@ leakTolerantTest(
         message.role === "user" && message.content === "how are you"
       );
       assert(userPromptIndex >= 0);
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql scenario runs persist chat-only transcripts into openresponses projection",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsDir = path.join(dir, "sessions");
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-scenario-openresponses.deck.ts");
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "assistant-first.deck.ts",
+    );
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+
+      export default defineDeck({
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+        testDecks: [{
+          id: "assistant-first",
+          path: "./scenarios/assistant-first.deck.ts",
+          label: "Assistant first",
+          maxTurns: 1,
+        }],
+      });
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+
+      export default defineDeck({
+        startMode: "assistant",
+        inputSchema: z.string().optional(),
+        outputSchema: z.string().optional(),
+        modelParams: { model: "dummy-model" },
+      });
+`,
+    );
+
+    const provider: ModelProvider = {
+      chat(input) {
+        const lastUser = [...input.messages].reverse().find((message) =>
+          message?.role === "user"
+        );
+        const prompt = typeof lastUser?.content === "string"
+          ? lastUser.content
+          : "";
+        return Promise.resolve({
+          message: {
+            role: "assistant",
+            content: prompt === "how are you"
+              ? "Fine. What do you need?"
+              : "Ready.",
+          },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+      sessionDir: sessionsDir,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(
+        query: string,
+        variables?: Record<string, unknown>,
+      ): Promise<GraphqlEnvelope<TData>> => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const createWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId =
+        createWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ?? "";
+      assert(workspaceId.length > 0);
+
+      const start = await gql<{
+        workspaceConversationSessionStart?: {
+          session?: {
+            sessionId?: string;
+            status?: string;
+          };
+        };
+      }>(
+        `
+          mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+            workspaceConversationSessionStart(input: $input) {
+              session {
+                sessionId
+                status
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            scenarioDeckId: "assistant-first",
+          },
+        },
+      );
+      const scenarioRunId =
+        start.data?.workspaceConversationSessionStart?.session?.sessionId ?? "";
+      assert(scenarioRunId.length > 0);
+
+      const statePath = path.join(sessionsDir, workspaceId, "state.json");
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
+      );
+      const readOutputRows = () => {
+        const db = new DatabaseSync(sqlitePath);
+        try {
+          return db.prepare(`
+            SELECT role, content
+            FROM openresponses_output_items_v0
+            WHERE workspace_id = ? AND run_id = ?
+            ORDER BY sequence ASC, output_index ASC, item_key ASC
+          `).all(workspaceId, scenarioRunId) as Array<{
+            role: string | null;
+            content: string | null;
+          }>;
+        } finally {
+          db.close();
+        }
+      };
+      const readRunEventCount = () => {
+        const db = new DatabaseSync(sqlitePath);
+        try {
+          const row = db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM openresponses_run_events_v0
+            WHERE workspace_id = ? AND run_id = ?
+          `).get(workspaceId, scenarioRunId) as { count?: number };
+          return row.count ?? 0;
+        } finally {
+          db.close();
+        }
+      };
+
+      await waitFor(async () => {
+        const state = JSON.parse(await Deno.readTextFile(statePath)) as {
+          meta?: { scenarioRunId?: string };
+          messages?: Array<{ role?: string; content?: unknown }>;
+        };
+        const assistantMessages = (state.messages ?? []).filter((message) =>
+          message.role === "assistant"
+        );
+        return state.meta?.scenarioRunId === scenarioRunId &&
+          assistantMessages.some((message) => message.content === "Ready.");
+      }, 5_000);
+
+      await waitFor(() => {
+        try {
+          return readOutputRows().some((row) =>
+            row.role === "assistant" && row.content === "Ready."
+          );
+        } catch {
+          return false;
+        }
+      }, 5_000);
+
+      await gql<{
+        workspaceConversationSessionSend?: {
+          session?: { sessionId?: string };
+        };
+      }>(
+        `
+          mutation SendScenario($input: WorkspaceConversationSessionSendInput!) {
+            workspaceConversationSessionSend(input: $input) {
+              session {
+                sessionId
+              }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            kind: "scenario",
+            sessionId: scenarioRunId,
+            inputItems: [{ role: "user", content: "how are you" }],
+          },
+        },
+      );
+
+      await waitFor(async () => {
+        const state = JSON.parse(await Deno.readTextFile(statePath)) as {
+          messages?: Array<{ role?: string; content?: unknown }>;
+        };
+        const messages = state.messages ?? [];
+        return messages.some((message) =>
+          message.role === "user" && message.content === "how are you"
+        ) &&
+          messages.some((message) =>
+            message.role === "assistant" &&
+            message.content === "Fine. What do you need?"
+          );
+      }, 5_000);
+
+      await waitFor(() => {
+        try {
+          const rows = readOutputRows();
+          const contents = rows.map((row) => row.content ?? "");
+          return contents.includes("Ready.") &&
+            contents.includes("how are you") &&
+            contents.includes("Fine. What do you need?");
+        } catch {
+          return false;
+        }
+      }, 5_000);
+
+      const outputRows = readOutputRows();
+      assert(
+        outputRows.some((row) =>
+          row.role === "assistant" && row.content === "Ready."
+        ),
+      );
+      assert(
+        outputRows.some((row) =>
+          row.role === "user" && row.content === "how are you"
+        ),
+      );
+      assert(
+        outputRows.some((row) =>
+          row.role === "assistant" &&
+          row.content === "Fine. What do you need?"
+        ),
+      );
+      assert(readRunEventCount() > 0);
+
+      const queried = await gql<{
+        workspace?: {
+          scenarioRuns?: {
+            edges?: Array<{
+              node?: {
+                id?: string;
+                openResponses?: {
+                  edges?: Array<{
+                    node?: {
+                      outputItems?: {
+                        edges?: Array<{
+                          node?: {
+                            __typename?: string;
+                            role?: string;
+                            content?: string;
+                          };
+                        }>;
+                      };
+                    };
+                  }>;
+                };
+              };
+            }>;
+          };
+        } | null;
+      }>(
+        `
+          query ScenarioRuns($workspaceId: ID!) {
+            workspace(id: $workspaceId) {
+              scenarioRuns(first: 10) {
+                edges {
+                  node {
+                    id
+                    openResponses(first: 1) {
+                      edges {
+                        node {
+                          outputItems(first: 50) {
+                            edges {
+                              node {
+                                __typename
+                                ... on OutputMessage {
+                                  role
+                                  content
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `,
+        { workspaceId },
+      );
+
+      const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find(
+        (edge) => edge?.node?.id === scenarioRunId,
+      );
+      const scenarioMessages =
+        scenarioEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
+          ?.map((edge) => edge?.node)
+          .filter((node) => node?.__typename === "OutputMessage")
+          .map((node) => ({
+            role: node?.role ?? "",
+            content: node?.content ?? "",
+          })) ?? [];
+      assert(
+        scenarioMessages.some((message) =>
+          message.role === "assistant" && message.content === "Ready."
+        ),
+      );
+      assert(
+        scenarioMessages.some((message) =>
+          message.role === "user" && message.content === "how are you"
+        ),
+      );
+      assert(
+        scenarioMessages.some((message) =>
+          message.role === "assistant" &&
+          message.content === "Fine. What do you need?"
+        ),
+      );
     } finally {
       await server.shutdown();
       await server.finished;

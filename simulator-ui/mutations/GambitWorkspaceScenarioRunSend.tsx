@@ -26,8 +26,17 @@ export const GambitWorkspaceScenarioRunSendMutation = iso(`
                           __typename
                           asOutputMessage {
                             id
+                            messageRefId
                             role
                             content
+                            feedback {
+                              id
+                              runId
+                              messageRefId
+                              score
+                              reason
+                              createdAt
+                            }
                           }
                         }
                       }
@@ -57,8 +66,17 @@ export const GambitWorkspaceScenarioRunSendMutation = iso(`
                     __typename
                     asOutputMessage {
                       id
+                      messageRefId
                       role
                       content
+                      feedback {
+                        id
+                        runId
+                        messageRefId
+                        score
+                        reason
+                        createdAt
+                      }
                     }
                     asOutputReasoning {
                       id

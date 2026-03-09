@@ -1,5 +1,14 @@
-export default 'mutation GambitWorkspaceScenarioRunSend($input: WorkspaceScenarioRunSendInput!) {\
-  workspaceScenarioRunSend____input___v_input: workspaceScenarioRunSend(input: $input) {\
+export default 'mutation GambitWorkspaceFeedbackSave($input: WorkspaceFeedbackSaveInput!) {\
+  workspaceFeedbackSave____input___v_input: workspaceFeedbackSave(input: $input) {\
+    deleted,\
+    feedback {\
+      id,\
+      createdAt,\
+      messageRefId,\
+      reason,\
+      runId,\
+      score,\
+    },\
     run {\
       id,\
       error,\
@@ -26,22 +35,6 @@ export default 'mutation GambitWorkspaceScenarioRunSend($input: WorkspaceScenari
                     },\
                     messageRefId,\
                     role,\
-                  },\
-                  ... on OutputReasoning {\
-                    __typename,\
-                    id,\
-                    reasoningType,\
-                    summary,\
-                  },\
-                  ... on OutputToolCall {\
-                    __typename,\
-                    id,\
-                    argumentsText,\
-                    error,\
-                    resultText,\
-                    status,\
-                    toolCallId,\
-                    toolName,\
                   },\
                 },\
               },\

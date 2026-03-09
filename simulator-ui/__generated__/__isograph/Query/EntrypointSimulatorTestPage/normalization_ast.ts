@@ -228,6 +228,49 @@ const normalizationAst: NormalizationAst = {
                                                   arguments: null,
                                                 },
                                                 {
+                                                  kind: "Linked",
+                                                  fieldName: "feedback",
+                                                  arguments: null,
+                                                  concreteType: "Feedback",
+                                                  selections: [
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "id",
+                                                      arguments: null,
+                                                    },
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "createdAt",
+                                                      arguments: null,
+                                                    },
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "messageRefId",
+                                                      arguments: null,
+                                                    },
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "reason",
+                                                      arguments: null,
+                                                    },
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "runId",
+                                                      arguments: null,
+                                                    },
+                                                    {
+                                                      kind: "Scalar",
+                                                      fieldName: "score",
+                                                      arguments: null,
+                                                    },
+                                                  ],
+                                                },
+                                                {
+                                                  kind: "Scalar",
+                                                  fieldName: "messageRefId",
+                                                  arguments: null,
+                                                },
+                                                {
                                                   kind: "Scalar",
                                                   fieldName: "role",
                                                   arguments: null,

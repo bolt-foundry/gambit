@@ -1,13 +1,13 @@
 import type { EagerReaderArtifact, ReaderAst } from '@isograph/react';
-import { Mutation__GambitWorkspaceScenarioRunStart__param } from './param_type.ts';
-import { Mutation__GambitWorkspaceScenarioRunStart__output_type } from './output_type.ts';
-import { GambitWorkspaceScenarioRunStartMutation as resolver } from '../../../../mutations/GambitWorkspaceScenarioRunStart.tsx';
+import { Mutation__GambitWorkspaceFeedbackSave__param } from './param_type.ts';
+import { Mutation__GambitWorkspaceFeedbackSave__output_type } from './output_type.ts';
+import { GambitWorkspaceFeedbackSaveMutation as resolver } from '../../../../mutations/GambitWorkspaceFeedbackSave.tsx';
 import OpenResponseOutputItem__asOutputMessage__resolver_reader from '../../OpenResponseOutputItem/asOutputMessage/resolver_reader.ts';
 
-const readerAst: ReaderAst<Mutation__GambitWorkspaceScenarioRunStart__param> = [
+const readerAst: ReaderAst<Mutation__GambitWorkspaceFeedbackSave__param> = [
   {
     kind: "Linked",
-    fieldName: "workspaceScenarioRunStart",
+    fieldName: "workspaceFeedbackSave",
     alias: null,
     arguments: [
       [
@@ -19,6 +19,66 @@ const readerAst: ReaderAst<Mutation__GambitWorkspaceScenarioRunStart__param> = [
     isUpdatable: false,
     refetchQueryIndex: null,
     selections: [
+      {
+        kind: "Scalar",
+        fieldName: "deleted",
+        alias: null,
+        arguments: null,
+        isUpdatable: false,
+      },
+      {
+        kind: "Linked",
+        fieldName: "feedback",
+        alias: null,
+        arguments: null,
+        condition: null,
+        isUpdatable: false,
+        refetchQueryIndex: null,
+        selections: [
+          {
+            kind: "Scalar",
+            fieldName: "id",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "runId",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "messageRefId",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "score",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "reason",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+          {
+            kind: "Scalar",
+            fieldName: "createdAt",
+            alias: null,
+            arguments: null,
+            isUpdatable: false,
+          },
+        ],
+      },
       {
         kind: "Linked",
         fieldName: "workspace",
@@ -350,6 +410,195 @@ const readerAst: ReaderAst<Mutation__GambitWorkspaceScenarioRunStart__param> = [
             arguments: null,
             isUpdatable: false,
           },
+          {
+            kind: "Linked",
+            fieldName: "openResponses",
+            alias: null,
+            arguments: [
+              [
+                "first",
+                { kind: "Literal", value: 1 },
+              ],
+            ],
+            condition: null,
+            isUpdatable: false,
+            refetchQueryIndex: null,
+            selections: [
+              {
+                kind: "Linked",
+                fieldName: "edges",
+                alias: null,
+                arguments: null,
+                condition: null,
+                isUpdatable: false,
+                refetchQueryIndex: null,
+                selections: [
+                  {
+                    kind: "Linked",
+                    fieldName: "node",
+                    alias: null,
+                    arguments: null,
+                    condition: null,
+                    isUpdatable: false,
+                    refetchQueryIndex: null,
+                    selections: [
+                      {
+                        kind: "Scalar",
+                        fieldName: "id",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Scalar",
+                        fieldName: "status",
+                        alias: null,
+                        arguments: null,
+                        isUpdatable: false,
+                      },
+                      {
+                        kind: "Linked",
+                        fieldName: "outputItems",
+                        alias: null,
+                        arguments: [
+                          [
+                            "first",
+                            { kind: "Literal", value: 200 },
+                          ],
+                        ],
+                        condition: null,
+                        isUpdatable: false,
+                        refetchQueryIndex: null,
+                        selections: [
+                          {
+                            kind: "Linked",
+                            fieldName: "edges",
+                            alias: null,
+                            arguments: null,
+                            condition: null,
+                            isUpdatable: false,
+                            refetchQueryIndex: null,
+                            selections: [
+                              {
+                                kind: "Linked",
+                                fieldName: "node",
+                                alias: null,
+                                arguments: null,
+                                condition: null,
+                                isUpdatable: false,
+                                refetchQueryIndex: null,
+                                selections: [
+                                  {
+                                    kind: "Scalar",
+                                    fieldName: "__typename",
+                                    alias: null,
+                                    arguments: null,
+                                    isUpdatable: false,
+                                  },
+                                  {
+                                    kind: "Linked",
+                                    fieldName: "asOutputMessage",
+                                    alias: null,
+                                    arguments: null,
+                                    condition: OpenResponseOutputItem__asOutputMessage__resolver_reader,
+                                    isUpdatable: false,
+                                    refetchQueryIndex: null,
+                                    selections: [
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "id",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "messageRefId",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "role",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Scalar",
+                                        fieldName: "content",
+                                        alias: null,
+                                        arguments: null,
+                                        isUpdatable: false,
+                                      },
+                                      {
+                                        kind: "Linked",
+                                        fieldName: "feedback",
+                                        alias: null,
+                                        arguments: null,
+                                        condition: null,
+                                        isUpdatable: false,
+                                        refetchQueryIndex: null,
+                                        selections: [
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "id",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "runId",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "messageRefId",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "score",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "reason",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                          {
+                                            kind: "Scalar",
+                                            fieldName: "createdAt",
+                                            alias: null,
+                                            arguments: null,
+                                            isUpdatable: false,
+                                          },
+                                        ],
+                                      },
+                                    ],
+                                  },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
         ],
       },
     ],
@@ -357,11 +606,11 @@ const readerAst: ReaderAst<Mutation__GambitWorkspaceScenarioRunStart__param> = [
 ];
 
 const artifact: EagerReaderArtifact<
-  Mutation__GambitWorkspaceScenarioRunStart__param,
-  Mutation__GambitWorkspaceScenarioRunStart__output_type
+  Mutation__GambitWorkspaceFeedbackSave__param,
+  Mutation__GambitWorkspaceFeedbackSave__output_type
 > = {
   kind: "EagerReaderArtifact",
-  fieldName: "GambitWorkspaceScenarioRunStart",
+  fieldName: "GambitWorkspaceFeedbackSave",
   resolver,
   readerAst,
   hasUpdatable: false,

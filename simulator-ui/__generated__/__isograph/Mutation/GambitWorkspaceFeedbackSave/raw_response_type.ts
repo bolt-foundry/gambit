@@ -1,5 +1,14 @@
-export type Mutation__GambitWorkspaceScenarioRunSend__raw_response_type = {
-  workspaceScenarioRunSend____input___v_input: {
+export type Mutation__GambitWorkspaceFeedbackSave__raw_response_type = {
+  workspaceFeedbackSave____input___v_input: {
+    deleted: boolean,
+    feedback?: ({
+      id: string,
+      createdAt?: (string | null),
+      messageRefId: string,
+      reason?: (string | null),
+      runId: string,
+      score: number,
+    } | null),
     run: {
       id: string,
       error?: (string | null),
@@ -24,20 +33,6 @@ export type Mutation__GambitWorkspaceScenarioRunSend__raw_response_type = {
                   } | null),
                   messageRefId?: (string | null),
                   role: string,
-                } | {
-                  __typename: "OutputReasoning",
-                  id: string,
-                  reasoningType?: (string | null),
-                  summary: string,
-                } | {
-                  __typename: "OutputToolCall",
-                  id: string,
-                  argumentsText?: (string | null),
-                  error?: (string | null),
-                  resultText?: (string | null),
-                  status: string,
-                  toolCallId: string,
-                  toolName: string,
                 },
               }>,
             },

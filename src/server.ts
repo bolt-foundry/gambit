@@ -637,8 +637,8 @@ export function startWebSocketSimulator(opts: {
     testStreamId: TEST_STREAM_ID,
     persistOpenResponsesTraceEvent:
       openResponsesEventPersistence.persistOpenResponsesTraceEvent,
-    persistCanonicalUserInputEvent:
-      openResponsesEventPersistence.persistCanonicalUserInputEvent,
+    persistCanonicalStateMessages:
+      openResponsesEventPersistence.persistCanonicalStateMessages,
     readSessionState,
     readSessionStateStrict,
     activateWorkspaceDeck,
@@ -778,6 +778,8 @@ export function startWebSocketSimulator(opts: {
       scenarioService.startWorkspaceScenarioRunForGraphql,
     sendWorkspaceScenarioRunForGraphql:
       scenarioService.sendWorkspaceScenarioRunForGraphql,
+    saveWorkspaceFeedbackForGraphql: async (args) =>
+      await scenarioService.saveWorkspaceFeedbackForGraphql(args),
     stopWorkspaceScenarioRunForGraphql:
       scenarioService.stopWorkspaceScenarioRunForGraphql,
     readWorkspaceScenarioRunsForGraphql:

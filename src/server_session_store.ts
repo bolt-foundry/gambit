@@ -457,6 +457,7 @@ type OpenResponsesOutputMessageV0 = {
   role: string;
   content: string;
   messageRefId?: string;
+  feedback?: FeedbackEntry;
 };
 
 type OpenResponsesOutputReasoningV0 = {
@@ -2202,6 +2203,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       : path.join(sessionsRoot, sessionId, "events.jsonl");
     const db = getSessionSqliteDb(sessionId, state);
     importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
+    const feedbackByRef = new Map(
+      (state.feedback ?? []).map((entry) => [entry.messageRefId, entry]),
+    );
     const rows = db.prepare(`
       SELECT
         item_id,
@@ -2243,6 +2247,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
           role: row.role ?? "assistant",
           content: row.content ?? "",
           messageRefId: row.message_ref_id ?? undefined,
+          feedback: row.message_ref_id
+            ? feedbackByRef.get(row.message_ref_id) ?? undefined
+            : undefined,
         }];
       }
       if (row.item_kind === "reasoning") {

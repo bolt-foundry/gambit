@@ -1,9 +1,10 @@
 import { iso } from "@iso-gambit-sim";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   buildWorkspacePath,
   parseWorkspaceRoute,
 } from "../../../../src/workspace_routes.ts";
+import gambitWorkspaceFeedbackSaveMutation from "../../../mutations/GambitWorkspaceFeedbackSaveMutation.ts";
 import gambitWorkspaceScenarioRunSendMutation from "../../../mutations/GambitWorkspaceScenarioRunSendMutation.ts";
 import gambitWorkspaceScenarioRunStartMutation from "../../../mutations/GambitWorkspaceScenarioRunStartMutation.ts";
 import gambitWorkspaceScenarioRunStopMutation from "../../../mutations/GambitWorkspaceScenarioRunStopMutation.ts";
@@ -29,6 +30,15 @@ import PageGrid from "../../../src/gds/PageGrid.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import TestBotChatPanel from "../../../src/TestBotChatPanel.tsx";
 
+type OptimisticFeedback = {
+  id: string;
+  runId: string;
+  messageRefId: string;
+  score: number;
+  reason?: string | null;
+  createdAt?: string | null;
+};
+
 function toTestBotStatus(status: string): TestBotRun["status"] {
   const normalized = status.trim().toUpperCase();
   if (normalized === "RUNNING") return "running";
@@ -48,21 +58,30 @@ function extractOutputItemIndex(outputMessageId: string): number | null {
 }
 
 function toOptimisticOutputEdges(
-  messages: Array<{ role: string; content: string; messageRefId?: string }>,
+  messages: Array<{
+    role: string;
+    content: string;
+    messageRefId?: string;
+    feedback?: FeedbackEntry | OptimisticFeedback;
+  }>,
 ): Array<{
   node: {
     __typename: "OutputMessage";
     id: string;
+    messageRefId?: string | null;
     role: "user" | "assistant";
     content: string;
+    feedback?: OptimisticFeedback | null;
   };
 }> {
   return messages.map((message, index) => ({
     node: {
       __typename: "OutputMessage",
       id: message.messageRefId ?? `optimistic-message-existing-${index}`,
+      messageRefId: message.messageRefId ?? null,
       role: message.role === "user" ? "user" : "assistant",
       content: message.content,
+      feedback: message.feedback ?? null,
     },
   }));
 }
@@ -75,7 +94,12 @@ type ScenarioRunSnapshot = {
   error: string | null;
   openResponseId: string | null;
   outputItemCount: number;
-  messages: Array<{ role: string; content: string; messageRefId?: string }>;
+  messages: Array<{
+    role: string;
+    content: string;
+    messageRefId?: string;
+    feedback?: FeedbackEntry;
+  }>;
 };
 
 function toOptimisticScenarioRunEdges(args: {
@@ -87,8 +111,10 @@ function toOptimisticScenarioRunEdges(args: {
     node: {
       __typename: "OutputMessage";
       id: string;
+      messageRefId?: string | null;
       role: "user" | "assistant";
       content: string;
+      feedback?: OptimisticFeedback | null;
     };
   }>;
 }): Array<{
@@ -108,8 +134,10 @@ function toOptimisticScenarioRunEdges(args: {
               node: {
                 __typename: "OutputMessage";
                 id: string;
+                messageRefId?: string | null;
                 role: "user" | "assistant";
                 content: string;
+                feedback?: OptimisticFeedback | null;
               };
             }>;
           };
@@ -179,6 +207,30 @@ function toOptimisticScenarioRunEdges(args: {
   }, ...edges];
 }
 
+function normalizeFeedbackEntry(
+  feedback:
+    | {
+      id: string;
+      runId: string;
+      messageRefId: string;
+      score: number;
+      reason?: string | null;
+      createdAt?: string | null;
+    }
+    | null
+    | undefined,
+): FeedbackEntry | undefined {
+  if (!feedback) return undefined;
+  return {
+    id: feedback.id,
+    runId: feedback.runId,
+    messageRefId: feedback.messageRefId,
+    score: feedback.score,
+    reason: feedback.reason ?? undefined,
+    createdAt: feedback.createdAt ?? undefined,
+  };
+}
+
 export const SimulatorTestPage = iso(`
   field Workspace.TestTab @component {
     id
@@ -220,8 +272,17 @@ export const SimulatorTestPage = iso(`
                       __typename
                       asOutputMessage {
                         id
+                        messageRefId
                         role
                         content
+                        feedback {
+                          id
+                          runId
+                          messageRefId
+                          score
+                          reason
+                          createdAt
+                        }
                       }
                     }
                   }
@@ -436,7 +497,8 @@ export const SimulatorTestPage = iso(`
             return [{
               role,
               content: outputMessage.content ?? "",
-              messageRefId: outputMessage.id,
+              messageRefId: outputMessage.messageRefId ?? undefined,
+              feedback: normalizeFeedbackEntry(outputMessage.feedback),
               outputIndex: extractOutputItemIndex(outputMessage.id),
               edgeIndex,
             }];
@@ -456,6 +518,7 @@ export const SimulatorTestPage = iso(`
           role: row.role,
           content: row.content,
           messageRefId: row.messageRefId,
+          feedback: row.feedback,
         }));
         return [{
           id: node.id,
@@ -490,6 +553,9 @@ export const SimulatorTestPage = iso(`
   );
   const stopScenarioRun = useGambitTypedMutation(
     gambitWorkspaceScenarioRunStopMutation,
+  );
+  const saveFeedbackMutation = useGambitTypedMutation(
+    gambitWorkspaceFeedbackSaveMutation,
   );
   const canStartScenarioRun = useMemo(() => {
     if (!workspaceId || !selectedScenarioDeck) return false;
@@ -701,7 +767,9 @@ export const SimulatorTestPage = iso(`
       error: selectedRun.error ?? undefined,
       startedAt: selectedRun.startedAt ?? undefined,
       finishedAt: selectedRun.finishedAt ?? undefined,
-      messages: selectedRun.messages,
+      messages: selectedRun.messages.map((message) => ({
+        ...message,
+      })),
       traces: [],
       toolInserts: [],
     };
@@ -763,8 +831,10 @@ export const SimulatorTestPage = iso(`
               node: {
                 __typename: "OutputMessage" as const,
                 id: optimisticMessageId,
+                messageRefId: null,
                 role: "user" as const,
                 content: message,
+                feedback: null,
               },
             },
           ];
@@ -860,6 +930,135 @@ export const SimulatorTestPage = iso(`
       toPrefixedPath(buildWorkspacePath("test", workspaceId)),
     );
   }, [navigate, toPrefixedPath, workspaceId]);
+  const saveFeedback = useCallback(
+    async (
+      messageRefId: string,
+      score: number | null,
+      reason?: string,
+    ): Promise<void> => {
+      if (!workspaceId) {
+        throw new Error("Missing workspaceId for feedback save.");
+      }
+      if (!selectedRun?.id) {
+        throw new Error("Missing scenario run for feedback save.");
+      }
+      const existingFeedback = selectedRun.messages.find((message) =>
+        message.messageRefId === messageRefId
+      )?.feedback;
+      const nextFeedback: FeedbackEntry | undefined = score === null
+        ? undefined
+        : {
+          id: existingFeedback?.id ??
+            `optimistic-feedback:${selectedRun.id}:${messageRefId}`,
+          runId: selectedRun.id,
+          messageRefId,
+          score,
+          reason,
+          createdAt: existingFeedback?.createdAt ?? new Date().toISOString(),
+        };
+      const optimisticFeedback: OptimisticFeedback | null = nextFeedback
+        ? {
+          id: nextFeedback.id,
+          runId: nextFeedback.runId,
+          messageRefId: nextFeedback.messageRefId,
+          score: nextFeedback.score,
+          reason: nextFeedback.reason ?? null,
+          createdAt: nextFeedback.createdAt ?? null,
+        }
+        : null;
+      await new Promise<void>((resolve, reject) => {
+        saveFeedbackMutation.commit(
+          {
+            input: {
+              workspaceId,
+              runId: selectedRun.id,
+              messageRefId,
+              score,
+              ...(reason !== undefined ? { reason } : {}),
+            },
+          },
+          {
+            optimisticNetworkResponse: {
+              workspaceFeedbackSave____input___v_input: {
+                deleted: score === null,
+                feedback: optimisticFeedback,
+                run: {
+                  __typename: "WorkspaceScenarioRun",
+                  id: selectedRun.id,
+                  error: selectedRun.error ?? null,
+                  finishedAt: selectedRun.finishedAt ?? null,
+                  openResponses____first___l_1: {
+                    edges: [{
+                      node: {
+                        __typename: "OpenResponse",
+                        id: selectedRun.openResponseId ??
+                          `${selectedRun.id}:open-response`,
+                        status: selectedRun.status,
+                        outputItems____first___l_200: {
+                          edges: toOptimisticOutputEdges(
+                            selectedRun.messages.map((message) =>
+                              message.messageRefId === messageRefId
+                                ? {
+                                  ...message,
+                                  feedback: nextFeedback,
+                                }
+                                : message
+                            ),
+                          ),
+                        },
+                      },
+                    }],
+                  },
+                  startedAt: selectedRun.startedAt ?? null,
+                  status: selectedRun.status,
+                  workspaceId,
+                },
+                workspace: {
+                  id: workspaceId,
+                  scenarioRuns____first___l_25: {
+                    edges: toOptimisticScenarioRunEdges({
+                      runs: scenarioRuns.map((run) =>
+                        run.id === selectedRun.id
+                          ? {
+                            ...run,
+                            messages: run.messages.map((message) =>
+                              message.messageRefId === messageRefId
+                                ? {
+                                  ...message,
+                                  feedback: nextFeedback,
+                                }
+                                : message
+                            ),
+                          }
+                          : run
+                      ),
+                      runId: selectedRun.id,
+                      runStatus: selectedRun.status,
+                      openResponseId: selectedRun.openResponseId ??
+                        `${selectedRun.id}:open-response`,
+                      outputEdges: toOptimisticOutputEdges(
+                        selectedRun.messages.map((message) =>
+                          message.messageRefId === messageRefId
+                            ? {
+                              ...message,
+                              feedback: nextFeedback,
+                            }
+                            : message
+                        ),
+                      ),
+                    }),
+                  },
+                },
+              },
+            } as never,
+            onComplete: () => resolve(),
+            onError: reject,
+          },
+        );
+      });
+    },
+    [saveFeedbackMutation, scenarioRuns, selectedRun, workspaceId],
+  );
   const canRunPersona = scenarioDecks.length > 0;
   const hasPersonaSelection = Boolean(selectedScenarioDeck);
 
@@ -901,7 +1100,9 @@ export const SimulatorTestPage = iso(`
           hasScenarioInputSchema={Boolean(selectedScenarioDeck?.inputSchema)}
           scenarioJsonText={scenarioJsonText}
           onScenarioJsonChange={(text) => {
-            if (!selectedScenarioDeck) return;
+            if (!selectedScenarioDeck) {
+              return;
+            }
             setScenarioJsonByDeckId((previous) => ({
               ...previous,
               [selectedScenarioDeck.id]: text,
@@ -964,8 +1165,8 @@ export const SimulatorTestPage = iso(`
           handleNewChat={handleNewChat}
           handleSendChat={handleSendChat}
           handleStartAssistant={handleStartAssistant}
-          onScore={async () => {}}
-          onReasonChange={async () => {}}
+          onScore={saveFeedback}
+          onReasonChange={saveFeedback}
         />
       </PageGrid>
     </PageShell>

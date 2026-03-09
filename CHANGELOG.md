@@ -1,6 +1,6 @@
 +++
 [release]
-since = "bc863eeda49ef30db7d7cf7032b5f5bb4a4d2fb3"
+since = "4934e197f8981d7a4c67fa46289542a0c02f5474"
 +++
 
 # Changelog
@@ -8,6 +8,25 @@ since = "bc863eeda49ef30db7d7cf7032b5f5bb4a4d2fb3"
 ## Unreleased (v0.8.6)
 
 - TBD
+
+## v0.8.6-rc.4
+
+- chore(gambit): cut 0.8.6-rc.3 release
+- chore(nix): update flake lock files
+- fix(simulator-ui): preserve isograph routes without blanking
+- fix(gambit): persist workspace deck state in sqlite
+- refactor(gambit): quarantine legacy api routes
+- refactor(gambit): extract simulator response and ui handlers
+- refactor(gambit): split simulator server into workspace modules
+- test(gambit): add feedback refresh repro to isograph test demo
+- fix(gambit): synthesize scenario openresponses messages from state
+- test(gambit): verify scenario openresponses projection for chat providers
+- feat(simulator-ui): add deterministic test-tab openresponses demo
+- docs(gambit): add test feedback graphql authority intent
+- feat(gambit): add graphql test feedback persistence
+- feat(simulator-ui): move test feedback authority into isograph
+- test(gambit): verify graphql-owned test feedback refresh
+- refactor(gambit): normalize scenario service Maybe types
 
 ## v0.8.6-rc.3
 

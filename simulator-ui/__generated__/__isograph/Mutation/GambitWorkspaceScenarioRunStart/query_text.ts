@@ -29,6 +29,15 @@ export default 'mutation GambitWorkspaceScenarioRunStart($input: WorkspaceScenar
                           __typename,\
                           id,\
                           content,\
+                          feedback {\
+                            id,\
+                            createdAt,\
+                            messageRefId,\
+                            reason,\
+                            runId,\
+                            score,\
+                          },\
+                          messageRefId,\
                           role,\
                         },\
                       },\
