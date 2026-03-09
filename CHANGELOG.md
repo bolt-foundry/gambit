@@ -1,6 +1,6 @@
 +++
 [release]
-since = "787990fb4533806fd90b00e28361d5028567ac5f"
+since = "bc863eeda49ef30db7d7cf7032b5f5bb4a4d2fb3"
 +++
 
 # Changelog
@@ -8,6 +8,48 @@ since = "787990fb4533806fd90b00e28361d5028567ac5f"
 ## Unreleased (v0.8.6)
 
 - TBD
+
+## v0.8.6-rc.3
+
+- chore(gambit): cut 0.8.6-rc.2
+- fix(gambit-simulator): make sessions and workbench nav icon-only
+- feat(gambit): persist build chat provider and surface Claude login status
+- fix(gambit): honor workbench build chat provider on server routes
+- refactor(gambit): extract build chat provider server module
+- feat(gambit-core): define openresponses run-event v0 contract
+- feat(gambit): persist and query openresponses run events
+- test(gambit): cover run-event replay, idempotency, and graphql events
+- feat(gambit): back openresponses run events with workspace sqlite
+- test(gambit): cover sqlite bootstrap and legacy run-event backfill
+- feat(gambit-graphql): read openresponse output from canonical run events
+- test(gambit-graphql): cover canonical output-items and openresponse live
+  stream
+- feat(gambit): emit canonical input.item run events for build/test chat
+- test(gambit): cover canonical input.item replay and graphql output/event
+  behavior
+- fix(gambit): remove transcript fallback paths from openresponse runtime
+- test(gambit): cover assistant-start terminal-empty run gate
+- feat(gambit): persist openresponse output items in sqlite
+- fix(gambit): persist response trace events from scenario state updates
+- fix(gambit): isolate build runtime authority from scenario state
+- test(gambit): cover build/scenario openresponses run-id isolation
+- fix(gambit-graphql): remove stray braces after output-item materializer
+  removal
+- fix(gambit/providers): normalize codex and claude stream events for core
+- fix(gambit): enforce canonical sqlite openresponses projections
+- fix(gambit): project response.reasoning events into output reasoning items
+- fix(gambit): prevent response replay duplication and idempotency collisions
+- fix(gambit): harden response trace persistence and replay test stability
+- fix(gambit): scope run-event idempotency and return committed sequences
+- fix(gambit-ci): avoid publish dry-run type skew false positives
+- GBENG-89 fix
+- fix(simulator-ui): align isograph navbar title centering with legacy layout
+- fix(simulator-ui): restore isograph docs nav and drawer behavior
+- fix(gambit-simulator-ui): switch workspace delete to Isograph mutation
+- fix(simulator-ui): restore workbench chat controls and enforce non-null output
+  fields
+- fix(simulator-ui): restore isograph drawer controls and docs-first nav
+- docs(gambit): align package README and examples paths
 
 ## v0.8.6-rc.2
 
