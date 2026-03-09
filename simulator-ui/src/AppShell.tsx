@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   buildWorkspacePath,
   parseWorkspaceRoute,
@@ -375,11 +375,7 @@ export function AppShell(props: {
               </Button>
             </div>
           )}
-          <Suspense
-            fallback={<div style={{ padding: "12px 16px" }}>Loading...</div>}
-          >
-            {isDocsPath ? <DocsPage /> : props.children}
-          </Suspense>
+          {isDocsPath ? <DocsPage /> : props.children}
         </main>
         <Workbench open={workbenchVisible} />
       </div>

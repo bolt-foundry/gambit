@@ -40,11 +40,11 @@ export function MinimalRouterRoot() {
       : `${pattern}|${currentPath}`;
     return (
       <AppIsoMinimal
-        key={routeInstanceKey}
         // deno-lint-ignore no-explicit-any
         entrypoint={entrypoint as any}
         params={params}
         onNavigate={navigate}
+        rendererKey={routeInstanceKey}
       />
     );
   }

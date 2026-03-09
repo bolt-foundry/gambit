@@ -1,6 +1,7 @@
 import {
   createContext,
   type ReactNode,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -72,10 +73,12 @@ export function RouterProvider({
   }, [currentPath]);
 
   const navigate = useCallback((path: string) => {
-    setCurrentPath(path);
     if (hasDom) {
       globalThis.history.pushState({}, "", path);
     }
+    startTransition(() => {
+      setCurrentPath(path);
+    });
   }, [hasDom]);
 
   // deno-lint-ignore gambit/no-useeffect-setstate gambit/no-useeffect-setstate
@@ -92,7 +95,9 @@ export function RouterProvider({
           `${normalizedWithSearch}${hash ?? ""}`,
         );
       }
-      setCurrentPath(normalizedWithSearch);
+      startTransition(() => {
+        setCurrentPath(normalizedWithSearch);
+      });
     };
 
     globalThis.addEventListener("popstate", handlePopState);

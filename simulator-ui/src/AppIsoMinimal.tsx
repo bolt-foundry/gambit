@@ -131,17 +131,22 @@ export function AppIsoMinimal(props: {
   entrypoint: any;
   params?: Record<string, string>;
   onNavigate?: (nextPath: string) => void;
+  fallback?: React.ReactNode;
+  rendererKey?: string;
 }) {
   const {
     entrypoint,
     params = {},
     onNavigate,
+    fallback = null,
+    rendererKey,
   } = props;
 
   return (
     <IsoErrorBoundary>
-      <Suspense fallback={<div>Loading Isograph entrypoint...</div>}>
+      <Suspense fallback={fallback}>
         <IsoMinimalRenderer
+          key={rendererKey}
           entrypoint={entrypoint}
           params={params}
           onNavigate={onNavigate}
