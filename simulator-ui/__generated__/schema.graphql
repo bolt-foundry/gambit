@@ -6,6 +6,15 @@ type BuildState {
   workspaceId: ID!
 }
 
+type Feedback {
+  createdAt: String
+  id: ID!
+  messageRefId: ID!
+  reason: String
+  runId: ID!
+  score: Int!
+}
+
 type GambitDurableStreamEvent {
   createdAt: String!
   data: JSON!
@@ -31,6 +40,7 @@ type Mutation {
   workspaceConversationSessionSend(input: WorkspaceConversationSessionSendInput!): WorkspaceConversationSessionPayload!
   workspaceConversationSessionStart(input: WorkspaceConversationSessionStartInput!): WorkspaceConversationSessionPayload!
   workspaceConversationSessionStop(input: WorkspaceConversationSessionStopInput!): WorkspaceConversationSessionPayload!
+  workspaceFeedbackSave(input: WorkspaceFeedbackSaveInput!): WorkspaceFeedbackSavePayload!
   workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload!
   workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload!
   workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload!
@@ -97,6 +107,7 @@ enum OpenResponseStatus {
 
 type OutputMessage {
   content: String!
+  feedback: Feedback
   id: ID!
   messageRefId: ID
   role: String!
@@ -340,6 +351,21 @@ type WorkspaceDeletePayload {
   deleted: Boolean!
   error: String
   workspaceId: ID!
+}
+
+input WorkspaceFeedbackSaveInput {
+  messageRefId: ID!
+  reason: String
+  runId: ID
+  score: Int
+  workspaceId: ID!
+}
+
+type WorkspaceFeedbackSavePayload {
+  deleted: Boolean!
+  feedback: Feedback
+  run: WorkspaceScenarioRun!
+  workspace: Workspace!
 }
 
 type WorkspaceFile {

@@ -16,6 +16,7 @@ iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStart`)
 iso(`entrypoint Mutation.GambitWorkspaceConversationSessionStop`)
 iso(`entrypoint Mutation.GambitWorkspaceCreate`)
 iso(`entrypoint Mutation.GambitWorkspaceDelete`)
+iso(`entrypoint Mutation.GambitWorkspaceFeedbackSave`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagReasonUpdate`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeFlagToggle`)
 iso(`entrypoint Mutation.GambitWorkspaceGradeRunCreate`)
@@ -60,6 +61,7 @@ import gambitWorkspaceConversationSessionStart from "@iso-gambit-sim/Mutation/Ga
 import gambitWorkspaceConversationSessionStop from "@iso-gambit-sim/Mutation/GambitWorkspaceConversationSessionStop/entrypoint.ts"
 import gambitWorkspaceCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceCreate/entrypoint.ts"
 import gambitWorkspaceDelete from "@iso-gambit-sim/Mutation/GambitWorkspaceDelete/entrypoint.ts"
+import gambitWorkspaceFeedbackSave from "@iso-gambit-sim/Mutation/GambitWorkspaceFeedbackSave/entrypoint.ts"
 import gambitWorkspaceGradeFlagReasonUpdate from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagReasonUpdate/entrypoint.ts"
 import gambitWorkspaceGradeFlagToggle from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeFlagToggle/entrypoint.ts"
 import gambitWorkspaceGradeRunCreate from "@iso-gambit-sim/Mutation/GambitWorkspaceGradeRunCreate/entrypoint.ts"
@@ -90,6 +92,7 @@ export {gambitWorkspaceConversationSessionStart};
 export {gambitWorkspaceConversationSessionStop};
 export {gambitWorkspaceCreate};
 export {gambitWorkspaceDelete};
+export {gambitWorkspaceFeedbackSave};
 export {gambitWorkspaceGradeFlagReasonUpdate};
 export {gambitWorkspaceGradeFlagToggle};
 export {gambitWorkspaceGradeRunCreate};

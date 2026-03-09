@@ -1,5 +1,6 @@
 import * as path from "@std/path";
 import type {
+  FeedbackEntry,
   LoadedDeck,
   ModelProvider,
   OpenResponsesRunEventV0,
@@ -164,6 +165,17 @@ export const createSimulatorRequestHandler = (deps: {
     runId: string;
     message: string;
   }) => Promise<TestBotRunStatus>;
+  saveWorkspaceFeedbackForGraphql: (args: {
+    workspaceId: string;
+    runId?: string | null;
+    messageRefId: string;
+    score: number | null;
+    reason?: string | null;
+  }) => Promise<{
+    feedback?: FeedbackEntry;
+    deleted: boolean;
+    run: TestBotRunStatus;
+  }>;
   stopWorkspaceScenarioRunForGraphql: (args: {
     workspaceId: string;
     runId: string;
@@ -698,6 +710,14 @@ async (req: Request): Promise<Response> => {
         args.workspaceId,
         await deps.sendWorkspaceScenarioRunForGraphql(args),
       ),
+    saveWorkspaceFeedback: async (args) => {
+      const result = await deps.saveWorkspaceFeedbackForGraphql(args);
+      return {
+        feedback: result.feedback,
+        deleted: result.deleted,
+        run: asScenarioRunRecord(args.workspaceId, result.run),
+      };
+    },
     stopWorkspaceScenarioRun: async (args: {
       workspaceId: string;
       runId: string;

@@ -30,8 +30,17 @@ A client pointer for the OutputMessage type.
                           */
                           readonly asOutputMessage: ({
                             readonly id: string,
+                            readonly messageRefId: (string | null),
                             readonly role: string,
                             readonly content: string,
+                            readonly feedback: ({
+                              readonly id: string,
+                              readonly runId: string,
+                              readonly messageRefId: string,
+                              readonly score: number,
+                              readonly reason: (string | null),
+                              readonly createdAt: (string | null),
+                            } | null),
                           } | null),
                         },
                       }>,

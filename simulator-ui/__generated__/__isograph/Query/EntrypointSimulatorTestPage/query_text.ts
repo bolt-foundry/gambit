@@ -39,6 +39,15 @@ export default 'query EntrypointSimulatorTestPage($workspaceId: ID!) {\
                         __typename,\
                         id,\
                         content,\
+                        feedback {\
+                          id,\
+                          createdAt,\
+                          messageRefId,\
+                          reason,\
+                          runId,\
+                          score,\
+                        },\
+                        messageRefId,\
                         role,\
                       },\
                     },\

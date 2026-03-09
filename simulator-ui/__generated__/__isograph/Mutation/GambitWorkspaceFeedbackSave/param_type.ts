@@ -1,8 +1,17 @@
-import type { Mutation__GambitWorkspaceScenarioRunSend__parameters } from './parameters_type.ts';
+import type { Mutation__GambitWorkspaceFeedbackSave__parameters } from './parameters_type.ts';
 
-export type Mutation__GambitWorkspaceScenarioRunSend__param = {
+export type Mutation__GambitWorkspaceFeedbackSave__param = {
   readonly data: {
-    readonly workspaceScenarioRunSend: {
+    readonly workspaceFeedbackSave: {
+      readonly deleted: boolean,
+      readonly feedback: ({
+        readonly id: string,
+        readonly runId: string,
+        readonly messageRefId: string,
+        readonly score: number,
+        readonly reason: (string | null),
+        readonly createdAt: (string | null),
+      } | null),
       readonly workspace: {
         readonly id: string,
         readonly scenarioRuns: {
@@ -88,26 +97,6 @@ A client pointer for the OutputMessage type.
                         readonly createdAt: (string | null),
                       } | null),
                     } | null),
-                    /**
-A client pointer for the OutputReasoning type.
-                    */
-                    readonly asOutputReasoning: ({
-                      readonly id: string,
-                      readonly summary: string,
-                      readonly reasoningType: (string | null),
-                    } | null),
-                    /**
-A client pointer for the OutputToolCall type.
-                    */
-                    readonly asOutputToolCall: ({
-                      readonly id: string,
-                      readonly toolCallId: string,
-                      readonly toolName: string,
-                      readonly status: string,
-                      readonly argumentsText: (string | null),
-                      readonly resultText: (string | null),
-                      readonly error: (string | null),
-                    } | null),
                   },
                 }>,
               },
@@ -117,5 +106,5 @@ A client pointer for the OutputToolCall type.
       },
     },
   },
-  readonly parameters: Mutation__GambitWorkspaceScenarioRunSend__parameters,
+  readonly parameters: Mutation__GambitWorkspaceFeedbackSave__parameters,
 };

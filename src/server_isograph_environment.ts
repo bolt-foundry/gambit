@@ -2,7 +2,10 @@ import {
   createIsographEnvironment,
   createIsographStore,
 } from "@isograph/react";
-import type { OpenResponsesRunEventV0 } from "@bolt-foundry/gambit-core";
+import type {
+  FeedbackEntry,
+  OpenResponsesRunEventV0,
+} from "@bolt-foundry/gambit-core";
 import type { OpenResponsesOutputItemV0 } from "./server_session_store.ts";
 import { gambitYoga } from "./simulator_graphql.ts";
 import type { GambitID } from "./gambit_id.ts";
@@ -240,6 +243,17 @@ export type SimulatorGraphqlOperations = {
     runId: string;
     message: string;
   }) => Promise<ScenarioRunRecord>;
+  saveWorkspaceFeedback?: (args: {
+    workspaceId: string;
+    runId?: Maybe<string>;
+    messageRefId: string;
+    score: Maybe<number>;
+    reason?: Maybe<string>;
+  }) => Promise<{
+    feedback?: FeedbackEntry;
+    deleted: boolean;
+    run: ScenarioRunRecord;
+  }>;
   stopWorkspaceScenarioRun: (args: {
     workspaceId: string;
     runId: string;
