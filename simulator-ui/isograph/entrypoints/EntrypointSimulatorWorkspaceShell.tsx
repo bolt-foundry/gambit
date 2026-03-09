@@ -6,6 +6,7 @@ import entrypointSimulatorVerifyPage from "@iso-gambit-sim/Query/EntrypointSimul
 import { parseWorkspaceRoute } from "../../../src/workspace_routes.ts";
 import { AppIsoMinimal } from "../../src/AppIsoMinimal.tsx";
 import { useRouter } from "../../src/RouterContext.tsx";
+import Panel from "../../src/gds/Panel.tsx";
 
 function isThenable(value: unknown): value is Promise<unknown> {
   return !!value &&
@@ -41,6 +42,11 @@ function WorkspaceMainPane(props: { workspaceId: string }) {
       key={`workspace-main:${props.workspaceId}:${tab}`}
       entrypoint={entrypoint}
       params={{ workspaceId: props.workspaceId }}
+      fallback={
+        <Panel>
+          <div className="editor-status">Loading workspace tab…</div>
+        </Panel>
+      }
     />
   );
 }
