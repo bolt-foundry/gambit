@@ -47,6 +47,7 @@ function WorkspaceMainPane(props: { workspaceId: string }) {
           <div className="editor-status">Loading workspace tab…</div>
         </Panel>
       }
+      shouldFetch="Yes"
     />
   );
 }

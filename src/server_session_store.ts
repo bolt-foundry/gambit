@@ -12,6 +12,12 @@ import {
   isOpenResponsesRunEventPayload,
   toOpenResponsesRunEventV0,
 } from "@bolt-foundry/gambit-core";
+import type {
+  AvailableGraderDeck,
+  PersistedAssistantDeck,
+  PersistedScenarioDeck,
+  WorkspaceDeckState,
+} from "./server_types.ts";
 
 export type ScenarioRunSummary = {
   scenarioRunId: string;
@@ -235,9 +241,10 @@ const safeStringify = (value: unknown, space?: number): string => {
 const OPENRESPONSES_RUN_EVENT_RECORD_TYPE = "gambit.openresponses.run_event";
 const OPENRESPONSES_RUN_EVENT_RECORD_KIND = "openresponses.run_event.v0";
 const SESSION_SQLITE_DB_FILENAME = "workspace.sqlite";
-const SESSION_SQLITE_SCHEMA_VERSION = 3;
+const SESSION_SQLITE_SCHEMA_VERSION = 4;
 const OPENRESPONSES_EVENTS_SQLITE_TABLE = "openresponses_run_events_v0";
 const OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE = "openresponses_output_items_v0";
+const WORKSPACE_DECK_STATE_SQLITE_TABLE = "workspace_deck_state_v0";
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -357,6 +364,18 @@ function ensureSessionSqliteSchema(db: DatabaseSync): void {
       throw error;
     }
   }
+  if (current < 4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${WORKSPACE_DECK_STATE_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL PRIMARY KEY,
+        root_deck_path TEXT NOT NULL,
+        assistant_deck_json TEXT NOT NULL,
+        scenario_decks_json TEXT NOT NULL,
+        grader_decks_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
   if (current < SESSION_SQLITE_SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SESSION_SQLITE_SCHEMA_VERSION};`);
   }
@@ -471,6 +490,130 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function parseJsonString(value: unknown): unknown {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function parseAvailableGraderDeck(
+  value: unknown,
+): AvailableGraderDeck | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const id = asString(record.id).trim();
+  const label = asString(record.label).trim();
+  const path = asString(record.path).trim();
+  if (!id || !label || !path) return null;
+  const description = asString(record.description).trim();
+  return {
+    id,
+    label,
+    path,
+    ...(description ? { description } : {}),
+  };
+}
+
+function parsePersistedScenarioDeck(
+  value: unknown,
+): PersistedScenarioDeck | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const id = asString(record.id).trim();
+  const label = asString(record.label).trim();
+  const path = asString(record.path).trim();
+  if (!id || !label || !path) return null;
+  const description = asString(record.description).trim();
+  const inputSchemaError = asString(record.inputSchemaError).trim();
+  const maxTurns = typeof record.maxTurns === "number" &&
+      Number.isFinite(record.maxTurns)
+    ? Math.round(record.maxTurns)
+    : undefined;
+  return {
+    id,
+    label,
+    path,
+    ...(description ? { description } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
+    ...("inputSchema" in record ? { inputSchema: record.inputSchema } : {}),
+    ...("defaults" in record ? { defaults: record.defaults } : {}),
+    ...(inputSchemaError ? { inputSchemaError } : {}),
+  };
+}
+
+function parsePersistedAssistantDeck(
+  value: unknown,
+): PersistedAssistantDeck | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const deck = asString(record.deck).trim();
+  if (!deck) return null;
+  const startMode = record.startMode === "user" ? "user" : "assistant";
+  const modelParams = asRecord(record.modelParams) ?? undefined;
+  const tools = Array.isArray(record.tools)
+    ? record.tools.map((entry) => {
+      const tool = asRecord(entry);
+      if (!tool) return null;
+      const name = asString(tool.name).trim();
+      if (!name) return null;
+      const label = asString(tool.label).trim();
+      const description = asString(tool.description).trim();
+      const toolPath = asString(tool.path).trim();
+      return {
+        name,
+        ...(label ? { label } : {}),
+        ...(description ? { description } : {}),
+        ...(toolPath ? { path: toolPath } : {}),
+      };
+    }).filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    : undefined;
+  const inputSchemaError = asString(record.inputSchemaError).trim();
+  return {
+    deck,
+    startMode,
+    ...(modelParams ? { modelParams } : {}),
+    ...("inputSchema" in record ? { inputSchema: record.inputSchema } : {}),
+    ...("defaults" in record ? { defaults: record.defaults } : {}),
+    ...(tools && tools.length > 0 ? { tools } : {}),
+    ...(inputSchemaError ? { inputSchemaError } : {}),
+  };
+}
+
+function parseWorkspaceDeckStateRow(value: unknown): WorkspaceDeckState | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const workspaceId = asString(record.workspace_id).trim();
+  const rootDeckPath = asString(record.root_deck_path).trim();
+  const updatedAt = asString(record.updated_at).trim();
+  if (!workspaceId || !rootDeckPath || !updatedAt) return null;
+  const assistantDeck = parsePersistedAssistantDeck(
+    parseJsonString(record.assistant_deck_json),
+  );
+  if (!assistantDeck) return null;
+  const scenarioDecksRaw = parseJsonString(record.scenario_decks_json);
+  const graderDecksRaw = parseJsonString(record.grader_decks_json);
+  if (!Array.isArray(scenarioDecksRaw) || !Array.isArray(graderDecksRaw)) {
+    return null;
+  }
+  const scenarioDecks = scenarioDecksRaw.map(parsePersistedScenarioDeck).filter(
+    (entry): entry is PersistedScenarioDeck => entry !== null,
+  );
+  const graderDecks = graderDecksRaw.map(parseAvailableGraderDeck).filter(
+    (entry): entry is AvailableGraderDeck => entry !== null,
+  );
+  return {
+    workspaceId,
+    rootDeckPath,
+    assistantDeck,
+    scenarioDecks,
+    graderDecks,
+    updatedAt,
+  };
 }
 
 function asFiniteNumber(value: unknown): number | null {
@@ -644,6 +787,69 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     sessionSqliteById.set(sessionId, db);
     return db;
   };
+
+  const readWorkspaceDeckState = (
+    workspaceId: string,
+  ): WorkspaceDeckState | null => {
+    if (!workspaceId || workspaceId.trim().length === 0) return null;
+    try {
+      const db = getSessionSqliteDb(workspaceId, readSessionState(workspaceId));
+      const row = db.prepare(
+        `SELECT workspace_id, root_deck_path, assistant_deck_json, scenario_decks_json, grader_decks_json, updated_at
+         FROM ${WORKSPACE_DECK_STATE_SQLITE_TABLE}
+         WHERE workspace_id = ?`,
+      ).get(workspaceId);
+      const parsed = parseWorkspaceDeckStateRow(row);
+      if (parsed) return parsed;
+      if (row) {
+        logger.warn(
+          `[sim] failed to parse workspace deck state for ${workspaceId}`,
+        );
+      }
+      return null;
+    } catch (error) {
+      logger.warn(
+        `[sim] failed to read workspace deck state for ${workspaceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  };
+
+  const writeWorkspaceDeckState = (
+    state: WorkspaceDeckState,
+  ): Promise<WorkspaceDeckState> =>
+    enqueueSessionWriteResult(state.workspaceId, () => {
+      const db = getSessionSqliteDb(
+        state.workspaceId,
+        readSessionState(state.workspaceId),
+      );
+      db.prepare(
+        `INSERT INTO ${WORKSPACE_DECK_STATE_SQLITE_TABLE} (
+          workspace_id,
+          root_deck_path,
+          assistant_deck_json,
+          scenario_decks_json,
+          grader_decks_json,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(workspace_id) DO UPDATE SET
+          root_deck_path = excluded.root_deck_path,
+          assistant_deck_json = excluded.assistant_deck_json,
+          scenario_decks_json = excluded.scenario_decks_json,
+          grader_decks_json = excluded.grader_decks_json,
+          updated_at = excluded.updated_at`,
+      ).run(
+        state.workspaceId,
+        state.rootDeckPath,
+        safeStringify(state.assistantDeck),
+        safeStringify(state.scenarioDecks),
+        safeStringify(state.graderDecks),
+        state.updatedAt,
+      );
+      return state;
+    });
 
   const normalizeBuildProjectionRun = (
     workspaceId: string,
@@ -2205,6 +2411,21 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         if (kind === "trace" || isTraceEventType(type)) {
           const normalized = normalizePersistedTraceRecord(record);
           if (normalized) traces.push(normalized);
+          continue;
+        }
+        const nestedEvent = isObjectRecord(record.event)
+          ? normalizePersistedTraceRecord(record.event)
+          : null;
+        if (nestedEvent) {
+          traces.push(nestedEvent);
+          continue;
+        }
+        const run = isObjectRecord(record.run) ? record.run : null;
+        const runTraces = Array.isArray(run?.traces) ? run.traces : [];
+        for (const candidate of runTraces) {
+          if (!isObjectRecord(candidate)) continue;
+          const normalized = normalizePersistedTraceRecord(candidate);
+          if (normalized) traces.push(normalized);
         }
       }
       return traces;
@@ -2481,10 +2702,12 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     persistSessionState,
     readSessionStateStrict,
     readSessionState,
+    readWorkspaceDeckState,
     readBuildState,
     listOpenResponsesRunEvents,
     listOpenResponsesOutputItems,
     subscribeOpenResponsesRunEvents,
+    writeWorkspaceDeckState,
     replayBuildProjection,
   };
 };
