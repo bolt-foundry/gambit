@@ -1,11 +1,15 @@
 +++
 [release]
-since = "4934e197f8981d7a4c67fa46289542a0c02f5474"
+since = "f05d0cfc7e3d566a802d63a4c0ba1c2682b73a5a"
 +++
 
 # Changelog
 
 ## Unreleased (v0.8.6)
+
+- TBD
+
+## v0.8.6-rc.5
 
 - TBD
 
