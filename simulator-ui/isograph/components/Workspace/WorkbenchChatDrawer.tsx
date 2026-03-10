@@ -167,6 +167,8 @@ export const WorkbenchChatDrawer = iso(`
     >(
       () => readStoredBuildChatProvider(),
     );
+    const selectedProviderLoginRequired = buildChatProvider === "codex-cli" &&
+      codexLoginRequired;
     const [chatError, setChatError] = useState<string | null>(null);
     const buildProviderOptions = useMemo<Array<ListboxOption>>(
       () => [
@@ -287,6 +289,7 @@ export const WorkbenchChatDrawer = iso(`
           createRunMutation.commit(
             {
               input: {
+                buildChatProvider,
                 workspaceId,
                 inputItems: [{ role: "user", content: "" }],
               },
@@ -305,7 +308,7 @@ export const WorkbenchChatDrawer = iso(`
       } catch (error) {
         setChatError(toErrorMessage(error));
       }
-    }, [createRunMutation, workspaceId]);
+    }, [buildChatProvider, createRunMutation, workspaceId]);
 
     const ConversationRunChat = runNode?.WorkbenchConversationRunChat ?? null;
     const headerActions = (
@@ -359,6 +362,7 @@ export const WorkbenchChatDrawer = iso(`
       return (
         <ConversationRunChat
           open={componentProps.open}
+          buildChatProvider={buildChatProvider}
           composerChips={composerChips}
           onComposerChipsChange={updateComposerChips}
           isSending={createRunMutation.inFlight ||
@@ -378,6 +382,7 @@ export const WorkbenchChatDrawer = iso(`
             createRunMutation.commit(
               {
                 input: {
+                  buildChatProvider,
                   workspaceId: args.workspaceId,
                   inputItems: [{
                     role: "user",
@@ -530,7 +535,7 @@ export const WorkbenchChatDrawer = iso(`
       <div className="test-bot-sidebar flex-column gap-8 flex-1 build-chat-panel">
         <WorkbenchChatIntro
           disabled={!workspaceId || createRunMutation.inFlight ||
-            codexLoginRequired}
+            selectedProviderLoginRequired}
           leadingContent={providerSelector}
           pending={createRunMutation.inFlight}
           title="Start a workspace editing session"
@@ -541,7 +546,7 @@ export const WorkbenchChatDrawer = iso(`
         <Callout>
           Start a chat session to inspect the workspace and begin editing files.
         </Callout>
-        {codexLoginRequired && (
+        {selectedProviderLoginRequired && (
           <Callout variant="danger" title="Codex login required">
             {codexStatus?.statusText?.trim() ||
               "Run `codex login` to continue."}

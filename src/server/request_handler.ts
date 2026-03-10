@@ -640,7 +640,13 @@ async (req: Request): Promise<Response> => {
     createWorkspaceBuildRun: async (
       workspaceId: string,
       message: string,
-    ) => await deps.startWorkspaceBuildRun({ workspaceId, message }),
+      buildChatProvider?: BuildChatProvider,
+    ) =>
+      await deps.startWorkspaceBuildRun({
+        workspaceId,
+        message,
+        buildChatProvider,
+      }),
     stopWorkspaceBuildRun: async (workspaceId: string, runId: string) =>
       await deps.stopWorkspaceBuildRun({ workspaceId, runId }),
     resetWorkspaceBuild: async (workspaceId: string) =>

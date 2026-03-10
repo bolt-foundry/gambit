@@ -3,58 +3,59 @@ import Callout from "./gds/Callout.tsx";
 import Icon from "./gds/Icon.tsx";
 
 export function CodexLoginRequiredOverlay(props: {
-  codexWorkspaceLoggedIn: boolean | null;
-  codexLoginCommand: string;
-  copiedCodexLoginCommand: boolean;
-  showCodexLoginRecheck: boolean;
-  codexLoginRecheckPending: boolean;
-  codexLoginStatusText: string | null;
-  codexLoginError: string | null;
-  onCopyCodexLoginCommand: () => void;
-  onRecheckCodexLogin?: () => void;
+  providerLabel: string;
+  providerWorkspaceLoggedIn: boolean | null;
+  loginCommand: string;
+  copiedLoginCommand: boolean;
+  showLoginRecheck: boolean;
+  loginRecheckPending: boolean;
+  loginStatusText: string | null;
+  loginError: string | null;
+  onCopyLoginCommand: () => void;
+  onRecheckLogin?: () => void;
   onDismiss?: () => void;
 }) {
   return (
     <div className="workbench-chat-readonly-overlay">
       <div className="workbench-chat-readonly-card">
         <h3 className="workbench-chat-readonly-title">
-          Codex login required
+          {props.providerLabel} login required
         </h3>
-        {props.codexWorkspaceLoggedIn === false && (
+        {props.providerWorkspaceLoggedIn === false && (
           <>
             <p className="workbench-chat-readonly-copy">
-              Codex login is required for this workspace.
+              {props.providerLabel} login is required for this workspace.
             </p>
             <p className="workbench-chat-readonly-copy">
-              Run this in your terminal to authenticate Codex, then restart
-              Gambit.
+              Run this in your terminal to authenticate{" "}
+              {props.providerLabel}, then restart Gambit.
             </p>
             <div className="workbench-chat-command-row">
               <pre className="workbench-chat-command-code">
-                <code>{props.codexLoginCommand}</code>
+                <code>{props.loginCommand}</code>
               </pre>
               <Button
                 variant="secondary"
                 size="medium"
-                onClick={props.onCopyCodexLoginCommand}
+                onClick={props.onCopyLoginCommand}
               >
                 <Icon
-                  name={props.copiedCodexLoginCommand ? "copied" : "copy"}
+                  name={props.copiedLoginCommand ? "copied" : "copy"}
                   size={14}
                 />
-                {props.copiedCodexLoginCommand ? "Copied" : "Copy"}
+                {props.copiedLoginCommand ? "Copied" : "Copy"}
               </Button>
             </div>
-            {props.showCodexLoginRecheck && props.onRecheckCodexLogin && (
+            {props.showLoginRecheck && props.onRecheckLogin && (
               <div className="workbench-chat-readonly-actions">
                 <Button
                   variant="primary"
                   size="medium"
                   style={{ width: "100%" }}
-                  onClick={props.onRecheckCodexLogin}
-                  disabled={props.codexLoginRecheckPending}
+                  onClick={props.onRecheckLogin}
+                  disabled={props.loginRecheckPending}
                 >
-                  {props.codexLoginRecheckPending
+                  {props.loginRecheckPending
                     ? "Rechecking..."
                     : "Recheck login"}
                 </Button>
@@ -62,13 +63,11 @@ export function CodexLoginRequiredOverlay(props: {
             )}
           </>
         )}
-        {props.codexLoginStatusText &&
+        {props.loginStatusText &&
           !/^not logged in$/i.test(
-            props.codexLoginStatusText.trim(),
-          ) && <Callout>{props.codexLoginStatusText}</Callout>}
-        {props.codexLoginError && (
-          <div className="error">{props.codexLoginError}</div>
-        )}
+            props.loginStatusText.trim(),
+          ) && <Callout>{props.loginStatusText}</Callout>}
+        {props.loginError && <div className="error">{props.loginError}</div>}
         {props.onDismiss && (
           <Button
             variant="secondary"
