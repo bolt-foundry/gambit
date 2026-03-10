@@ -19,10 +19,6 @@ export const EntrypointSimulatorRedirect = iso(`
       ? globals.__GAMBIT_CURRENT_PATH__
       : "/";
   })();
-  const isIsographPrefixed = currentPath === "/isograph" ||
-    currentPath.startsWith("/isograph/");
-  const routePrefix = isIsographPrefixed ? "/isograph" : "";
-  const withPrefix = (path: string) => `${routePrefix}${path}`;
 
   if (
     currentPath === "/" || currentPath === "/build" ||
@@ -35,21 +31,8 @@ export const EntrypointSimulatorRedirect = iso(`
       headers: { Location: "/workspaces" },
     };
   }
-  if (
-    currentPath === "/isograph" || currentPath === "/isograph/build" ||
-    currentPath === "/isograph/debug" || currentPath === "/isograph/simulate"
-  ) {
-    return {
-      Body: null,
-      title: "Gambit Simulator",
-      status: 302,
-      headers: { Location: "/isograph/workspaces" },
-    };
-  }
 
-  const bareWorkspaceMatch = currentPath.match(
-    /^(?:\/isograph)?\/workspaces\/([^/]+)$/,
-  );
+  const bareWorkspaceMatch = currentPath.match(/^\/workspaces\/([^/]+)$/);
   if (bareWorkspaceMatch && bareWorkspaceMatch[1] !== "new") {
     const workspaceId = (() => {
       try {
@@ -62,7 +45,7 @@ export const EntrypointSimulatorRedirect = iso(`
       Body: null,
       title: "Gambit Simulator",
       status: 302,
-      headers: { Location: withPrefix(`/workspaces/${workspaceId}/build`) },
+      headers: { Location: `/workspaces/${workspaceId}/build` },
     };
   }
 
@@ -70,7 +53,7 @@ export const EntrypointSimulatorRedirect = iso(`
     Body: null,
     title: "Gambit Simulator",
     status: 302,
-    headers: { Location: withPrefix("/workspaces") },
+    headers: { Location: "/workspaces" },
   };
 });
 

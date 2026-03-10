@@ -370,9 +370,7 @@ function parseWorkspaceRunPath(pathname: string): {
   workspaceId: string;
   runId: string;
 } | null {
-  const normalized = pathname.startsWith("/isograph/")
-    ? pathname.slice("/isograph".length)
-    : pathname;
+  const normalized = pathname;
   const match = normalized.match(/^\/workspaces\/([^/]+)\/test\/([^/]+)$/);
   if (!match) return null;
   return {
@@ -410,10 +408,7 @@ async function main(): Promise<void> {
       "gambit test tab demo",
       async ({ demoTarget, screenshot, wait }) => {
         await installLegacyFeedbackRouteMonitor(demoTarget);
-        const normalizeWorkspacePath = (pathname: string): string =>
-          pathname.startsWith("/isograph/")
-            ? pathname.slice("/isograph".length)
-            : pathname;
+        const normalizeWorkspacePath = (pathname: string): string => pathname;
         const isWorkspaceBuildPath = (pathname: string): boolean =>
           /^\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(
             normalizeWorkspacePath(pathname),
@@ -433,12 +428,8 @@ async function main(): Promise<void> {
             wait,
             (pathname) =>
               pathname === "/" ||
-              pathname === "/isograph" ||
-              pathname === "/isograph/" ||
               pathname === "/workspaces" ||
               pathname === "/workspaces/new" ||
-              pathname === "/isograph/workspaces" ||
-              pathname === "/isograph/workspaces/new" ||
               isWorkspaceBuildPath(pathname),
             5_000,
             { label: "simulator load", logEveryMs: 250 },
@@ -825,7 +816,7 @@ async function main(): Promise<void> {
       {
         slug: Deno.env.get("GAMBIT_DEMO_SLUG")?.trim() ||
           "gambit-test-tab-demo",
-        iframeTargetPath: "/isograph",
+        iframeTargetPath: "/",
         server: {
           cwd: serveRoot,
           command: (targetPort: number) => [

@@ -4,9 +4,48 @@ import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import {
   modImportPath,
+  parseGraphqlEnvelope,
   readJsonLines,
-  runSimulator,
+  startScenarioConversation,
 } from "./server_test_utils.ts";
+
+async function saveWorkspaceFeedback(args: {
+  port: number;
+  workspaceId: string;
+  messageRefId: string;
+  score: number | null;
+  reason?: string;
+  runId?: string;
+}): Promise<Response> {
+  return await fetch(`http://127.0.0.1:${args.port}/graphql`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      query: `
+        mutation SaveFeedback($input: WorkspaceFeedbackSaveInput!) {
+          workspaceFeedbackSave(input: $input) {
+            deleted
+            feedback {
+              messageRefId
+              runId
+              score
+              reason
+            }
+          }
+        }
+      `,
+      variables: {
+        input: {
+          workspaceId: args.workspaceId,
+          messageRefId: args.messageRefId,
+          score: args.score,
+          reason: args.reason ?? null,
+          runId: args.runId ?? null,
+        },
+      },
+    }),
+  });
+}
 
 async function readStateMessageRefs(args: {
   sessionsDir: string;
@@ -99,33 +138,26 @@ leakTolerantTest("simulator appends feedback log entries", async () => {
   });
 
   const port = (server.addr as Deno.NetAddr).port;
-  const result = await runSimulator(port, {
-    input: "hello",
-    message: "hello",
-    stream: false,
-  });
-  assert(result.workspaceId, "missing workspaceId");
-  assert(result.runId, "missing runId");
-  const sessionDir = path.join(sessionsDir, result.workspaceId!);
+  const result = await startScenarioConversation({ port, message: "hello" });
+  const sessionDir = path.join(sessionsDir, result.workspaceId);
   const messageRefId = await waitForMessageRef({
     sessionsDir,
-    workspaceId: result.workspaceId!,
+    workspaceId: result.workspaceId,
     role: "assistant",
   });
   assert(messageRefId, "missing messageRefId");
 
-  const res = await fetch(`http://127.0.0.1:${port}/api/workspace/feedback`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      workspaceId: result.workspaceId,
-      messageRefId,
-      score: 1,
-      reason: "ok",
-    }),
+  const res = await saveWorkspaceFeedback({
+    port,
+    workspaceId: result.workspaceId,
+    messageRefId,
+    score: 1,
+    reason: "ok",
   });
-  assert(res.ok);
-  await res.json();
+  const body = await parseGraphqlEnvelope<{
+    workspaceFeedbackSave?: { feedback?: { score?: number } };
+  }>(res);
+  assertEquals(body.data?.workspaceFeedbackSave?.feedback?.score, 1);
 
   const eventsPath = path.join(sessionDir, "events.jsonl");
   let hasFeedbackUpdate = false;
@@ -181,13 +213,8 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const first = await runSimulator(port, {
-      input: "hello",
-      message: "hello",
-      stream: false,
-    });
-    const workspaceId = first.workspaceId!;
-    assert(first.runId);
+    const first = await startScenarioConversation({ port, message: "hello" });
+    const workspaceId = first.workspaceId;
     const userRef = await waitForMessageRef({
       sessionsDir,
       workspaceId,
@@ -195,21 +222,26 @@ leakTolerantTest(
     });
     assert(userRef, "expected user ref");
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/workspace/feedback`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        messageRefId: userRef,
-        score: 1,
-        reason: "should fail",
-      }),
+    const res = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      messageRefId: userRef,
+      score: 1,
+      reason: "should fail",
     });
-    assertEquals(res.status, 400);
-    const body = await res.json() as { error?: string };
-    assert(
-      typeof body.error === "string" &&
-        body.error.includes("not eligible"),
+    assertEquals(res.status, 200);
+    const body = await parseGraphqlEnvelope<
+      { workspaceFeedbackSave?: unknown }
+    >(
+      res,
+    );
+    assertEquals(body.data?.workspaceFeedbackSave ?? null, null);
+    const nextState = await readWorkspaceState({ sessionsDir, workspaceId });
+    assertEquals(
+      (nextState.feedback ?? []).some((entry) =>
+        entry.messageRefId === userRef
+      ),
+      false,
     );
 
     await server.shutdown();
@@ -255,13 +287,8 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const first = await runSimulator(port, {
-      input: "hello",
-      message: "hello",
-      stream: false,
-    });
-    const workspaceId = first.workspaceId!;
-    assert(first.runId);
+    const first = await startScenarioConversation({ port, message: "hello" });
+    const workspaceId = first.workspaceId;
     const assistantRef = await waitForMessageRef({
       sessionsDir,
       workspaceId,
@@ -269,40 +296,36 @@ leakTolerantTest(
     });
     assert(assistantRef, "expected assistant ref");
 
-    const saveWithReasonRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/feedback`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          messageRefId: assistantRef,
-          score: 3,
-          reason: "great response",
-        }),
-      },
-    );
+    const saveWithReasonRes = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      messageRefId: assistantRef,
+      score: 3,
+      reason: "great response",
+    });
     assertEquals(saveWithReasonRes.ok, true);
-    await saveWithReasonRes.json();
+    await parseGraphqlEnvelope(saveWithReasonRes);
 
-    const saveScoreOnlyRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/feedback`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          messageRefId: assistantRef,
-          score: -2,
-        }),
-      },
-    );
+    const saveScoreOnlyRes = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      messageRefId: assistantRef,
+      score: -2,
+    });
     assertEquals(saveScoreOnlyRes.ok, true);
-    const saveScoreOnlyBody = await saveScoreOnlyRes.json() as {
-      feedback?: { score?: number; reason?: string };
-    };
-    assertEquals(saveScoreOnlyBody.feedback?.score, -2);
-    assertEquals(saveScoreOnlyBody.feedback?.reason, "great response");
+    const saveScoreOnlyBody = await parseGraphqlEnvelope<{
+      workspaceFeedbackSave?: {
+        feedback?: { score?: number; reason?: string };
+      };
+    }>(saveScoreOnlyRes);
+    assertEquals(
+      saveScoreOnlyBody.data?.workspaceFeedbackSave?.feedback?.score,
+      -2,
+    );
+    assertEquals(
+      saveScoreOnlyBody.data?.workspaceFeedbackSave?.feedback?.reason,
+      "great response",
+    );
 
     let saved:
       | {
@@ -363,6 +386,8 @@ leakTolerantTest(
           workspaceSchemaVersion: "workspace-state.v1",
           sessionId: workspaceId,
           workspaceId,
+          scenarioRunId: "testbot-older-run",
+          testBotRunId: "testbot-older-run",
         },
       }),
     );
@@ -409,24 +434,29 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/workspace/feedback`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        runId: "testbot-older-run",
-        messageRefId: "msg-from-older-run",
-        score: -3,
-        reason: "old run message",
-      }),
+    const res = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      runId: "testbot-older-run",
+      messageRefId: "msg-from-older-run",
+      score: -3,
+      reason: "old run message",
     });
     assertEquals(res.status, 200);
-    const body = await res.json() as {
-      feedback?: { runId?: string; messageRefId?: string; score?: number };
-    };
-    assertEquals(body.feedback?.runId, "testbot-older-run");
-    assertEquals(body.feedback?.messageRefId, "msg-from-older-run");
-    assertEquals(body.feedback?.score, -3);
+    const body = await parseGraphqlEnvelope<{
+      workspaceFeedbackSave?: {
+        feedback?: { runId?: string; messageRefId?: string; score?: number };
+      };
+    }>(res);
+    assertEquals(
+      body.data?.workspaceFeedbackSave?.feedback?.runId,
+      "testbot-older-run",
+    );
+    assertEquals(
+      body.data?.workspaceFeedbackSave?.feedback?.messageRefId,
+      "msg-from-older-run",
+    );
+    assertEquals(body.data?.workspaceFeedbackSave?.feedback?.score, -3);
 
     let saved: { messageRefId?: string; runId?: string } | undefined;
     for (let i = 0; i < 20; i++) {
@@ -500,7 +530,7 @@ leakTolerantTest(
     await Deno.writeTextFile(
       path.join(workspaceDir, "state.json"),
       JSON.stringify({
-        runId: "session-source",
+        runId: "scenario-user-run",
         messages: [
           { role: "user", content: "scenario prompt" },
           { role: "user", content: "manual prompt" },
@@ -515,6 +545,8 @@ leakTolerantTest(
           workspaceSchemaVersion: "workspace-state.v1",
           sessionId: workspaceId,
           workspaceId,
+          scenarioRunId: "scenario-user-run",
+          testBotRunId: "scenario-user-run",
         },
       }),
     );
@@ -536,64 +568,69 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const scenarioRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/feedback`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          messageRefId: "msg-scenario-user",
-          score: -2,
-          reason: "scenario input quality",
-        }),
-      },
-    );
+    const scenarioRes = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      runId: "scenario-user-run",
+      messageRefId: "msg-scenario-user",
+      score: -2,
+      reason: "scenario input quality",
+    });
     assertEquals(scenarioRes.status, 200);
-    const scenarioBody = await scenarioRes.json() as {
-      feedback?: { messageRefId?: string; score?: number };
-    };
-    assertEquals(scenarioBody.feedback?.messageRefId, "msg-scenario-user");
-    assertEquals(scenarioBody.feedback?.score, -2);
-
-    const manualRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/feedback`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          messageRefId: "msg-manual-user",
-          score: -1,
-          reason: "manual input should reject",
-        }),
-      },
+    const scenarioBody = await parseGraphqlEnvelope<{
+      workspaceFeedbackSave?: {
+        feedback?: { messageRefId?: string; score?: number };
+      };
+    }>(scenarioRes);
+    assertEquals(
+      scenarioBody.data?.workspaceFeedbackSave?.feedback?.messageRefId,
+      "msg-scenario-user",
     );
-    assertEquals(manualRes.status, 400);
-    const manualBody = await manualRes.json() as { error?: string };
-    assert(
-      typeof manualBody.error === "string" &&
-        manualBody.error.includes("not eligible"),
+    assertEquals(
+      scenarioBody.data?.workspaceFeedbackSave?.feedback?.score,
+      -2,
     );
 
-    const artifactRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/feedback`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          messageRefId: "msg-artifact-user",
-          score: -1,
-          reason: "artifact input should reject",
-        }),
-      },
+    const manualRes = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      runId: "scenario-user-run",
+      messageRefId: "msg-manual-user",
+      score: -1,
+      reason: "manual input should reject",
+    });
+    assertEquals(manualRes.status, 200);
+    const manualBody = await parseGraphqlEnvelope<{
+      workspaceFeedbackSave?: unknown;
+    }>(manualRes);
+    assertEquals(manualBody.data?.workspaceFeedbackSave ?? null, null);
+
+    const artifactRes = await saveWorkspaceFeedback({
+      port,
+      workspaceId,
+      runId: "scenario-user-run",
+      messageRefId: "msg-artifact-user",
+      score: -1,
+      reason: "artifact input should reject",
+    });
+    assertEquals(artifactRes.status, 200);
+    const artifactBody = await parseGraphqlEnvelope<{
+      workspaceFeedbackSave?: unknown;
+    }>(artifactRes);
+    assertEquals(artifactBody.data?.workspaceFeedbackSave ?? null, null);
+
+    const nextState = await readWorkspaceState({ sessionsDir, workspaceId });
+    assertEquals(
+      (nextState.feedback ?? []).some((entry) =>
+        entry.messageRefId === "msg-manual-user"
+      ),
+      false,
     );
-    assertEquals(artifactRes.status, 400);
-    const artifactBody = await artifactRes.json() as { error?: string };
-    assert(
-      typeof artifactBody.error === "string" &&
-        artifactBody.error.includes("not eligible"),
+    assertEquals(
+      (nextState.feedback ?? []).some((entry) =>
+        entry.messageRefId === "msg-artifact-user"
+      ),
+      false,
     );
 
     await server.shutdown();

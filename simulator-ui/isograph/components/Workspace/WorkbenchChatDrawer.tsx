@@ -4,7 +4,6 @@ import gambitSimulatorResetWorkspaceMutation from "../../../mutations/GambitSimu
 import gambitSimulatorStopRunMutation from "../../../mutations/GambitSimulatorStopRunMutation.ts";
 import gambitWorkspaceBuildRunCreateMutation from "../../../mutations/GambitWorkspaceBuildRunCreateMutation.ts";
 import gambitWorkspaceWorkbenchLiveSubscription from "../../../subscriptions/GambitWorkspaceWorkbenchLiveSubscription.ts";
-import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import Listbox, { type ListboxOption } from "../../../src/gds/Listbox.tsx";
 import List from "../../../src/gds/List.tsx";
@@ -282,20 +281,6 @@ export const WorkbenchChatDrawer = iso(`
   const headerActions = (
     <>
       {providerSelector}
-      {workbenchChatTopActionsEnabled && (
-        <Button
-          variant="secondary"
-          size="small"
-          onClick={(event) => {
-            event.stopPropagation();
-            void resetWorkspace();
-          }}
-          disabled={!workspaceId || createRunMutation.inFlight ||
-            stopRunMutation.inFlight || resetWorkspaceMutation.inFlight}
-        >
-          New chat
-        </Button>
-      )}
     </>
   );
   const historyContent = (
@@ -352,7 +337,6 @@ export const WorkbenchChatDrawer = iso(`
         }}
         chatHeaderActions={headerActions}
         chatHistoryOpen={chatHistoryOpen}
-        onToggleChatHistory={() => setChatHistoryOpen((previous) => !previous)}
         chatHistoryContent={historyContent}
         onSend={(args) => {
           createRunMutation.commit(
@@ -535,9 +519,7 @@ export const WorkbenchChatDrawer = iso(`
       open={componentProps.open}
       runStatus="IDLE"
       chatHeaderActions={headerActions}
-      showChatHistoryToggle={workbenchChatTopActionsEnabled}
       chatHistoryOpen={workbenchChatTopActionsEnabled ? chatHistoryOpen : false}
-      onToggleChatHistory={() => setChatHistoryOpen((previous) => !previous)}
       chatHistoryContent={historyContent}
       chatBody={fallbackBody}
     />

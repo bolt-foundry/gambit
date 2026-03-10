@@ -56,19 +56,19 @@ async function main(): Promise<void> {
         );
         await screenshot("04-test-tab");
 
-        if (!buildPath.startsWith("/isograph/workspaces/")) {
+        if (!buildPath.startsWith("/workspaces/")) {
           throw new Error(`Unexpected build path: ${buildPath}`);
         }
-        if (!testPath.startsWith("/isograph/workspaces/")) {
+        if (!testPath.startsWith("/workspaces/")) {
           throw new Error(`Unexpected test path: ${testPath}`);
         }
-        if (!testRunPath.startsWith("/isograph/workspaces/")) {
+        if (!testRunPath.startsWith("/workspaces/")) {
           throw new Error(`Unexpected test run path: ${testRunPath}`);
         }
 
         const gradeRunPath = await runGradeSmokeFlow(demoTarget, wait);
         await screenshot("05-grade-tab");
-        if (!gradeRunPath.startsWith("/isograph/workspaces/")) {
+        if (!gradeRunPath.startsWith("/workspaces/")) {
           throw new Error(`Unexpected grade run path: ${gradeRunPath}`);
         }
 
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
           demoTarget,
           wait,
           (pathname) =>
-            /^\/isograph\/workspaces\/[^/]+\/grade(?:\/[^/]+)?$/.test(pathname),
+            /^\/workspaces\/[^/]+\/grade(?:\/[^/]+)?$/.test(pathname),
           15_000,
           { label: "grade return", logEveryMs: 250 },
         );
@@ -102,7 +102,7 @@ async function main(): Promise<void> {
       },
       {
         slug: Deno.env.get("GAMBIT_DEMO_SLUG")?.trim() || "gambit-full-demo",
-        iframeTargetPath: "/isograph",
+        iframeTargetPath: "/",
         server: {
           cwd: serveRoot,
           command: (targetPort: number) => [

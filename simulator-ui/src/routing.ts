@@ -73,9 +73,6 @@ export const isographAppRoutes = new Map<string, unknown>([
   ["/", entrypointSimulatorRedirect],
   ["/build", entrypointSimulatorRedirect],
   ["/docs", entrypointSimulatorWorkspaces],
-  ["/isograph", entrypointSimulatorRedirect],
-  ["/isograph/build", entrypointSimulatorRedirect],
-  ["/isograph/docs", entrypointSimulatorWorkspaces],
   ["/workspaces", entrypointSimulatorWorkspaces],
   ["/workspaces/new", entrypointSimulatorWorkspaces],
   ["/workspaces/:workspaceId", entrypointSimulatorRedirect],
@@ -92,32 +89,4 @@ export const isographAppRoutes = new Map<string, unknown>([
   ],
   ["/workspaces/:workspaceId/grade", entrypointSimulatorWorkspaceShell],
   ["/workspaces/:workspaceId/verify", entrypointSimulatorWorkspaceShell],
-  ["/isograph/workspaces", entrypointSimulatorWorkspaces],
-  ["/isograph/workspaces/new", entrypointSimulatorWorkspaces],
-  ["/isograph/workspaces/:workspaceId", entrypointSimulatorRedirect],
-  [
-    "/isograph/workspaces/:workspaceId/build/:path*",
-    entrypointSimulatorWorkspaceShell,
-  ],
-  [
-    "/isograph/workspaces/:workspaceId/build",
-    entrypointSimulatorWorkspaceShell,
-  ],
-  [
-    "/isograph/workspaces/:workspaceId/test/:testRunId",
-    entrypointSimulatorWorkspaceShell,
-  ],
-  ["/isograph/workspaces/:workspaceId/test", entrypointSimulatorWorkspaceShell],
-  [
-    "/isograph/workspaces/:workspaceId/grade/:gradeRunId",
-    entrypointSimulatorWorkspaceShell,
-  ],
-  [
-    "/isograph/workspaces/:workspaceId/grade",
-    entrypointSimulatorWorkspaceShell,
-  ],
-  [
-    "/isograph/workspaces/:workspaceId/verify",
-    entrypointSimulatorWorkspaceShell,
-  ],
 ]);

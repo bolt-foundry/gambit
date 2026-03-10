@@ -199,23 +199,7 @@ export const SimulatorTestPage = iso(`
   );
   const workspaceId = data.id ?? "";
   const { currentRoutePath, navigate } = useRouter();
-  const routePrefix = useMemo(
-    () =>
-      currentRoutePath === "/isograph" ||
-        currentRoutePath.startsWith("/isograph/")
-        ? "/isograph"
-        : "",
-    [currentRoutePath],
-  );
-  const workspaceRoutePath = useMemo(() => {
-    if (!routePrefix) return currentRoutePath;
-    const stripped = currentRoutePath.slice(routePrefix.length);
-    return stripped.length > 0 ? stripped : "/";
-  }, [currentRoutePath, routePrefix]);
-  const toPrefixedPath = useCallback(
-    (path: string) => `${routePrefix}${path}`,
-    [routePrefix],
-  );
+  const workspaceRoutePath = currentRoutePath;
   const scenarioDecks = useMemo(
     () =>
       (data.scenarioDecks ?? []).flatMap((deck) =>
@@ -457,9 +441,7 @@ export const SimulatorTestPage = iso(`
         onComplete: (result) => {
           const runId = result?.run?.id;
           if (!runId) return;
-          navigate(
-            toPrefixedPath(buildWorkspacePath("test", workspaceId, { runId })),
-          );
+          navigate(buildWorkspacePath("test", workspaceId, { runId }));
         },
       },
     );
@@ -470,7 +452,6 @@ export const SimulatorTestPage = iso(`
     scenarioJsonText,
     selectedScenarioDeck,
     startScenarioRun,
-    toPrefixedPath,
     workspaceId,
   ]);
   const startAssistantChatRun = useCallback(async (): Promise<
@@ -516,16 +497,15 @@ export const SimulatorTestPage = iso(`
       );
     });
     if (!started) return null;
-    navigate(toPrefixedPath(buildWorkspacePath("test", workspaceId, {
+    navigate(buildWorkspacePath("test", workspaceId, {
       runId: started.runId,
-    })));
+    }));
     return started;
   }, [
     assistantInitJsonText,
     canStartAssistantRun,
     navigate,
     startScenarioRun,
-    toPrefixedPath,
     workspaceId,
   ]);
   const kickoffAssistantTurn = useCallback(async (
@@ -735,24 +715,19 @@ export const SimulatorTestPage = iso(`
   const handleRunHistorySelection = useCallback((nextRunId: string) => {
     if (!nextRunId || !workspaceId) return;
     if (nextRunId === selectedRunHistoryValue) return;
-    navigate(
-      toPrefixedPath(buildWorkspacePath("test", workspaceId, {
-        runId: nextRunId,
-      })),
-    );
+    navigate(buildWorkspacePath("test", workspaceId, {
+      runId: nextRunId,
+    }));
   }, [
     navigate,
     selectedRunHistoryValue,
-    toPrefixedPath,
     workspaceId,
   ]);
   const handleNewChat = useCallback(async () => {
     if (!workspaceId) return;
     setChatDraft("");
-    navigate(
-      toPrefixedPath(buildWorkspacePath("test", workspaceId)),
-    );
-  }, [navigate, toPrefixedPath, workspaceId]);
+    navigate(buildWorkspacePath("test", workspaceId));
+  }, [navigate, workspaceId]);
   const saveFeedback = useCallback(
     async (
       messageRefId: string,

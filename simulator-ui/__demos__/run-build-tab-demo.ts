@@ -38,8 +38,11 @@ async function main(): Promise<void> {
       async ({ demoTarget, screenshot, wait }) => {
         const sendBuildPrompt = async (
           prompt: string,
-          userBubbleText = prompt,
         ): Promise<void> => {
+          const userBubbles = demoTarget.locator(
+            '.imessage-bubble[title="user"]',
+          );
+          const userBubbleCountBefore = await userBubbles.count();
           await demoTarget.locator('[data-testid="build-chat-input"]').fill(
             prompt,
           );
@@ -50,18 +53,40 @@ async function main(): Promise<void> {
             timeout: 120_000,
           });
           await sendButton.click();
-          await demoTarget.locator('.imessage-bubble[title="user"]', {
-            hasText: userBubbleText,
-          }).waitFor({
-            timeout: 20_000,
+          await demoTarget.locator('[data-testid="build-chat-input"]').evaluate(
+            (element) => {
+              if (!(element instanceof HTMLTextAreaElement)) {
+                throw new Error("Expected build chat input textarea.");
+              }
+              return element.value;
+            },
+          ).then((value) => {
+            if (typeof value !== "string") {
+              throw new Error("Expected build chat input value.");
+            }
           });
+          const acceptedStart = Date.now();
+          while (Date.now() - acceptedStart < 20_000) {
+            const currentUserBubbleCount = await userBubbles.count();
+            const draftValue = await demoTarget.locator(
+              '[data-testid="build-chat-input"]',
+            ).evaluate((element) =>
+              element instanceof HTMLTextAreaElement ? element.value : ""
+            );
+            if (
+              currentUserBubbleCount > userBubbleCountBefore ||
+              draftValue.trim().length === 0
+            ) {
+              return;
+            }
+            await wait(250);
+          }
+          throw new Error(
+            `Timed out waiting for build prompt to be accepted: ${prompt}`,
+          );
         };
 
-        const normalizeWorkspacePath = (pathname: string): string => {
-          return pathname.startsWith("/isograph/")
-            ? pathname.slice("/isograph".length)
-            : pathname;
-        };
+        const normalizeWorkspacePath = (pathname: string): string => pathname;
         const isWorkspaceBuildPath = (pathname: string): boolean =>
           /^\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(
             normalizeWorkspacePath(pathname),
@@ -72,12 +97,8 @@ async function main(): Promise<void> {
           wait,
           (pathname) =>
             pathname === "/" ||
-            pathname === "/isograph" ||
-            pathname === "/isograph/" ||
             pathname === "/workspaces" ||
             pathname === "/workspaces/new" ||
-            pathname === "/isograph/workspaces" ||
-            pathname === "/isograph/workspaces/new" ||
             isWorkspaceBuildPath(pathname),
           5_000,
           { label: "simulator load", logEveryMs: 250 },
@@ -101,9 +122,7 @@ async function main(): Promise<void> {
             wait,
             (pathname) =>
               pathname === "/workspaces" ||
-              pathname === "/workspaces/new" ||
-              pathname === "/isograph/workspaces" ||
-              pathname === "/isograph/workspaces/new",
+              pathname === "/workspaces/new",
             10_000,
             { label: "workspaces landing", logEveryMs: 250 },
           );
@@ -158,7 +177,6 @@ async function main(): Promise<void> {
         const refreshMarker = `refresh-marker-${Date.now()}`;
         await sendBuildPrompt(
           `${updateModelPrompt} and include a single line "${refreshMarker}"`,
-          "please update the root PROMPT.md model",
         );
         await demoTarget.locator(".build-file-preview", {
           hasText: "openai/gpt-5.1-chat",
@@ -220,7 +238,7 @@ async function main(): Promise<void> {
       {
         slug: Deno.env.get("GAMBIT_DEMO_SLUG")?.trim() ||
           "gambit-build-tab-demo",
-        iframeTargetPath: "/isograph",
+        iframeTargetPath: "/",
         server: {
           cwd: serveRoot,
           command: (targetPort: number) => [

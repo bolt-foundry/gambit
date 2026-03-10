@@ -574,58 +574,12 @@ async (req: Request): Promise<Response> => {
   const legacyApiResponse = await handleLegacyApiRoutes({
     req,
     url,
-    activeWorkspaceId: deps.activeWorkspaceId,
-    workspaceApiBase: deps.workspaceApiBase,
-    workspaceStateSchemaVersion: deps.workspaceStateSchemaVersion,
-    maxFilePreviewBytes: deps.maxFilePreviewBytes,
-    getWorkspaceIdFromQuery: deps.getWorkspaceIdFromQuery,
     getWorkspaceIdFromBody: deps.getWorkspaceIdFromBody,
-    createWorkspaceSession: deps.createWorkspaceSession,
-    ensureWorkspaceSession: deps.ensureWorkspaceSession,
-    deleteSessionState: deps.deleteSessionState,
-    deleteWorkspaceRuntime: deps.deleteWorkspaceRuntime,
     logWorkspaceBotRoot: deps.logWorkspaceBotRoot,
-    activateWorkspaceDeck: deps.activateWorkspaceDeck,
-    readPrimaryDeckState: deps.readPrimaryDeckState,
-    readWorkspaceDeckStateStrict: deps.readWorkspaceDeckStateStrict,
-    resolveScenarioDeckFromState: deps.resolveScenarioDeckFromState,
-    readSessionState: deps.readSessionState,
     readSessionStateStrict: deps.readSessionStateStrict,
     persistSessionState: deps.persistSessionState,
-    appendSessionEvent: deps.appendSessionEvent,
-    isFeedbackEligibleMessageRef: deps.isFeedbackEligibleMessageRef,
-    isFeedbackEligiblePersistedTestRunMessageRef:
-      deps.isFeedbackEligiblePersistedTestRunMessageRef,
-    randomId: deps.randomId,
-    syncTestBotRunFromState: (run, state) => {
-      deps.syncTestBotRunFromState(run as TestBotRunStatus, state);
-    },
-    broadcastTestBot: (payload, workspaceId) => {
-      deps.broadcastTestBot(
-        payload as { type: "testBotStatus"; run: TestBotRunStatus },
-        workspaceId,
-      );
-    },
-    getLiveTestRunEntry: deps.getLiveTestRunEntry,
-    startWorkspaceScenarioRunForGraphql:
-      deps.startWorkspaceScenarioRunForGraphql,
-    sendWorkspaceScenarioRunForGraphql: deps.sendWorkspaceScenarioRunForGraphql,
-    stopWorkspaceScenarioRunForGraphql: deps.stopWorkspaceScenarioRunForGraphql,
-    readWorkspaceScenarioRunsForGraphql:
-      deps.readWorkspaceScenarioRunsForGraphql,
-    handleBuildProviderStatusRequest: deps.handleBuildProviderStatusRequest,
-    readCodexWorkspaceStatus: deps.readCodexWorkspaceStatus,
     normalizeBuildChatProvider: deps.normalizeBuildChatProvider,
     persistBuildChatProviderMeta: deps.persistBuildChatProviderMeta,
-    startWorkspaceBuildRun: deps.startWorkspaceBuildRun,
-    stopWorkspaceBuildRun: deps.stopWorkspaceBuildRun,
-    resetWorkspaceBuild: deps.resetWorkspaceBuild,
-    readWorkspaceBuildRunForGraphql: deps.readWorkspaceBuildRunForGraphql,
-    getLiveBuildRunEntry: deps.getLiveBuildRunEntry,
-    readWorkspaceFiles,
-    resolveBuildBotRoot: deps.resolveBuildBotRoot,
-    resolveBuildBotPath: deps.resolveBuildBotPath,
-    readPreviewText: deps.readPreviewText,
   });
   if (legacyApiResponse) return legacyApiResponse;
   if (url.pathname === "/graphql/streams") {

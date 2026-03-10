@@ -524,7 +524,7 @@ export function startWebSocketSimulator(opts: {
 
   const workspaceDeckGraphqlOperations = createWorkspaceDeckGraphqlOperations({
     activateWorkspaceDeck,
-    readWorkspaceDeckStateStrict,
+    readWorkspaceDeckState,
     getResolvedDeckPath: () => resolvedDeckPath,
     summarizeWorkspaceDeckState,
     logWorkspaceRefreshDebug,

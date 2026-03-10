@@ -103,12 +103,6 @@ type VerifyBatchView = {
   metrics: VerifyMetricsView | null;
 };
 
-function getRoutePrefix(path: string): string {
-  return path === "/isograph" || path.startsWith("/isograph/")
-    ? "/isograph"
-    : "";
-}
-
 function toBatchStatus(
   status: string | null | undefined,
 ): VerifyBatchStatus {
@@ -239,14 +233,7 @@ export const SimulatorVerifyPage = iso(`
   }
 `)(function SimulatorVerifyPage({ data }) {
   const workspaceId = data.id ?? "";
-  const { currentRoutePath, navigate } = useRouter();
-  const routePrefix = useMemo(() => getRoutePrefix(currentRoutePath), [
-    currentRoutePath,
-  ]);
-  const toPrefixedPath = useCallback(
-    (path: string) => `${routePrefix}${path}`,
-    [routePrefix],
-  );
+  const { navigate } = useRouter();
 
   const runBatchMutation = useGambitTypedMutation(
     gambitWorkspaceVerifyBatchRunCreateMutation,
@@ -552,8 +539,8 @@ export const SimulatorVerifyPage = iso(`
 
   const navigateToGradeRun = useCallback((runId: string) => {
     const gradePath = buildWorkspacePath("grade", workspaceId, { runId });
-    navigate(toPrefixedPath(gradePath));
-  }, [navigate, toPrefixedPath, workspaceId]);
+    navigate(gradePath);
+  }, [navigate, workspaceId]);
 
   return (
     <PageShell className="verify-shell">
@@ -824,11 +811,9 @@ export const SimulatorVerifyPage = iso(`
                             {uniqueRunLinks.map((runId) => (
                               <a
                                 key={runId}
-                                href={toPrefixedPath(
-                                  buildWorkspacePath("grade", workspaceId, {
-                                    runId,
-                                  }),
-                                )}
+                                href={buildWorkspacePath("grade", workspaceId, {
+                                  runId,
+                                })}
                                 onClick={(event) => {
                                   event.preventDefault();
                                   navigateToGradeRun(runId);
@@ -919,11 +904,9 @@ export const SimulatorVerifyPage = iso(`
                       {request.runId
                         ? (
                           <a
-                            href={toPrefixedPath(
-                              buildWorkspacePath("grade", workspaceId, {
-                                runId: request.runId,
-                              }),
-                            )}
+                            href={buildWorkspacePath("grade", workspaceId, {
+                              runId: request.runId,
+                            })}
                             onClick={(event) => {
                               event.preventDefault();
                               navigateToGradeRun(request.runId as string);

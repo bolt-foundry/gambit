@@ -19,10 +19,8 @@ type WorkbenchDrawerIsoProps = {
   runStatus?: WorkbenchChatRunStatus;
   chatBody?: React.ReactNode;
   chatHeaderActions?: React.ReactNode;
-  showChatHistoryToggle?: boolean;
   chatHistoryOpen?: boolean;
   chatHistoryContent?: React.ReactNode;
-  onToggleChatHistory?: () => void;
 };
 
 function toBadgeStatus(status: WorkbenchChatRunStatus): string {
@@ -61,10 +59,8 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
     runStatus = "IDLE",
     chatBody = null,
     chatHeaderActions = null,
-    showChatHistoryToggle = true,
     chatHistoryOpen = false,
     chatHistoryContent = null,
-    onToggleChatHistory,
   } = props;
   const hasChatHistory = chatHistoryContent !== null;
 
@@ -77,29 +73,6 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
           <header className="gds-accordion-header">
             <div className="gds-accordion-title">
               <div className="workbench-accordion-title">
-                {hasChatHistory && showChatHistoryToggle && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="workbench-chat-history-toggle"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onToggleChatHistory?.();
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onToggleChatHistory?.();
-                    }}
-                    aria-label={chatHistoryOpen
-                      ? "Hide chat history"
-                      : "Show chat history"}
-                  >
-                    <span className="workbench-chat-history-arrow">▶</span>
-                  </span>
-                )}
                 <span>Chat</span>
                 <Badge status={toBadgeStatus(runStatus)}>
                   {toBadgeLabel(runStatus)}

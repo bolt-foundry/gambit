@@ -49,8 +49,6 @@ export const handleUiRoutes = async (
 
   if (
     url.pathname === "/" ||
-    url.pathname === "/isograph" ||
-    url.pathname.startsWith("/isograph/") ||
     url.pathname === workspaceRouteBase ||
     url.pathname.startsWith(`${workspaceRouteBase}/`) ||
     url.pathname.startsWith("/simulate") ||
