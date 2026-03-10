@@ -21,7 +21,7 @@ Deno.test("routing matches workspace build file path params", () => {
   assertEquals(result.params.path, "scenarios/example.deck.md");
 });
 
-Deno.test("routing includes workspace build and legacy workspace paths", () => {
+Deno.test("routing includes canonical workspace paths", () => {
   assert(isographAppRoutes.has("/workspaces/:workspaceId/build"));
   assert(isographAppRoutes.has("/workspaces/:workspaceId/build/:path*"));
   assert(isographAppRoutes.has("/workspaces/:workspaceId/test"));
@@ -30,34 +30,12 @@ Deno.test("routing includes workspace build and legacy workspace paths", () => {
   assert(isographAppRoutes.has("/workspaces/:workspaceId/grade/:gradeRunId"));
   assert(isographAppRoutes.has("/workspaces/:workspaceId/verify"));
   assert(isographAppRoutes.has("/workspaces/:workspaceId"));
-  assert(isographAppRoutes.has("/isograph/workspaces/:workspaceId/build"));
-  assert(
-    isographAppRoutes.has("/isograph/workspaces/:workspaceId/build/:path*"),
-  );
-  assert(isographAppRoutes.has("/isograph/workspaces/:workspaceId/test"));
-  assert(
-    isographAppRoutes.has("/isograph/workspaces/:workspaceId/test/:testRunId"),
-  );
-  assert(isographAppRoutes.has("/isograph/workspaces/:workspaceId/grade"));
-  assert(isographAppRoutes.has("/isograph/workspaces/:workspaceId/verify"));
-  assert(
-    isographAppRoutes.has(
-      "/isograph/workspaces/:workspaceId/grade/:gradeRunId",
-    ),
-  );
-  assert(isographAppRoutes.has("/isograph/workspaces/:workspaceId"));
   const legacyResult = matchRouteWithParams(
     "/workspaces/ws-legacy",
     "/workspaces/:workspaceId",
   );
   assert(legacyResult.match);
   assertEquals(legacyResult.params.workspaceId, "ws-legacy");
-  const prefixedResult = matchRouteWithParams(
-    "/isograph/workspaces/ws-prefixed",
-    "/isograph/workspaces/:workspaceId",
-  );
-  assert(prefixedResult.match);
-  assertEquals(prefixedResult.params.workspaceId, "ws-prefixed");
 });
 
 Deno.test("routing matches workspace test route params", () => {

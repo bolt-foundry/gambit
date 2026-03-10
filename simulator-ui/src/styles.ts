@@ -1859,6 +1859,21 @@ code:not(pre *) {
 .composer-actions {
   display: flex;
   gap: 10px;
+  align-items: stretch;
+}
+.composer-action-slot {
+  display: flex;
+  min-width: 110px;
+}
+.composer-action-slot-primary {
+  justify-content: flex-end;
+}
+.composer-action-placeholder,
+.composer-action-button {
+  width: 100%;
+}
+.composer-action-placeholder {
+  visibility: hidden;
 }
 .composer-actions button {
   padding: 10px 18px;

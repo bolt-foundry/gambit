@@ -58,13 +58,13 @@ if (!windowObj.location) {
 const {
   default: Chat,
   BuildChatRows,
+  ChatView,
   bucketBuildChatDisplay,
   decodeWorkbenchMessageWithErrorContext,
   deriveBuildChatActivityState,
   encodeWorkbenchMessageWithErrorContext,
   formatElapsedDuration,
 } = await import("./Chat.tsx");
-const { ChatView } = await import("./ChatView.reference.tsx");
 const { globalStyles } = await import("./styles.ts");
 type BuildDisplayMessage = import("./utils.ts").BuildDisplayMessage;
 type BuildChatViewState = import("./Chat.tsx").BuildChatViewState;

@@ -22,14 +22,13 @@ function readText(node: ReactTestInstance): string {
   ).join("");
 }
 
-Deno.test("WorkbenchDrawerIso hides chat history toggle when flag is disabled", async () => {
+Deno.test("WorkbenchDrawerIso renders chat history content when provided", async () => {
   let renderer: TestRenderer.ReactTestRenderer | null = null;
   try {
     await act(async () => {
       renderer = TestRenderer.create(
         <WorkbenchDrawerIso
           open
-          showChatHistoryToggle={false}
           chatHistoryContent={<div>history</div>}
           chatBody={<div>chat</div>}
         />,
@@ -37,11 +36,12 @@ Deno.test("WorkbenchDrawerIso hides chat history toggle when flag is disabled", 
     });
     assert(renderer);
 
-    const toggles = renderer.root.findAll((node: ReactTestInstance) =>
+    const historyPanels = renderer.root.findAll((node: ReactTestInstance) =>
       typeof node.props.className === "string" &&
-      node.props.className.includes("workbench-chat-history-toggle")
+      node.props.className.includes("workbench-chat-history")
     );
-    assertEquals(toggles.length, 0);
+    assertEquals(historyPanels.length, 1);
+    assertEquals(readText(historyPanels[0]), "history");
   } finally {
     if (renderer) {
       await act(async () => {

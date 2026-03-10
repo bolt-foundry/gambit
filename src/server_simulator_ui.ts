@@ -341,6 +341,32 @@ export async function handleSimulatorFaviconRequest(
 }
 
 export function handleSimulatorPathRedirect(pathname: string): Response | null {
+  if (pathname === "/isograph" || pathname.startsWith("/isograph/")) {
+    const strippedPath = pathname.slice("/isograph".length);
+    const canonicalPath = strippedPath.length > 0 ? strippedPath : "/";
+    const canonicalEntrypoint = Array.from(simulatorIsographAppRoutes).find(
+      ([pattern]) =>
+        matchSimulatorRouteWithParams(canonicalPath, pattern).match,
+    )?.[1];
+    if (!canonicalEntrypoint) return null;
+
+    const globals = globalThis as typeof globalThis & {
+      __GAMBIT_CURRENT_PATH__?: unknown;
+    };
+    const previousPath = globals.__GAMBIT_CURRENT_PATH__;
+    globals.__GAMBIT_CURRENT_PATH__ = canonicalPath;
+    try {
+      const redirect = getRedirectFromEntrypoint(canonicalEntrypoint);
+      return createServerRedirectResponse(redirect?.location ?? canonicalPath);
+    } finally {
+      if (previousPath === undefined) {
+        delete globals.__GAMBIT_CURRENT_PATH__;
+      } else {
+        globals.__GAMBIT_CURRENT_PATH__ = previousPath;
+      }
+    }
+  }
+
   const matchedEntrypoint = Array.from(simulatorIsographAppRoutes).find(
     ([pattern]) => matchSimulatorRouteWithParams(pathname, pattern).match,
   )?.[1];

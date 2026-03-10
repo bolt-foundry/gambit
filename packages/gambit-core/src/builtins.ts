@@ -12,6 +12,7 @@ const DECKS_BASE_URL = new URL("../decks/", import.meta.url);
 
 const LEGACY_CARD_WARNINGS = new Set<string>();
 const LEGACY_SCHEMA_WARNINGS = new Set<string>();
+const LEGACY_SCHEMA_CONTEXT_WARNINGS = new Set<string>();
 const LEGACY_DECK_WARNINGS = new Set<string>();
 const logger = console;
 
@@ -48,6 +49,15 @@ export function resolveBuiltinSchemaPath(target: string): string | undefined {
   let relative = target.slice(SCHEMAS_PREFIX.length);
   if (!relative) {
     throw new Error(`Invalid gambit schema specifier: ${target}`);
+  }
+  if (relative.startsWith("contexts/")) {
+    if (!LEGACY_SCHEMA_CONTEXT_WARNINGS.has(target)) {
+      LEGACY_SCHEMA_CONTEXT_WARNINGS.add(target);
+      logger.warn(
+        `[gambit] "${target}" is deprecated; use gambit://schemas/graders/${relative} instead.`,
+      );
+    }
+    relative = `graders/${relative}`;
   }
   if (relative.endsWith(".ts") && !relative.endsWith(".zod.ts")) {
     if (!LEGACY_SCHEMA_WARNINGS.has(target)) {

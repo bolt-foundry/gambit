@@ -62,23 +62,7 @@ export function AppShell(props: {
   const THEME_STORAGE_KEY = "gambit-simulator-theme";
   const { Drawer } = props;
   const { currentRoutePath, navigate } = useRouter();
-  const routePrefix = useMemo(
-    () =>
-      currentRoutePath === "/isograph" ||
-        currentRoutePath.startsWith("/isograph/")
-        ? "/isograph"
-        : "",
-    [currentRoutePath],
-  );
-  const toPrefixedPath = useCallback(
-    (path: string) => `${routePrefix}${path}`,
-    [routePrefix],
-  );
-  const workspaceRoutePath = useMemo(() => {
-    if (!routePrefix) return currentRoutePath;
-    const stripped = currentRoutePath.slice(routePrefix.length);
-    return stripped.length > 0 ? stripped : "/";
-  }, [currentRoutePath, routePrefix]);
+  const workspaceRoutePath = currentRoutePath;
   const deckLabel = getDeckLabelForShell();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [workbenchOpen, setWorkbenchOpen] = useState(true);
@@ -116,7 +100,7 @@ export function AppShell(props: {
     const route = parseWorkspaceRoute(workspaceRoutePath);
     return route?.tab ?? null;
   }, [workspaceRoutePath]);
-  const buildTabLabel = routePrefix ? "Build (isograph)" : "Build";
+  const buildTabLabel = "Build";
 
   const isWorkspacesPath = useMemo(
     () =>
@@ -129,9 +113,9 @@ export function AppShell(props: {
   const workbenchVisible = workbenchOpen && canOpenWorkbench;
 
   const handleSelectWorkspace = useCallback((workspaceId: string) => {
-    navigate(toPrefixedPath(buildWorkspacePath("build", workspaceId)));
+    navigate(buildWorkspacePath("build", workspaceId));
     setDrawerOpen(false);
-  }, [navigate, toPrefixedPath]);
+  }, [navigate]);
 
   const createWorkspace = useCallback(() => {
     createWorkspaceMutation.commit(
@@ -140,11 +124,11 @@ export function AppShell(props: {
         onComplete: (result) => {
           const workspaceId = result?.workspace?.id;
           if (!workspaceId) return;
-          navigate(toPrefixedPath(buildWorkspacePath("build", workspaceId)));
+          navigate(buildWorkspacePath("build", workspaceId));
         },
       },
     );
-  }, [createWorkspaceMutation, navigate, toPrefixedPath]);
+  }, [createWorkspaceMutation, navigate]);
 
   const persistAppearance = useCallback((nextAppearance: AppearanceSetting) => {
     try {
@@ -187,12 +171,12 @@ export function AppShell(props: {
     try {
       await runDeleteWorkspaceMutation(workspaceId);
       if (workspaceId === activeWorkspaceId) {
-        navigate(toPrefixedPath("/workspaces"));
+        navigate("/workspaces");
       }
     } finally {
       setDeletingWorkspaceId(null);
     }
-  }, [activeWorkspaceId, navigate, runDeleteWorkspaceMutation, toPrefixedPath]);
+  }, [activeWorkspaceId, navigate, runDeleteWorkspaceMutation]);
 
   const deleteAllWorkspaces = useCallback(
     async (workspaceIds: Array<string>) => {
@@ -209,12 +193,12 @@ export function AppShell(props: {
             runDeleteWorkspaceMutation(workspaceId)
           ),
         );
-        navigate(toPrefixedPath("/workspaces"));
+        navigate("/workspaces");
       } finally {
         setDeletingAll(false);
       }
     },
-    [navigate, runDeleteWorkspaceMutation, toPrefixedPath],
+    [navigate, runDeleteWorkspaceMutation],
   );
 
   return (
@@ -245,7 +229,7 @@ export function AppShell(props: {
               "tab-anchor",
               isDocsPath && "tab-anchor--active",
             )}
-            onClick={() => navigate(toPrefixedPath(DOCS_PATH))}
+            onClick={() => navigate(DOCS_PATH)}
           >
             Docs
           </Button>
@@ -259,11 +243,7 @@ export function AppShell(props: {
             )}
             onClick={() => {
               if (!activeWorkspaceId) return;
-              navigate(
-                toPrefixedPath(
-                  buildWorkspacePath("build", activeWorkspaceId),
-                ),
-              );
+              navigate(buildWorkspacePath("build", activeWorkspaceId));
             }}
             disabled={!activeWorkspaceId}
           >
@@ -279,11 +259,7 @@ export function AppShell(props: {
             )}
             onClick={() => {
               if (!activeWorkspaceId) return;
-              navigate(
-                toPrefixedPath(
-                  buildWorkspacePath("test", activeWorkspaceId),
-                ),
-              );
+              navigate(buildWorkspacePath("test", activeWorkspaceId));
             }}
             disabled={!activeWorkspaceId}
           >
@@ -299,11 +275,7 @@ export function AppShell(props: {
             )}
             onClick={() => {
               if (!activeWorkspaceId) return;
-              navigate(
-                toPrefixedPath(
-                  buildWorkspacePath("grade", activeWorkspaceId),
-                ),
-              );
+              navigate(buildWorkspacePath("grade", activeWorkspaceId));
             }}
             disabled={!activeWorkspaceId}
           >
@@ -322,11 +294,7 @@ export function AppShell(props: {
               )}
               onClick={() => {
                 if (!activeWorkspaceId) return;
-                navigate(
-                  toPrefixedPath(
-                    buildWorkspacePath("verify", activeWorkspaceId),
-                  ),
-                );
+                navigate(buildWorkspacePath("verify", activeWorkspaceId));
               }}
               disabled={!activeWorkspaceId}
             >

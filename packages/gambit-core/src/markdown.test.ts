@@ -121,6 +121,46 @@ Schema deck.
   assertEquals(parsed, { status: 200 });
 });
 
+Deno.test("markdown deck resolves legacy gambit://schemas/contexts references", async () => {
+  const dir = await Deno.makeTempDir();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "legacy-context-schema.deck.md",
+    `+++
+label = "legacy-context-schema"
+contextSchema = "gambit://schemas/contexts/conversation.zod.ts"
++++
+
+Schema deck.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+
+  assert(deck.contextSchema, "expected context schema to resolve");
+  const parsed = deck.contextSchema.parse({
+    session: {
+      messages: [
+        {
+          role: "user",
+          content: "hello",
+        },
+      ],
+    },
+  });
+  assertEquals(parsed, {
+    session: {
+      messages: [
+        {
+          role: "user",
+          content: "hello",
+        },
+      ],
+    },
+  });
+});
+
 Deno.test("markdown deck resolves tool-call-aware grader context schema", async () => {
   const dir = await Deno.makeTempDir();
 

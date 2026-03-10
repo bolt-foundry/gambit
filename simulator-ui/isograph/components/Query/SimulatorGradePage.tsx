@@ -13,18 +13,6 @@ import { useGambitTypedSubscription } from "../../../src/hooks/useGambitTypedSub
 import { useRouter } from "../../../src/RouterContext.tsx";
 import GradeTabView from "../grade/GradeTabView.tsx";
 
-function getRoutePrefix(path: string): string {
-  return path === "/isograph" || path.startsWith("/isograph/")
-    ? "/isograph"
-    : "";
-}
-
-function normalizeWorkspacePath(path: string, routePrefix: string): string {
-  if (!routePrefix) return path;
-  const stripped = path.slice(routePrefix.length);
-  return stripped.length > 0 ? stripped : "/";
-}
-
 function formatRunStatus(
   status: string | null | undefined,
 ): "idle" | "running" | "completed" | "error" {
@@ -95,23 +83,13 @@ export const SimulatorGradePage = iso(`
 `)(function SimulatorGradePage({ data }) {
   const workspaceId = data.id ?? "";
   const { currentRoutePath, navigate } = useRouter();
-  const routePrefix = useMemo(() => getRoutePrefix(currentRoutePath), [
-    currentRoutePath,
-  ]);
-  const workspaceRoutePath = useMemo(
-    () => normalizeWorkspacePath(currentRoutePath, routePrefix),
-    [currentRoutePath, routePrefix],
-  );
+  const workspaceRoutePath = currentRoutePath;
   const route = useMemo(() => parseWorkspaceRoute(workspaceRoutePath), [
     workspaceRoutePath,
   ]);
   const routeGradeRunId = route?.tab === "grade" && route.gradeRunId
     ? route.gradeRunId
     : null;
-  const toPrefixedPath = useCallback(
-    (path: string) => `${routePrefix}${path}`,
-    [routePrefix],
-  );
 
   const runGradeMutation = useGambitTypedMutation(
     gambitWorkspaceGradeRunCreateMutation,
@@ -289,8 +267,8 @@ export const SimulatorGradePage = iso(`
     const nextPath = buildWorkspacePath("grade", workspaceId, {
       runId: runId ?? undefined,
     });
-    navigate(toPrefixedPath(nextPath));
-  }, [navigate, toPrefixedPath, workspaceId]);
+    navigate(nextPath);
+  }, [navigate, workspaceId]);
 
   const onRunGrader = useCallback(() => {
     if (!workspaceId || !selectedGraderId || !selectedScenarioRunId) return;
@@ -400,7 +378,7 @@ export const SimulatorGradePage = iso(`
       filteredRuns={filteredRuns}
       routeGradeRunId={routeGradeRunId}
       routeRunMissing={routeRunMissing}
-      missingRunHref={toPrefixedPath(buildWorkspacePath("grade", workspaceId))}
+      missingRunHref={buildWorkspacePath("grade", workspaceId)}
       onSelectRun={onSelectRun}
       flagByRefId={flagByRefId}
       reasonDrafts={reasonDrafts}

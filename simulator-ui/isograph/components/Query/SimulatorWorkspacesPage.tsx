@@ -25,11 +25,7 @@ export const SimulatorWorkspacesPage = iso(`
     }
   }
 `)(function SimulatorWorkspacesPage({ data }) {
-  const { currentRoutePath, navigate } = useRouter();
-  const routePrefix = currentRoutePath === "/isograph" ||
-      currentRoutePath.startsWith("/isograph/")
-    ? "/isograph"
-    : "";
+  const { navigate } = useRouter();
   const workspaces: Array<SessionMeta> = (data.gambitWorkspaces?.edges ?? [])
     .flatMap((edge) => {
       const node = edge?.node;
@@ -71,11 +67,7 @@ export const SimulatorWorkspacesPage = iso(`
                   className="gds-list-item-button"
                   style={{ width: "100%", display: "block" }}
                   onClick={() =>
-                    navigate(
-                      `${routePrefix}${
-                        buildWorkspacePath("build", workspace.id)
-                      }`,
-                    )}
+                    navigate(buildWorkspacePath("build", workspace.id))}
                 >
                   <ListItem
                     title={workspace.testBotName ??

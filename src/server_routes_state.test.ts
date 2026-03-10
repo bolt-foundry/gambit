@@ -3,10 +3,134 @@ import * as path from "@std/path";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import {
+  createBuildRun,
+  createWorkspace,
+  gql,
   modImportPath,
   readJsonLines,
   runSimulator,
 } from "./server_test_utils.ts";
+
+async function readWorkspaceBuildState(port: number, workspaceId: string) {
+  const response = await gql<{
+    workspace?: {
+      build?: {
+        workspaceId?: string;
+        runStatus?: string;
+        canSend?: boolean;
+        canStop?: boolean;
+      };
+    };
+  }>(
+    port,
+    `
+      query WorkspaceBuild($id: ID!) {
+        workspace(id: $id) {
+          build {
+            workspaceId
+            runStatus
+            canSend
+            canStop
+          }
+        }
+      }
+    `,
+    { id: workspaceId },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+  return response.data?.workspace?.build ?? null;
+}
+
+async function listWorkspaceFiles(args: {
+  port: number;
+  workspaceId: string;
+  pathPrefix?: string;
+}) {
+  const response = await gql<{
+    workspace?: {
+      files?: {
+        edges?: Array<{
+          node?: {
+            id?: string;
+            path?: string;
+            size?: number | null;
+            modifiedAt?: string | null;
+            content?: string | null;
+          };
+        }>;
+      };
+    };
+  }>(
+    args.port,
+    `
+      query WorkspaceFiles($id: ID!, $pathPrefix: WorkspaceRelativePath) {
+        workspace(id: $id) {
+          files(first: 500, pathPrefix: $pathPrefix) {
+            edges {
+              node {
+                id
+                path
+                size
+                modifiedAt
+                content
+              }
+            }
+          }
+        }
+      }
+    `,
+    {
+      id: args.workspaceId,
+      pathPrefix: args.pathPrefix ?? null,
+    },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+  return (response.data?.workspace?.files?.edges ?? [])
+    .map((edge) => edge?.node)
+    .filter((node): node is NonNullable<typeof node> => Boolean(node));
+}
+
+async function readWorkspaceFile(args: {
+  port: number;
+  workspaceId: string;
+  relativePath: string;
+}) {
+  const selectedId = `workspace-file:${args.workspaceId}:${args.relativePath}`;
+  const response = await gql<{
+    workspace?: {
+      selected?: {
+        edges?: Array<{
+          node?: {
+            path?: string;
+            content?: string | null;
+          };
+        }>;
+      };
+    };
+  }>(
+    args.port,
+    `
+      query WorkspaceFile($id: ID!, $selectedId: ID!) {
+        workspace(id: $id) {
+          selected: files(first: 1, id: $selectedId) {
+            edges {
+              node {
+                path
+                content
+              }
+            }
+          }
+        }
+      }
+    `,
+    {
+      id: args.workspaceId,
+      selectedId,
+    },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+  return response.data?.workspace?.selected?.edges?.[0]?.node ?? null;
+}
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });
@@ -55,26 +179,16 @@ leakTolerantTest(
     });
     try {
       const port = (server.addr as Deno.NetAddr).port;
-      const runId = "unsafe-root-run";
-      const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ runId, message: "" }),
+      const workspaceId = await createWorkspace(port);
+      const run = await createBuildRun({
+        port,
+        workspaceId,
+        message: "",
       });
-      const body = await res.json().catch(() => ({})) as {
-        run?: { id?: string; status?: string; error?: string };
-        error?: string;
-      };
-      // Build start now returns immediately; root-safety failures surface on run status.
-      assertEquals(res.status, 200);
-      assertEquals(body.run?.id, runId);
+      assert(run.runId.length > 0);
 
-      // Current behavior logs unsafe root failures and keeps API responsive.
-      // The run transitions via status endpoints instead of an immediate 4xx.
-      const statusRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspaces/${runId}`,
-      );
-      assertEquals(statusRes.ok, true);
+      const build = await readWorkspaceBuildState(port, workspaceId);
+      assertEquals(build?.workspaceId, workspaceId);
     } finally {
       await server.shutdown();
       await server.finished;
@@ -88,7 +202,7 @@ leakTolerantTest(
 );
 
 leakTolerantTest(
-  "build API errors are persisted to session errors sidecar",
+  "build run failures are persisted to session events",
   async () => {
     const dir = await Deno.makeTempDir();
     const sessionsDir = path.join(dir, "sessions");
@@ -117,40 +231,43 @@ leakTolerantTest(
       },
     };
 
+    const previous = Deno.env.get("GAMBIT_SIMULATOR_BUILD_BOT_ROOT");
+    const unsafeRoot = path.resolve(
+      path.dirname(path.fromFileUrl(import.meta.url)),
+      "decks",
+      "gambit-bot",
+    );
+    Deno.env.set("GAMBIT_SIMULATOR_BUILD_BOT_ROOT", unsafeRoot);
+
     const server = startWebSocketSimulator({
       deckPath,
       modelProvider: provider,
       port: 0,
       sessionDir: sessionsDir,
     });
-    const port = (server.addr as Deno.NetAddr).port;
+    try {
+      const port = (server.addr as Deno.NetAddr).port;
+      const workspaceId = await createWorkspace(port);
 
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      {
-        method: "POST",
-      },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
-    assert(workspaceId.length > 0, "missing workspaceId");
+      const run = await createBuildRun({
+        port,
+        workspaceId,
+        message: "trigger build root validation",
+      });
+      assert(run.runId.length > 0, "missing build run id");
 
-    const missingPathRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/file?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(missingPathRes.status, 400);
-    const missingPathBody = await missingPathRes.json() as { error?: string };
-    assertEquals(missingPathBody.error, "Missing path");
-
-    const errorsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-    const errors = await readJsonLines(errorsPath);
-    assert(errors.length > 0, "events.jsonl should have entries");
-
-    await server.shutdown();
-    await server.finished;
+      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
+      const events = await readJsonLines(eventsPath);
+      assert(events.length > 0, "events.jsonl should have entries");
+    } finally {
+      await server.shutdown();
+      await server.finished;
+      if (previous === undefined) {
+        Deno.env.delete("GAMBIT_SIMULATOR_BUILD_BOT_ROOT");
+      } else {
+        Deno.env.set("GAMBIT_SIMULATOR_BUILD_BOT_ROOT", previous);
+      }
+    }
   },
 );
 
@@ -189,28 +306,8 @@ leakTolerantTest(
       port: 0,
     });
     const port = (server.addr as Deno.NetAddr).port;
-
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
-    assert(workspaceId.length > 0, "missing workspaceId");
-
-    const filesRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/files?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(filesRes.ok, true);
-    const filesBody = await filesRes.json() as {
-      root?: string;
-      entries?: Array<{ path?: string }>;
-    };
-    const root = filesBody.root ?? "";
-    assert(root.length > 0, "missing bot root");
+    const workspaceId = await createWorkspace(port);
+    const root = path.dirname(deckPath);
 
     await Deno.mkdir(path.join(root, ".gambit", "nested"), { recursive: true });
     await Deno.writeTextFile(
@@ -241,16 +338,8 @@ Body
 `,
     );
 
-    const refreshedRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/files?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(refreshedRes.ok, true);
-    const refreshedBody = await refreshedRes.json() as {
-      entries?: Array<{ path?: string; label?: string }>;
-    };
-    const paths = (refreshedBody.entries ?? [])
+    const files = await listWorkspaceFiles({ port, workspaceId });
+    const paths = files
       .map((entry) => entry.path ?? "")
       .filter((value) => value.length > 0);
 
@@ -307,25 +396,8 @@ leakTolerantTest(
       port: 0,
     });
     const port = (server.addr as Deno.NetAddr).port;
-
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
-    assert(workspaceId.length > 0, "missing workspaceId");
-
-    const firstFilesRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/files?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(firstFilesRes.ok, true);
-    const firstFilesBody = await firstFilesRes.json() as { root?: string };
-    const root = firstFilesBody.root ?? "";
-    assert(root.length > 0, "missing bot root");
+    const workspaceId = await createWorkspace(port);
+    const root = path.dirname(deckPath);
 
     const scenarioDir = path.join(root, "scenarios", "scenario_a");
     await Deno.mkdir(scenarioDir, { recursive: true });
@@ -343,16 +415,8 @@ Body
     await Deno.writeTextFile(promptPath, makePrompt("Alpha"));
     await Deno.utime(promptPath, fixedTime, fixedTime);
 
-    const warmCacheRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/files?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(warmCacheRes.ok, true);
-    const warmCacheBody = await warmCacheRes.json() as {
-      entries?: Array<{ path?: string }>;
-    };
-    const warmPrompt = (warmCacheBody.entries ?? []).find((entry) =>
+    const warmFiles = await listWorkspaceFiles({ port, workspaceId });
+    const warmPrompt = warmFiles.find((entry) =>
       entry.path === "scenarios/scenario_a/PROMPT.md"
     );
     assert(Boolean(warmPrompt));
@@ -361,29 +425,19 @@ Body
     await Deno.writeTextFile(promptPath, makePrompt("Bravo"));
     await Deno.utime(promptPath, fixedTime, fixedTime);
 
-    const refreshedRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/files?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }`,
-    );
-    assertEquals(refreshedRes.ok, true);
-    const refreshedBody = await refreshedRes.json() as {
-      entries?: Array<{ path?: string }>;
-    };
-    const refreshedPrompt = (refreshedBody.entries ?? []).find((entry) =>
+    const refreshedFiles = await listWorkspaceFiles({ port, workspaceId });
+    const refreshedPrompt = refreshedFiles.find((entry) =>
       entry.path === "scenarios/scenario_a/PROMPT.md"
     );
     assert(Boolean(refreshedPrompt));
-    const readPromptRes = await fetch(
-      `http://127.0.0.1:${port}/api/build/file?workspaceId=${
-        encodeURIComponent(workspaceId)
-      }&path=${encodeURIComponent("scenarios/scenario_a/PROMPT.md")}`,
-    );
-    assertEquals(readPromptRes.ok, true);
-    const readPromptBody = await readPromptRes.json() as { contents?: string };
+    const readPromptBody = await readWorkspaceFile({
+      port,
+      workspaceId,
+      relativePath: "scenarios/scenario_a/PROMPT.md",
+    });
     assert(
-      typeof readPromptBody.contents === "string" &&
-        readPromptBody.contents.includes('label = "Bravo"'),
+      typeof readPromptBody?.content === "string" &&
+        readPromptBody.content.includes('label = "Bravo"'),
     );
 
     await server.shutdown();

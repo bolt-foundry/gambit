@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { AppIsoMinimal } from "./AppIsoMinimal.tsx";
 import { isographAppRoutes, matchRouteWithParams } from "./routing.ts";
 import { useRouter } from "./RouterContext.tsx";
@@ -8,16 +7,6 @@ export function MinimalRouterRoot() {
   const isoMatch = Array.from(isographAppRoutes).find(([pattern]) =>
     matchRouteWithParams(currentPath, pattern).match
   );
-  useEffect(() => {
-    if (!currentPath.startsWith("/isograph")) return;
-    if (!isoMatch) return;
-    const [pattern] = isoMatch;
-    // deno-lint-ignore no-console
-    console.log("[gambit:isograph] route matched", {
-      currentPath,
-      pattern,
-    });
-  }, [currentPath, isoMatch]);
 
   if (isoMatch) {
     const [pattern, entrypoint] = isoMatch;
@@ -25,9 +14,7 @@ export function MinimalRouterRoot() {
     const rawParams = { ...match.params, ...queryParams };
     const isWorkspaceShellRoute =
       pattern.startsWith("/workspaces/:workspaceId/build") ||
-      pattern.startsWith("/workspaces/:workspaceId/test") ||
-      pattern.startsWith("/isograph/workspaces/:workspaceId/build") ||
-      pattern.startsWith("/isograph/workspaces/:workspaceId/test");
+      pattern.startsWith("/workspaces/:workspaceId/test");
     const params = isWorkspaceShellRoute &&
         typeof rawParams.workspaceId === "string" &&
         rawParams.workspaceId.length > 0

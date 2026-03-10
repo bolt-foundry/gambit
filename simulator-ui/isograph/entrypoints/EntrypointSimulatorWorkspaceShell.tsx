@@ -14,18 +14,9 @@ function isThenable(value: unknown): value is Promise<unknown> {
     typeof (value as { then?: unknown }).then === "function";
 }
 
-function toWorkspaceRoutePath(path: string): string {
-  if (path === "/isograph" || path.startsWith("/isograph/")) {
-    const stripped = path.slice("/isograph".length);
-    return stripped.length > 0 ? stripped : "/";
-  }
-  return path;
-}
-
 function WorkspaceMainPane(props: { workspaceId: string }) {
   const { currentRoutePath } = useRouter();
-  const workspaceRoutePath = toWorkspaceRoutePath(currentRoutePath);
-  const route = parseWorkspaceRoute(workspaceRoutePath);
+  const route = parseWorkspaceRoute(currentRoutePath);
   const tab = route?.tab === "test" || route?.tab === "grade" ||
       route?.tab === "verify"
     ? route.tab

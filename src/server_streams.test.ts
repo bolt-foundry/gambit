@@ -8,10 +8,133 @@ import type {
   SavedState,
 } from "@bolt-foundry/gambit-core";
 import {
+  createBuildRun,
+  createWorkspace,
+  gql,
   modImportPath,
   readDurableStreamEvents,
   runSimulator,
+  sendScenarioSession,
+  startScenarioSession,
 } from "./server_test_utils.ts";
+async function listScenarioDecks(port: number, workspaceId: string) {
+  const response = await gql<{
+    workspace?: {
+      scenarioDecks?: Array<{
+        id?: string;
+        path?: string;
+        maxTurns?: number | null;
+      }>;
+    };
+  }>(
+    port,
+    `
+      query ScenarioDecks($id: ID!) {
+        workspace(id: $id) {
+          scenarioDecks {
+            id
+            path
+            maxTurns
+          }
+        }
+      }
+    `,
+    { id: workspaceId },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+  return response.data?.workspace?.scenarioDecks ?? [];
+}
+
+async function stopScenarioSession(args: {
+  port: number;
+  workspaceId: string;
+  sessionId: string;
+}): Promise<void> {
+  const response = await gql<{
+    workspaceConversationSessionStop?: {
+      session?: { sessionId?: string };
+    };
+  }>(
+    args.port,
+    `
+      mutation StopScenario($input: WorkspaceConversationSessionStopInput!) {
+        workspaceConversationSessionStop(input: $input) {
+          session {
+            sessionId
+          }
+        }
+      }
+    `,
+    {
+      input: {
+        workspaceId: args.workspaceId,
+        kind: "scenario",
+        sessionId: args.sessionId,
+      },
+    },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+  assertEquals(
+    response.data?.workspaceConversationSessionStop?.session?.sessionId,
+    args.sessionId,
+  );
+}
+
+async function resetWorkspaceBuild(
+  port: number,
+  workspaceId: string,
+): Promise<void> {
+  const response = await gql<{
+    simulatorResetWorkspace?: {
+      workspace?: { id?: string };
+      build?: { runStatus?: string };
+    };
+  }>(
+    port,
+    `
+      mutation ResetWorkspace($input: SimulatorResetWorkspaceInput!) {
+        simulatorResetWorkspace(input: $input) {
+          workspace { id }
+          build { runStatus }
+        }
+      }
+    `,
+    {
+      input: { workspaceId },
+    },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+}
+
+async function stopBuildRun(args: {
+  port: number;
+  workspaceId: string;
+  runId: string;
+}): Promise<void> {
+  const response = await gql<{
+    simulatorStopRun?: {
+      workspace?: { id?: string };
+      run?: { id?: string; status?: string };
+    };
+  }>(
+    args.port,
+    `
+      mutation StopBuild($input: SimulatorStopRunInput!) {
+        simulatorStopRun(input: $input) {
+          workspace { id }
+          run { id status }
+        }
+      }
+    `,
+    {
+      input: {
+        workspaceId: args.workspaceId,
+        runId: args.runId,
+      },
+    },
+  );
+  assertEquals(Array.isArray(response.errors), false);
+}
 
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
@@ -370,49 +493,19 @@ leakTolerantTest(
     const portB = (serverB.addr as Deno.NetAddr).port;
 
     try {
-      const workspaceRes = await fetch(
-        `http://127.0.0.1:${portA}/api/workspace/new`,
-        {
-          method: "POST",
-        },
-      );
-      assertEquals(workspaceRes.ok, true);
-      const workspaceBody = await workspaceRes.json() as {
-        workspaceId?: string;
-      };
-      const workspaceId = workspaceBody.workspaceId ?? "";
-      assert(workspaceId.length > 0);
+      const workspaceId = await createWorkspace(portA);
+      const warmupWorkspaceId = await createWorkspace(portB);
+      const warmupDecks = await listScenarioDecks(portB, warmupWorkspaceId);
+      assertEquals(warmupDecks.length, 1);
+      assertEquals(warmupDecks[0]?.id, "b-scenario");
+      assertEquals(warmupDecks[0]?.path, b.scenarioDeckPath);
 
-      // Ensure server B loads its own deck registry before server A resolves A's scenario path.
-      const warmupRes = await fetch(`http://127.0.0.1:${portB}/api/test`);
-      assertEquals(warmupRes.ok, true);
-      const warmupBody = await warmupRes.json() as {
-        testDecks?: Array<{ id?: string; path?: string }>;
-      };
-      assertEquals(warmupBody.testDecks?.length, 1);
-      assertEquals(warmupBody.testDecks?.[0]?.id, "b-scenario");
-      assertEquals(warmupBody.testDecks?.[0]?.path, b.scenarioDeckPath);
-
-      const runRes = await fetch(`http://127.0.0.1:${portA}/api/test/run`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          botDeckPath: a.scenarioDeckPath,
-          maxTurns: 1,
-        }),
+      const started = await startScenarioSession({
+        port: portA,
+        workspaceId,
+        scenarioDeckId: "a-scenario",
       });
-      const runBody = await runRes.json().catch(() => ({})) as {
-        error?: string;
-        run?: { id?: string };
-      };
-      assert(
-        runRes.ok,
-        `scenario run failed with cross-instance bleed: status=${runRes.status} error=${
-          runBody.error ?? "unknown"
-        }`,
-      );
-      assert((runBody.run?.id ?? "").length > 0);
+      assert(started.runId.length > 0);
     } finally {
       await serverA.shutdown();
       await serverA.finished;
@@ -500,62 +593,42 @@ leakTolerantTest(
     const port = (server.addr as Deno.NetAddr).port;
 
     try {
-      const workspaceRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspace/new`,
-        { method: "POST" },
-      );
-      assertEquals(workspaceRes.ok, true);
-      const workspaceBody = await workspaceRes.json() as {
-        workspaceId?: string;
-      };
-      const workspaceId = workspaceBody.workspaceId ?? "";
-      assert(workspaceId.length > 0);
-
-      const listRes = await fetch(
-        `http://127.0.0.1:${port}/api/test?workspaceId=${
-          encodeURIComponent(workspaceId)
-        }`,
-      );
-      assertEquals(listRes.ok, true);
-      const listBody = await listRes.json() as {
-        testDecks?: Array<{ id?: string; maxTurns?: number }>;
-      };
-      const lowDeck = listBody.testDecks?.find((deck) =>
-        deck.id === "low-max-turns"
-      );
-      const highDeck = listBody.testDecks?.find((deck) =>
-        deck.id === "high-max-turns"
-      );
+      const workspaceId = await createWorkspace(port);
+      const listBody = await listScenarioDecks(port, workspaceId);
+      const lowDeck = listBody.find((deck) => deck.id === "low-max-turns");
+      const highDeck = listBody.find((deck) => deck.id === "high-max-turns");
       assertEquals(lowDeck?.maxTurns, 1);
       assertEquals(highDeck?.maxTurns, 200);
 
-      const lowRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          botDeckPath: lowDeckPath,
-        }),
+      const lowRun = await startScenarioSession({
+        port,
+        workspaceId,
+        scenarioDeckId: "low-max-turns",
       });
-      assertEquals(lowRunRes.ok, true);
-      const lowRunBody = await lowRunRes.json() as {
-        run?: { maxTurns?: number };
+      const lowStatusRes = await fetch(
+        `http://127.0.0.1:${port}/api/workspaces/${
+          encodeURIComponent(workspaceId)
+        }/test/${encodeURIComponent(lowRun.runId)}`,
+      );
+      const lowRunBody = await lowStatusRes.json() as {
+        test?: { run?: { maxTurns?: number } };
       };
-      assertEquals(lowRunBody.run?.maxTurns, 1);
+      assertEquals(lowRunBody.test?.run?.maxTurns, 1);
 
-      const highRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          botDeckPath: highDeckPath,
-        }),
+      const highRun = await startScenarioSession({
+        port,
+        workspaceId,
+        scenarioDeckId: "high-max-turns",
       });
-      assertEquals(highRunRes.ok, true);
-      const highRunBody = await highRunRes.json() as {
-        run?: { maxTurns?: number };
+      const highStatusRes = await fetch(
+        `http://127.0.0.1:${port}/api/workspaces/${
+          encodeURIComponent(workspaceId)
+        }/test/${encodeURIComponent(highRun.runId)}`,
+      );
+      const highRunBody = await highStatusRes.json() as {
+        test?: { run?: { maxTurns?: number } };
       };
-      assertEquals(highRunBody.run?.maxTurns, 200);
+      assertEquals(highRunBody.test?.run?.maxTurns, 200);
     } finally {
       await server.shutdown();
       await server.finished;
@@ -621,37 +694,13 @@ leakTolerantTest(
     const port = (server.addr as Deno.NetAddr).port;
 
     try {
-      const workspaceRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspace/new`,
-        { method: "POST" },
-      );
-      assertEquals(workspaceRes.ok, true);
-      const workspaceBody = await workspaceRes.json() as {
-        workspaceId?: string;
-      };
-      const workspaceId = workspaceBody.workspaceId ?? "";
-      assert(workspaceId.length > 0);
-
-      const runRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          botDeckPath: scenarioDeckPath,
-          maxTurns: 1,
-        }),
+      const workspaceId = await createWorkspace(port);
+      const started = await startScenarioSession({
+        port,
+        workspaceId,
+        scenarioDeckId: "worker-scenario",
       });
-      const runBody = await runRes.json().catch(() => ({})) as {
-        error?: string;
-        run?: { id?: string };
-      };
-      assert(
-        runRes.ok,
-        `scenario run failed to start: status=${runRes.status} error=${
-          runBody.error ?? "unknown"
-        }`,
-      );
-      const runId = runBody.run?.id ?? "";
+      const runId = started.runId;
       assert(runId.length > 0);
 
       const terminal = await waitForTestRunTerminalStatus(
@@ -710,23 +759,19 @@ leakTolerantTest("build bot endpoint streams status and runs", async () => {
   assert(html.includes("__GAMBIT_VERIFY_TAB_ENABLED__"));
   assert(/__GAMBIT_VERIFY_TAB_ENABLED__\s*=\s*true/.test(html));
 
-  const runId = "test-build-run";
-  const res = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ runId, message: "" }),
+  const workspaceId = await createWorkspace(port);
+  await createBuildRun({
+    port,
+    workspaceId,
+    message: "",
   });
-  const body = await res.json().catch(() => ({})) as {
-    run?: { id?: string; status?: string };
-    error?: string;
-  };
-  assertEquals(res.ok, true);
-  assertEquals(body.run?.id, runId);
 
   let status: unknown = null;
   for (let i = 0; i < 20; i += 1) {
     const sres = await fetch(
-      `http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(runId)}`,
+      `http://127.0.0.1:${port}/api/workspaces/${
+        encodeURIComponent(workspaceId)
+      }`,
     );
     const sb = await sres.json().catch(() => ({})) as {
       build?: {
@@ -793,13 +838,7 @@ leakTolerantTest(
     });
     const workspaceId = runResult.workspaceId!;
 
-    const buildRes = await fetch(`http://127.0.0.1:${port}/api/build/reset`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId }),
-    });
-    assertEquals(buildRes.ok, true);
-    await buildRes.text();
+    await resetWorkspaceBuild(port, workspaceId);
 
     let workspaceEvents = await readDurableStreamEvents(
       port,
@@ -911,37 +950,15 @@ leakTolerantTest("calibrate run API endpoint is unavailable", async () => {
   });
   const port = (server.addr as Deno.NetAddr).port;
 
-  const workspaceRes = await fetch(
-    `http://127.0.0.1:${port}/api/workspace/new`,
-    {
-      method: "POST",
-    },
-  );
-  assertEquals(workspaceRes.ok, true);
-  const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-  const workspaceId = workspaceBody.workspaceId ?? "";
+  const workspaceId = await createWorkspace(port);
   assert(workspaceId.length > 0);
 
-  const scenarioRunRes = await fetch(`http://127.0.0.1:${port}/api/test/run`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      workspaceId,
-      botDeckPath: scenarioDeckPath,
-      maxTurns: 1,
-    }),
+  const started = await startScenarioSession({
+    port,
+    workspaceId,
+    scenarioDeckId: "turn-scenario",
   });
-  const scenarioRunBody = await scenarioRunRes.json().catch(() => ({})) as {
-    error?: string;
-    run?: { id?: string };
-  };
-  assert(
-    scenarioRunRes.ok,
-    `scenario run failed: status=${scenarioRunRes.status} error=${
-      scenarioRunBody.error ?? "unknown"
-    }`,
-  );
-  const scenarioRunId = scenarioRunBody.run?.id ?? "";
+  const scenarioRunId = started.runId;
   assert(scenarioRunId.length > 0);
 
   const gradeRes = await fetch(`http://127.0.0.1:${port}/api/calibrate/run`, {
@@ -1037,15 +1054,7 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      {
-        method: "POST",
-      },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
+    const workspaceId = await createWorkspace(port);
     assert(workspaceId.length > 0);
 
     const runRequests = Array.from(
@@ -1110,34 +1119,23 @@ leakTolerantTest("test stop aborts in-flight runtime execution", async () => {
   });
   const port = (server.addr as Deno.NetAddr).port;
 
-  const startRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ runId: "stop-run", message: "hello" }),
+  const workspaceId = await createWorkspace(port);
+  const started = await startScenarioSession({
+    port,
+    workspaceId,
+    sessionId: "stop-run",
   });
-  assertEquals(startRes.ok, true);
-  const startBody = await startRes.json() as {
-    run?: { id?: string; workspaceId?: string };
-  };
-  const runId = startBody.run?.id ?? "";
-  const workspaceId = startBody.run?.workspaceId ?? "";
+  const runId = started.runId;
   assert(runId.length > 0);
   assert(workspaceId.length > 0);
 
-  const stopRes = await fetch(`http://127.0.0.1:${port}/api/test/stop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ runId }),
+  await sendScenarioSession({
+    port,
+    workspaceId,
+    sessionId: runId,
+    message: "hello",
   });
-  assertEquals(stopRes.ok, true);
-  const stopBody = await stopRes.json() as {
-    stopped?: boolean;
-    run?: { status?: string };
-  };
-  assertEquals(stopBody.stopped, true);
-  assert(
-    stopBody.run?.status === "running" || stopBody.run?.status === "canceled",
-  );
+  await stopScenarioSession({ port, workspaceId, sessionId: runId });
   const terminal = await waitForTestRunTerminalStatus(port, workspaceId, runId);
   assertEquals(terminal.status, "canceled");
 
@@ -1187,27 +1185,15 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
+    const workspaceId = await createWorkspace(port);
     assert(workspaceId.length > 0, "missing workspaceId");
 
-    const startRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        message: "",
-        stream: false,
-      }),
+    const started = await startScenarioSession({
+      port,
+      workspaceId,
+      message: "",
     });
-    assertEquals(startRes.ok, true);
-    const startBody = await startRes.json() as { run?: { id?: string } };
-    const runId = startBody.run?.id ?? "";
+    const runId = started.runId;
     assert(runId.length > 0, "missing runId");
 
     const deadline = Date.now() + 1500;
@@ -1290,42 +1276,23 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
+    const workspaceId = await createWorkspace(port);
     assert(workspaceId.length > 0);
 
-    const startRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        message: "",
-      }),
+    const started = await startScenarioSession({
+      port,
+      workspaceId,
+      message: "",
     });
-    assertEquals(startRes.ok, true);
-    const startBody = await startRes.json() as { run?: { id?: string } };
-    const runId = startBody.run?.id ?? "";
+    const runId = started.runId;
     assert(runId.length > 0);
 
-    const firstScenarioSendRes = await fetch(
-      `http://127.0.0.1:${port}/api/test/message`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          runId,
-          message: "scenario one",
-        }),
-      },
-    );
-    assertEquals(firstScenarioSendRes.ok, true);
-    await firstScenarioSendRes.body?.cancel();
+    await sendScenarioSession({
+      port,
+      workspaceId,
+      sessionId: runId,
+      message: "scenario one",
+    });
     await waitForTestRunTerminalStatus(port, workspaceId, runId);
 
     const buildSendRes = await fetch(`http://127.0.0.1:${port}/graphql`, {
@@ -1363,20 +1330,12 @@ leakTolerantTest(
     );
     await waitForWorkspaceStatus(port, workspaceId, "completed", 3000);
 
-    const secondScenarioSendRes = await fetch(
-      `http://127.0.0.1:${port}/api/test/message`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId,
-          runId,
-          message: "scenario two",
-        }),
-      },
-    );
-    assertEquals(secondScenarioSendRes.ok, true);
-    await secondScenarioSendRes.body?.cancel();
+    await sendScenarioSession({
+      port,
+      workspaceId,
+      sessionId: runId,
+      message: "scenario two",
+    });
     await waitForTestRunTerminalStatus(port, workspaceId, runId);
 
     const runRes = await fetch(
@@ -1450,27 +1409,15 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const workspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceRes.ok, true);
-    const workspaceBody = await workspaceRes.json() as { workspaceId?: string };
-    const workspaceId = workspaceBody.workspaceId ?? "";
+    const workspaceId = await createWorkspace(port);
     assert(workspaceId.length > 0, "missing workspaceId");
 
-    const firstRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        runId: "run-old",
-        message: "hello",
-        stream: false,
-      }),
+    await startScenarioSession({
+      port,
+      workspaceId,
+      sessionId: "run-old",
+      message: "hello",
     });
-    assertEquals(firstRes.ok, true);
-    await firstRes.text();
 
     const firstDeadline = Date.now() + 1500;
     while (Date.now() < firstDeadline) {
@@ -1487,19 +1434,13 @@ leakTolerantTest(
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    const secondRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        runId: "run-new",
-        message: "",
-        stream: false,
-      }),
+    const secondStarted = await startScenarioSession({
+      port,
+      workspaceId,
+      sessionId: "run-new",
+      message: "",
     });
-    assertEquals(secondRes.ok, true);
-    const secondBody = await secondRes.json() as { run?: { id?: string } };
-    assertEquals(secondBody.run?.id, "run-new");
+    assertEquals(secondStarted.runId, "run-new");
 
     const secondDeadline = Date.now() + 1500;
     let secondRunMessages: Array<{ role?: string; content?: string }> = [];
@@ -1575,44 +1516,19 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const workspaceARes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceARes.ok, true);
-    const workspaceABody = await workspaceARes.json() as {
-      workspaceId?: string;
-    };
-    const workspaceA = workspaceABody.workspaceId ?? "";
+    const workspaceA = await createWorkspace(port);
     assert(workspaceA.length > 0, "missing workspaceA");
 
-    const workspaceBRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    assertEquals(workspaceBRes.ok, true);
-    const workspaceBBody = await workspaceBRes.json() as {
-      workspaceId?: string;
-    };
-    const workspaceB = workspaceBBody.workspaceId ?? "";
+    const workspaceB = await createWorkspace(port);
     assert(workspaceB.length > 0, "missing workspaceB");
 
     const foreignRunId = "shared-run-id";
-    const foreignRes = await fetch(
-      `http://127.0.0.1:${port}/api/test/message`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: workspaceB,
-          runId: foreignRunId,
-          message: "hello from workspace B",
-          stream: false,
-        }),
-      },
-    );
-    assertEquals(foreignRes.ok, true);
-    await foreignRes.text();
+    await startScenarioSession({
+      port,
+      workspaceId: workspaceB,
+      sessionId: foreignRunId,
+      message: "hello from workspace B",
+    });
 
     const foreignDeadline = Date.now() + 1500;
     while (Date.now() < foreignDeadline) {
@@ -1629,24 +1545,13 @@ leakTolerantTest(
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
 
-    const localStartRes = await fetch(
-      `http://127.0.0.1:${port}/api/test/message`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          workspaceId: workspaceA,
-          runId: foreignRunId,
-          message: "",
-          stream: false,
-        }),
-      },
-    );
-    assertEquals(localStartRes.ok, true);
-    const localStartBody = await localStartRes.json() as {
-      run?: { id?: string };
-    };
-    assertEquals(localStartBody.run?.id, foreignRunId);
+    const localStarted = await startScenarioSession({
+      port,
+      workspaceId: workspaceA,
+      sessionId: foreignRunId,
+      message: "",
+    });
+    assertEquals(localStarted.runId, foreignRunId);
 
     const localDeadline = Date.now() + 1500;
     let localRunMessages: Array<{ role?: string; content?: string }> = [];
@@ -1724,23 +1629,14 @@ leakTolerantTest("build reset aborts in-flight runtime execution", async () => {
   });
   const port = (server.addr as Deno.NetAddr).port;
 
-  const startRes = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ runId: "build-abort", message: "hello" }),
+  const workspaceId = await createWorkspace(port);
+  await createBuildRun({
+    port,
+    workspaceId,
+    message: "hello",
   });
-  assertEquals(startRes.ok, true);
-  await startRes.text();
-  await waitForWorkspaceStatus(port, "build-abort", "running");
-
-  const resetRes = await fetch(`http://127.0.0.1:${port}/api/build/reset`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workspaceId: "build-abort" }),
-  });
-  assertEquals(resetRes.ok, true);
-  const resetBody = await resetRes.json() as { reset?: boolean };
-  assertEquals(resetBody.reset, true);
+  await waitForWorkspaceStatus(port, workspaceId, "running");
+  await resetWorkspaceBuild(port, workspaceId);
 
   await waitForAbortCount(() => abortCount, 1);
 
@@ -1851,31 +1747,21 @@ leakTolerantTest(
 
     try {
       const port = (server.addr as Deno.NetAddr).port;
-      const createRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspace/new`,
-        { method: "POST" },
-      );
-      assertEquals(createRes.status, 200);
-      const createBody = await createRes.json() as { workspaceId?: string };
-      const workspaceId = createBody.workspaceId ?? "";
+      const workspaceId = await createWorkspace(port);
       assert(workspaceId.length > 0);
 
       const scenarioRunId = "scenario-authority-run";
-      const scenarioStart = await fetch(
-        `http://127.0.0.1:${port}/api/test/message`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            workspaceId,
-            runId: scenarioRunId,
-            message: "scenario seed",
-            stream: true,
-          }),
-        },
-      );
-      assertEquals(scenarioStart.status, 200);
-      await scenarioStart.text();
+      await startScenarioSession({
+        port,
+        workspaceId,
+        sessionId: scenarioRunId,
+      });
+      await sendScenarioSession({
+        port,
+        workspaceId,
+        sessionId: scenarioRunId,
+        message: "scenario seed",
+      });
       const scenarioTerminal = await waitForTestRunTerminalStatus(
         port,
         workspaceId,
@@ -1943,22 +1829,12 @@ leakTolerantTest(
       }, 5_000);
       const beforeBuild = readSummary("build-not-started");
 
-      const buildStart = await fetch(
-        `http://127.0.0.1:${port}/api/build/message`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            workspaceId,
-            message: "build seed",
-          }),
-        },
-      );
-      assertEquals(buildStart.status, 200);
-      const buildBody = await buildStart.json() as {
-        run?: { id?: string };
-      };
-      const buildRunId = buildBody.run?.id ?? "";
+      const buildBody = await createBuildRun({
+        port,
+        workspaceId,
+        message: "build seed",
+      });
+      const buildRunId = buildBody.runId;
       assert(buildRunId.length > 0);
 
       await waitForWorkspaceStatus(port, workspaceId, "completed", 5_000);
@@ -2061,29 +1937,22 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const createWorkspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    const createWorkspaceBody = await createWorkspaceRes.json() as {
-      workspaceId?: string;
-    };
-    const workspaceId = createWorkspaceBody.workspaceId ?? "";
+    const workspaceId = await createWorkspace(port);
     assert(workspaceId.length > 0, "workspace id required");
 
     const runId = "test-circular";
-    const startRes = await fetch(`http://127.0.0.1:${port}/api/test/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        workspaceId,
-        runId,
-        message: "hello",
-        stream: true,
-      }),
+    const started = await startScenarioSession({
+      port,
+      workspaceId,
+      sessionId: runId,
     });
-    assertEquals(startRes.ok, true);
-    await startRes.text();
+    assertEquals(started.runId, runId);
+    await sendScenarioSession({
+      port,
+      workspaceId,
+      sessionId: runId,
+      message: "hello",
+    });
 
     const terminal = await waitForTestRunTerminalStatus(
       port,
@@ -2150,31 +2019,17 @@ leakTolerantTest("build stop aborts in-flight runtime execution", async () => {
   });
   const port = (server.addr as Deno.NetAddr).port;
 
-  const startRes = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ runId: "build-stop", message: "hello" }),
+  const workspaceId = await createWorkspace(port);
+  const build = await createBuildRun({
+    port,
+    workspaceId,
+    message: "hello",
   });
-  assertEquals(startRes.ok, true);
-  const startBody = await startRes.json() as {
-    run?: { id?: string; workspaceId?: string };
-  };
-  const runId = startBody.run?.id ?? "";
-  const workspaceId = startBody.run?.workspaceId ?? runId;
+  const runId = build.runId;
   assert(runId.length > 0);
   await waitForWorkspaceStatus(port, workspaceId, "running");
 
-  const stopRes = await fetch(`http://127.0.0.1:${port}/api/build/stop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workspaceId }),
-  });
-  assertEquals(stopRes.ok, true);
-  const stopBody = await stopRes.json() as {
-    stopped?: boolean;
-    run?: { status?: string };
-  };
-  assertEquals(stopBody.stopped, true);
+  await stopBuildRun({ port, workspaceId, runId });
   await waitForWorkspaceStatus(port, workspaceId, "canceled", 3000);
 
   await waitForAbortCount(() => abortCount, 1);

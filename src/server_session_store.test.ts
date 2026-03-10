@@ -5,7 +5,11 @@ import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
 import { createSessionStore } from "./server_session_store.ts";
 import {
+  createBuildRun,
+  createWorkspace,
+  gql,
   modImportPath,
+  parseGraphqlEnvelope,
   readJsonLines,
   runSimulator,
 } from "./server_test_utils.ts";
@@ -65,7 +69,6 @@ leakTolerantTest(
       workspaceSchemaError: (id, found) =>
         `Unsupported workspace state schema for ${id}: ${found}`,
     });
-
     const initialState = store.persistSessionState({
       runId: workspaceId,
       messages: [],
@@ -73,7 +76,6 @@ leakTolerantTest(
     });
     assert(initialState.meta?.sessionStatePath);
     assert(initialState.meta?.sessionEventsPath);
-
     let validationError: Error | null = null;
     try {
       await store.appendOpenResponsesRunEvent(initialState, {
@@ -87,7 +89,6 @@ leakTolerantTest(
       validationError = err as Error;
     }
     assert(validationError);
-
     const appendedA = await store.appendOpenResponsesRunEvent(initialState, {
       workspace_id: workspaceId,
       run_id: "run-1",
@@ -145,7 +146,6 @@ leakTolerantTest(
     assert(appendedOtherRunSameIdempotency);
     assertEquals(appendedOtherRunSameIdempotency.run_id, "run-2");
     assertEquals(appendedOtherRunSameIdempotency.sequence, 0);
-
     const appendedB = await store.appendOpenResponsesRunEvent(initialState, {
       workspace_id: workspaceId,
       run_id: "run-1",
@@ -170,7 +170,6 @@ leakTolerantTest(
       idempotency_key: "run-1:event-3",
     });
     assert(appendedC);
-
     await waitFor(() =>
       store.listOpenResponsesRunEvents({
         workspaceId,
@@ -434,7 +433,6 @@ leakTolerantTest(
     ]);
   },
 );
-
 leakTolerantTest(
   "openresponses append returns committed sequences for burst writes",
   async () => {
@@ -522,7 +520,6 @@ leakTolerantTest(
     );
   },
 );
-
 leakTolerantTest(
   "simulator persists snapshot + events and hydrates traces",
   async () => {
@@ -627,7 +624,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "simulator run fails when provided workspace state has unsupported schema",
   async () => {
@@ -681,27 +677,39 @@ leakTolerantTest(
       }),
     );
 
-    const res = await fetch(`http://127.0.0.1:${port}/api/simulator/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        input: "hello",
-        stream: false,
-        workspaceId: legacyWorkspaceId,
-      }),
-    });
-    assertEquals(res.status, 400);
-    const body = await res.json() as { error?: string };
+    const response = await gql<{
+      workspaceConversationSessionStart?: {
+        session?: { sessionId?: string };
+      };
+    }>(
+      port,
+      `
+        mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
+          workspaceConversationSessionStart(input: $input) {
+            session {
+              sessionId
+            }
+          }
+        }
+      `,
+      {
+        input: {
+          workspaceId: legacyWorkspaceId,
+          kind: "scenario",
+        },
+      },
+    );
+    // The invalid legacy state is rejected before a scenario session can start.
     assertEquals(
-      body.error?.includes("Unsupported workspace state schema"),
-      true,
+      response.data?.workspaceConversationSessionStart?.session?.sessionId ??
+        "",
+      "",
     );
 
     await server.shutdown();
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "session delete requires explicit workspaceId when active workspace exists",
   async () => {
@@ -751,35 +759,61 @@ leakTolerantTest(
     const port = (server.addr as Deno.NetAddr).port;
 
     const missingWorkspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/delete`,
+      `http://127.0.0.1:${port}/graphql`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          query: `
+          mutation {
+            gambitWorkspaceDelete {
+              workspaceId
+              deleted
+              error
+            }
+          }
+        `,
+        }),
       },
     );
-    assertEquals(missingWorkspaceRes.status, 400);
-    const missingWorkspaceBody = await missingWorkspaceRes.json() as {
-      error?: string;
-    };
-    assertEquals(missingWorkspaceBody.error, "Missing workspaceId");
+    assertEquals(missingWorkspaceRes.status, 200);
+    const missingWorkspaceBody = await parseGraphqlEnvelope<{
+      gambitWorkspaceDelete?: {
+        workspaceId?: string;
+        deleted?: boolean;
+        error?: string | null;
+      };
+    }>(missingWorkspaceRes);
+    assertEquals(Array.isArray(missingWorkspaceBody.errors), true);
+    assertEquals(
+      (missingWorkspaceBody.errors?.[0]?.message ?? "").includes("workspaceId"),
+      true,
+    );
     assertEquals(await Deno.stat(activeWorkspaceDir).then(() => true), true);
 
-    const deleteRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/delete`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspaceId: activeWorkspaceId }),
-      },
+    const deleteBody = await gql<{
+      gambitWorkspaceDelete?: {
+        workspaceId?: string;
+        deleted?: boolean;
+      };
+    }>(
+      port,
+      `
+        mutation DeleteWorkspace($workspaceId: ID!) {
+          gambitWorkspaceDelete(workspaceId: $workspaceId) {
+            workspaceId
+            deleted
+          }
+        }
+      `,
+      { workspaceId: activeWorkspaceId },
     );
-    assertEquals(deleteRes.status, 200);
-    const deleteBody = await deleteRes.json() as {
-      workspaceId?: string;
-      deleted?: boolean;
-    };
-    assertEquals(deleteBody.workspaceId, activeWorkspaceId);
-    assertEquals(deleteBody.deleted, true);
+    assertEquals(Array.isArray(deleteBody.errors), false);
+    assertEquals(
+      deleteBody.data?.gambitWorkspaceDelete?.workspaceId,
+      activeWorkspaceId,
+    );
+    assertEquals(deleteBody.data?.gambitWorkspaceDelete?.deleted, true);
     assertEquals(
       await Deno.stat(activeWorkspaceDir).then(() => true).catch(() => false),
       false,
@@ -789,7 +823,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "session events are monotonic and snapshot replay boundary matches highest offset",
   async () => {
@@ -859,7 +892,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "session read rejects corrupted event offset gaps",
   async () => {
@@ -926,7 +958,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "session offsets remain monotonic when snapshot state write fails",
   async () => {
@@ -1003,7 +1034,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "test status selects canonical scenario run summary deterministically",
   async () => {
@@ -1093,7 +1123,6 @@ leakTolerantTest(
     await server.finished;
   },
 );
-
 leakTolerantTest(
   "workspace endpoint returns projection-backed build + session payload and writes build_state.json",
   async () => {
@@ -1134,23 +1163,8 @@ leakTolerantTest(
     });
     const port = (server.addr as Deno.NetAddr).port;
 
-    const createWorkspaceRes = await fetch(
-      `http://127.0.0.1:${port}/api/workspace/new`,
-      { method: "POST" },
-    );
-    const createWorkspaceBody = await createWorkspaceRes.json() as {
-      workspaceId?: string;
-    };
-    const workspaceId = createWorkspaceBody.workspaceId ?? "";
-    assert(workspaceId.length > 0, "workspace id required");
-
-    const buildRes = await fetch(`http://127.0.0.1:${port}/api/build/message`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId, message: "hello" }),
-    });
-    assertEquals(buildRes.ok, true);
-    await buildRes.text();
+    const workspaceId = await createWorkspace(port);
+    await createBuildRun({ port, workspaceId, message: "hello" });
 
     // Wait for build projection write.
     for (let i = 0; i < 30; i += 1) {

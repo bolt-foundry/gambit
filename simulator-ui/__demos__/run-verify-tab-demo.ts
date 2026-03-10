@@ -34,10 +34,10 @@ async function main(): Promise<void> {
           demoTarget,
           wait,
           (pathname) =>
-            pathname === "/isograph" ||
-            pathname === "/isograph/workspaces" ||
-            pathname === "/isograph/workspaces/new" ||
-            /^\/isograph\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(pathname),
+            pathname === "/" ||
+            pathname === "/workspaces" ||
+            pathname === "/workspaces/new" ||
+            /^\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(pathname),
           5_000,
           { label: "simulator load", logEveryMs: 250 },
         );
@@ -50,8 +50,7 @@ async function main(): Promise<void> {
           demoTarget,
           wait,
           (pathname) =>
-            pathname === "/isograph/workspaces" ||
-            pathname === "/isograph/workspaces/new",
+            pathname === "/workspaces" || pathname === "/workspaces/new",
           5_000,
           { label: "workspaces landing", logEveryMs: 250 },
         );
@@ -61,8 +60,7 @@ async function main(): Promise<void> {
         await waitForPath(
           demoTarget,
           wait,
-          (pathname) =>
-            /^\/isograph\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(pathname),
+          (pathname) => /^\/workspaces\/[^/]+\/build(?:\/.*)?$/.test(pathname),
           20_000,
           { label: "build tab load", logEveryMs: 250 },
         );
@@ -76,7 +74,7 @@ async function main(): Promise<void> {
           demoTarget,
           wait,
           (pathname) =>
-            /^\/isograph\/workspaces\/[^/]+\/test(?:\/[^/]+)?$/.test(pathname),
+            /^\/workspaces\/[^/]+\/test(?:\/[^/]+)?$/.test(pathname),
           10_000,
           { label: "test tab load", logEveryMs: 250 },
         );
@@ -91,8 +89,7 @@ async function main(): Promise<void> {
         await waitForPath(
           demoTarget,
           wait,
-          (pathname) =>
-            /^\/isograph\/workspaces\/[^/]+\/test\/[^/]+$/.test(pathname),
+          (pathname) => /^\/workspaces\/[^/]+\/test\/[^/]+$/.test(pathname),
           30_000,
           { label: "test run start", logEveryMs: 500 },
         );
@@ -104,8 +101,7 @@ async function main(): Promise<void> {
         await waitForPath(
           demoTarget,
           wait,
-          (pathname) =>
-            /^\/isograph\/workspaces\/[^/]+\/verify$/.test(pathname),
+          (pathname) => /^\/workspaces\/[^/]+\/verify$/.test(pathname),
           10_000,
           { label: "verify tab load", logEveryMs: 250 },
         );
@@ -195,8 +191,7 @@ async function main(): Promise<void> {
           await waitForPath(
             demoTarget,
             wait,
-            (pathname) =>
-              /^\/isograph\/workspaces\/[^/]+\/grade\/[^/]+$/.test(pathname),
+            (pathname) => /^\/workspaces\/[^/]+\/grade\/[^/]+$/.test(pathname),
             30_000,
             { label: "verify request grade deep-link", logEveryMs: 500 },
           );
@@ -206,7 +201,7 @@ async function main(): Promise<void> {
       {
         slug: Deno.env.get("GAMBIT_DEMO_SLUG")?.trim() ||
           "gambit-verify-tab-demo",
-        iframeTargetPath: "/isograph",
+        iframeTargetPath: "/",
         server: {
           cwd: serveRoot,
           command: (targetPort: number) => [

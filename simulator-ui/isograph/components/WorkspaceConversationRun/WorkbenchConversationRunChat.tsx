@@ -257,7 +257,6 @@ export const WorkbenchConversationRunChat = iso(`
   onNewChat?: () => void;
   chatHeaderActions?: ReactNode;
   chatHistoryOpen?: boolean;
-  onToggleChatHistory?: () => void;
   chatHistoryContent?: ReactNode;
 }) {
   const [chatError, setChatError] = useState<string | null>(null);
@@ -600,28 +599,51 @@ export const WorkbenchConversationRunChat = iso(`
               }}
             />
             <div className="composer-actions">
-              {isRunning && (
-                <Button
-                  variant="secondary"
-                  disabled={isBusy}
-                  data-testid={stopButtonTestId}
-                  onClick={() => {
-                    void stopMessage();
-                  }}
-                >
-                  {componentProps.isStopping ? "Stopping..." : "Stop"}
-                </Button>
-              )}
-              <Button
-                variant="primary"
-                disabled={!canSubmitMessage || isBusy || codexLoginRequired}
-                data-testid={sendButtonTestId}
-                onClick={() => {
-                  void sendMessage();
-                }}
-              >
-                {componentProps.isSending ? "Sending..." : "Send"}
-              </Button>
+              <div className="composer-action-slot composer-action-slot-secondary">
+                {isRunning
+                  ? (
+                    <Button
+                      variant="secondary"
+                      className="composer-action-button"
+                      disabled={isBusy}
+                      data-testid={stopButtonTestId}
+                      onClick={() => {
+                        void stopMessage();
+                      }}
+                    >
+                      {componentProps.isStopping ? "Stopping..." : "Stop"}
+                    </Button>
+                  )
+                  : (
+                    <span
+                      className="composer-action-placeholder"
+                      aria-hidden="true"
+                    />
+                  )}
+              </div>
+              <div className="composer-action-slot composer-action-slot-primary">
+                {!showStartOverlay
+                  ? (
+                    <Button
+                      variant="primary"
+                      className="composer-action-button"
+                      disabled={!canSubmitMessage || isBusy ||
+                        codexLoginRequired}
+                      data-testid={sendButtonTestId}
+                      onClick={() => {
+                        void sendMessage();
+                      }}
+                    >
+                      {componentProps.isSending ? "Sending..." : "Send"}
+                    </Button>
+                  )
+                  : (
+                    <span
+                      className="composer-action-placeholder"
+                      aria-hidden="true"
+                    />
+                  )}
+              </div>
             </div>
           </div>
           {resolvedError && <div className="error">{resolvedError}</div>}
@@ -635,11 +657,9 @@ export const WorkbenchConversationRunChat = iso(`
       open={componentProps.open}
       runStatus={runStatus}
       chatHeaderActions={componentProps.chatHeaderActions}
-      showChatHistoryToggle={workbenchChatTopActionsEnabled}
       chatHistoryOpen={workbenchChatTopActionsEnabled
         ? componentProps.chatHistoryOpen
         : false}
-      onToggleChatHistory={componentProps.onToggleChatHistory}
       chatHistoryContent={componentProps.chatHistoryContent}
       chatBody={chatBody}
     />

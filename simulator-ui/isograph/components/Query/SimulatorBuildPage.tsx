@@ -7,13 +7,6 @@ import { useGambitTypedSubscription } from "../../../src/hooks/useGambitTypedSub
 import Listbox, { type ListboxOption } from "../../../src/gds/Listbox.tsx";
 import type { Maybe } from "../../../../src/utility_types.ts";
 
-function getRoutePrefixFromLocation(): string {
-  const pathname = globalThis.location?.pathname ?? "";
-  return pathname === "/isograph" || pathname.startsWith("/isograph/")
-    ? "/isograph"
-    : "";
-}
-
 function decodeBuildPathFromLocation(): Maybe<string> {
   const pathname = (() => {
     if (
@@ -29,9 +22,7 @@ function decodeBuildPathFromLocation(): Maybe<string> {
       ? globals.__GAMBIT_CURRENT_PATH__
       : "/";
   })();
-  const match = pathname.match(
-    /^(?:\/isograph)?\/workspaces\/[^/]+\/build(?:\/(.*))?$/,
-  );
+  const match = pathname.match(/^\/workspaces\/[^/]+\/build(?:\/(.*))?$/);
   if (!match || !match[1]) return null;
   try {
     return decodeURIComponent(match[1]);
@@ -55,9 +46,7 @@ function decodeWorkspaceIdFromLocation(): Maybe<string> {
       ? globals.__GAMBIT_CURRENT_PATH__
       : "/";
   })();
-  const match = pathname.match(
-    /^(?:\/isograph)?\/workspaces\/([^/]+)\/build(?:\/.*)?$/,
-  );
+  const match = pathname.match(/^\/workspaces\/([^/]+)\/build(?:\/.*)?$/);
   if (!match || !match[1]) return null;
   try {
     return decodeURIComponent(match[1]);
@@ -70,7 +59,6 @@ function toBuildRoutePath(
   workspaceId: string,
   filePath: string,
 ): string {
-  const routePrefix = getRoutePrefixFromLocation();
   const encodedWorkspaceId = encodeURIComponent(workspaceId);
   const encodedFilePath = filePath
     .split("/")
@@ -78,8 +66,8 @@ function toBuildRoutePath(
     .map((segment) => encodeURIComponent(segment))
     .join("/");
   return encodedFilePath.length > 0
-    ? `${routePrefix}/workspaces/${encodedWorkspaceId}/build/${encodedFilePath}`
-    : `${routePrefix}/workspaces/${encodedWorkspaceId}/build`;
+    ? `/workspaces/${encodedWorkspaceId}/build/${encodedFilePath}`
+    : `/workspaces/${encodedWorkspaceId}/build`;
 }
 
 function navigateToBuildFile(
