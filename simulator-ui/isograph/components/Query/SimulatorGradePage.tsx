@@ -299,9 +299,10 @@ export const SimulatorGradePage = iso(`
     if (!routeGradeRunId) return;
     const routeRun = runs.find((run) => run.id === routeGradeRunId);
     if (!routeRun?.scenarioRunId) return;
-    if (routeRun.scenarioRunId === selectedScenarioRunId) return;
-    setSelectedScenarioRunId(routeRun.scenarioRunId);
-  }, [routeGradeRunId, runs, selectedScenarioRunId]);
+    setSelectedScenarioRunId((current) =>
+      current === routeRun.scenarioRunId ? current : routeRun.scenarioRunId
+    );
+  }, [routeGradeRunId, runs]);
 
   const filteredRuns = useMemo(() => {
     if (!selectedScenarioRunId) return runs;
