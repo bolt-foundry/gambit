@@ -12,7 +12,7 @@ export default function WorkbenchChatIntro(props: {
 }) {
   const title = props.title?.trim().length
     ? props.title.trim()
-    : "Start a workbench chat";
+    : "What do you want to build?";
 
   return (
     <div className="workbench-chat-start-overlay">
@@ -23,12 +23,11 @@ export default function WorkbenchChatIntro(props: {
             <span className="workbench-chat-start-title">{title}</span>
           </div>
           <p className="workbench-chat-start-copy">
-            Start a session to inspect the workspace and edit files. The
-            assistant will ask what you want to build before it starts making
-            changes.
+            Describe what you want and the build assistant will scaffold a first
+            version and then iterate on it with you.
           </p>
           <p className="workbench-chat-start-copy">
-            Example reply: "I want to build an assistant that does..."
+            Example chat: "I want to build an assistant that..."
           </p>
           {props.leadingContent
             ? (

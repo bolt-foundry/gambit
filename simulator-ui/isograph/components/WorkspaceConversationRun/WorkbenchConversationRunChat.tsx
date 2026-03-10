@@ -541,9 +541,7 @@ export const WorkbenchConversationRunChat = iso(`
             shouldAutoScrollRef.current = isNearBottom(event.currentTarget);
           }}
         >
-          {!showCodexLoginOverlay && showStartOverlay && (
-            <WorkbenchChatIntro title="Describe what you want to build" />
-          )}
+          {!showCodexLoginOverlay && showStartOverlay && <WorkbenchChatIntro />}
           {effectiveTranscriptDisplay.length === 0
             ? (
               showStartOverlay && !showCodexLoginOverlay
