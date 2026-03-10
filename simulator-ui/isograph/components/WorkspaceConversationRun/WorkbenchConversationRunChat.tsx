@@ -20,7 +20,10 @@ import Callout from "../../../src/gds/Callout.tsx";
 import CodexLoginRequiredOverlay from "../../../src/CodexLoginRequiredOverlay.tsx";
 import WorkbenchChatIntro from "../../../src/WorkbenchChatIntro.tsx";
 import WorkbenchComposerChip from "../../../src/gds/WorkbenchComposerChip.tsx";
-import type { BuildDisplayMessage } from "../../../src/utils.ts";
+import type {
+  BuildChatProvider,
+  BuildDisplayMessage,
+} from "../../../src/utils.ts";
 import {
   countTranscriptMessages,
   type OptimisticTranscriptEntry,
@@ -226,6 +229,7 @@ export const WorkbenchConversationRunChat = iso(`
   }
 `)(function WorkbenchConversationRunChat({ data }, componentProps: {
   open: boolean;
+  buildChatProvider: BuildChatProvider;
   codexAccess?: {
     model?: string;
     workspaceId?: string;
@@ -284,8 +288,18 @@ export const WorkbenchConversationRunChat = iso(`
     ? (componentProps.codexAccess.requiresLogin === true ||
       componentProps.codexAccess.loggedIn !== true)
     : false;
-  const showCodexLoginOverlay = codexLoginRequired && !codexOverlayDismissed;
-  const codexLoginCommand = "codex login";
+  const providerLabel = componentProps.buildChatProvider === "claude-code-cli"
+    ? "Claude Code"
+    : "Codex";
+  const providerLoginRequired = componentProps.buildChatProvider === "codex-cli"
+    ? codexLoginRequired
+    : false;
+  const showProviderLoginOverlay = providerLoginRequired &&
+    !codexOverlayDismissed;
+  const providerLoginCommand = componentProps.buildChatProvider ===
+      "claude-code-cli"
+    ? "claude auth login"
+    : "codex login";
   const startedAtMs = typeof data.startedAt === "string"
     ? Date.parse(data.startedAt)
     : Number.NaN;
@@ -344,8 +358,8 @@ export const WorkbenchConversationRunChat = iso(`
     message: string,
     options?: { allowEmpty?: boolean },
   ) => {
-    if (codexLoginRequired) {
-      setChatError("Codex login is required for this workspace.");
+    if (providerLoginRequired) {
+      setChatError(`${providerLabel} login is required for this workspace.`);
       return Promise.resolve();
     }
     const trimmedMessage = message.trim();
@@ -381,16 +395,17 @@ export const WorkbenchConversationRunChat = iso(`
     });
   }, [
     componentProps,
-    codexLoginRequired,
     firstOpenResponse?.id,
     optimisticTranscriptEntries,
+    providerLabel,
+    providerLoginRequired,
     runId,
     workspaceId,
   ]);
 
   const onStopRun = useCallback(() => {
-    if (codexLoginRequired) {
-      setChatError("Codex login is required for this workspace.");
+    if (providerLoginRequired) {
+      setChatError(`${providerLabel} login is required for this workspace.`);
       return Promise.resolve();
     }
     if (!workspaceId || !runId) {
@@ -420,9 +435,10 @@ export const WorkbenchConversationRunChat = iso(`
     });
   }, [
     componentProps,
-    codexLoginRequired,
     firstOpenResponse?.id,
     optimisticTranscriptEntries,
+    providerLabel,
+    providerLoginRequired,
     runId,
     workspaceId,
   ]);
@@ -437,10 +453,10 @@ export const WorkbenchConversationRunChat = iso(`
     chatDraft.trim().length === 0;
   const resolvedError = chatError ?? localError;
   const handleCopyCodexLoginCommand = useCallback(() => {
-    globalThis.navigator?.clipboard?.writeText(codexLoginCommand);
+    globalThis.navigator?.clipboard?.writeText(providerLoginCommand);
     setCopiedCodexLoginCommand(true);
     globalThis.setTimeout(() => setCopiedCodexLoginCommand(false), 1200);
-  }, []);
+  }, [providerLoginCommand]);
   const emptyStateText = isRunning
     ? "Run is active. Waiting for response..."
     : "No messages yet.";
@@ -569,18 +585,20 @@ export const WorkbenchConversationRunChat = iso(`
 
   const chatBody = (
     <div className="test-bot-sidebar flex-column gap-8 flex-1 build-chat-panel">
-      {showCodexLoginOverlay && (
+      {showProviderLoginOverlay && (
         <CodexLoginRequiredOverlay
-          codexWorkspaceLoggedIn={componentProps.codexAccess?.loggedIn === true
+          providerLabel={providerLabel}
+          providerWorkspaceLoggedIn={componentProps.codexAccess?.loggedIn ===
+              true
             ? true
             : false}
-          codexLoginCommand={codexLoginCommand}
-          copiedCodexLoginCommand={copiedCodexLoginCommand}
-          showCodexLoginRecheck={false}
-          codexLoginRecheckPending={false}
-          codexLoginStatusText={componentProps.codexAccess?.statusText ?? null}
-          codexLoginError={null}
-          onCopyCodexLoginCommand={handleCopyCodexLoginCommand}
+          loginCommand={providerLoginCommand}
+          copiedLoginCommand={copiedCodexLoginCommand}
+          showLoginRecheck={false}
+          loginRecheckPending={false}
+          loginStatusText={componentProps.codexAccess?.statusText ?? null}
+          loginError={null}
+          onCopyLoginCommand={handleCopyCodexLoginCommand}
           onDismiss={() => setCodexOverlayDismissed(true)}
         />
       )}
@@ -592,10 +610,11 @@ export const WorkbenchConversationRunChat = iso(`
             shouldAutoScrollRef.current = isNearBottom(event.currentTarget);
           }}
         >
-          {!showCodexLoginOverlay && showStartOverlay && <WorkbenchChatIntro />}
+          {!showProviderLoginOverlay && showStartOverlay &&
+            <WorkbenchChatIntro />}
           {effectiveTranscriptDisplay.length === 0
             ? (
-              showStartOverlay && !showCodexLoginOverlay
+              showStartOverlay && !showProviderLoginOverlay
                 ? null
                 : <Callout>{emptyStateText}</Callout>
             )

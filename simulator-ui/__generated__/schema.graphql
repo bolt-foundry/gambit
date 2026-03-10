@@ -247,6 +247,7 @@ type WorkspaceBuildRun implements WorkspaceConversationRun & WorkspaceRun {
 }
 
 input WorkspaceBuildRunCreateInput {
+  buildChatProvider: String
   inputItems: [OpenResponseInputItemInput!]!
   workspaceId: ID!
 }

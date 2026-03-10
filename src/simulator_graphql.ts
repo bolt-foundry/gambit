@@ -23,6 +23,7 @@ import {
   readDurableStreamEvents,
   subscribeDurableStream,
 } from "./durable_streams.ts";
+import type { BuildChatProvider } from "./server_build_chat_provider.ts";
 
 const BUILD_CHAT_DEBUG = (() => {
   const value = (Deno.env.get("GAMBIT_BUILD_CHAT_DEBUG") ?? "").toLowerCase()
@@ -563,6 +564,7 @@ export type GambitGraphqlContext = {
   createWorkspaceBuildRun?: (
     workspaceId: string,
     message: string,
+    buildChatProvider?: BuildChatProvider,
   ) => Promise<BuildRunRecord>;
   stopWorkspaceBuildRun?: (
     workspaceId: string,
@@ -3124,6 +3126,7 @@ const WorkspaceBuildRunCreateInput = builder.inputType(
   "WorkspaceBuildRunCreateInput",
   {
     fields: (t) => ({
+      buildChatProvider: t.string(),
       workspaceId: t.id({ required: true }),
       inputItems: t.field({
         required: true,
@@ -3390,6 +3393,11 @@ builder.mutationType({
         const run = await context.createWorkspaceBuildRun(
           args.input.workspaceId,
           message,
+          args.input.buildChatProvider === "claude-code-cli"
+            ? "claude-code-cli"
+            : args.input.buildChatProvider === "codex-cli"
+            ? "codex-cli"
+            : undefined,
         );
         return {
           workspace: { id: asGambitID(args.input.workspaceId) },

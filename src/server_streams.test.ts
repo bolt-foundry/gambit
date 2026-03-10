@@ -1254,8 +1254,12 @@ leakTolerantTest(
     `,
     );
 
+    const seenModels: Array<string> = [];
     const provider: ModelProvider = {
       chat(input) {
+        if (typeof input.model === "string") {
+          seenModels.push(input.model);
+        }
         const lastUser = [...input.messages].reverse().find((message) =>
           message?.role === "user"
         );
@@ -1300,8 +1304,9 @@ leakTolerantTest(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         query: `
-        mutation Build($workspaceId: ID!, $message: String!) {
+        mutation Build($workspaceId: ID!, $message: String!, $buildChatProvider: String) {
           workspaceBuildRunCreate(input: {
+            buildChatProvider: $buildChatProvider
             workspaceId: $workspaceId
             inputItems: [{ role: "user", content: $message }]
           }) {
@@ -1312,6 +1317,7 @@ leakTolerantTest(
         variables: {
           workspaceId,
           message: "workbench ping",
+          buildChatProvider: "claude-code-cli",
         },
       }),
     });
@@ -1329,6 +1335,7 @@ leakTolerantTest(
       (buildSendBody.data?.workspaceBuildRunCreate?.run?.id ?? "").length > 0,
     );
     await waitForWorkspaceStatus(port, workspaceId, "completed", 3000);
+    assertEquals(seenModels.includes("claude-code-cli/default"), true);
 
     await sendScenarioSession({
       port,
