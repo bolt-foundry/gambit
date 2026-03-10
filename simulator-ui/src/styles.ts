@@ -2400,6 +2400,55 @@ code:not(pre *) {
   font-size: 13px;
   color: var(--color-text-muted);
 }
+.workbench-chat-start-overlay {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 0 4px;
+}
+.workbench-chat-start-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workbench-chat-start-eyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+.workbench-chat-start-title {
+  display: block;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--color-text-strong);
+}
+.workbench-chat-start-copy-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.workbench-chat-start-copy {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-text-body);
+}
+.workbench-chat-start-leading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.workbench-chat-start-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 8px;
+}
 .workbench-chat-readonly-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2496,6 +2545,7 @@ code:not(pre *) {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 .workbench-chat-current .build-chat-panel {
   height: auto;

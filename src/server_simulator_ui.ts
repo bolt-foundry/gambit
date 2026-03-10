@@ -390,6 +390,10 @@ export async function simulatorReactHtml(
     "GAMBIT_SIMULATOR_BUILD_STREAM_DEBUG",
     false,
   );
+  const workbenchChatTopActionsEnabled = readEnvBoolean(
+    "GAMBIT_SIMULATOR_WORKBENCH_CHAT_TOP_ACTIONS",
+    false,
+  );
   const gambitDev = (() => {
     const raw = (Deno.env.get("GAMBIT_ENV") ?? Deno.env.get("NODE_ENV") ?? "")
       .trim()
@@ -435,6 +439,7 @@ export async function simulatorReactHtml(
         __GAMBIT_BUILD_TAB_ENABLED__?: unknown;
         __GAMBIT_VERIFY_TAB_ENABLED__?: unknown;
         __GAMBIT_CHAT_ACCORDION_ENABLED__?: unknown;
+        __GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__?: unknown;
         __GAMBIT_WORKSPACE_ID__?: unknown;
         __GAMBIT_WORKSPACE_ONBOARDING__?: unknown;
         __GAMBIT_BUILD_STREAM_DEBUG__?: unknown;
@@ -448,6 +453,8 @@ export async function simulatorReactHtml(
       const previousVerifyTabEnabled = globals.__GAMBIT_VERIFY_TAB_ENABLED__;
       const previousChatAccordionEnabled =
         globals.__GAMBIT_CHAT_ACCORDION_ENABLED__;
+      const previousWorkbenchChatTopActions =
+        globals.__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__;
       const previousWorkspaceId = globals.__GAMBIT_WORKSPACE_ID__;
       const previousWorkspaceOnboarding =
         globals.__GAMBIT_WORKSPACE_ONBOARDING__;
@@ -460,6 +467,8 @@ export async function simulatorReactHtml(
       globals.__GAMBIT_BUILD_TAB_ENABLED__ = buildTabEnabled;
       globals.__GAMBIT_VERIFY_TAB_ENABLED__ = verifyTabEnabled;
       globals.__GAMBIT_CHAT_ACCORDION_ENABLED__ = chatAccordionEnabled;
+      globals.__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__ =
+        workbenchChatTopActionsEnabled;
       globals.__GAMBIT_WORKSPACE_ID__ = workspaceId;
       globals.__GAMBIT_WORKSPACE_ONBOARDING__ = workspaceOnboarding;
       globals.__GAMBIT_BUILD_STREAM_DEBUG__ = buildStreamDebugEnabled;
@@ -514,6 +523,12 @@ export async function simulatorReactHtml(
           globals.__GAMBIT_CHAT_ACCORDION_ENABLED__ =
             previousChatAccordionEnabled;
         }
+        if (previousWorkbenchChatTopActions === undefined) {
+          delete globals.__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__;
+        } else {
+          globals.__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__ =
+            previousWorkbenchChatTopActions;
+        }
         if (previousWorkspaceId === undefined) {
           delete globals.__GAMBIT_WORKSPACE_ID__;
         } else {
@@ -565,6 +580,11 @@ ${globalStyles}
     window.__GAMBIT_CHAT_ACCORDION_ENABLED__ = ${
     JSON.stringify(
       chatAccordionEnabled,
+    )
+  };
+    window.__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__ = ${
+    JSON.stringify(
+      workbenchChatTopActionsEnabled,
     )
   };
     window.__GAMBIT_WORKSPACE_ID__ = ${JSON.stringify(workspaceId)};

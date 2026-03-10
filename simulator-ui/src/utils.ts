@@ -328,6 +328,7 @@ const gambitGlobals = globalThis as typeof globalThis & {
   __GAMBIT_WORKSPACE_ONBOARDING__?: boolean;
   __GAMBIT_WORKSPACE_ID__?: string | null;
   __GAMBIT_CHAT_ACCORDION_ENABLED__?: boolean;
+  __GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__?: boolean;
   __GAMBIT_DECK_PATH__?: string;
   __GAMBIT_DECK_LABEL__?: string | null;
   __GAMBIT_VERSION__?: string | null;
@@ -347,6 +348,8 @@ export const workspaceIdFromWindow = gambitGlobals.__GAMBIT_WORKSPACE_ID__ ??
 export const chatAccordionEnabled = Boolean(
   gambitGlobals.__GAMBIT_CHAT_ACCORDION_ENABLED__,
 );
+export const workbenchChatTopActionsEnabled = gambitGlobals
+  .__GAMBIT_WORKBENCH_CHAT_TOP_ACTIONS__ === true;
 export type BuildChatProvider = "codex-cli" | "claude-code-cli";
 export const buildChatProvider = ((() => {
   const raw = gambitGlobals.__GAMBIT_BUILD_CHAT_PROVIDER__;
