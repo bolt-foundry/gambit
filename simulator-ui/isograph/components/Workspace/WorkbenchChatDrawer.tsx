@@ -9,12 +9,14 @@ import Callout from "../../../src/gds/Callout.tsx";
 import Listbox, { type ListboxOption } from "../../../src/gds/Listbox.tsx";
 import List from "../../../src/gds/List.tsx";
 import ListItem from "../../../src/gds/ListItem.tsx";
+import WorkbenchChatIntro from "../../../src/WorkbenchChatIntro.tsx";
 import { useGambitTypedMutation } from "../../../src/hooks/useGambitTypedMutation.tsx";
 import { useGambitTypedSubscription } from "../../../src/hooks/useGambitTypedSubscription.tsx";
 import WorkbenchDrawerIso from "../../../src/WorkbenchDrawerIso.tsx";
 import {
   type BuildChatProvider,
   formatTimestampShort,
+  workbenchChatTopActionsEnabled,
 } from "../../../src/utils.ts";
 import {
   buildWorkspacePath,
@@ -144,6 +146,29 @@ export const WorkbenchChatDrawer = iso(`
     ],
     [],
   );
+  const providerSelector = (
+    <label className="workbench-provider-select-label">
+      <div
+        className="workbench-provider-select"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <Listbox
+          value={buildChatProvider}
+          onChange={(value) =>
+            onBuildChatProviderChange(value as BuildChatProvider)}
+          options={buildProviderOptions}
+          disabled={createRunMutation.inFlight || stopRunMutation.inFlight ||
+            resetWorkspaceMutation.inFlight}
+          size="small"
+          popoverMatchTriggerWidth={false}
+          popoverMinWidth={200}
+          popoverAlign="right"
+        />
+      </div>
+    </label>
+  );
 
   const loadChatHistory = useCallback(async () => {
     setChatHistoryLoading(true);
@@ -256,39 +281,21 @@ export const WorkbenchChatDrawer = iso(`
   const ConversationRunChat = runNode?.WorkbenchConversationRunChat ?? null;
   const headerActions = (
     <>
-      <label className="workbench-provider-select-label">
-        <div
-          className="workbench-provider-select"
-          onClick={(event) => event.stopPropagation()}
-          onMouseDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
+      {providerSelector}
+      {workbenchChatTopActionsEnabled && (
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={(event) => {
+            event.stopPropagation();
+            void resetWorkspace();
+          }}
+          disabled={!workspaceId || createRunMutation.inFlight ||
+            stopRunMutation.inFlight || resetWorkspaceMutation.inFlight}
         >
-          <Listbox
-            value={buildChatProvider}
-            onChange={(value) =>
-              onBuildChatProviderChange(value as BuildChatProvider)}
-            options={buildProviderOptions}
-            disabled={createRunMutation.inFlight || stopRunMutation.inFlight ||
-              resetWorkspaceMutation.inFlight}
-            size="small"
-            popoverMatchTriggerWidth={false}
-            popoverMinWidth={200}
-            popoverAlign="right"
-          />
-        </div>
-      </label>
-      <Button
-        variant="secondary"
-        size="small"
-        onClick={(event) => {
-          event.stopPropagation();
-          void resetWorkspace();
-        }}
-        disabled={!workspaceId || createRunMutation.inFlight ||
-          stopRunMutation.inFlight || resetWorkspaceMutation.inFlight}
-      >
-        New chat
-      </Button>
+          New chat
+        </Button>
+      )}
     </>
   );
   const historyContent = (
@@ -501,22 +508,19 @@ export const WorkbenchChatDrawer = iso(`
 
   const fallbackBody = (
     <div className="test-bot-sidebar flex-column gap-8 flex-1 build-chat-panel">
-      <Callout variant="emphasis">
-        Start the assistant to begin editing.
+      <WorkbenchChatIntro
+        disabled={!workspaceId || createRunMutation.inFlight ||
+          codexLoginRequired}
+        leadingContent={providerSelector}
+        pending={createRunMutation.inFlight}
+        title="Start a workspace editing session"
+        onStart={() => {
+          void startAssistant();
+        }}
+      />
+      <Callout>
+        Start a chat session to inspect the workspace and begin editing files.
       </Callout>
-      <div className="composer-actions">
-        <Button
-          variant="primary"
-          data-testid="build-start"
-          disabled={!workspaceId || createRunMutation.inFlight ||
-            codexLoginRequired}
-          onClick={() => {
-            void startAssistant();
-          }}
-        >
-          {createRunMutation.inFlight ? "Starting..." : "Start"}
-        </Button>
-      </div>
       {codexLoginRequired && (
         <Callout variant="danger" title="Codex login required">
           {codexStatus?.statusText?.trim() || "Run `codex login` to continue."}
@@ -531,7 +535,8 @@ export const WorkbenchChatDrawer = iso(`
       open={componentProps.open}
       runStatus="IDLE"
       chatHeaderActions={headerActions}
-      chatHistoryOpen={chatHistoryOpen}
+      showChatHistoryToggle={workbenchChatTopActionsEnabled}
+      chatHistoryOpen={workbenchChatTopActionsEnabled ? chatHistoryOpen : false}
       onToggleChatHistory={() => setChatHistoryOpen((previous) => !previous)}
       chatHistoryContent={historyContent}
       chatBody={fallbackBody}

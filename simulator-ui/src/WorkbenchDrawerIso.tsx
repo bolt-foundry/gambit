@@ -19,6 +19,7 @@ type WorkbenchDrawerIsoProps = {
   runStatus?: WorkbenchChatRunStatus;
   chatBody?: React.ReactNode;
   chatHeaderActions?: React.ReactNode;
+  showChatHistoryToggle?: boolean;
   chatHistoryOpen?: boolean;
   chatHistoryContent?: React.ReactNode;
   onToggleChatHistory?: () => void;
@@ -60,6 +61,7 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
     runStatus = "IDLE",
     chatBody = null,
     chatHeaderActions = null,
+    showChatHistoryToggle = true,
     chatHistoryOpen = false,
     chatHistoryContent = null,
     onToggleChatHistory,
@@ -75,7 +77,7 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
           <header className="gds-accordion-header">
             <div className="gds-accordion-title">
               <div className="workbench-accordion-title">
-                {hasChatHistory && (
+                {hasChatHistory && showChatHistoryToggle && (
                   <span
                     role="button"
                     tabIndex={0}

@@ -17,6 +17,7 @@ import {
 import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import CodexLoginRequiredOverlay from "../../../src/CodexLoginRequiredOverlay.tsx";
+import WorkbenchChatIntro from "../../../src/WorkbenchChatIntro.tsx";
 import type { BuildDisplayMessage } from "../../../src/utils.ts";
 import {
   countTranscriptMessages,
@@ -29,6 +30,7 @@ import {
 import WorkbenchDrawerIso, {
   type WorkbenchChatRunStatus,
 } from "../../../src/WorkbenchDrawerIso.tsx";
+import { workbenchChatTopActionsEnabled } from "../../../src/utils.ts";
 
 const RUN_STATUS_VALUES = new Set<WorkbenchChatRunStatus>([
   "IDLE",
@@ -264,7 +266,6 @@ export const WorkbenchConversationRunChat = iso(`
   const testIdPrefix = (componentProps.testIdPrefix ?? "build").trim() ||
     "build";
   const chatInputTestId = `${testIdPrefix}-chat-input`;
-  const startButtonTestId = `${testIdPrefix}-start`;
   const sendButtonTestId = `${testIdPrefix}-send`;
   const stopButtonTestId = `${testIdPrefix}-stop`;
   const activityIndicatorTestId = `${testIdPrefix}-chat-activity-indicator`;
@@ -422,7 +423,7 @@ export const WorkbenchConversationRunChat = iso(`
     transcriptMessageCount === 0;
   const canSubmitMessage = !componentProps.isSending && !isRunning &&
     chatDraft.trim().length > 0;
-  const showStartButton = canStartAssistant && chatDraft.trim().length === 0;
+  const showStartOverlay = canStartAssistant;
   const resolvedError = chatError ?? localError;
   const handleCopyCodexLoginCommand = useCallback(() => {
     globalThis.navigator?.clipboard?.writeText(codexLoginCommand);
@@ -493,16 +494,6 @@ export const WorkbenchConversationRunChat = iso(`
     }
   }, [canSubmitMessage, chatDraft, isBusy, onSendMessage]);
 
-  const startAssistant = useCallback(async () => {
-    if (!showStartButton || isBusy) return;
-    setLocalError(null);
-    try {
-      await onSendMessage("", { allowEmpty: true });
-    } catch (error) {
-      setLocalError(toErrorMessage(error));
-    }
-  }, [isBusy, onSendMessage, showStartButton]);
-
   const stopMessage = useCallback(async () => {
     if (isBusy || !isRunning) return;
     setLocalError(null);
@@ -522,7 +513,6 @@ export const WorkbenchConversationRunChat = iso(`
     });
     composerInputRef.current?.focus();
   }, [scenarioRunError]);
-  const newChatButtonTestId = `${testIdPrefix}-new-chat`;
   const errorCalloutTestId = `${testIdPrefix}-error-callout`;
   const addErrorToChatTestId = `${testIdPrefix}-add-error-to-chat`;
 
@@ -551,8 +541,15 @@ export const WorkbenchConversationRunChat = iso(`
             shouldAutoScrollRef.current = isNearBottom(event.currentTarget);
           }}
         >
+          {!showCodexLoginOverlay && showStartOverlay && (
+            <WorkbenchChatIntro title="Describe what you want to build" />
+          )}
           {effectiveTranscriptDisplay.length === 0
-            ? <Callout>{emptyStateText}</Callout>
+            ? (
+              showStartOverlay && !showCodexLoginOverlay
+                ? null
+                : <Callout>{emptyStateText}</Callout>
+            )
             : <BuildChatRows display={effectiveTranscriptDisplay} />}
         </div>
       </div>
@@ -585,19 +582,12 @@ export const WorkbenchConversationRunChat = iso(`
               {scenarioRunError}
             </Callout>
           )}
-          {showStartButton && (
-            <Callout variant="emphasis">
-              Start the assistant to begin editing.
-            </Callout>
-          )}
           <div className="flex-row gap-4 mb-2">
             <textarea
               ref={composerInputRef}
               className="message-input flex-1"
               rows={1}
-              placeholder={showStartButton
-                ? "Start the assistant to begin..."
-                : "Message Gambit Bot..."}
+              placeholder="Message Gambit Bot..."
               value={chatDraft}
               onChange={(event) => setChatDraft(event.target.value)}
               data-testid={chatInputTestId}
@@ -612,17 +602,6 @@ export const WorkbenchConversationRunChat = iso(`
               }}
             />
             <div className="composer-actions">
-              {componentProps.onNewChat && (
-                <Button
-                  variant="secondary"
-                  disabled={isBusy || isRunning ||
-                    componentProps.canStartNewChat === false}
-                  data-testid={newChatButtonTestId}
-                  onClick={componentProps.onNewChat}
-                >
-                  New chat
-                </Button>
-              )}
               {isRunning && (
                 <Button
                   variant="secondary"
@@ -635,31 +614,16 @@ export const WorkbenchConversationRunChat = iso(`
                   {componentProps.isStopping ? "Stopping..." : "Stop"}
                 </Button>
               )}
-              {showStartButton
-                ? (
-                  <Button
-                    variant="primary"
-                    disabled={!showStartButton || isBusy || codexLoginRequired}
-                    data-testid={startButtonTestId}
-                    onClick={() => {
-                      void startAssistant();
-                    }}
-                  >
-                    {componentProps.isSending ? "Starting..." : "Start"}
-                  </Button>
-                )
-                : (
-                  <Button
-                    variant="primary"
-                    disabled={!canSubmitMessage || isBusy || codexLoginRequired}
-                    data-testid={sendButtonTestId}
-                    onClick={() => {
-                      void sendMessage();
-                    }}
-                  >
-                    {componentProps.isSending ? "Sending..." : "Send"}
-                  </Button>
-                )}
+              <Button
+                variant="primary"
+                disabled={!canSubmitMessage || isBusy || codexLoginRequired}
+                data-testid={sendButtonTestId}
+                onClick={() => {
+                  void sendMessage();
+                }}
+              >
+                {componentProps.isSending ? "Sending..." : "Send"}
+              </Button>
             </div>
           </div>
           {resolvedError && <div className="error">{resolvedError}</div>}
@@ -673,7 +637,10 @@ export const WorkbenchConversationRunChat = iso(`
       open={componentProps.open}
       runStatus={runStatus}
       chatHeaderActions={componentProps.chatHeaderActions}
-      chatHistoryOpen={componentProps.chatHistoryOpen}
+      showChatHistoryToggle={workbenchChatTopActionsEnabled}
+      chatHistoryOpen={workbenchChatTopActionsEnabled
+        ? componentProps.chatHistoryOpen
+        : false}
       onToggleChatHistory={componentProps.onToggleChatHistory}
       chatHistoryContent={componentProps.chatHistoryContent}
       chatBody={chatBody}
