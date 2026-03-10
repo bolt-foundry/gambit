@@ -224,6 +224,8 @@ type WorkspaceVerificationRecord = {
   workspaceId: string;
 };
 
+type WorkspaceWorkbenchSelectedContextChipsRecord = Array<unknown>;
+
 type WorkspaceVerifyBatchRequestRecord = {
   id: string;
   status: "queued" | "running" | "completed" | "error";
@@ -2457,6 +2459,12 @@ WorkspaceType.implement({
     verification: t.field({
       type: WorkspaceVerificationType,
       resolve: (parent) => ({ workspaceId: parent.id }),
+    }),
+    workbenchSelectedContextChips: t.field({
+      description:
+        "Client-exclusive ephemeral workbench chip selection. This field exists for Isograph-owned simulator state until durable persistence is needed.",
+      type: "JSON",
+      resolve: () => [] satisfies WorkspaceWorkbenchSelectedContextChipsRecord,
     }),
     models: t.field({
       type: WorkspaceModelsType,

@@ -12,12 +12,14 @@ import {
   type BuildChatActivityState,
   BuildChatRows,
   deriveBuildChatActivityState,
+  encodeWorkbenchMessageWithContext,
   formatElapsedDuration,
 } from "../../../src/Chat.tsx";
 import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import CodexLoginRequiredOverlay from "../../../src/CodexLoginRequiredOverlay.tsx";
 import WorkbenchChatIntro from "../../../src/WorkbenchChatIntro.tsx";
+import WorkbenchComposerChip from "../../../src/gds/WorkbenchComposerChip.tsx";
 import type { BuildDisplayMessage } from "../../../src/utils.ts";
 import {
   countTranscriptMessages,
@@ -31,6 +33,11 @@ import WorkbenchDrawerIso, {
   type WorkbenchChatRunStatus,
 } from "../../../src/WorkbenchDrawerIso.tsx";
 import { workbenchChatTopActionsEnabled } from "../../../src/utils.ts";
+import {
+  toWorkbenchMessageContext,
+  type WorkbenchSelectedContextChip,
+} from "../../../src/workbenchContext.ts";
+import { mergeWorkbenchSelectedContextChip } from "../../../src/workbenchChipStore.ts";
 
 const RUN_STATUS_VALUES = new Set<WorkbenchChatRunStatus>([
   "IDLE",
@@ -63,15 +70,12 @@ function isBuildChatDebugEnabled(): boolean {
   return stored === "1" || stored === "true" || stored === "yes";
 }
 
-const BUILD_CHAT_DEBUG = isBuildChatDebugEnabled();
-
 function logBuildChatDebug(
   event: string,
   payload: Record<string, unknown>,
 ): void {
-  if (!BUILD_CHAT_DEBUG) return;
-  void event;
-  void payload;
+  if (!isBuildChatDebugEnabled()) return;
+  console.info(`[build-chat-debug] ${event}`, payload);
 }
 
 function toRunStatus(value: unknown): WorkbenchChatRunStatus {
@@ -257,7 +261,10 @@ export const WorkbenchConversationRunChat = iso(`
   onNewChat?: () => void;
   chatHeaderActions?: ReactNode;
   chatHistoryOpen?: boolean;
+  onToggleChatHistory?: () => void;
   chatHistoryContent?: ReactNode;
+  composerChips?: Array<WorkbenchSelectedContextChip>;
+  onComposerChipsChange?: (next: Array<WorkbenchSelectedContextChip>) => void;
 }) {
   const [chatError, setChatError] = useState<string | null>(null);
   const [copiedCodexLoginCommand, setCopiedCodexLoginCommand] = useState(false);
@@ -329,6 +336,9 @@ export const WorkbenchConversationRunChat = iso(`
   const wasActiveRef = useRef(false);
   const [chatDraft, setChatDraft] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+  const composerChips = componentProps.composerChips ?? [];
+  const updateComposerChips = componentProps.onComposerChipsChange ??
+    (() => {});
 
   const onSendMessage = useCallback((
     message: string,
@@ -418,11 +428,13 @@ export const WorkbenchConversationRunChat = iso(`
   ]);
   const isRunning = runStatus === "RUNNING";
   const isBusy = componentProps.isSending || componentProps.isStopping;
+  const hasEnabledComposerChip = composerChips.some((chip) => chip.enabled);
   const canStartAssistant = !isRunning && !componentProps.isSending &&
     transcriptMessageCount === 0;
   const canSubmitMessage = !componentProps.isSending && !isRunning &&
-    chatDraft.trim().length > 0;
-  const showStartOverlay = canStartAssistant;
+    (chatDraft.trim().length > 0 || hasEnabledComposerChip);
+  const showStartOverlay = canStartAssistant && !hasEnabledComposerChip &&
+    chatDraft.trim().length === 0;
   const resolvedError = chatError ?? localError;
   const handleCopyCodexLoginCommand = useCallback(() => {
     globalThis.navigator?.clipboard?.writeText(codexLoginCommand);
@@ -484,14 +496,43 @@ export const WorkbenchConversationRunChat = iso(`
   const sendMessage = useCallback(async () => {
     const trimmed = chatDraft.trim();
     if (!canSubmitMessage || isBusy) return;
+    const activeChips = composerChips.filter((chip) => chip.enabled);
+    const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
+    const outboundMessage = activeChips.length > 0
+      ? encodeWorkbenchMessageWithContext(
+        trimmed,
+        activeChips.map((chip) => toWorkbenchMessageContext(chip)),
+      )
+      : trimmed;
+    logBuildChatDebug("send.outbound", {
+      runId,
+      workspaceId,
+      trimmed,
+      activeChips,
+      outboundMessage,
+    });
     setLocalError(null);
     try {
-      await onSendMessage(trimmed);
+      await onSendMessage(outboundMessage);
       setChatDraft("");
+      if (activeChipIds.size > 0) {
+        updateComposerChips(
+          composerChips.map((chip) =>
+            activeChipIds.has(chip.chipId) ? { ...chip, enabled: false } : chip
+          ),
+        );
+      }
     } catch (error) {
       setLocalError(toErrorMessage(error));
     }
-  }, [canSubmitMessage, chatDraft, isBusy, onSendMessage]);
+  }, [
+    canSubmitMessage,
+    chatDraft,
+    composerChips,
+    isBusy,
+    onSendMessage,
+    updateComposerChips,
+  ]);
 
   const stopMessage = useCallback(async () => {
     if (isBusy || !isRunning) return;
@@ -504,14 +545,25 @@ export const WorkbenchConversationRunChat = iso(`
   }, [isBusy, isRunning, onStopRun]);
   const addScenarioErrorToChat = useCallback(() => {
     if (!scenarioRunError) return;
-    const prefixedError = `Scenario error: ${scenarioRunError}`;
-    setChatDraft((previous) => {
-      if (previous.includes(prefixedError)) return previous;
-      if (previous.trim().length === 0) return prefixedError;
-      return `${previous}\n\n${prefixedError}`;
-    });
+    updateComposerChips(
+      mergeWorkbenchSelectedContextChip(composerChips, {
+        chipId: `scenario_run_error:${runId ?? workspaceId ?? "workspace"}`,
+        source: "scenario_run_error",
+        workspaceId: workspaceId ?? undefined,
+        runId: runId ?? undefined,
+        capturedAt: new Date().toISOString(),
+        error: scenarioRunError,
+        enabled: true,
+      }),
+    );
     composerInputRef.current?.focus();
-  }, [scenarioRunError]);
+  }, [
+    composerChips,
+    runId,
+    scenarioRunError,
+    updateComposerChips,
+    workspaceId,
+  ]);
   const errorCalloutTestId = `${testIdPrefix}-error-callout`;
   const addErrorToChatTestId = `${testIdPrefix}-add-error-to-chat`;
 
@@ -560,6 +612,34 @@ export const WorkbenchConversationRunChat = iso(`
               timerTestId={activityTimerTestId}
             />
           </div>
+          {composerChips.length > 0 && (
+            <div
+              className="workbench-composer-chip-row"
+              data-testid={`${testIdPrefix}-composer-chip-row`}
+            >
+              {composerChips.map((chip) => (
+                <WorkbenchComposerChip
+                  key={chip.chipId}
+                  context={chip}
+                  enabled={chip.enabled}
+                  onEnabledChange={(enabled) =>
+                    updateComposerChips(
+                      composerChips.map((entry) =>
+                        entry.chipId === chip.chipId
+                          ? { ...entry, enabled }
+                          : entry
+                      ),
+                    )}
+                  onRemove={() =>
+                    updateComposerChips(
+                      composerChips.filter((entry) =>
+                        entry.chipId !== chip.chipId
+                      ),
+                    )}
+                />
+              ))}
+            </div>
+          )}
           {scenarioRunError && (
             <Callout
               variant="danger"
@@ -599,7 +679,7 @@ export const WorkbenchConversationRunChat = iso(`
               }}
             />
             <div className="composer-actions">
-              <div className="composer-action-slot composer-action-slot-secondary">
+              <div className="composer-action-slot composer-action-slot-primary">
                 {isRunning
                   ? (
                     <Button
@@ -615,15 +695,6 @@ export const WorkbenchConversationRunChat = iso(`
                     </Button>
                   )
                   : (
-                    <span
-                      className="composer-action-placeholder"
-                      aria-hidden="true"
-                    />
-                  )}
-              </div>
-              <div className="composer-action-slot composer-action-slot-primary">
-                {!showStartOverlay
-                  ? (
                     <Button
                       variant="primary"
                       className="composer-action-button"
@@ -636,12 +707,6 @@ export const WorkbenchConversationRunChat = iso(`
                     >
                       {componentProps.isSending ? "Sending..." : "Send"}
                     </Button>
-                  )
-                  : (
-                    <span
-                      className="composer-action-placeholder"
-                      aria-hidden="true"
-                    />
                   )}
               </div>
             </div>

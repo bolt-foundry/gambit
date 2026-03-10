@@ -2,28 +2,9 @@ import React from "react";
 import { classNames, getScoreClass } from "../utils.ts";
 import Icon from "./Icon.tsx";
 import Tooltip from "./Tooltip.tsx";
+import type { WorkbenchMessageContext } from "../workbenchContext.ts";
 
-type WorkbenchComposerChipContext =
-  | {
-    source: "scenario_run_error" | "grader_run_error";
-    error: string;
-  }
-  | {
-    source: "message_rating";
-    score: number;
-    reason?: string;
-  }
-  | {
-    source: "grading_flag";
-    message: string;
-    score?: number;
-  }
-  | {
-    source: "verify_outlier";
-    message: string;
-    instability?: boolean;
-    score?: number;
-  };
+type WorkbenchComposerChipContext = WorkbenchMessageContext;
 
 function formatScoreLabel(score: number): string {
   return score > 0 ? `+${score}` : String(score);

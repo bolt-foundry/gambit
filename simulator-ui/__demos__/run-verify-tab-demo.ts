@@ -19,6 +19,24 @@ async function runWithTempServeRoot(
   }
 }
 
+async function ensureWorkbenchDrawerVisible(
+  demoTarget: {
+    locator: (selector: string) => {
+      count(): Promise<number>;
+      first(): { isVisible(): Promise<boolean> };
+      click(): Promise<void>;
+      waitFor(args?: { timeout?: number }): Promise<void>;
+    };
+  },
+): Promise<void> {
+  const drawer = demoTarget.locator(".workbench-drawer-docked");
+  if (await drawer.count() > 0 && await drawer.first().isVisible()) {
+    return;
+  }
+  await demoTarget.locator('[data-testid="nav-workbench"]').click();
+  await drawer.waitFor({ timeout: 10_000 });
+}
+
 async function main(): Promise<void> {
   const moduleDir = path.dirname(path.fromFileUrl(import.meta.url));
   const repoRoot = path.resolve(moduleDir, "..", "..", "..", "..");
@@ -42,21 +60,31 @@ async function main(): Promise<void> {
           { label: "simulator load", logEveryMs: 250 },
         );
 
-        await demoTarget.locator('[data-testid="nav-workspaces"]').waitFor({
-          timeout: 10_000,
-        });
-        await demoTarget.locator('[data-testid="nav-workspaces"]').click();
-        await waitForPath(
-          demoTarget,
-          wait,
-          (pathname) =>
-            pathname === "/workspaces" || pathname === "/workspaces/new",
-          5_000,
-          { label: "workspaces landing", logEveryMs: 250 },
+        const createWorkspaceCta = demoTarget.locator(
+          '[data-testid="workspace-create-cta"]',
         );
+        if (await createWorkspaceCta.count() > 0) {
+          await createWorkspaceCta.first().waitFor({
+            timeout: 10_000,
+          });
+          await createWorkspaceCta.first().click();
+        } else {
+          await demoTarget.locator('[data-testid="nav-workspaces"]').waitFor({
+            timeout: 10_000,
+          });
+          await demoTarget.locator('[data-testid="nav-workspaces"]').click();
+          await waitForPath(
+            demoTarget,
+            wait,
+            (pathname) =>
+              pathname === "/workspaces" || pathname === "/workspaces/new",
+            5_000,
+            { label: "workspaces landing", logEveryMs: 250 },
+          );
 
-        await demoTarget.locator('[data-testid="workspace-create-cta"]')
-          .click();
+          await demoTarget.locator('[data-testid="workspace-create-cta"]')
+            .click();
+        }
         await waitForPath(
           demoTarget,
           wait,
@@ -185,6 +213,19 @@ async function main(): Promise<void> {
         }
         await screenshot("03-verify-batch-complete");
 
+        await demoTarget.locator('[data-testid="verify-outlier-add-to-chat"]')
+          .first()
+          .waitFor({ timeout: 15_000 });
+        await demoTarget.locator('[data-testid="verify-outlier-add-to-chat"]')
+          .first()
+          .click();
+        await ensureWorkbenchDrawerVisible(demoTarget);
+        await demoTarget.locator('[data-testid="build-composer-chip-row"]')
+          .waitFor({
+            timeout: 10_000,
+          });
+        await screenshot("04-verify-chip-added-to-workbench");
+
         const firstRunLink = requestRows.locator("a").first();
         if (await firstRunLink.count() > 0) {
           await firstRunLink.click();
@@ -195,7 +236,7 @@ async function main(): Promise<void> {
             30_000,
             { label: "verify request grade deep-link", logEveryMs: 500 },
           );
-          await screenshot("04-verify-open-grade-run");
+          await screenshot("05-verify-open-grade-run");
         }
       },
       {

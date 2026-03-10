@@ -33,11 +33,18 @@ import {
   toOptimisticTranscriptEntries,
 } from "../../../src/transcriptEntries.ts";
 import TestBotSidebarPanels from "../../../src/TestBotSidebarPanels.tsx";
-import Button from "../../../src/gds/Button.tsx";
 import PageShell from "../../../src/gds/PageShell.tsx";
 import PageGrid from "../../../src/gds/PageGrid.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import TestBotChatPanel from "../../../src/TestBotChatPanel.tsx";
+import {
+  mergeWorkbenchSelectedContextChip,
+  replaceWorkbenchSelectedContextChips,
+  resolveWorkbenchSelectedContextChips,
+} from "../../../src/workbenchChipStore.ts";
+import {
+  type WorkbenchSelectedContextChip,
+} from "../../../src/workbenchContext.ts";
 
 function toTestBotStatus(status: string): TestBotRun["status"] {
   const normalized = status.trim().toUpperCase();
@@ -48,6 +55,33 @@ function toTestBotStatus(status: string): TestBotRun["status"] {
     return "canceled";
   }
   return "idle";
+}
+
+function isBuildChatDebugEnabled(): boolean {
+  if (typeof globalThis === "undefined") return false;
+  if ("location" in globalThis && globalThis.location) {
+    const search = typeof globalThis.location.search === "string"
+      ? globalThis.location.search
+      : "";
+    if (search.length > 0) {
+      const value = new URLSearchParams(search).get("gambitBuildChatDebug");
+      if (value === "1" || value === "true") return true;
+    }
+  }
+  let stored = "";
+  try {
+    stored = (globalThis.localStorage?.getItem("gambit:build-chat-debug") ?? "")
+      .toLowerCase()
+      .trim();
+  } catch {
+    return false;
+  }
+  return stored === "1" || stored === "true" || stored === "yes";
+}
+
+function logTestChipDebug(event: string, payload: Record<string, unknown>) {
+  if (!isBuildChatDebugEnabled()) return;
+  console.info(`[test-chip-debug] ${event}`, payload);
 }
 
 type ScenarioRunSnapshot = {
@@ -112,6 +146,7 @@ function toOptimisticScenarioRunEdges(args: {
 export const SimulatorTestPage = iso(`
   field Workspace.TestTab @component {
     id
+    workbenchSelectedContextChips @updatable
     scenarioDecks {
       id
       label
@@ -174,7 +209,7 @@ export const SimulatorTestPage = iso(`
       }
     }
   }
-`)(function SimulatorTestPage({ data }) {
+`)(function SimulatorTestPage({ data, startUpdate }) {
   const parseJsonField = useCallback((value: unknown): unknown => {
     if (typeof value !== "string") return value;
     const trimmed = value.trim();
@@ -198,6 +233,20 @@ export const SimulatorTestPage = iso(`
     [],
   );
   const workspaceId = data.id ?? "";
+  const composerChips = useMemo(
+    () =>
+      resolveWorkbenchSelectedContextChips(
+        workspaceId,
+        data.workbenchSelectedContextChips,
+      ),
+    [data.workbenchSelectedContextChips, workspaceId],
+  );
+  const updateComposerChips = useCallback(
+    (next: Array<WorkbenchSelectedContextChip>) => {
+      replaceWorkbenchSelectedContextChips(startUpdate, next, workspaceId);
+    },
+    [startUpdate, workspaceId],
+  );
   const { currentRoutePath, navigate } = useRouter();
   const workspaceRoutePath = currentRoutePath;
   const scenarioDecks = useMemo(
@@ -612,11 +661,12 @@ export const SimulatorTestPage = iso(`
       selectedRunNeedsAssistantStart,
   );
   const hasActiveScenarioTurn = selectedRunState.status === "running";
-  const handleStopRun = useCallback(async () => {
-    if (!selectedRun?.id || !workspaceId) return;
+  const handleStopRun = useCallback(() => {
+    if (!selectedRun?.id || !workspaceId) return Promise.resolve();
     stopScenarioRun.commit({
       input: { workspaceId, runId: selectedRun.id },
     });
+    return Promise.resolve();
   }, [selectedRun?.id, stopScenarioRun, workspaceId]);
   const handleSendChat = useCallback(async () => {
     const message = chatDraft.trim();
@@ -723,10 +773,11 @@ export const SimulatorTestPage = iso(`
     selectedRunHistoryValue,
     workspaceId,
   ]);
-  const handleNewChat = useCallback(async () => {
-    if (!workspaceId) return;
+  const handleNewChat = useCallback(() => {
+    if (!workspaceId) return Promise.resolve();
     setChatDraft("");
     navigate(buildWorkspacePath("test", workspaceId));
+    return Promise.resolve();
   }, [navigate, workspaceId]);
   const saveFeedback = useCallback(
     async (
@@ -955,13 +1006,56 @@ export const SimulatorTestPage = iso(`
           optimisticUser={null}
           streamingUser={null}
           streamingAssistant={null}
-          startRun={async () => startNewScenarioRun()}
+          startRun={() => {
+            startNewScenarioRun();
+            return Promise.resolve();
+          }}
           stopRun={handleStopRun}
           handleNewChat={handleNewChat}
           handleSendChat={handleSendChat}
           handleStartAssistant={handleStartAssistant}
           onScore={saveFeedback}
           onReasonChange={saveFeedback}
+          onAddFeedbackToWorkbench={(feedback) => {
+            const chip = {
+              chipId: `rating:${feedback.messageRefId}:${feedback.id}`,
+              source: "message_rating" as const,
+              workspaceId,
+              runId: feedback.runId,
+              capturedAt: feedback.createdAt ?? new Date().toISOString(),
+              messageRefId: feedback.messageRefId,
+              score: feedback.score,
+              reason: feedback.reason,
+              enabled: true,
+            };
+            logTestChipDebug("feedback.add_to_workbench", {
+              messageRefId: feedback.messageRefId,
+              score: feedback.score,
+              reason: feedback.reason,
+              chip,
+            });
+            updateComposerChips(
+              mergeWorkbenchSelectedContextChip(composerChips, chip),
+            );
+          }}
+          onAddErrorToWorkbench={(payload) => {
+            if (!payload.error) return;
+            updateComposerChips(
+              mergeWorkbenchSelectedContextChip(composerChips, {
+                chipId: `scenario_run_error:${
+                  payload.runId ?? selectedRunState.id ?? workspaceId
+                }`,
+                source: payload.source === "grader_run_error"
+                  ? "grader_run_error"
+                  : "scenario_run_error",
+                workspaceId: payload.workspaceId ?? workspaceId,
+                runId: payload.runId ?? selectedRunState.id,
+                capturedAt: new Date().toISOString(),
+                error: payload.error,
+                enabled: true,
+              }),
+            );
+          }}
         />
       </PageGrid>
     </PageShell>

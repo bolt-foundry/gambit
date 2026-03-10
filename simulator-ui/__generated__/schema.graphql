@@ -200,6 +200,11 @@ type Workspace {
   scenarioDecks: [WorkspaceScenarioDeck!]!
   scenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceScenarioRunsConnection!
   verification: WorkspaceVerification!
+
+  """
+  Client-exclusive ephemeral workbench chip selection. This field exists for Isograph-owned simulator state until durable persistence is needed.
+  """
+  workbenchSelectedContextChips: JSON!
 }
 
 type WorkspaceAssistantDeck {

@@ -95,5 +95,6 @@ export default 'query EntrypointSimulatorVerifyPage($workspaceId: ID!) {\
         },\
       },\
     },\
+    workbenchSelectedContextChips,\
   },\
 }';

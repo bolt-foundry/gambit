@@ -73,5 +73,6 @@ export default 'query EntrypointSimulatorWorkspaceShell($workspaceId: ID!) {\
         writeEnabled,\
       },\
     },\
+    workbenchSelectedContextChips,\
   },\
 }';

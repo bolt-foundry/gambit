@@ -19,6 +19,53 @@ async function runWithTempServeRoot(
   }
 }
 
+async function ensureWorkbenchDrawerVisible(
+  demoTarget: {
+    locator: (selector: string) => {
+      count(): Promise<number>;
+      first(): { isVisible(): Promise<boolean> };
+      click(): Promise<void>;
+      waitFor(args?: { timeout?: number }): Promise<void>;
+    };
+  },
+): Promise<void> {
+  const drawer = demoTarget.locator(".workbench-drawer-docked");
+  if (await drawer.count() > 0 && await drawer.first().isVisible()) {
+    return;
+  }
+  await demoTarget.locator('[data-testid="nav-workbench"]').click();
+  await drawer.waitFor({ timeout: 10_000 });
+}
+
+async function waitForAssistantWorkbenchReply(
+  demoTarget: {
+    locator: (selector: string, options?: { hasText?: string }) => {
+      count(): Promise<number>;
+      first(): {
+        waitFor(args?: { timeout?: number }): Promise<void>;
+        textContent(): Promise<string | null>;
+      };
+    };
+  },
+  wait: (ms: number) => Promise<void>,
+): Promise<void> {
+  const assistantBubbles = demoTarget.locator(
+    ".workbench-drawer-docked .imessage-row.left .imessage-bubble.left",
+  );
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const count = await assistantBubbles.count();
+    if (count > 0) {
+      const text = await assistantBubbles.first().textContent().catch(() => "");
+      if (typeof text === "string" && text.trim().length > 0) {
+        return;
+      }
+    }
+    await wait(500);
+  }
+  throw new Error("Timed out waiting for a Workbench assistant response.");
+}
+
 async function main(): Promise<void> {
   const moduleDir = path.dirname(path.fromFileUrl(import.meta.url));
   const repoRoot = path.resolve(moduleDir, "..", "..", "..", "..");
@@ -30,6 +77,9 @@ async function main(): Promise<void> {
     await runE2e(
       "gambit grade tab demo",
       async ({ demoTarget, screenshot, wait }) => {
+        await demoTarget.evaluate(() => {
+          globalThis.localStorage?.setItem("gambit:build-chat-debug", "true");
+        });
         await waitForPath(
           demoTarget,
           wait,
@@ -42,21 +92,31 @@ async function main(): Promise<void> {
           { label: "simulator load", logEveryMs: 250 },
         );
 
-        await demoTarget.locator('[data-testid="nav-workspaces"]').waitFor({
-          timeout: 10_000,
-        });
-        await demoTarget.locator('[data-testid="nav-workspaces"]').click();
-        await waitForPath(
-          demoTarget,
-          wait,
-          (pathname) =>
-            pathname === "/workspaces" || pathname === "/workspaces/new",
-          5_000,
-          { label: "workspaces landing", logEveryMs: 250 },
+        const createWorkspaceCta = demoTarget.locator(
+          '[data-testid="workspace-create-cta"]',
         );
+        if (await createWorkspaceCta.count() > 0) {
+          await createWorkspaceCta.first().waitFor({
+            timeout: 10_000,
+          });
+          await createWorkspaceCta.first().click();
+        } else {
+          await demoTarget.locator('[data-testid="nav-workspaces"]').waitFor({
+            timeout: 10_000,
+          });
+          await demoTarget.locator('[data-testid="nav-workspaces"]').click();
+          await waitForPath(
+            demoTarget,
+            wait,
+            (pathname) =>
+              pathname === "/workspaces" || pathname === "/workspaces/new",
+            5_000,
+            { label: "workspaces landing", logEveryMs: 250 },
+          );
 
-        await demoTarget.locator('[data-testid="workspace-create-cta"]')
-          .click();
+          await demoTarget.locator('[data-testid="workspace-create-cta"]')
+            .click();
+        }
         const buildPath = await waitForPath(
           demoTarget,
           wait,
@@ -149,11 +209,33 @@ async function main(): Promise<void> {
         await runReason.waitFor({ timeout: 10_000 });
         await screenshot("04-grade-flagged");
 
+        await runBody.locator('[data-testid="grade-flag-add-to-chat"]').first()
+          .click();
+        await ensureWorkbenchDrawerVisible(demoTarget);
+        await demoTarget.locator('[data-testid="build-composer-chip-row"]')
+          .waitFor({
+            timeout: 10_000,
+          });
+        await screenshot("05-grade-chip-added-to-workbench");
+
+        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
+          "what flagged reason did they leave",
+        );
+        await demoTarget.locator('[data-testid="build-send"]:not([disabled])')
+          .waitFor({
+            timeout: 15_000,
+          });
+        await demoTarget.locator('[data-testid="build-send"]:not([disabled])')
+          .click();
+        await waitForAssistantWorkbenchReply(demoTarget, wait);
+        await screenshot("06-grade-chip-sent-response");
+
         await runBody.locator('button:has-text("Flagged")').first().click();
         await runBody.locator('button:has-text("Flag")').first().waitFor({
           timeout: 10_000,
         });
-        await screenshot("05-grade-unflagged");
+        await screenshot("07-grade-unflagged");
+        await wait(2_000);
 
         const finalPath = await demoTarget.evaluate(() =>
           globalThis.location.pathname

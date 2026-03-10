@@ -12,6 +12,13 @@ const readerAst: ReaderAst<Workspace__WorkbenchChatDrawer__param> = [
     isUpdatable: false,
   },
   {
+    kind: "Scalar",
+    fieldName: "workbenchSelectedContextChips",
+    alias: null,
+    arguments: null,
+    isUpdatable: true,
+  },
+  {
     kind: "Linked",
     fieldName: "models",
     alias: null,
@@ -151,7 +158,7 @@ const artifact: ComponentReaderArtifact<
   fieldName: "WorkbenchChatDrawer",
   resolver,
   readerAst,
-  hasUpdatable: false,
+  hasUpdatable: true,
 };
 
 export default artifact;

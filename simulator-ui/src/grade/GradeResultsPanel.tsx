@@ -36,6 +36,18 @@ export function GradeResultsPanel(props: {
   ) => void;
   onFlagReasonChange: (refId: string, reason: string) => void;
   onFlagReasonBlur: (refId: string, reason: string) => void;
+  onAddFlagToWorkbench?: (
+    args: {
+      refId: string;
+      runId: string;
+      turnIndex?: number;
+      score?: number;
+      graderReason?: string;
+      flagReason?: string;
+      priorUser?: string;
+      gradedAssistant?: string;
+    },
+  ) => void;
   onAddErrorToWorkbench?: (args: { runId?: string; error: string }) => void;
   topErrorRunId?: string | null;
 }) {
@@ -356,6 +368,33 @@ export function GradeResultsPanel(props: {
                                 >
                                   <Icon name="circleInfo" size={16} />
                                   {isOpen ? "Hide raw input" : "Show raw input"}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  className="flex-1 calibrate-toggle"
+                                  disabled={!props.onAddFlagToWorkbench}
+                                  data-testid="grade-flag-add-to-chat"
+                                  onClick={() =>
+                                    props.onAddFlagToWorkbench?.({
+                                      refId: item.refId,
+                                      runId: item.runId,
+                                      turnIndex: item.turnIndex,
+                                      score: displayScore,
+                                      graderReason: displayReason ?? undefined,
+                                      flagReason:
+                                        props.flagReasonDrafts[item.refId] ??
+                                          props.flagReasonByRefId.get(
+                                            item.refId,
+                                          )
+                                            ?.reason ??
+                                          undefined,
+                                      priorUser: turnContext.priorUser,
+                                      gradedAssistant:
+                                        turnContext.gradedAssistant,
+                                    })}
+                                >
+                                  <Icon name="chat" size={16} />
+                                  Add to chat
                                 </Button>
                               </div>
                             )}

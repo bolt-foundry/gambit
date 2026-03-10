@@ -7,7 +7,6 @@ import { verifyTabEnabled } from "./utils.ts";
 import { useRouter } from "./RouterContext.tsx";
 import Button from "./gds/Button.tsx";
 import Icon from "./gds/Icon.tsx";
-import WorkbenchDrawer from "./WorkbenchDrawer.tsx";
 import { classNames, DOCS_PATH } from "./utils.ts";
 import { useGambitTypedMutation } from "./hooks/useGambitTypedMutation.tsx";
 import gambitWorkspaceCreateMutation from "../mutations/GambitWorkspaceCreateMutation.ts";
@@ -90,7 +89,7 @@ export function AppShell(props: {
   const deleteWorkspaceMutation = useGambitTypedMutation(
     gambitWorkspaceDeleteMutation,
   );
-  const Workbench = props.Workbench ?? WorkbenchDrawer;
+  const Workbench = props.Workbench;
 
   const activeWorkspaceId = useMemo(() => {
     const route = parseWorkspaceRoute(workspaceRoutePath);
@@ -110,7 +109,8 @@ export function AppShell(props: {
   );
   const isDocsPath = workspaceRoutePath === "/docs";
   const canOpenWorkbench = Boolean(activeWorkspaceId);
-  const workbenchVisible = workbenchOpen && canOpenWorkbench;
+  const workbenchVisible = workbenchOpen && canOpenWorkbench &&
+    Boolean(Workbench);
 
   const handleSelectWorkspace = useCallback((workspaceId: string) => {
     navigate(buildWorkspacePath("build", workspaceId));
@@ -307,25 +307,27 @@ export function AppShell(props: {
         </div>
         <div className="top-nav-right">
           <div className="top-nav-actions" />
-          <Button
-            data-testid="nav-workbench"
-            className={classNames(
-              "workbench-toggle",
-              workbenchVisible && "active",
-            )}
-            variant="secondary"
-            onClick={() => setWorkbenchOpen((prev) => !prev)}
-            disabled={!canOpenWorkbench}
-            aria-label={workbenchVisible
-              ? "Close workbench drawer"
-              : "Open workbench drawer"}
-          >
-            <Icon
-              name="chat"
-              size={16}
-              style={{ color: "currentColor" }}
-            />
-          </Button>
+          {Workbench && (
+            <Button
+              data-testid="nav-workbench"
+              className={classNames(
+                "workbench-toggle",
+                workbenchVisible && "active",
+              )}
+              variant="secondary"
+              onClick={() => setWorkbenchOpen((prev) => !prev)}
+              disabled={!canOpenWorkbench}
+              aria-label={workbenchVisible
+                ? "Close workbench drawer"
+                : "Open workbench drawer"}
+            >
+              <Icon
+                name="chat"
+                size={16}
+                style={{ color: "currentColor" }}
+              />
+            </Button>
+          )}
         </div>
       </header>
       <div className="app-content-frame">
@@ -345,7 +347,7 @@ export function AppShell(props: {
           )}
           {isDocsPath ? <DocsPage /> : props.children}
         </main>
-        <Workbench open={workbenchVisible} />
+        {Workbench ? <Workbench open={workbenchVisible} /> : null}
       </div>
       <Drawer
         open={drawerOpen}

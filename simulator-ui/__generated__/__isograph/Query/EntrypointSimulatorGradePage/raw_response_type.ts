@@ -55,6 +55,7 @@ export type Query__EntrypointSimulatorGradePage__raw_response_type = {
         },
       }>,
     },
+    workbenchSelectedContextChips: string,
   },
 }
 
