@@ -261,6 +261,127 @@ const normalizationAst: NormalizationAst = {
                           fieldName: "status",
                           arguments: null,
                         },
+                        {
+                          kind: "Linked",
+                          fieldName: "transcriptEntries",
+                          arguments: null,
+                          concreteType: null,
+                          selections: [
+                            {
+                              kind: "Scalar",
+                              fieldName: "__typename",
+                              arguments: null,
+                            },
+                            {
+                              kind: "InlineFragment",
+                              type: "WorkspaceConversationTranscriptMessage",
+                              selections: [
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "__typename",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "id",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "content",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "feedbackEligible",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "messageRefId",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "role",
+                                  arguments: null,
+                                },
+                              ],
+                            },
+                            {
+                              kind: "InlineFragment",
+                              type: "WorkspaceConversationTranscriptReasoning",
+                              selections: [
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "__typename",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "id",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "reasoningType",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "summary",
+                                  arguments: null,
+                                },
+                              ],
+                            },
+                            {
+                              kind: "InlineFragment",
+                              type: "WorkspaceConversationTranscriptToolCall",
+                              selections: [
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "__typename",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "id",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "argumentsText",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "error",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "resultText",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "status",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "toolCallId",
+                                  arguments: null,
+                                },
+                                {
+                                  kind: "Scalar",
+                                  fieldName: "toolName",
+                                  arguments: null,
+                                },
+                              ],
+                            },
+                          ],
+                        },
                       ],
                     },
                   ],

@@ -18,6 +18,10 @@ import type {
   PersistedScenarioDeck,
   WorkspaceDeckState,
 } from "./server_types.ts";
+import {
+  isFeedbackEligibleMessageRef,
+  isFeedbackEligiblePersistedTestRunMessageRef,
+} from "./server/workspace/scenario_history.ts";
 
 export type ScenarioRunSummary = {
   scenarioRunId: string;
@@ -457,6 +461,7 @@ type OpenResponsesOutputMessageV0 = {
   role: string;
   content: string;
   messageRefId?: string;
+  feedbackEligible: boolean;
   feedback?: FeedbackEntry;
 };
 
@@ -1107,6 +1112,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     errorText: string | null;
     outputIndex: number | null;
     sequence: number;
+    canonicalBackfill?: boolean;
   };
 
   const projectOutputItemRowsFromEvent = (
@@ -1252,17 +1258,28 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         toEventMessageText(item.text).trim();
       if (!text) return [];
       const role = asString(item.role).trim() || "assistant";
+      const rawItemId = asString(item.id).trim() || null;
+      const canonicalBackfill = event.idempotency_key.includes(":canonical:");
+      const messageRefId = asString(item.messageRefId).trim() ||
+        (canonicalBackfill ? rawItemId : null);
+      const itemIdentity = messageRefId ?? rawItemId;
+      // Canonical assistant messages can be projected once from the live trace
+      // and again from the final saved-state backfill. When both carry the same
+      // messageRefId, use that as the stable sqlite key so they collapse into
+      // one raw output item instead of surfacing as duplicates in GraphQL/sqlite.
+      const itemKey = itemIdentity
+        ? `message:${role}:${itemIdentity}`
+        : `output:${outputIndex ?? "na"}:${event.sequence}`;
       return [{
         workspaceId: event.workspace_id,
         runId: event.run_id,
-        itemKey: `output:${outputIndex ?? "na"}:${event.sequence}`,
-        itemId: `${event.run_id}:output:${
-          outputIndex ?? "na"
-        }:${event.sequence}`,
+        itemKey,
+        itemId: itemIdentity ??
+          `${event.run_id}:output:${outputIndex ?? "na"}:${event.sequence}`,
         itemKind: "message",
         role,
         content: text,
-        messageRefId: asString(item.messageRefId).trim() || null,
+        messageRefId,
         reasoningType: null,
         summary: null,
         summaryMode: "replace",
@@ -1274,6 +1291,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         errorText: null,
         outputIndex,
         sequence: event.sequence,
+        canonicalBackfill,
       }];
     }
     if (itemType === "reasoning") {
@@ -1311,6 +1329,53 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     db: DatabaseSync,
     row: OutputItemUpsertRow,
   ) => {
+    let itemKey = row.itemKey;
+    if (
+      row.canonicalBackfill === true &&
+      row.itemKind === "message" &&
+      row.role === "assistant" &&
+      typeof row.messageRefId === "string" &&
+      row.messageRefId.trim().length > 0 &&
+      typeof row.content === "string" &&
+      row.content.trim().length > 0
+    ) {
+      const canonicalRow = db.prepare(`
+        SELECT item_key
+        FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
+        WHERE workspace_id = ? AND run_id = ? AND item_key = ?
+        LIMIT 1
+      `).get(row.workspaceId, row.runId, row.itemKey) as
+        | { item_key?: string | null }
+        | undefined;
+      if (!canonicalRow?.item_key) {
+        const unresolvedMatch = db.prepare(`
+          SELECT item_key
+          FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
+          WHERE workspace_id = ?
+            AND run_id = ?
+            AND item_kind = 'message'
+            AND role = 'assistant'
+            AND content = ?
+            AND message_ref_id IS NULL
+            AND sequence < ?
+          ORDER BY sequence DESC, output_index DESC, item_key DESC
+          LIMIT 1
+        `).get(
+          row.workspaceId,
+          row.runId,
+          row.content,
+          row.sequence,
+        ) as
+          | { item_key?: string | null }
+          | undefined;
+        if (
+          typeof unresolvedMatch?.item_key === "string" &&
+          unresolvedMatch.item_key.trim().length > 0
+        ) {
+          itemKey = unresolvedMatch.item_key.trim();
+        }
+      }
+    }
     let summary = row.summary;
     if (row.itemKind === "reasoning" && row.summaryMode === "append") {
       const existing = db.prepare(`
@@ -1318,7 +1383,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
         WHERE workspace_id = ? AND run_id = ? AND item_key = ?
         LIMIT 1
-      `).get(row.workspaceId, row.runId, row.itemKey) as
+      `).get(row.workspaceId, row.runId, itemKey) as
         | { summary?: string | null }
         | undefined;
       summary = `${existing?.summary ?? ""}${row.summary ?? ""}`;
@@ -1366,7 +1431,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     `).run(
       row.workspaceId,
       row.runId,
-      row.itemKey,
+      itemKey,
       row.itemId,
       row.itemKind,
       row.role,
@@ -2241,12 +2306,23 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     }>;
     return rows.flatMap<OpenResponsesOutputItemV0>((row) => {
       if (row.item_kind === "message") {
+        const feedbackEligible = row.message_ref_id
+          ? (
+            isFeedbackEligibleMessageRef(state, row.message_ref_id) ||
+            isFeedbackEligiblePersistedTestRunMessageRef(
+              state,
+              args.runId,
+              row.message_ref_id,
+            )
+          )
+          : false;
         return [{
           __typename: "OutputMessage" as const,
           id: row.item_id,
           role: row.role ?? "assistant",
           content: row.content ?? "",
           messageRefId: row.message_ref_id ?? undefined,
+          feedbackEligible,
           feedback: row.message_ref_id
             ? feedbackByRef.get(row.message_ref_id) ?? undefined
             : undefined,

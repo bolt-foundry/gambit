@@ -50,7 +50,26 @@ const normalizePersistedTestRunStatus = (
       ? raw.maxTurns
       : undefined,
     messages: Array.isArray(raw.messages)
-      ? raw.messages as TestBotRunStatus["messages"]
+      ? raw.messages.map((entry) => {
+        if (!entry || typeof entry !== "object") {
+          return entry;
+        }
+        const message = entry as TestBotRunStatus["messages"][number];
+        const role = message.role === "user" ? "user" : "assistant";
+        const messageSource = message.messageSource === "scenario" ||
+            message.messageSource === "manual" ||
+            message.messageSource === "artifact"
+          ? message.messageSource
+          : undefined;
+        return {
+          ...message,
+          role,
+          feedbackEligible: message.feedbackEligible ??
+            (role === "assistant" ||
+              (role === "user" && messageSource === "scenario")),
+          messageSource,
+        };
+      }) as TestBotRunStatus["messages"]
       : [],
     traces: Array.isArray(raw.traces) ? raw.traces as Array<TraceEvent> : [],
     toolInserts: Array.isArray(raw.toolInserts)

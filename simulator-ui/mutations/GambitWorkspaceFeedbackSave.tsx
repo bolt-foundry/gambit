@@ -24,33 +24,35 @@ export const GambitWorkspaceFeedbackSaveMutation = iso(`
               startedAt
               finishedAt
               error
-              openResponses(first: 1) {
-                edges {
-                  node {
+              transcriptEntries {
+                asWorkspaceConversationTranscriptMessage {
+                  id
+                  messageRefId
+                  feedbackEligible
+                  role
+                  content
+                  feedback {
                     id
-                    status
-                    outputItems(first: 200) {
-                      edges {
-                        node {
-                          __typename
-                          asOutputMessage {
-                            id
-                            messageRefId
-                            role
-                            content
-                            feedback {
-                              id
-                              runId
-                              messageRefId
-                              score
-                              reason
-                              createdAt
-                            }
-                          }
-                        }
-                      }
-                    }
+                    runId
+                    messageRefId
+                    score
+                    reason
+                    createdAt
                   }
+                }
+                asWorkspaceConversationTranscriptReasoning {
+                  id
+                  summary
+                  reasoningType
+                }
+                asWorkspaceConversationTranscriptToolCall {
+                  id
+                  toolCallId
+                  toolName
+                  status
+                  argumentsText
+                  resultText
+                  error
                 }
               }
             }
@@ -64,33 +66,35 @@ export const GambitWorkspaceFeedbackSaveMutation = iso(`
         startedAt
         finishedAt
         error
-        openResponses(first: 1) {
-          edges {
-            node {
+        transcriptEntries {
+          asWorkspaceConversationTranscriptMessage {
+            id
+            messageRefId
+            feedbackEligible
+            role
+            content
+            feedback {
               id
-              status
-              outputItems(first: 200) {
-                edges {
-                  node {
-                    __typename
-                    asOutputMessage {
-                      id
-                      messageRefId
-                      role
-                      content
-                      feedback {
-                        id
-                        runId
-                        messageRefId
-                        score
-                        reason
-                        createdAt
-                      }
-                    }
-                  }
-                }
-              }
+              runId
+              messageRefId
+              score
+              reason
+              createdAt
             }
+          }
+          asWorkspaceConversationTranscriptReasoning {
+            id
+            summary
+            reasoningType
+          }
+          asWorkspaceConversationTranscriptToolCall {
+            id
+            toolCallId
+            toolName
+            status
+            argumentsText
+            resultText
+            error
           }
         }
       }

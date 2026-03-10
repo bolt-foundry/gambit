@@ -24,36 +24,34 @@ export type Query__EntrypointSimulatorWorkspaceShell__raw_response_type = {
             edges: ReadonlyArray<{
               node: {
                 id: string,
-                outputItems____first___l_200: {
-                  edges: ReadonlyArray<{
-                    node: {
-                      __typename: "OutputMessage",
-                      id: string,
-                      content: string,
-                      role: string,
-                    } | {
-                      __typename: "OutputReasoning",
-                      id: string,
-                      reasoningType?: (string | null),
-                      summary: string,
-                    } | {
-                      __typename: "OutputToolCall",
-                      id: string,
-                      argumentsText?: (string | null),
-                      error?: (string | null),
-                      resultText?: (string | null),
-                      status: string,
-                      toolCallId: string,
-                      toolName: string,
-                    },
-                  }>,
-                },
                 status: string,
               },
             }>,
           },
           startedAt?: (string | null),
           status: string,
+          transcriptEntries: ReadonlyArray<{
+            __typename: "WorkspaceConversationTranscriptMessage",
+            id: string,
+            content: string,
+            feedbackEligible: boolean,
+            messageRefId?: (string | null),
+            role: string,
+          } | {
+            __typename: "WorkspaceConversationTranscriptReasoning",
+            id: string,
+            reasoningType?: (string | null),
+            summary: string,
+          } | {
+            __typename: "WorkspaceConversationTranscriptToolCall",
+            id: string,
+            argumentsText?: (string | null),
+            error?: (string | null),
+            resultText?: (string | null),
+            status: string,
+            toolCallId: string,
+            toolName: string,
+          }>,
           workspaceId: string,
         },
       }>,

@@ -792,10 +792,13 @@ export default function TestBotPage(props: {
     run.status !== "running" &&
     (Boolean(runWorkspaceId) ||
       (deckJsonErrorCount === 0 && missingDeckInit.length === 0));
+  const hasStreamingTurn = Boolean(
+    streamingAssistant?.text || streamingUser?.text,
+  );
 
   const canSendChat = hasDeckSelection &&
-    run.status !== "running" &&
     !chatSending &&
+    !hasStreamingTurn &&
     chatDraft.trim().length > 0 &&
     !showStartOverlay &&
     (Boolean(runWorkspaceId) ||

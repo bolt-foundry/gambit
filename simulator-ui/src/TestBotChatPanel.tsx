@@ -21,6 +21,8 @@ type Props = {
   runWorkspaceId?: string;
   runStatusLabel: string;
   testChatDisplay: Array<BuildDisplayMessage>;
+  transcriptMessageCount?: number;
+  transcriptUserMessageCount?: number;
   activeWorkspaceId: string | null;
   requestedRunNotFound: boolean;
   canStart: boolean;
@@ -77,6 +79,8 @@ export default function TestBotChatPanel(props: Props) {
     runWorkspaceId,
     runStatusLabel,
     testChatDisplay,
+    transcriptMessageCount,
+    transcriptUserMessageCount,
     activeWorkspaceId,
     requestedRunNotFound,
     canStart,
@@ -106,19 +110,23 @@ export default function TestBotChatPanel(props: Props) {
     onReasonChange,
     onAddErrorToWorkbench,
   } = props;
+  const resolvedMessageCount = transcriptMessageCount ?? run.messages.length;
+  const resolvedUserMessageCount = transcriptUserMessageCount ??
+    countUserMessages(run.messages);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const lastRunMessageCountRef = useRef(0);
+  const lastTranscriptDisplayCountRef = useRef(0);
 
   useEffect(() => {
-    lastRunMessageCountRef.current = 0;
+    lastTranscriptDisplayCountRef.current = 0;
   }, [run.id]);
 
   useEffect(() => {
     const el = transcriptRef.current;
     if (!el) return;
-    const shouldScroll = run.messages.length > lastRunMessageCountRef.current ||
+    const shouldScroll = testChatDisplay.length >
+        lastTranscriptDisplayCountRef.current ||
       Boolean(streamingUser?.text || streamingAssistant?.text);
-    lastRunMessageCountRef.current = run.messages.length;
+    lastTranscriptDisplayCountRef.current = testChatDisplay.length;
     if (!shouldScroll) return;
     const frame = requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
@@ -126,7 +134,7 @@ export default function TestBotChatPanel(props: Props) {
     return () => cancelAnimationFrame(frame);
   }, [
     run.id,
-    run.messages.length,
+    testChatDisplay.length,
     streamingUser,
     streamingAssistant?.text,
   ]);
@@ -240,16 +248,34 @@ export default function TestBotChatPanel(props: Props) {
           className="imessage-thread"
           ref={transcriptRef}
         >
-          {run.messages.length === 0 && <Callout>No messages yet.</Callout>}
+          {testChatDisplay.length === 0 && <Callout>No messages yet.</Callout>}
           <ActivityTranscriptRows
             key={`test-activity-${run.id ?? "unknown"}`}
             display={testChatDisplay}
             previewToolWhenNoReasoning
-            renderMessage={(_, messageOrdinal) => {
-              const message = run.messages[messageOrdinal];
-              if (!message) return null;
-              const messageKey = message.messageRefId ??
-                `${message.role}-${messageOrdinal}`;
+            renderMessage={(entry, messageOrdinal) => {
+              const fallbackMessage = run.messages[messageOrdinal];
+              if (!entry && !fallbackMessage) return null;
+              const message = {
+                id: entry.id ?? fallbackMessage?.messageRefId ?? null,
+                role: entry.role ?? fallbackMessage?.role ?? "assistant",
+                content: entry.content ?? fallbackMessage?.content ?? "",
+                messageRefId: entry.messageRefId ??
+                  fallbackMessage?.messageRefId,
+                feedbackEligible: entry.feedbackEligible ??
+                  fallbackMessage?.feedbackEligible ?? false,
+                feedback: entry.feedback ?? fallbackMessage?.feedback,
+                respondStatus: fallbackMessage?.respondStatus,
+                respondCode: fallbackMessage?.respondCode,
+                respondMessage: fallbackMessage?.respondMessage,
+                respondPayload: fallbackMessage?.respondPayload,
+                respondMeta: fallbackMessage?.respondMeta,
+              };
+              const messageKey = message.messageRefId
+                ? `${message.messageRefId}-${messageOrdinal}`
+                : message.id
+                ? `${message.id}-${messageOrdinal}`
+                : `${message.role}-${messageOrdinal}`;
               const hasRespondPayload = message.respondPayload !== undefined ||
                 message.respondMeta !== undefined ||
                 typeof message.respondStatus === "number" ||
@@ -309,6 +335,7 @@ export default function TestBotChatPanel(props: Props) {
                       <FeedbackControls
                         messageRefId={message.messageRefId}
                         feedback={message.feedback as FeedbackEntry | undefined}
+                        disabled={!message.feedbackEligible}
                         onScore={onScore}
                         onReasonChange={onReasonChange}
                       />
@@ -320,8 +347,7 @@ export default function TestBotChatPanel(props: Props) {
           />
           {streamingUser?.text && streamingUser.runId === run.id &&
             (streamingUser.expectedUserCount === undefined ||
-              countUserMessages(run.messages) <
-                streamingUser.expectedUserCount) &&
+              resolvedUserMessageCount < streamingUser.expectedUserCount) &&
             (
               <div className="imessage-row right">
                 <div
@@ -357,7 +383,7 @@ export default function TestBotChatPanel(props: Props) {
         </div>
         <div className="composer">
           <div className="composer-inputs">
-            {isUserStart && run.messages.length === 0 &&
+            {isUserStart && resolvedMessageCount === 0 &&
               !streamingAssistant?.text && !streamingUser?.text && (
               <Callout variant="emphasis">
                 This deck expects a user message to kick things off.
@@ -369,7 +395,7 @@ export default function TestBotChatPanel(props: Props) {
                 rows={1}
                 placeholder={showStartOverlay
                   ? "Start the assistant to begin..."
-                  : isUserStart && run.messages.length === 0
+                  : isUserStart && resolvedMessageCount === 0
                   ? "Send the first message to begin..."
                   : "Message the assistant..."}
                 value={chatDraft}

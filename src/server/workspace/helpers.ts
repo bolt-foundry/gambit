@@ -165,6 +165,8 @@ export const buildTestBotSnapshot = (
         role: msg.role,
         content,
         messageRefId: refId,
+        feedbackEligible: msg.role === "assistant" ||
+          (msg.role === "user" && refs[i]?.source === "scenario"),
         messageSource: refs[i]?.source === "scenario" ||
             refs[i]?.source === "manual" ||
             refs[i]?.source === "artifact"
@@ -180,6 +182,7 @@ export const buildTestBotSnapshot = (
         role: "assistant",
         content: respondSummary.displayText,
         messageRefId: refId,
+        feedbackEligible: true,
         messageSource: refs[i]?.source === "scenario" ||
             refs[i]?.source === "manual" ||
             refs[i]?.source === "artifact"

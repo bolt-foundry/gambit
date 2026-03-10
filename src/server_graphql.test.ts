@@ -1062,6 +1062,16 @@ leakTolerantTest(
             edges?: Array<{
               node?: {
                 id?: string;
+                transcriptEntries?: Array<{
+                  __typename?: string;
+                  role?: string;
+                  content?: string;
+                  summary?: string;
+                  toolCallId?: string;
+                  toolName?: string;
+                  status?: string;
+                  resultText?: string;
+                }>;
                 openResponses?: {
                   edges?: Array<{
                     node?: {
@@ -1117,6 +1127,22 @@ leakTolerantTest(
                 edges {
                   node {
                     id
+                    transcriptEntries {
+                      __typename
+                      ... on WorkspaceConversationTranscriptMessage {
+                        role
+                        content
+                      }
+                      ... on WorkspaceConversationTranscriptReasoning {
+                        summary
+                      }
+                      ... on WorkspaceConversationTranscriptToolCall {
+                        toolCallId
+                        toolName
+                        status
+                        resultText
+                      }
+                    }
                     openResponses(first: 1) {
                       edges {
                         node {
@@ -1179,6 +1205,9 @@ leakTolerantTest(
 
       const buildOutputEdges = queried.data?.workspace?.buildRuns?.edges?.[0]
         ?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges ?? [];
+      const buildTranscriptEntries =
+        queried.data?.workspace?.buildRuns?.edges?.[0]?.node
+          ?.transcriptEntries ?? [];
       const buildMessages = buildOutputEdges.flatMap((edge) => {
         const node = asRecord(edge?.node);
         if (!node) return [];
@@ -1210,6 +1239,33 @@ leakTolerantTest(
         .filter((entry): entry is string => typeof entry === "string");
       assert(buildReasoningSummary.includes("build deep reasoning"));
       assert(buildReasoningSummary.includes("build reasoning"));
+      assertEquals(buildTranscriptEntries, [
+        {
+          __typename: "WorkspaceConversationTranscriptMessage",
+          role: "user",
+          content: "build user canonical",
+        },
+        {
+          __typename: "WorkspaceConversationTranscriptMessage",
+          role: "assistant",
+          content: "build canonical",
+        },
+        {
+          __typename: "WorkspaceConversationTranscriptReasoning",
+          summary: "build deep reasoning",
+        },
+        {
+          __typename: "WorkspaceConversationTranscriptToolCall",
+          toolCallId: "build-call-1",
+          toolName: "lookup",
+          status: "COMPLETED",
+          resultText: "lookup-result",
+        },
+        {
+          __typename: "WorkspaceConversationTranscriptReasoning",
+          summary: "build reasoning",
+        },
+      ]);
 
       const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find((
         edge,
@@ -1546,6 +1602,16 @@ leakTolerantTest(
               edges?: Array<{
                 node?: {
                   id?: string;
+                  transcriptEntries?: Array<{
+                    __typename?: string;
+                    role?: string;
+                    content?: string;
+                    summary?: string;
+                    toolCallId?: string;
+                    toolName?: string;
+                    status?: string;
+                    resultText?: string;
+                  }>;
                   openResponses?: {
                     edges?: Array<{
                       node?: {
@@ -1600,13 +1666,29 @@ leakTolerantTest(
                     }
                   }
                 }
-                scenarioRuns(first: 10) {
-                  edges {
-                    node {
-                      id
-                      openResponses(first: 1) {
-                        edges {
-                          node {
+              scenarioRuns(first: 10) {
+                edges {
+                  node {
+                    id
+                    transcriptEntries {
+                      __typename
+                      ... on WorkspaceConversationTranscriptMessage {
+                        role
+                        content
+                      }
+                      ... on WorkspaceConversationTranscriptReasoning {
+                        summary
+                      }
+                      ... on WorkspaceConversationTranscriptToolCall {
+                        toolCallId
+                        toolName
+                        status
+                        resultText
+                      }
+                    }
+                    openResponses(first: 1) {
+                      edges {
+                        node {
                             outputItems(first: 20) {
                               edges {
                                 node {
@@ -2558,14 +2640,22 @@ leakTolerantTest(
 `,
     );
 
+    let releaseSecondResponse: () => void = () => {};
+    const secondResponseGate = new Promise<void>((resolve) => {
+      releaseSecondResponse = resolve;
+    });
+
     const provider: ModelProvider = {
-      chat(input) {
+      async chat(input) {
         const lastUser = [...input.messages].reverse().find((message) =>
           message?.role === "user"
         );
         const prompt = typeof lastUser?.content === "string"
           ? lastUser.content
           : "";
+        if (prompt === "how are you") {
+          await secondResponseGate;
+        }
         return Promise.resolve({
           message: {
             role: "assistant",
@@ -2680,6 +2770,130 @@ leakTolerantTest(
           db.close();
         }
       };
+      const readScenarioMessages = async () => {
+        const queried = await gql<{
+          workspace?: {
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  openResponses?: {
+                    edges?: Array<{
+                      node?: {
+                        outputItems?: {
+                          edges?: Array<{
+                            node?: {
+                              __typename?: string;
+                              role?: string;
+                              content?: string;
+                            };
+                          }>;
+                        };
+                      };
+                    }>;
+                  };
+                };
+              }>;
+            };
+          } | null;
+        }>(
+          `
+            query ScenarioRuns($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      openResponses(first: 1) {
+                        edges {
+                          node {
+                            outputItems(first: 50) {
+                              edges {
+                                node {
+                                  __typename
+                                  ... on OutputMessage {
+                                    role
+                                    content
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId },
+        );
+
+        const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find(
+          (edge) => edge?.node?.id === scenarioRunId,
+        );
+        return scenarioEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems
+          ?.edges
+          ?.map((edge) => edge?.node)
+          .filter((node) => node?.__typename === "OutputMessage")
+          .map((node) => ({
+            role: node?.role ?? "",
+            content: node?.content ?? "",
+          })) ?? [];
+      };
+      const readScenarioTranscriptMessages = async () => {
+        const queried = await gql<{
+          workspace?: {
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  transcriptEntries?: Array<{
+                    __typename?: string;
+                    role?: string;
+                    content?: string;
+                  }>;
+                };
+              }>;
+            };
+          } | null;
+        }>(
+          `
+            query ScenarioRunTranscript($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      transcriptEntries {
+                        __typename
+                        ... on WorkspaceConversationTranscriptMessage {
+                          role
+                          content
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId },
+        );
+
+        const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find(
+          (edge) => edge?.node?.id === scenarioRunId,
+        );
+        return scenarioEdge?.node?.transcriptEntries
+          ?.filter((entry) =>
+            entry?.__typename === "WorkspaceConversationTranscriptMessage"
+          )
+          .map((entry) => ({
+            role: entry?.role ?? "",
+            content: entry?.content ?? "",
+          })) ?? [];
+      };
 
       await waitFor(async () => {
         const state = JSON.parse(await Deno.readTextFile(statePath)) as {
@@ -2728,6 +2942,19 @@ leakTolerantTest(
       );
 
       await waitFor(async () => {
+        const messages = await readScenarioMessages();
+        return messages.some((message) =>
+          message.role === "user" && message.content === "how are you"
+        ) &&
+          !messages.some((message) =>
+            message.role === "assistant" &&
+            message.content === "Fine. What do you need?"
+          );
+      }, 5_000);
+
+      releaseSecondResponse();
+
+      await waitFor(async () => {
         const state = JSON.parse(await Deno.readTextFile(statePath)) as {
           messages?: Array<{ role?: string; content?: unknown }>;
         };
@@ -2754,109 +2981,67 @@ leakTolerantTest(
       }, 5_000);
 
       const outputRows = readOutputRows();
+      const transcriptRows = outputRows.filter((row) =>
+        row.role === "assistant" || row.role === "user"
+      );
       assert(
-        outputRows.some((row) =>
+        transcriptRows.some((row) =>
           row.role === "assistant" && row.content === "Ready."
         ),
       );
-      assert(
-        outputRows.some((row) =>
+      assertEquals(
+        transcriptRows.filter((row) =>
           row.role === "user" && row.content === "how are you"
-        ),
+        ).length,
+        1,
       );
-      assert(
-        outputRows.some((row) =>
+      assertEquals(
+        transcriptRows.filter((row) =>
           row.role === "assistant" &&
           row.content === "Fine. What do you need?"
-        ),
+        ).length,
+        1,
       );
       assert(readRunEventCount() > 0);
 
-      const queried = await gql<{
-        workspace?: {
-          scenarioRuns?: {
-            edges?: Array<{
-              node?: {
-                id?: string;
-                openResponses?: {
-                  edges?: Array<{
-                    node?: {
-                      outputItems?: {
-                        edges?: Array<{
-                          node?: {
-                            __typename?: string;
-                            role?: string;
-                            content?: string;
-                          };
-                        }>;
-                      };
-                    };
-                  }>;
-                };
-              };
-            }>;
-          };
-        } | null;
-      }>(
-        `
-          query ScenarioRuns($workspaceId: ID!) {
-            workspace(id: $workspaceId) {
-              scenarioRuns(first: 10) {
-                edges {
-                  node {
-                    id
-                    openResponses(first: 1) {
-                      edges {
-                        node {
-                          outputItems(first: 50) {
-                            edges {
-                              node {
-                                __typename
-                                ... on OutputMessage {
-                                  role
-                                  content
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `,
-        { workspaceId },
-      );
-
-      const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find(
-        (edge) => edge?.node?.id === scenarioRunId,
-      );
-      const scenarioMessages =
-        scenarioEdge?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
-          ?.map((edge) => edge?.node)
-          .filter((node) => node?.__typename === "OutputMessage")
-          .map((node) => ({
-            role: node?.role ?? "",
-            content: node?.content ?? "",
-          })) ?? [];
+      const scenarioMessages = await readScenarioMessages();
       assert(
         scenarioMessages.some((message) =>
           message.role === "assistant" && message.content === "Ready."
         ),
       );
-      assert(
-        scenarioMessages.some((message) =>
+      assertEquals(
+        scenarioMessages.filter((message) =>
           message.role === "user" && message.content === "how are you"
-        ),
+        ).length,
+        1,
       );
-      assert(
-        scenarioMessages.some((message) =>
+      assertEquals(
+        scenarioMessages.filter((message) =>
           message.role === "assistant" &&
           message.content === "Fine. What do you need?"
+        ).length,
+        1,
+      );
+
+      const scenarioTranscriptMessages = await readScenarioTranscriptMessages();
+      assert(
+        scenarioTranscriptMessages.some((message) =>
+          message.role === "assistant" && message.content === "Ready."
         ),
+      );
+      assertEquals(
+        scenarioTranscriptMessages.filter((message) =>
+          message.role === "user" && message.content === "how are you"
+        ).length,
+        1,
+      );
+      assertEquals(
+        scenarioTranscriptMessages.filter((message) =>
+          message.role === "assistant" &&
+          message.content === "Fine. What do you need?"
+        ).length,
+        1,
       );
     } finally {
       await server.shutdown();

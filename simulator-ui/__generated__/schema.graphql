@@ -108,6 +108,7 @@ enum OpenResponseStatus {
 type OutputMessage {
   content: String!
   feedback: Feedback
+  feedbackEligible: Boolean!
   id: ID!
   messageRefId: ID
   role: String!
@@ -236,6 +237,7 @@ type WorkspaceBuildRun implements WorkspaceConversationRun & WorkspaceRun {
   openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
   status: OpenResponseStatus!
+  transcriptEntries: [WorkspaceConversationTranscriptEntry!]!
   workspaceId: ID!
 }
 
@@ -266,6 +268,7 @@ interface WorkspaceConversationRun {
   openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
   status: OpenResponseStatus!
+  transcriptEntries: [WorkspaceConversationTranscriptEntry!]!
   workspaceId: ID!
 }
 
@@ -330,6 +333,33 @@ type WorkspaceConversationSessionsConnection {
 type WorkspaceConversationSessionsConnectionEdge {
   cursor: String!
   node: WorkspaceConversationSession!
+}
+
+union WorkspaceConversationTranscriptEntry = WorkspaceConversationTranscriptMessage | WorkspaceConversationTranscriptReasoning | WorkspaceConversationTranscriptToolCall
+
+type WorkspaceConversationTranscriptMessage {
+  content: String!
+  feedback: Feedback
+  feedbackEligible: Boolean!
+  id: ID!
+  messageRefId: ID
+  role: String!
+}
+
+type WorkspaceConversationTranscriptReasoning {
+  id: ID!
+  reasoningType: String
+  summary: String!
+}
+
+type WorkspaceConversationTranscriptToolCall {
+  argumentsText: String
+  error: String
+  id: ID!
+  resultText: String
+  status: ToolCallStatus!
+  toolCallId: ID!
+  toolName: String!
 }
 
 type WorkspaceCreatePayload {
@@ -556,6 +586,7 @@ type WorkspaceScenarioRun implements WorkspaceConversationRun {
   openResponses(after: String, before: String, first: Int, last: Int): WorkspaceConversationRunOpenResponsesConnection!
   startedAt: String
   status: OpenResponseStatus!
+  transcriptEntries: [WorkspaceConversationTranscriptEntry!]!
   workspaceId: ID!
 }
 

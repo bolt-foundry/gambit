@@ -637,6 +637,8 @@ export function startWebSocketSimulator(opts: {
     testStreamId: TEST_STREAM_ID,
     persistOpenResponsesTraceEvent:
       openResponsesEventPersistence.persistOpenResponsesTraceEvent,
+    persistCanonicalUserInputEvent:
+      openResponsesEventPersistence.persistCanonicalUserInputEvent,
     persistCanonicalStateMessages:
       openResponsesEventPersistence.persistCanonicalStateMessages,
     readSessionState,

@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import { toFileUrl } from "@std/path";
 
 const GENERATED_QUERY_TEXT_PATH = path.resolve(
-  "packages/gambit/simulator-ui/__generated__/__isograph/Query/EntrypointWorkspaceBuildLiveWrite/query_text.ts",
+  "packages/gambit/simulator-ui/__generated__/__isograph/Query/EntrypointWorkspaceTestLiveWrite/query_text.ts",
 );
 const OUTPUT_PATH = path.resolve(
   "packages/gambit/simulator-ui/subscriptions/__generated__/workspaceTestLiveSubscriptionQuery.ts",
@@ -14,7 +14,7 @@ async function loadEntrypointQueryText(): Promise<string> {
   const mod = await import(moduleUrl);
   if (typeof mod.default !== "string" || mod.default.trim().length === 0) {
     throw new Error(
-      "EntrypointWorkspaceBuildLiveWrite query_text.ts did not export a query string.",
+      "EntrypointWorkspaceTestLiveWrite query_text.ts did not export a query string.",
     );
   }
   return mod.default;

@@ -4,45 +4,35 @@ export default 'mutation GambitWorkspaceScenarioRunStop($input: WorkspaceScenari
       id,\
       error,\
       finishedAt,\
-      openResponses____first___l_1: openResponses(first: 1) {\
-        edges {\
-          node {\
-            id,\
-            outputItems____first___l_200: outputItems(first: 200) {\
-              edges {\
-                node {\
-                  __typename,\
-                  ... on OutputMessage {\
-                    __typename,\
-                    id,\
-                    content,\
-                    role,\
-                  },\
-                  ... on OutputReasoning {\
-                    __typename,\
-                    id,\
-                    reasoningType,\
-                    summary,\
-                  },\
-                  ... on OutputToolCall {\
-                    __typename,\
-                    id,\
-                    argumentsText,\
-                    error,\
-                    resultText,\
-                    status,\
-                    toolCallId,\
-                    toolName,\
-                  },\
-                },\
-              },\
-            },\
-            status,\
-          },\
-        },\
-      },\
       startedAt,\
       status,\
+      transcriptEntries {\
+        __typename,\
+        ... on WorkspaceConversationTranscriptMessage {\
+          __typename,\
+          id,\
+          content,\
+          feedbackEligible,\
+          messageRefId,\
+          role,\
+        },\
+        ... on WorkspaceConversationTranscriptReasoning {\
+          __typename,\
+          id,\
+          reasoningType,\
+          summary,\
+        },\
+        ... on WorkspaceConversationTranscriptToolCall {\
+          __typename,\
+          id,\
+          argumentsText,\
+          error,\
+          resultText,\
+          status,\
+          toolCallId,\
+          toolName,\
+        },\
+      },\
       workspaceId,\
     },\
     workspace {\
@@ -54,29 +44,35 @@ export default 'mutation GambitWorkspaceScenarioRunStop($input: WorkspaceScenari
             id,\
             error,\
             finishedAt,\
-            openResponses____first___l_1: openResponses(first: 1) {\
-              edges {\
-                node {\
-                  id,\
-                  outputItems____first___l_200: outputItems(first: 200) {\
-                    edges {\
-                      node {\
-                        __typename,\
-                        ... on OutputMessage {\
-                          __typename,\
-                          id,\
-                          content,\
-                          role,\
-                        },\
-                      },\
-                    },\
-                  },\
-                  status,\
-                },\
-              },\
-            },\
             startedAt,\
             status,\
+            transcriptEntries {\
+              __typename,\
+              ... on WorkspaceConversationTranscriptMessage {\
+                __typename,\
+                id,\
+                content,\
+                feedbackEligible,\
+                messageRefId,\
+                role,\
+              },\
+              ... on WorkspaceConversationTranscriptReasoning {\
+                __typename,\
+                id,\
+                reasoningType,\
+                summary,\
+              },\
+              ... on WorkspaceConversationTranscriptToolCall {\
+                __typename,\
+                id,\
+                argumentsText,\
+                error,\
+                resultText,\
+                status,\
+                toolCallId,\
+                toolName,\
+              },\
+            },\
           },\
         },\
       },\

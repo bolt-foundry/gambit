@@ -20,24 +20,24 @@ import {
   type NormalizedSchema,
   type TestBotRun,
 } from "../../../src/utils.ts";
-import { buildTestBotChatDisplay } from "../../../src/testBotChatDisplay.ts";
 import { buildTestRunHistoryDisplayOptions } from "../../../src/testBotSidebarDisplay.ts";
 import { runAwaitsAssistantKickoff } from "../../../src/test_tab_start_gate.ts";
+import {
+  countTranscriptMessages,
+  countTranscriptUserMessages,
+  getTranscriptMessages,
+  type OptimisticTranscriptEntry,
+  type ParsedTranscriptEntry,
+  parseTranscriptEntries,
+  toBuildDisplayEntries,
+  toOptimisticTranscriptEntries,
+} from "../../../src/transcriptEntries.ts";
 import TestBotSidebarPanels from "../../../src/TestBotSidebarPanels.tsx";
 import Button from "../../../src/gds/Button.tsx";
 import PageShell from "../../../src/gds/PageShell.tsx";
 import PageGrid from "../../../src/gds/PageGrid.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import TestBotChatPanel from "../../../src/TestBotChatPanel.tsx";
-
-type OptimisticFeedback = {
-  id: string;
-  runId: string;
-  messageRefId: string;
-  score: number;
-  reason?: string | null;
-  createdAt?: string | null;
-};
 
 function toTestBotStatus(status: string): TestBotRun["status"] {
   const normalized = status.trim().toUpperCase();
@@ -50,112 +50,34 @@ function toTestBotStatus(status: string): TestBotRun["status"] {
   return "idle";
 }
 
-function extractOutputItemIndex(outputMessageId: string): number | null {
-  const match = outputMessageId.match(/:item:(\d+)$/);
-  if (!match) return null;
-  const parsed = Number.parseInt(match[1] ?? "", 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function toOptimisticOutputEdges(
-  messages: Array<{
-    role: string;
-    content: string;
-    messageRefId?: string;
-    feedback?: FeedbackEntry | OptimisticFeedback;
-  }>,
-): Array<{
-  node: {
-    __typename: "OutputMessage";
-    id: string;
-    messageRefId?: string | null;
-    role: "user" | "assistant";
-    content: string;
-    feedback?: OptimisticFeedback | null;
-  };
-}> {
-  return messages.map((message, index) => ({
-    node: {
-      __typename: "OutputMessage",
-      id: message.messageRefId ?? `optimistic-message-existing-${index}`,
-      messageRefId: message.messageRefId ?? null,
-      role: message.role === "user" ? "user" : "assistant",
-      content: message.content,
-      feedback: message.feedback ?? null,
-    },
-  }));
-}
-
 type ScenarioRunSnapshot = {
   id: string;
   status: string;
   startedAt: string | null;
   finishedAt: string | null;
-  error: string | null;
-  openResponseId: string | null;
   outputItemCount: number;
-  messages: Array<{
-    role: string;
-    content: string;
-    messageRefId?: string;
-    feedback?: FeedbackEntry;
-  }>;
+  error: string | null;
+  transcriptEntries: Array<ParsedTranscriptEntry>;
 };
 
 function toOptimisticScenarioRunEdges(args: {
   runs: Array<ScenarioRunSnapshot>;
   runId: string;
   runStatus: string;
-  openResponseId: string;
-  outputEdges: Array<{
-    node: {
-      __typename: "OutputMessage";
-      id: string;
-      messageRefId?: string | null;
-      role: "user" | "assistant";
-      content: string;
-      feedback?: OptimisticFeedback | null;
-    };
-  }>;
+  transcriptEntries: Array<OptimisticTranscriptEntry>;
 }): Array<{
   node: {
     __typename: "WorkspaceScenarioRun";
     id: string;
     error: string | null;
     finishedAt: string | null;
-    openResponses____first___l_1: {
-      edges: Array<{
-        node: {
-          __typename: "OpenResponse";
-          id: string;
-          status: string;
-          outputItems____first___l_200: {
-            edges: Array<{
-              node: {
-                __typename: "OutputMessage";
-                id: string;
-                messageRefId?: string | null;
-                role: "user" | "assistant";
-                content: string;
-                feedback?: OptimisticFeedback | null;
-              };
-            }>;
-          };
-        };
-      }>;
-    };
+    transcriptEntries: Array<OptimisticTranscriptEntry>;
     startedAt: string | null;
     status: string;
   };
 }> {
   const edges = args.runs.map((run) => {
     const isActive = run.id === args.runId;
-    const openResponseId = isActive
-      ? args.openResponseId
-      : run.openResponseId ?? `${run.id}:open-response`;
-    const outputEdges = isActive
-      ? args.outputEdges
-      : toOptimisticOutputEdges(run.messages);
     const status = isActive ? args.runStatus : run.status;
     return {
       node: {
@@ -163,18 +85,9 @@ function toOptimisticScenarioRunEdges(args: {
         id: run.id,
         error: run.error ?? null,
         finishedAt: run.finishedAt ?? null,
-        openResponses____first___l_1: {
-          edges: [{
-            node: {
-              __typename: "OpenResponse" as const,
-              id: openResponseId,
-              status,
-              outputItems____first___l_200: {
-                edges: outputEdges,
-              },
-            },
-          }],
-        },
+        transcriptEntries: isActive
+          ? args.transcriptEntries
+          : toOptimisticTranscriptEntries(run.transcriptEntries),
         startedAt: run.startedAt ?? null,
         status,
       },
@@ -189,46 +102,11 @@ function toOptimisticScenarioRunEdges(args: {
       id: args.runId,
       error: null,
       finishedAt: null,
-      openResponses____first___l_1: {
-        edges: [{
-          node: {
-            __typename: "OpenResponse" as const,
-            id: args.openResponseId,
-            status: args.runStatus,
-            outputItems____first___l_200: {
-              edges: args.outputEdges,
-            },
-          },
-        }],
-      },
+      transcriptEntries: args.transcriptEntries,
       startedAt: null,
       status: args.runStatus,
     },
   }, ...edges];
-}
-
-function normalizeFeedbackEntry(
-  feedback:
-    | {
-      id: string;
-      runId: string;
-      messageRefId: string;
-      score: number;
-      reason?: string | null;
-      createdAt?: string | null;
-    }
-    | null
-    | undefined,
-): FeedbackEntry | undefined {
-  if (!feedback) return undefined;
-  return {
-    id: feedback.id,
-    runId: feedback.runId,
-    messageRefId: feedback.messageRefId,
-    score: feedback.score,
-    reason: feedback.reason ?? undefined,
-    createdAt: feedback.createdAt ?? undefined,
-  };
 }
 
 export const SimulatorTestPage = iso(`
@@ -261,33 +139,35 @@ export const SimulatorTestPage = iso(`
           startedAt
           finishedAt
           error
-          openResponses(first: 1) {
-            edges {
-              node {
+          transcriptEntries {
+            asWorkspaceConversationTranscriptMessage {
+              id
+              messageRefId
+              feedbackEligible
+              role
+              content
+              feedback {
                 id
-                status
-                outputItems(first: 200) {
-                  edges {
-                    node {
-                      __typename
-                      asOutputMessage {
-                        id
-                        messageRefId
-                        role
-                        content
-                        feedback {
-                          id
-                          runId
-                          messageRefId
-                          score
-                          reason
-                          createdAt
-                        }
-                      }
-                    }
-                  }
-                }
+                runId
+                messageRefId
+                score
+                reason
+                createdAt
               }
+            }
+            asWorkspaceConversationTranscriptReasoning {
+              id
+              summary
+              reasoningType
+            }
+            asWorkspaceConversationTranscriptToolCall {
+              id
+              toolCallId
+              toolName
+              status
+              argumentsText
+              resultText
+              error
             }
           }
         }
@@ -474,61 +354,22 @@ export const SimulatorTestPage = iso(`
       ),
     [assistantDeck?.inputSchema, parsedAssistantInitJson.parsed],
   );
-  const scenarioRuns = useMemo(
+  const scenarioRuns = useMemo<Array<ScenarioRunSnapshot>>(
     () =>
       (data.scenarioRuns?.edges ?? []).flatMap((edge) => {
         const node = edge?.node;
         if (!node?.id || !node.status) return [];
-        const firstOpenResponse = (node.openResponses?.edges ?? []).flatMap((
-          openResponseEdge,
-        ) => openResponseEdge?.node ? [openResponseEdge.node] : [])[0] ?? null;
-        const outputItemCount = (firstOpenResponse?.outputItems?.edges ?? [])
-          .flatMap((outputEdge) => outputEdge?.node ? [outputEdge.node] : [])
-          .length;
-        const messageRows = (firstOpenResponse?.outputItems?.edges ?? [])
-          .flatMap((
-            outputEdge,
-            edgeIndex,
-          ) => {
-            const outputNode = outputEdge?.node;
-            const outputMessage = outputNode?.asOutputMessage;
-            if (!outputMessage?.id || !outputMessage.role) return [];
-            const role = outputMessage.role === "user" ? "user" : "assistant";
-            return [{
-              role,
-              content: outputMessage.content ?? "",
-              messageRefId: outputMessage.messageRefId ?? undefined,
-              feedback: normalizeFeedbackEntry(outputMessage.feedback),
-              outputIndex: extractOutputItemIndex(outputMessage.id),
-              edgeIndex,
-            }];
-          });
-        messageRows.sort((a, b) => {
-          if (a.outputIndex !== null && b.outputIndex !== null) {
-            if (a.outputIndex !== b.outputIndex) {
-              return a.outputIndex - b.outputIndex;
-            }
-            return a.edgeIndex - b.edgeIndex;
-          }
-          if (a.outputIndex !== null) return -1;
-          if (b.outputIndex !== null) return 1;
-          return a.edgeIndex - b.edgeIndex;
-        });
-        const messages = messageRows.map((row) => ({
-          role: row.role,
-          content: row.content,
-          messageRefId: row.messageRefId,
-          feedback: row.feedback,
-        }));
+        const transcriptEntries = parseTranscriptEntries(
+          node.transcriptEntries,
+        );
         return [{
           id: node.id,
           status: node.status,
           startedAt: node.startedAt ?? null,
           finishedAt: node.finishedAt ?? null,
+          outputItemCount: transcriptEntries.length,
           error: node.error ?? null,
-          openResponseId: firstOpenResponse?.id ?? null,
-          outputItemCount,
-          messages,
+          transcriptEntries,
         }];
       }),
     [data.scenarioRuns?.edges],
@@ -691,18 +532,17 @@ export const SimulatorTestPage = iso(`
     runId: string,
   ): Promise<boolean> => {
     if (!workspaceId || !runId) return false;
-    const baseMessages = selectedRun?.id === runId ? selectedRun.messages : [];
-    const optimisticOutputEdges = toOptimisticOutputEdges(baseMessages);
-    const optimisticOpenResponseId =
-      selectedRun?.id === runId && selectedRun.openResponseId
-        ? selectedRun.openResponseId
-        : `${runId}:open-response`;
+    const baseEntries = selectedRun?.id === runId
+      ? selectedRun.transcriptEntries
+      : [];
+    const optimisticTranscriptEntries = toOptimisticTranscriptEntries(
+      baseEntries,
+    );
     const optimisticScenarioRunEdges = toOptimisticScenarioRunEdges({
       runs: scenarioRuns,
       runId,
       runStatus: "RUNNING",
-      openResponseId: optimisticOpenResponseId,
-      outputEdges: optimisticOutputEdges,
+      transcriptEntries: optimisticTranscriptEntries,
     });
     return await new Promise<boolean>((resolve) => {
       sendScenarioRun.commit(
@@ -721,18 +561,7 @@ export const SimulatorTestPage = iso(`
                 id: runId,
                 error: null,
                 finishedAt: null,
-                openResponses____first___l_1: {
-                  edges: [{
-                    node: {
-                      __typename: "OpenResponse",
-                      id: optimisticOpenResponseId,
-                      status: "RUNNING",
-                      outputItems____first___l_200: {
-                        edges: optimisticOutputEdges,
-                      },
-                    },
-                  }],
-                },
+                transcriptEntries: optimisticTranscriptEntries,
                 startedAt: selectedRun?.startedAt ?? null,
                 status: "RUNNING",
                 workspaceId,
@@ -767,7 +596,9 @@ export const SimulatorTestPage = iso(`
       error: selectedRun.error ?? undefined,
       startedAt: selectedRun.startedAt ?? undefined,
       finishedAt: selectedRun.finishedAt ?? undefined,
-      messages: selectedRun.messages.map((message) => ({
+      messages: getTranscriptMessages(selectedRun.transcriptEntries).map((
+        message,
+      ) => ({
         ...message,
       })),
       traces: [],
@@ -775,8 +606,16 @@ export const SimulatorTestPage = iso(`
     };
   }, [selectedRun, workspaceId]);
   const testChatDisplay = useMemo(
-    () => buildTestBotChatDisplay(selectedRunState),
-    [selectedRunState],
+    () => toBuildDisplayEntries(selectedRun?.transcriptEntries ?? []),
+    [selectedRun?.transcriptEntries],
+  );
+  const transcriptMessageCount = useMemo(
+    () => countTranscriptMessages(selectedRun?.transcriptEntries ?? []),
+    [selectedRun?.transcriptEntries],
+  );
+  const transcriptUserMessageCount = useMemo(
+    () => countTranscriptUserMessages(selectedRun?.transcriptEntries ?? []),
+    [selectedRun?.transcriptEntries],
   );
   const runStatusLabel = selectedRunState.status === "running"
     ? "Running…"
@@ -792,6 +631,7 @@ export const SimulatorTestPage = iso(`
     assistantDeck?.startMode !== "user" &&
       selectedRunNeedsAssistantStart,
   );
+  const hasActiveScenarioTurn = selectedRunState.status === "running";
   const handleStopRun = useCallback(async () => {
     if (!selectedRun?.id || !workspaceId) return;
     stopScenarioRun.commit({
@@ -800,7 +640,7 @@ export const SimulatorTestPage = iso(`
   }, [selectedRun?.id, stopScenarioRun, workspaceId]);
   const handleSendChat = useCallback(async () => {
     const message = chatDraft.trim();
-    if (!message || !workspaceId) return;
+    if (!message || !workspaceId || hasActiveScenarioTurn) return;
     let runId = selectedRun?.id ?? null;
     if (!runId) {
       const started = await startAssistantChatRun();
@@ -817,33 +657,27 @@ export const SimulatorTestPage = iso(`
       },
       {
         optimisticNetworkResponse: (() => {
-          const baseMessages = selectedRun?.id === runId
-            ? selectedRun.messages
+          const baseEntries = selectedRun?.id === runId
+            ? selectedRun.transcriptEntries
             : [];
-          const optimisticOpenResponseId =
-            selectedRun?.id === runId && selectedRun.openResponseId
-              ? selectedRun.openResponseId
-              : `${runId}:open-response`;
           const optimisticMessageId = `${runId}:message:${Date.now()}`;
-          const optimisticOutputEdges = [
-            ...toOptimisticOutputEdges(baseMessages),
+          const optimisticTranscriptEntries = [
+            ...toOptimisticTranscriptEntries(baseEntries),
             {
-              node: {
-                __typename: "OutputMessage" as const,
-                id: optimisticMessageId,
-                messageRefId: null,
-                role: "user" as const,
-                content: message,
-                feedback: null,
-              },
+              __typename: "WorkspaceConversationTranscriptMessage" as const,
+              id: optimisticMessageId,
+              messageRefId: null,
+              feedbackEligible: false,
+              role: "user" as const,
+              content: message,
+              feedback: null,
             },
           ];
           const optimisticScenarioRunEdges = toOptimisticScenarioRunEdges({
             runs: scenarioRuns,
             runId,
             runStatus: "RUNNING",
-            openResponseId: optimisticOpenResponseId,
-            outputEdges: optimisticOutputEdges,
+            transcriptEntries: optimisticTranscriptEntries,
           });
           return {
             workspaceScenarioRunSend____input___v_input: {
@@ -852,18 +686,7 @@ export const SimulatorTestPage = iso(`
                 id: runId,
                 error: null,
                 finishedAt: null,
-                openResponses____first___l_1: {
-                  edges: [{
-                    node: {
-                      __typename: "OpenResponse",
-                      id: optimisticOpenResponseId,
-                      status: "RUNNING",
-                      outputItems____first___l_200: {
-                        edges: optimisticOutputEdges,
-                      },
-                    },
-                  }],
-                },
+                transcriptEntries: optimisticTranscriptEntries,
                 startedAt: selectedRun?.startedAt ?? null,
                 status: "RUNNING",
                 workspaceId,
@@ -882,10 +705,10 @@ export const SimulatorTestPage = iso(`
     );
   }, [
     chatDraft,
+    hasActiveScenarioTurn,
     scenarioRuns,
     selectedRun?.id,
-    selectedRun?.messages,
-    selectedRun?.openResponseId,
+    selectedRun?.transcriptEntries,
     selectedRun?.startedAt,
     sendScenarioRun,
     startAssistantChatRun,
@@ -942,9 +765,10 @@ export const SimulatorTestPage = iso(`
       if (!selectedRun?.id) {
         throw new Error("Missing scenario run for feedback save.");
       }
-      const existingFeedback = selectedRun.messages.find((message) =>
-        message.messageRefId === messageRefId
-      )?.feedback;
+      const existingFeedback = getTranscriptMessages(
+        selectedRun.transcriptEntries,
+      )
+        .find((message) => message.messageRefId === messageRefId)?.feedback;
       const nextFeedback: FeedbackEntry | undefined = score === null
         ? undefined
         : {
@@ -956,14 +780,14 @@ export const SimulatorTestPage = iso(`
           reason,
           createdAt: existingFeedback?.createdAt ?? new Date().toISOString(),
         };
-      const optimisticFeedback: OptimisticFeedback | null = nextFeedback
+      const optimisticFeedback: FeedbackEntry | null = nextFeedback
         ? {
           id: nextFeedback.id,
           runId: nextFeedback.runId,
           messageRefId: nextFeedback.messageRefId,
           score: nextFeedback.score,
-          reason: nextFeedback.reason ?? null,
-          createdAt: nextFeedback.createdAt ?? null,
+          reason: nextFeedback.reason,
+          createdAt: nextFeedback.createdAt,
         }
         : null;
       await new Promise<void>((resolve, reject) => {
@@ -987,28 +811,19 @@ export const SimulatorTestPage = iso(`
                   id: selectedRun.id,
                   error: selectedRun.error ?? null,
                   finishedAt: selectedRun.finishedAt ?? null,
-                  openResponses____first___l_1: {
-                    edges: [{
-                      node: {
-                        __typename: "OpenResponse",
-                        id: selectedRun.openResponseId ??
-                          `${selectedRun.id}:open-response`,
-                        status: selectedRun.status,
-                        outputItems____first___l_200: {
-                          edges: toOptimisticOutputEdges(
-                            selectedRun.messages.map((message) =>
-                              message.messageRefId === messageRefId
-                                ? {
-                                  ...message,
-                                  feedback: nextFeedback,
-                                }
-                                : message
-                            ),
-                          ),
-                        },
-                      },
-                    }],
-                  },
+                  transcriptEntries: toOptimisticTranscriptEntries(
+                    selectedRun.transcriptEntries.map((
+                      entry: ParsedTranscriptEntry,
+                    ) =>
+                      entry.kind === "message" &&
+                        entry.messageRefId === messageRefId
+                        ? {
+                          ...entry,
+                          feedback: nextFeedback,
+                        }
+                        : entry
+                    ),
+                  ),
                   startedAt: selectedRun.startedAt ?? null,
                   status: selectedRun.status,
                   workspaceId,
@@ -1021,29 +836,33 @@ export const SimulatorTestPage = iso(`
                         run.id === selectedRun.id
                           ? {
                             ...run,
-                            messages: run.messages.map((message) =>
-                              message.messageRefId === messageRefId
+                            transcriptEntries: run.transcriptEntries.map((
+                              entry: ParsedTranscriptEntry,
+                            ) =>
+                              entry.kind === "message" &&
+                                entry.messageRefId === messageRefId
                                 ? {
-                                  ...message,
+                                  ...entry,
                                   feedback: nextFeedback,
                                 }
-                                : message
+                                : entry
                             ),
                           }
                           : run
                       ),
                       runId: selectedRun.id,
                       runStatus: selectedRun.status,
-                      openResponseId: selectedRun.openResponseId ??
-                        `${selectedRun.id}:open-response`,
-                      outputEdges: toOptimisticOutputEdges(
-                        selectedRun.messages.map((message) =>
-                          message.messageRefId === messageRefId
+                      transcriptEntries: toOptimisticTranscriptEntries(
+                        selectedRun.transcriptEntries.map((
+                          entry: ParsedTranscriptEntry,
+                        ) =>
+                          entry.kind === "message" &&
+                            entry.messageRefId === messageRefId
                             ? {
-                              ...message,
+                              ...entry,
                               feedback: nextFeedback,
                             }
-                            : message
+                            : entry
                         ),
                       ),
                     }),
@@ -1138,6 +957,8 @@ export const SimulatorTestPage = iso(`
           runWorkspaceId={workspaceId}
           runStatusLabel={runStatusLabel}
           testChatDisplay={testChatDisplay}
+          transcriptMessageCount={transcriptMessageCount}
+          transcriptUserMessageCount={transcriptUserMessageCount}
           activeWorkspaceId={workspaceId || null}
           requestedRunNotFound={hasMissingSelectedRun}
           canStart={canStartScenarioRun}
@@ -1152,8 +973,7 @@ export const SimulatorTestPage = iso(`
           showStartOverlay={showStartOverlay}
           canStartAssistant={canStartAssistantRun}
           canSendChat={chatDraft.trim().length > 0 && !showStartOverlay &&
-            selectedRunState.status !== "running" &&
-            !sendScenarioRun.inFlight}
+            !sendScenarioRun.inFlight && !hasActiveScenarioTurn}
           chatDraft={chatDraft}
           setChatDraft={setChatDraft}
           chatError={null}

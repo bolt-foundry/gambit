@@ -24,6 +24,19 @@ function toWritePayload(
   if (!live || typeof live !== "object") return null;
   const node = live.node;
   if (!node || typeof node !== "object") return null;
+  const nodeRecord = node as Record<string, unknown>;
+  const buildRuns = nodeRecord["buildRuns____first___l_1"];
+  const buildRunNode = buildRuns &&
+      typeof buildRuns === "object" &&
+      Array.isArray((buildRuns as { edges?: unknown }).edges)
+    ? (buildRuns as { edges: Array<unknown> }).edges.flatMap((edge) =>
+      edge && typeof edge === "object" &&
+        (edge as { node?: unknown }).node &&
+        typeof (edge as { node?: unknown }).node === "object"
+        ? [(edge as { node: Record<string, unknown> }).node]
+        : []
+    )[0] ?? null
+    : null;
   return {
     [WORKSPACE_ROOT_KEY]:
       node as WorkspaceWorkbenchLiveWritePayload[typeof WORKSPACE_ROOT_KEY],

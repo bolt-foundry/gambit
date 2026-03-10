@@ -87,6 +87,9 @@ type BuildRunRecord = {
     role: string;
     content: string;
     messageRefId?: string;
+    feedbackEligible?: boolean;
+    messageSource?: "scenario" | "manual" | "artifact";
+    feedback?: FeedbackRecord;
   }>;
   traces?: Array<Record<string, unknown>>;
   toolInserts?: Array<{
@@ -140,6 +143,9 @@ type ScenarioRunRecord = {
     role: string;
     content: string;
     messageRefId?: string;
+    feedbackEligible?: boolean;
+    messageSource?: "scenario" | "manual" | "artifact";
+    feedback?: FeedbackRecord;
   }>;
   traces?: Array<Record<string, unknown>>;
   toolInserts?: Array<{
@@ -314,6 +320,7 @@ type OutputMessageRecord = {
   role: string;
   content: string;
   messageRefId?: string;
+  feedbackEligible: boolean;
   feedback?: FeedbackEntry;
 };
 
@@ -339,6 +346,190 @@ type OpenResponseOutputItemRecord =
   | OutputMessageRecord
   | OutputReasoningRecord
   | OutputToolCallRecord;
+
+type TranscriptMessageRecord = {
+  __typename: "WorkspaceConversationTranscriptMessage";
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  messageRefId?: string;
+  feedbackEligible: boolean;
+  feedback?: FeedbackRecord;
+};
+
+type TranscriptReasoningRecord = {
+  __typename: "WorkspaceConversationTranscriptReasoning";
+  id: string;
+  summary: string;
+  reasoningType?: string;
+};
+
+type TranscriptToolCallRecord = {
+  __typename: "WorkspaceConversationTranscriptToolCall";
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  status: "RUNNING" | "COMPLETED" | "ERROR";
+  argumentsText?: string;
+  resultText?: string;
+  error?: string;
+};
+
+type TranscriptEntryRecord =
+  | TranscriptMessageRecord
+  | TranscriptReasoningRecord
+  | TranscriptToolCallRecord;
+
+function toTranscriptMessageRole(value: string): "user" | "assistant" {
+  return value === "user" ? "user" : "assistant";
+}
+
+function isTranscriptMessageFeedbackEligible(message: {
+  role: string;
+  messageSource?: "scenario" | "manual" | "artifact";
+  feedbackEligible?: boolean;
+}): boolean {
+  if (typeof message.feedbackEligible === "boolean") {
+    return message.feedbackEligible;
+  }
+  const role = toTranscriptMessageRole(message.role);
+  return role === "assistant" ||
+    (role === "user" && message.messageSource === "scenario");
+}
+
+function buildTranscriptMessages(
+  parent: BuildRunRecord | ScenarioRunRecord,
+): Array<TranscriptMessageRecord> {
+  return parent.messages.map((message, index) => ({
+    __typename: "WorkspaceConversationTranscriptMessage",
+    id: message.messageRefId ?? `${parent.id}:transcript:${index}`,
+    role: toTranscriptMessageRole(message.role),
+    content: message.content,
+    messageRefId: message.messageRefId,
+    feedbackEligible: isTranscriptMessageFeedbackEligible(message),
+    feedback: message.feedback,
+  }));
+}
+
+function buildTranscriptEntries(args: {
+  parent: BuildRunRecord | ScenarioRunRecord;
+  outputItems: Array<OpenResponseOutputItemRecord>;
+}): Array<TranscriptEntryRecord> {
+  const transcriptMessages = buildTranscriptMessages(args.parent);
+  if (args.outputItems.length === 0) {
+    return transcriptMessages;
+  }
+
+  const transcriptEntries: Array<TranscriptEntryRecord> = [];
+  const consumedCanonicalMessageIndexes = new Set<number>();
+  let messageCursor = 0;
+
+  const markCanonicalMessageConsumed = (
+    index: number,
+  ): TranscriptMessageRecord => {
+    consumedCanonicalMessageIndexes.add(index);
+    while (
+      messageCursor < transcriptMessages.length &&
+      consumedCanonicalMessageIndexes.has(messageCursor)
+    ) {
+      messageCursor += 1;
+    }
+    return transcriptMessages[index];
+  };
+
+  const toTranscriptEntryFromOutputItem = (
+    item: OpenResponseOutputItemRecord,
+  ): Maybe<TranscriptEntryRecord> => {
+    switch (item.__typename) {
+      case "OutputReasoning":
+        return {
+          __typename: "WorkspaceConversationTranscriptReasoning",
+          id: item.id,
+          summary: item.summary,
+          reasoningType: item.reasoningType,
+        };
+      case "OutputToolCall":
+        return {
+          __typename: "WorkspaceConversationTranscriptToolCall",
+          id: item.id,
+          toolCallId: item.toolCallId,
+          toolName: item.toolName,
+          status: item.status,
+          argumentsText: item.argumentsText,
+          resultText: item.resultText,
+          error: item.error,
+        };
+      case "OutputMessage":
+        return {
+          __typename: "WorkspaceConversationTranscriptMessage",
+          id: item.messageRefId ?? item.id,
+          role: toTranscriptMessageRole(item.role),
+          content: item.content,
+          messageRefId: item.messageRefId,
+          feedbackEligible: item.feedbackEligible,
+          feedback: item.feedback,
+        };
+    }
+  };
+
+  const takeCanonicalMessageForOutput = (
+    item: OutputMessageRecord,
+  ): Maybe<TranscriptMessageRecord> => {
+    if (item.messageRefId) {
+      for (
+        let index = messageCursor;
+        index < transcriptMessages.length;
+        index += 1
+      ) {
+        const message = transcriptMessages[index];
+        if (
+          !consumedCanonicalMessageIndexes.has(index) &&
+          message.messageRefId === item.messageRefId
+        ) {
+          return markCanonicalMessageConsumed(index);
+        }
+      }
+    }
+    for (
+      let index = messageCursor;
+      index < transcriptMessages.length;
+      index += 1
+    ) {
+      const message = transcriptMessages[index];
+      if (
+        !consumedCanonicalMessageIndexes.has(index) &&
+        message.role === toTranscriptMessageRole(item.role) &&
+        message.content.trim() === item.content.trim()
+      ) {
+        return markCanonicalMessageConsumed(index);
+      }
+    }
+    return null;
+  };
+
+  for (const item of args.outputItems) {
+    if (item.__typename === "OutputMessage") {
+      transcriptEntries.push(
+        takeCanonicalMessageForOutput(item) ??
+          toTranscriptEntryFromOutputItem(item)!,
+      );
+      continue;
+    }
+    const entry = toTranscriptEntryFromOutputItem(item);
+    if (entry) {
+      transcriptEntries.push(entry);
+    }
+  }
+
+  if (args.parent.conversationRunKind === "scenario") {
+    for (let index = 0; index < transcriptMessages.length; index += 1) {
+      if (consumedCanonicalMessageIndexes.has(index)) continue;
+      transcriptEntries.push(transcriptMessages[index]);
+    }
+  }
+
+  return transcriptEntries;
+}
 
 export type GambitGraphqlContext = {
   readWorkspaceFiles: (args: {
@@ -832,6 +1023,27 @@ WorkspaceRunInterface.implement({
   }),
 });
 
+const TranscriptMessageType = builder.objectRef<TranscriptMessageRecord>(
+  "WorkspaceConversationTranscriptMessage",
+);
+const TranscriptReasoningType = builder.objectRef<TranscriptReasoningRecord>(
+  "WorkspaceConversationTranscriptReasoning",
+);
+const TranscriptToolCallType = builder.objectRef<TranscriptToolCallRecord>(
+  "WorkspaceConversationTranscriptToolCall",
+);
+const WorkspaceConversationTranscriptEntryType = builder.unionType(
+  "WorkspaceConversationTranscriptEntry",
+  {
+    types: [
+      TranscriptMessageType,
+      TranscriptReasoningType,
+      TranscriptToolCallType,
+    ] as const,
+    resolveType: (parent) => parent.__typename,
+  },
+);
+
 const WorkspaceConversationRunInterface = builder.interfaceRef<
   BuildRunRecord | ScenarioRunRecord
 >("WorkspaceConversationRun");
@@ -865,6 +1077,23 @@ WorkspaceConversationRunInterface.implement({
     finishedAt: t.string({
       nullable: true,
       resolve: (parent) => parent.finishedAt ?? null,
+    }),
+    transcriptEntries: t.field({
+      type: [WorkspaceConversationTranscriptEntryType],
+      resolve: async (parent, _args, ctx) => {
+        const workspaceId = typeof parent.workspaceId === "string" &&
+            parent.workspaceId.trim().length > 0
+          ? parent.workspaceId
+          : null;
+        if (!workspaceId || !ctx.readWorkspaceOpenResponseOutputItems) {
+          return buildTranscriptMessages(parent);
+        }
+        const outputItems = await ctx.readWorkspaceOpenResponseOutputItems({
+          workspaceId,
+          runId: parent.id,
+        });
+        return buildTranscriptEntries({ parent, outputItems });
+      },
     }),
     openResponses: t.connection({
       type: OpenResponseType,
@@ -908,6 +1137,61 @@ FeedbackType.implement({
   }),
 });
 
+TranscriptMessageType.implement({
+  fields: (t) => ({
+    id: t.id({ resolve: (parent) => parent.id }),
+    role: t.string({ resolve: (parent) => parent.role }),
+    content: t.string({ resolve: (parent) => parent.content }),
+    messageRefId: t.id({
+      nullable: true,
+      resolve: (parent) => parent.messageRefId ?? null,
+    }),
+    feedbackEligible: t.boolean({
+      resolve: (parent) => parent.feedbackEligible,
+    }),
+    feedback: t.field({
+      type: FeedbackType,
+      nullable: true,
+      resolve: (parent) => parent.feedback ?? null,
+    }),
+  }),
+});
+
+TranscriptReasoningType.implement({
+  fields: (t) => ({
+    id: t.id({ resolve: (parent) => parent.id }),
+    summary: t.string({ resolve: (parent) => parent.summary }),
+    reasoningType: t.string({
+      nullable: true,
+      resolve: (parent) => parent.reasoningType ?? null,
+    }),
+  }),
+});
+
+TranscriptToolCallType.implement({
+  fields: (t) => ({
+    id: t.id({ resolve: (parent) => parent.id }),
+    toolCallId: t.id({ resolve: (parent) => parent.toolCallId }),
+    toolName: t.string({ resolve: (parent) => parent.toolName }),
+    status: t.field({
+      type: ToolCallStatusEnum,
+      resolve: (parent) => parent.status,
+    }),
+    argumentsText: t.string({
+      nullable: true,
+      resolve: (parent) => parent.argumentsText ?? null,
+    }),
+    resultText: t.string({
+      nullable: true,
+      resolve: (parent) => parent.resultText ?? null,
+    }),
+    error: t.string({
+      nullable: true,
+      resolve: (parent) => parent.error ?? null,
+    }),
+  }),
+});
+
 const OutputMessageType = builder.objectRef<OutputMessageRecord>(
   "OutputMessage",
 );
@@ -919,6 +1203,9 @@ OutputMessageType.implement({
     messageRefId: t.id({
       nullable: true,
       resolve: (parent) => parent.messageRefId ?? null,
+    }),
+    feedbackEligible: t.boolean({
+      resolve: (parent) => parent.feedbackEligible,
     }),
     feedback: t.field({
       type: FeedbackType,

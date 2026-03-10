@@ -5,7 +5,6 @@ import * as path from "@std/path";
 import { DatabaseSync } from "node:sqlite";
 import { runE2e, waitForPath } from "../../../demo-runner/src/e2e/utils.ts";
 import { DemoServerError } from "../../../demo-runner/src/runner.ts";
-import { createTestTabOpenResponsesDemoFixture } from "./fixtures/test-tab-openresponses-fixture.ts";
 
 function logTestTabDemo(
   label: string,
@@ -162,7 +161,7 @@ async function waitForGraphqlFeedback(
 }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const payload = await demoTarget.evaluate(
+    const payloads = await demoTarget.evaluate(
       async ({
         workspaceId,
         runId,
@@ -243,26 +242,128 @@ async function waitForGraphqlFeedback(
           ?.find((edge) => edge?.node?.id === runId)
           ?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
           ?.map((edge) => edge?.node)
-          .find((node) =>
+          .filter((node) =>
             node?.__typename === "OutputMessage" &&
-            node.content === messageText
-          ) ?? null;
+            (node.content ?? "").replace(/\s+/g, " ").trim() ===
+              (messageText ?? "").replace(/\s+/g, " ").trim()
+          ) ?? [];
       },
       args,
-    ) as {
+    ) as Array<{
       content?: string;
       messageRefId?: string;
       feedback?: { score?: number; reason?: string };
-    } | null;
-    if (
+    }>;
+    const matchingPayload = payloads.find((payload) =>
       payload?.feedback?.score === args.score &&
       payload.feedback?.reason === args.reason
-    ) {
-      return payload;
+    );
+    if (matchingPayload) {
+      return matchingPayload;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("Timed out waiting for feedback in GraphQL.");
+}
+
+async function readScenarioRunGraphqlMessages(
+  demoTarget: {
+    evaluate: <T, R>(
+      pageFunction: (arg: T) => R | Promise<R>,
+      arg: T,
+    ) => Promise<R>;
+  },
+  args: {
+    workspaceId: string;
+    runId: string;
+  },
+): Promise<Array<{ role: string; content: string }>> {
+  const graphqlResponse = await demoTarget.evaluate(
+    async ({ workspaceId, runId }) => {
+      const response = await fetch("/graphql", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: `
+            query ScenarioRuns($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      openResponses(first: 1) {
+                        edges {
+                          node {
+                            outputItems(first: 50) {
+                              edges {
+                                node {
+                                  __typename
+                                  ... on OutputMessage {
+                                    role
+                                    content
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { workspaceId, runId },
+        }),
+      });
+      if (!response.ok) return [];
+      const body = await response.json() as {
+        data?: {
+          workspace?: {
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  openResponses?: {
+                    edges?: Array<{
+                      node?: {
+                        outputItems?: {
+                          edges?: Array<{
+                            node?: {
+                              __typename?: string;
+                              role?: string;
+                              content?: string;
+                            };
+                          }>;
+                        };
+                      };
+                    }>;
+                  };
+                };
+              }>;
+            };
+          };
+        };
+      };
+      return body.data?.workspace?.scenarioRuns?.edges
+        ?.find((edge) => edge?.node?.id === runId)
+        ?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
+        ?.map((edge) => edge?.node)
+        .filter((node) => node?.__typename === "OutputMessage")
+        .map((node) => ({
+          role: node?.role ?? "",
+          content: node?.content ?? "",
+        })) ?? [];
+    },
+    args,
+  ) as Array<{ role: string; content: string }>;
+
+  return graphqlResponse;
+}
+
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function parseWorkspaceRunPath(pathname: string): {
@@ -283,17 +384,28 @@ function parseWorkspaceRunPath(pathname: string): {
 async function main(): Promise<void> {
   const moduleDir = path.dirname(path.fromFileUrl(import.meta.url));
   const repoRoot = path.resolve(moduleDir, "..", "..", "..", "..");
-  const demoServerPath = path.join(
+  const cliPath = path.join(
     repoRoot,
     "packages",
     "gambit",
-    "simulator-ui",
-    "__demos__",
-    "serve-test-tab-demo.ts",
+    "src",
+    "cli.ts",
   );
+  const demoDeckPath = path.join(
+    repoRoot,
+    "packages",
+    "gambit",
+    "scaffolds",
+    "demo",
+    "examples",
+    "advanced",
+    "agent_with_typescript",
+    "PROMPT.md",
+  );
+  const scenarioLabel = "Typescript agent scenario";
+  const userMessage = "what time is it?";
 
   await runWithTempServeRoot(async (serveRoot) => {
-    const fixture = await createTestTabOpenResponsesDemoFixture(serveRoot);
     await runE2e(
       "gambit test tab demo",
       async ({ demoTarget, screenshot, wait }) => {
@@ -333,13 +445,6 @@ async function main(): Promise<void> {
           );
         };
 
-        const assistantBubble = demoTarget.locator(
-          ".imessage-row.left .imessage-bubble.left",
-        ).first();
-        const followupAssistantBubble = demoTarget.locator(
-          ".imessage-row.left .imessage-bubble.left",
-          { hasText: "Fine. What do you need?" },
-        ).first();
         const composerInput = demoTarget.locator(
           ".composer textarea.message-input",
         ).first();
@@ -394,9 +499,9 @@ async function main(): Promise<void> {
           const label = labels.length > 1 ? labels[1] : labels[0];
           return (label?.textContent ?? "").replace(/\s+/g, " ").trim();
         });
-        if (selectedScenarioLabel !== fixture.scenarioLabel) {
+        if (selectedScenarioLabel !== scenarioLabel) {
           throw new Error(
-            `Expected selected scenario "${fixture.scenarioLabel}", got "${selectedScenarioLabel}".`,
+            `Expected selected scenario "${scenarioLabel}", got "${selectedScenarioLabel}".`,
           );
         }
 
@@ -431,9 +536,64 @@ async function main(): Promise<void> {
         await screenshot("02-test-run-route");
 
         await composerInput.waitFor({ timeout: 10_000 });
-        await composerInput.fill("how are you");
+        await composerInput.fill(userMessage);
         await composerSend.waitFor({ timeout: 10_000 });
-        await composerSend.click();
+        const enabledComposerSend = demoTarget.locator(
+          '[data-testid="testbot-chat-send"]:not([disabled])',
+        ).first();
+        await enabledComposerSend.waitFor({ timeout: 10_000 });
+        await enabledComposerSend.click();
+
+        await demoTarget.locator(".imessage-row.right .imessage-bubble.right", {
+          hasText: userMessage,
+        }).first().waitFor({
+          timeout: 10_000,
+        });
+        await waitForCondition(async () => {
+          const graphqlMessages = await readScenarioRunGraphqlMessages(
+            demoTarget,
+            ids,
+          );
+          const lastUserIndex = graphqlMessages.findLastIndex((message) =>
+            message.role === "user" &&
+            normalizeText(message.content) === userMessage
+          );
+          if (lastUserIndex < 0) return false;
+          const assistantReply = graphqlMessages.slice(lastUserIndex + 1).find(
+            (message) => message.role === "assistant",
+          );
+          return graphqlMessages.some((message) =>
+            message.role === "user" &&
+            normalizeText(message.content) === userMessage
+          ) && Boolean(assistantReply);
+        }, 20_000);
+        const graphqlMessagesAfterSend = await readScenarioRunGraphqlMessages(
+          demoTarget,
+          ids,
+        );
+        const lastUserIndex = graphqlMessagesAfterSend.findLastIndex((
+          message,
+        ) =>
+          message.role === "user" &&
+          normalizeText(message.content) === userMessage
+        );
+        const assistantReplyText = normalizeText(
+          graphqlMessagesAfterSend.slice(lastUserIndex + 1)
+            .find((message) => message.role === "assistant")
+            ?.content,
+        );
+        if (!assistantReplyText) {
+          throw new Error("Expected a non-empty assistant reply after send.");
+        }
+        await demoTarget.locator(".imessage-row.left .imessage-bubble.left", {
+          hasText: assistantReplyText,
+        }).first().waitFor({
+          timeout: 10_000,
+        });
+        const followupAssistantBubble = demoTarget.locator(
+          ".imessage-row.left .imessage-bubble.left",
+          { hasText: assistantReplyText },
+        ).first();
 
         const sqlitePath = path.join(
           serveRoot,
@@ -449,34 +609,6 @@ async function main(): Promise<void> {
           ids.workspaceId,
           "state.json",
         );
-
-        await waitForCondition(async () => {
-          try {
-            const db = new DatabaseSync(sqlitePath);
-            try {
-              const rows = db.prepare(`
-                SELECT role, content
-                FROM openresponses_output_items_v0
-                WHERE workspace_id = ? AND run_id = ?
-                ORDER BY sequence ASC, output_index ASC, item_key ASC
-              `).all(ids.workspaceId, ids.runId) as Array<{
-                role: string | null;
-                content: string | null;
-              }>;
-              return rows.some((row) =>
-                row.role === "user" && row.content === "how are you"
-              ) &&
-                rows.some((row) =>
-                  row.role === "assistant" &&
-                  row.content === "Fine. What do you need?"
-                );
-            } finally {
-              db.close();
-            }
-          } catch {
-            return false;
-          }
-        }, 10_000);
 
         const state = JSON.parse(await Deno.readTextFile(statePath)) as {
           meta?: { scenarioRunId?: string };
@@ -524,87 +656,10 @@ async function main(): Promise<void> {
           );
         }
 
-        const graphqlResponse = await demoTarget.evaluate(
-          async ({ workspaceId, runId }) => {
-            const response = await fetch("/graphql", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                query: `
-                  query ScenarioRuns($workspaceId: ID!) {
-                    workspace(id: $workspaceId) {
-                      scenarioRuns(first: 10) {
-                        edges {
-                          node {
-                            id
-                            openResponses(first: 1) {
-                              edges {
-                                node {
-                                  outputItems(first: 50) {
-                                    edges {
-                                      node {
-                                        __typename
-                                        ... on OutputMessage {
-                                          role
-                                          content
-                                        }
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                `,
-                variables: { workspaceId, runId },
-              }),
-            });
-            return await response.json();
-          },
+        const graphqlMessages = await readScenarioRunGraphqlMessages(
+          demoTarget,
           ids,
-        ) as {
-          data?: {
-            workspace?: {
-              scenarioRuns?: {
-                edges?: Array<{
-                  node?: {
-                    id?: string;
-                    openResponses?: {
-                      edges?: Array<{
-                        node?: {
-                          outputItems?: {
-                            edges?: Array<{
-                              node?: {
-                                __typename?: string;
-                                role?: string;
-                                content?: string;
-                              };
-                            }>;
-                          };
-                        };
-                      }>;
-                    };
-                  };
-                }>;
-              };
-            };
-          };
-        };
-
-        const graphqlMessages =
-          graphqlResponse.data?.workspace?.scenarioRuns?.edges
-            ?.find((edge) => edge?.node?.id === ids.runId)
-            ?.node?.openResponses?.edges?.[0]?.node?.outputItems?.edges
-            ?.map((edge) => edge?.node)
-            .filter((node) => node?.__typename === "OutputMessage")
-            .map((node) => ({
-              role: node?.role ?? "",
-              content: node?.content ?? "",
-            })) ?? [];
+        );
         logTestTabDemo("graphql-evidence", {
           workspaceId: ids.workspaceId,
           runId: ids.runId,
@@ -612,11 +667,11 @@ async function main(): Promise<void> {
         });
         if (
           !graphqlMessages.some((message) =>
-            message.content === "Fine. What do you need?"
+            normalizeText(message.content) === assistantReplyText
           )
         ) {
           throw new Error(
-            "Expected GraphQL transcript to include follow-up assistant output.",
+            "Expected GraphQL transcript to include assistant output from the live run.",
           );
         }
 
@@ -635,12 +690,12 @@ async function main(): Promise<void> {
           timeout: 10_000,
         });
         await demoTarget.locator(".imessage-row.right .imessage-bubble.right", {
-          hasText: "how are you",
+          hasText: userMessage,
         }).first().waitFor({
           timeout: 10_000,
         });
         await demoTarget.locator(".imessage-row.left .imessage-bubble.left", {
-          hasText: "Fine. What do you need?",
+          hasText: assistantReplyText,
         }).first().waitFor({
           timeout: 10_000,
         });
@@ -660,34 +715,12 @@ async function main(): Promise<void> {
         await feedbackReasonInput.fill(feedbackReason);
         await feedbackReasonInput.blur();
 
-        await waitForCondition(async () => {
-          try {
-            const refreshedState = JSON.parse(
-              await Deno.readTextFile(statePath),
-            ) as {
-              feedback?: Array<{
-                runId?: string;
-                messageRefId?: string;
-                score?: number;
-                reason?: string;
-              }>;
-            };
-            return (refreshedState.feedback ?? []).some((entry) =>
-              entry.runId === ids.runId &&
-              entry.score === feedbackScore &&
-              entry.reason === feedbackReason
-            );
-          } catch {
-            return false;
-          }
-        }, 10_000);
-
         const graphqlFeedback = await waitForGraphqlFeedback(
           demoTarget,
           {
             workspaceId: ids.workspaceId,
             runId: ids.runId,
-            messageText: "Fine. What do you need?",
+            messageText: assistantReplyText,
             score: feedbackScore,
             reason: feedbackReason,
           },
@@ -732,15 +765,15 @@ async function main(): Promise<void> {
           timeout: 10_000,
         });
         await demoTarget.locator(".imessage-row.right .imessage-bubble.right", {
-          hasText: "how are you",
+          hasText: userMessage,
         }).first().waitFor({ timeout: 10_000 });
         await demoTarget.locator(".imessage-row.left .imessage-bubble.left", {
-          hasText: "Fine. What do you need?",
+          hasText: assistantReplyText,
         }).first().waitFor({ timeout: 10_000 });
         await waitForFeedbackReason(
           demoTarget,
           {
-            messageText: "Fine. What do you need?",
+            messageText: assistantReplyText,
             expectedReason: feedbackReason,
           },
           10_000,
@@ -759,11 +792,9 @@ async function main(): Promise<void> {
             .filter((value) => value.length > 0);
         });
         if (
+          !reloadedMessages.some((message) => message.includes(userMessage)) ||
           !reloadedMessages.some((message) =>
-            message.includes("how are you")
-          ) ||
-          !reloadedMessages.some((message) =>
-            message.includes("Fine. What do you need?")
+            message.includes(assistantReplyText)
           )
         ) {
           throw new Error(
@@ -801,8 +832,10 @@ async function main(): Promise<void> {
             "deno",
             "run",
             "-A",
-            demoServerPath,
-            fixture.rootDeckPath,
+            cliPath,
+            "serve",
+            demoDeckPath,
+            "--bundle",
             "--port",
             String(targetPort),
           ],

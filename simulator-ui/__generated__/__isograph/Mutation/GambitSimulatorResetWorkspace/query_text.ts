@@ -51,6 +51,33 @@ export default 'mutation GambitSimulatorResetWorkspace($input: SimulatorResetWor
               },\
             },\
             status,\
+            transcriptEntries {\
+              __typename,\
+              ... on WorkspaceConversationTranscriptMessage {\
+                __typename,\
+                id,\
+                content,\
+                feedbackEligible,\
+                messageRefId,\
+                role,\
+              },\
+              ... on WorkspaceConversationTranscriptReasoning {\
+                __typename,\
+                id,\
+                reasoningType,\
+                summary,\
+              },\
+              ... on WorkspaceConversationTranscriptToolCall {\
+                __typename,\
+                id,\
+                argumentsText,\
+                error,\
+                resultText,\
+                status,\
+                toolCallId,\
+                toolName,\
+              },\
+            },\
           },\
         },\
       },\

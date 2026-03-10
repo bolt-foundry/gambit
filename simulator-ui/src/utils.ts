@@ -185,6 +185,7 @@ export type TestBotRun = {
     role: string;
     content: string;
     messageRefId?: string;
+    feedbackEligible?: boolean;
     messageSource?: "scenario" | "manual" | "artifact";
     feedback?: FeedbackEntry;
     respondStatus?: number;
@@ -281,8 +282,12 @@ export type ToolCallSummary = {
 
 export type BuildDisplayMessage = {
   kind: "message" | "tool" | "reasoning";
+  id?: string;
   role?: "user" | "assistant";
   content?: string;
+  messageRefId?: string | null;
+  feedbackEligible?: boolean;
+  feedback?: FeedbackEntry;
   toolCallId?: string;
   toolSummary?: ToolCallSummary;
   reasoningId?: string;

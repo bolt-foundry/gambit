@@ -111,6 +111,12 @@ export const createWorkspaceScenarioService = (deps: {
     trace: TraceEvent,
     fallbackRunId?: string,
   ) => void;
+  persistCanonicalUserInputEvent: (args: {
+    state: Maybe<SavedState>;
+    runId: string;
+    message: string;
+    source: "build" | "scenario" | "manual" | "artifact";
+  }) => void;
   persistCanonicalStateMessages: (args: {
     state: Maybe<SavedState>;
     runId: string;
@@ -938,6 +944,12 @@ export const createWorkspaceScenarioService = (deps: {
         ...run.messages,
         { role: "user", content: trimmedMessage },
       ];
+      deps.persistCanonicalUserInputEvent({
+        state,
+        runId: args.runId,
+        message: trimmedMessage,
+        source: userMessageSource,
+      });
     }
     let hasStartedAssistantStreamMessage = false;
     entry.promise = (async () => {
@@ -1060,7 +1072,8 @@ export const createWorkspaceScenarioService = (deps: {
           deps.persistCanonicalStateMessages({
             state: savedState,
             runId: args.runId,
-            startIndex: openResponsesStartIndex,
+            startIndex: openResponsesStartIndex +
+              (trimmedMessage.length > 0 ? 1 : 0),
             source: userMessageSource,
           });
           entry.state = savedState;
