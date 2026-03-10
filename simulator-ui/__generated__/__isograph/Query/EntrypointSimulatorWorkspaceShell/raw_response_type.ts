@@ -68,6 +68,7 @@ export type Query__EntrypointSimulatorWorkspaceShell__raw_response_type = {
         writeEnabled: boolean,
       },
     },
+    workbenchSelectedContextChips: string,
   },
 }
 

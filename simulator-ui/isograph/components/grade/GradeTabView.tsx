@@ -86,6 +86,17 @@ export function GradeTabView(props: {
     runId: string;
     turnIndex?: number;
   }) => void;
+  onAddFlagToWorkbench?: (args: {
+    refId: string;
+    runId: string;
+    turnIndex?: number;
+    score?: number;
+    graderReason?: string;
+    flagReason?: string;
+    priorUser?: string;
+    gradedAssistant?: string;
+  }) => void;
+  onAddErrorToWorkbench?: (args: { runId?: string; error: string }) => void;
   mutationError: string | null;
   expandedResults: Record<string, boolean>;
   onToggleExpandedResult: (itemKey: string) => void;
@@ -225,6 +236,8 @@ export function GradeTabView(props: {
           onToggleFlag={props.onToggleFlag}
           onFlagReasonChange={props.onReasonDraftChange}
           onFlagReasonBlur={props.onReasonBlur}
+          onAddFlagToWorkbench={props.onAddFlagToWorkbench}
+          onAddErrorToWorkbench={props.onAddErrorToWorkbench}
           topErrorRunId={props.routeGradeRunId}
         />
       }

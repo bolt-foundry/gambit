@@ -357,6 +357,11 @@ const normalizationAst: NormalizationAst = {
             },
           ],
         },
+        {
+          kind: "Scalar",
+          fieldName: "workbenchSelectedContextChips",
+          arguments: null,
+        },
       ],
     },
   ],

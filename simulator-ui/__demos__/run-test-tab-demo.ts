@@ -76,6 +76,53 @@ async function waitForFeedbackReason(
   }, timeoutMs);
 }
 
+async function ensureWorkbenchDrawerVisible(
+  demoTarget: {
+    locator: (selector: string) => {
+      count(): Promise<number>;
+      first(): { isVisible(): Promise<boolean> };
+      click(): Promise<void>;
+      waitFor(args?: { timeout?: number }): Promise<void>;
+    };
+  },
+): Promise<void> {
+  const drawer = demoTarget.locator(".workbench-drawer-docked");
+  if (await drawer.count() > 0 && await drawer.first().isVisible()) {
+    return;
+  }
+  await demoTarget.locator('[data-testid="nav-workbench"]').click();
+  await drawer.waitFor({ timeout: 10_000 });
+}
+
+async function waitForAssistantWorkbenchReply(
+  demoTarget: {
+    locator: (selector: string, options?: { hasText?: string }) => {
+      count(): Promise<number>;
+      first(): {
+        waitFor(args?: { timeout?: number }): Promise<void>;
+        textContent(): Promise<string | null>;
+      };
+    };
+  },
+  wait: (ms: number) => Promise<void>,
+): Promise<void> {
+  const assistantBubbles = demoTarget.locator(
+    ".workbench-drawer-docked .imessage-row.left .imessage-bubble.left",
+  );
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const count = await assistantBubbles.count();
+    if (count > 0) {
+      const text = await assistantBubbles.first().textContent().catch(() => "");
+      if (typeof text === "string" && text.trim().length > 0) {
+        return;
+      }
+    }
+    await wait(500);
+  }
+  throw new Error("Timed out waiting for a Workbench assistant response.");
+}
+
 async function installLegacyFeedbackRouteMonitor(
   demoTarget: {
     addInitScript?: (script: () => void) => Promise<void>;
@@ -407,6 +454,9 @@ async function main(): Promise<void> {
     await runE2e(
       "gambit test tab demo",
       async ({ demoTarget, screenshot, wait }) => {
+        await demoTarget.evaluate(() => {
+          globalThis.localStorage?.setItem("gambit:build-chat-debug", "true");
+        });
         await installLegacyFeedbackRouteMonitor(demoTarget);
         const normalizeWorkspacePath = (pathname: string): string => pathname;
         const isWorkspaceBuildPath = (pathname: string): boolean =>
@@ -802,6 +852,29 @@ async function main(): Promise<void> {
           );
         }
         await screenshot("06-test-feedback-after-refresh");
+
+        await followupAssistantBubble.locator(
+          '[data-testid="feedback-add-to-chat"]',
+        ).click();
+        await ensureWorkbenchDrawerVisible(demoTarget);
+        await demoTarget.locator('[data-testid="build-composer-chip-row"]')
+          .waitFor({
+            timeout: 10_000,
+          });
+        await screenshot("07-test-feedback-chip-added-to-workbench");
+
+        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
+          "do you see what feedback they left",
+        );
+        await demoTarget.locator('[data-testid="build-send"]:not([disabled])')
+          .waitFor({
+            timeout: 15_000,
+          });
+        await demoTarget.locator('[data-testid="build-send"]:not([disabled])')
+          .click();
+        await waitForAssistantWorkbenchReply(demoTarget, wait);
+        await screenshot("08-test-feedback-chip-sent-response");
+        await wait(2_000);
 
         logTestTabDemo("demo-complete", {
           workspaceId: ids.workspaceId,

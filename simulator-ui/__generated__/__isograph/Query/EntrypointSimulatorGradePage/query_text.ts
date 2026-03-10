@@ -55,5 +55,6 @@ export default 'query EntrypointSimulatorGradePage($workspaceId: ID!) {\
         },\
       },\
     },\
+    workbenchSelectedContextChips,\
   },\
 }';

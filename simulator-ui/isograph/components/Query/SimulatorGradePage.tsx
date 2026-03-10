@@ -11,6 +11,14 @@ import gambitWorkspaceGradeLiveSubscription from "../../../subscriptions/GambitW
 import { useGambitTypedMutation } from "../../../src/hooks/useGambitTypedMutation.tsx";
 import { useGambitTypedSubscription } from "../../../src/hooks/useGambitTypedSubscription.tsx";
 import { useRouter } from "../../../src/RouterContext.tsx";
+import {
+  mergeWorkbenchSelectedContextChip,
+  replaceWorkbenchSelectedContextChips,
+  resolveWorkbenchSelectedContextChips,
+} from "../../../src/workbenchChipStore.ts";
+import {
+  type WorkbenchSelectedContextChip,
+} from "../../../src/workbenchContext.ts";
 import GradeTabView from "../grade/GradeTabView.tsx";
 
 function formatRunStatus(
@@ -26,6 +34,7 @@ function formatRunStatus(
 export const SimulatorGradePage = iso(`
   field Workspace.GradeTab @component {
     id
+    workbenchSelectedContextChips @updatable
     scenarioRuns(first: 50) {
       edges {
         node {
@@ -80,8 +89,52 @@ export const SimulatorGradePage = iso(`
       }
     }
   }
-`)(function SimulatorGradePage({ data }) {
+`)(function SimulatorGradePage({ data, startUpdate }) {
+  function isBuildChatDebugEnabled(): boolean {
+    if (typeof globalThis === "undefined") return false;
+    const debugGlobal =
+      (globalThis as { __GAMBIT_BUILD_CHAT_DEBUG__?: unknown })
+        .__GAMBIT_BUILD_CHAT_DEBUG__;
+    if (debugGlobal === true) return true;
+    const search = typeof globalThis.location?.search === "string"
+      ? globalThis.location.search
+      : "";
+    if (search.length > 0) {
+      const value = new URLSearchParams(search).get("gambitBuildChatDebug");
+      if (value === "1" || value === "true") return true;
+    }
+    let stored = "";
+    try {
+      stored = (globalThis.localStorage?.getItem("gambit:build-chat-debug") ??
+        "")
+        .toLowerCase()
+        .trim();
+    } catch {
+      return false;
+    }
+    return stored === "1" || stored === "true" || stored === "yes";
+  }
+
+  function logGradeChipDebug(event: string, payload: Record<string, unknown>) {
+    if (!isBuildChatDebugEnabled()) return;
+    console.info(`[grade-chip-debug] ${event}`, payload);
+  }
+
   const workspaceId = data.id ?? "";
+  const composerChips = useMemo(
+    () =>
+      resolveWorkbenchSelectedContextChips(
+        workspaceId,
+        data.workbenchSelectedContextChips,
+      ),
+    [data.workbenchSelectedContextChips, workspaceId],
+  );
+  const updateComposerChips = useCallback(
+    (next: Array<WorkbenchSelectedContextChip>) => {
+      replaceWorkbenchSelectedContextChips(startUpdate, next, workspaceId);
+    },
+    [startUpdate, workspaceId],
+  );
   const { currentRoutePath, navigate } = useRouter();
   const workspaceRoutePath = currentRoutePath;
   const route = useMemo(() => parseWorkspaceRoute(workspaceRoutePath), [
@@ -385,6 +438,49 @@ export const SimulatorGradePage = iso(`
       onReasonDraftChange={onReasonDraftChange}
       onReasonBlur={onReasonBlur}
       onToggleFlag={onToggleFlag}
+      onAddFlagToWorkbench={(args) => {
+        const flagReason = args.flagReason?.trim();
+        const graderReason = args.graderReason?.trim();
+        const gradedAssistant = args.gradedAssistant?.trim();
+        const message = [
+          flagReason ? `Flag reason: ${flagReason}` : null,
+          graderReason ? `Grader feedback: ${graderReason}` : null,
+          gradedAssistant ? `Assistant response: ${gradedAssistant}` : null,
+        ].filter((part): part is string => Boolean(part)).join("\n");
+        logGradeChipDebug("flag.add_to_workbench", {
+          workspaceId,
+          args,
+          chipMessage: message || "Flagged by grader",
+        });
+        updateComposerChips(
+          mergeWorkbenchSelectedContextChip(composerChips, {
+            chipId: `flag:${args.refId}`,
+            source: "grading_flag",
+            workspaceId,
+            runId: args.runId,
+            capturedAt: new Date().toISOString(),
+            refId: args.refId,
+            score: args.score,
+            message: message || "Flagged by grader",
+            enabled: true,
+          }),
+        );
+      }}
+      onAddErrorToWorkbench={({ runId, error }) => {
+        updateComposerChips(
+          mergeWorkbenchSelectedContextChip(composerChips, {
+            chipId: `grader_run_error:${
+              runId ?? routeGradeRunId ?? workspaceId
+            }`,
+            source: "grader_run_error",
+            workspaceId,
+            runId: runId ?? routeGradeRunId ?? undefined,
+            capturedAt: new Date().toISOString(),
+            error,
+            enabled: true,
+          }),
+        );
+      }}
       mutationError={mutationError}
       expandedResults={expandedResults}
       onToggleExpandedResult={(itemKey) =>

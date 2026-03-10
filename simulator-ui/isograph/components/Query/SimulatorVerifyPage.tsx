@@ -18,6 +18,14 @@ import {
   scenarioNameFromValue,
 } from "../../../src/utils.ts";
 import {
+  mergeWorkbenchSelectedContextChip,
+  replaceWorkbenchSelectedContextChips,
+  resolveWorkbenchSelectedContextChips,
+} from "../../../src/workbenchChipStore.ts";
+import {
+  type WorkbenchSelectedContextChip,
+} from "../../../src/workbenchContext.ts";
+import {
   sortVerifyOutlierScenarioRuns,
   VERIFY_DEFAULTS,
   VERIFY_LIMITS,
@@ -136,6 +144,7 @@ function formatPercent(value: number | null): string {
 export const SimulatorVerifyPage = iso(`
   field Workspace.VerifyTab @component {
     id
+    workbenchSelectedContextChips @updatable
     scenarioDecks {
       id
       label
@@ -231,8 +240,22 @@ export const SimulatorVerifyPage = iso(`
       }
     }
   }
-`)(function SimulatorVerifyPage({ data }) {
+`)(function SimulatorVerifyPage({ data, startUpdate }) {
   const workspaceId = data.id ?? "";
+  const composerChips = useMemo(
+    () =>
+      resolveWorkbenchSelectedContextChips(
+        workspaceId,
+        data.workbenchSelectedContextChips,
+      ),
+    [data.workbenchSelectedContextChips, workspaceId],
+  );
+  const updateComposerChips = useCallback(
+    (next: Array<WorkbenchSelectedContextChip>) => {
+      replaceWorkbenchSelectedContextChips(startUpdate, next, workspaceId);
+    },
+    [startUpdate, workspaceId],
+  );
   const { navigate } = useRouter();
 
   const runBatchMutation = useGambitTypedMutation(
@@ -805,6 +828,45 @@ export const SimulatorVerifyPage = iso(`
                           {outlier.messageRefId
                             ? ` · ref ${outlier.messageRefId}`
                             : ""}
+                        </div>
+                        <div className="verify-outlier-links">
+                          <button
+                            type="button"
+                            className="link-button"
+                            data-testid="verify-outlier-add-to-chat"
+                            onClick={() =>
+                              updateComposerChips(
+                                mergeWorkbenchSelectedContextChip(
+                                  composerChips,
+                                  {
+                                    chipId: `verify:${outlier.key}`,
+                                    source: "verify_outlier",
+                                    workspaceId,
+                                    runId: outlier.maxRunId ?? outlier.minRunId,
+                                    capturedAt: new Date().toISOString(),
+                                    batchId: selectedBatch?.id,
+                                    scenarioRunId: outlier.scenarioRunId,
+                                    messageRefId: outlier.messageRefId,
+                                    score: outlier.averageScore ?? undefined,
+                                    instability: (outlier.maxScore ?? 0) -
+                                        (outlier.minScore ?? 0) >= 2,
+                                    message: `${
+                                      scenarioNameFromValue(
+                                        outlier.scenarioRunId,
+                                      ) ??
+                                        outlier.scenarioRunId
+                                    }: avg ${
+                                      outlier.averageScore ?? "-"
+                                    }, min/max ${outlier.minScore ?? "-"}/${
+                                      outlier.maxScore ?? "-"
+                                    }, samples ${outlier.completedSampleCount}/${outlier.gradeSampleCount}`,
+                                    enabled: true,
+                                  },
+                                ),
+                              )}
+                          >
+                            Add to chat
+                          </button>
                         </div>
                         {uniqueRunLinks.length > 0 && (
                           <div className="verify-outlier-links">

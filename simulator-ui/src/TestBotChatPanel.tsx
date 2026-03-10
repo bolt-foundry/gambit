@@ -71,6 +71,7 @@ type Props = {
       error: string;
     },
   ) => void;
+  onAddFeedbackToWorkbench?: (feedback: FeedbackEntry) => void;
 };
 
 export default function TestBotChatPanel(props: Props) {
@@ -109,6 +110,7 @@ export default function TestBotChatPanel(props: Props) {
     onScore,
     onReasonChange,
     onAddErrorToWorkbench,
+    onAddFeedbackToWorkbench,
   } = props;
   const resolvedMessageCount = transcriptMessageCount ?? run.messages.length;
   const resolvedUserMessageCount = transcriptUserMessageCount ??
@@ -338,6 +340,7 @@ export default function TestBotChatPanel(props: Props) {
                         disabled={!message.feedbackEligible}
                         onScore={onScore}
                         onReasonChange={onReasonChange}
+                        onAddToWorkbench={onAddFeedbackToWorkbench}
                       />
                     )}
                   </div>

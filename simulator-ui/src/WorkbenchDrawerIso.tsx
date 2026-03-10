@@ -19,8 +19,10 @@ type WorkbenchDrawerIsoProps = {
   runStatus?: WorkbenchChatRunStatus;
   chatBody?: React.ReactNode;
   chatHeaderActions?: React.ReactNode;
+  showChatHistoryToggle?: boolean;
   chatHistoryOpen?: boolean;
   chatHistoryContent?: React.ReactNode;
+  onToggleChatHistory?: () => void;
 };
 
 function toBadgeStatus(status: WorkbenchChatRunStatus): string {
@@ -59,9 +61,13 @@ export default function WorkbenchDrawerIso(props: WorkbenchDrawerIsoProps) {
     runStatus = "IDLE",
     chatBody = null,
     chatHeaderActions = null,
+    showChatHistoryToggle = true,
     chatHistoryOpen = false,
     chatHistoryContent = null,
+    onToggleChatHistory,
   } = props;
+  void showChatHistoryToggle;
+  void onToggleChatHistory;
   const hasChatHistory = chatHistoryContent !== null;
 
   if (!open) return null;

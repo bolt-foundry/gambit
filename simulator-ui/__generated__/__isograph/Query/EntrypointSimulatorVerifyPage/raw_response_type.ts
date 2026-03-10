@@ -95,6 +95,7 @@ export type Query__EntrypointSimulatorVerifyPage__raw_response_type = {
         }>,
       },
     },
+    workbenchSelectedContextChips: string,
   },
 }
 

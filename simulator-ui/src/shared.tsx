@@ -250,9 +250,16 @@ export function FeedbackControls(props: {
     score: number,
     reason: string,
   ) => void | Promise<void>;
+  onAddToWorkbench?: (feedback: FeedbackEntry) => void;
 }) {
-  const { messageRefId, feedback, disabled = false, onScore, onReasonChange } =
-    props;
+  const {
+    messageRefId,
+    feedback,
+    disabled = false,
+    onScore,
+    onReasonChange,
+    onAddToWorkbench,
+  } = props;
   const [reason, setReason] = useState(feedback?.reason ?? "");
   const [opened, setOpened] = useState(false);
   const [localScore, setLocalScore] = useState<number | null>(null);
@@ -419,6 +426,18 @@ export function FeedbackControls(props: {
           {status === "error" && errorMessage && (
             <div className="error">{errorMessage}</div>
           )}
+          {feedback && typeof feedback.score === "number" && onAddToWorkbench &&
+            (
+              <button
+                type="button"
+                className="link-button"
+                data-testid="feedback-add-to-chat"
+                disabled={disabled}
+                onClick={() => onAddToWorkbench(feedback)}
+              >
+                Add to chat
+              </button>
+            )}
         </>
       )}
     </div>

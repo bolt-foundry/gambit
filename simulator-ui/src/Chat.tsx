@@ -13,133 +13,39 @@ import {
   bucketBuildChatDisplay,
 } from "./ActivityTranscriptRows.tsx";
 import { useBuildChat } from "./BuildChatContext.tsx";
+import {
+  parseWorkbenchMessageContext,
+  toWorkbenchMessageContext,
+  type WorkbenchErrorContext,
+  type WorkbenchFlagContext,
+  type WorkbenchMessageContext,
+  type WorkbenchRatingContext,
+  type WorkbenchSelectedContextChip,
+  type WorkbenchVerifyOutlierContext,
+} from "./workbenchContext.ts";
 
 export { bucketBuildChatDisplay };
 
-export type WorkbenchScenarioErrorContext = {
+export type WorkbenchScenarioErrorContext = WorkbenchErrorContext & {
   source: "scenario_run_error";
-  workspaceId?: string;
-  runId?: string;
-  capturedAt: string;
-  error: string;
 };
-
-export type WorkbenchRatingContext = {
-  source: "message_rating";
-  workspaceId?: string;
-  runId?: string;
-  capturedAt: string;
-  messageRefId: string;
-  statePath?: string;
-  statePointer?: string;
-  score: number;
-  reason?: string;
+export type WorkbenchGraderErrorContext = WorkbenchErrorContext & {
+  source: "grader_run_error";
 };
-
-export type WorkbenchFlagContext = {
-  source: "grading_flag";
-  workspaceId?: string;
-  runId?: string;
-  capturedAt: string;
-  flagId?: string;
-  refId: string;
-  score?: number;
-  message: string;
-};
-
-export type WorkbenchMessageContext =
-  | WorkbenchScenarioErrorContext
-  | WorkbenchRatingContext
-  | WorkbenchFlagContext;
-
 export type WorkbenchScenarioErrorChip = WorkbenchScenarioErrorContext & {
   enabled: boolean;
 };
-
-export type WorkbenchComposerChip = WorkbenchMessageContext & {
-  chipId: string;
-  enabled: boolean;
+export type WorkbenchComposerChip = WorkbenchSelectedContextChip;
+export type {
+  WorkbenchFlagContext,
+  WorkbenchRatingContext,
+  WorkbenchVerifyOutlierContext,
 };
 
 const ERROR_CONTEXT_START_MARKER = "[gambit:error-context/v1]";
 const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
 const WORKBENCH_CONTEXT_START_MARKER = "[gambit:workbench-context/v2]";
 const WORKBENCH_CONTEXT_END_MARKER = "[/gambit:workbench-context/v2]";
-
-function parseWorkbenchContext(value: unknown): WorkbenchMessageContext | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    typeof record.capturedAt !== "string" ||
-    record.capturedAt.trim().length === 0
-  ) {
-    return null;
-  }
-  const workspaceId = typeof record.workspaceId === "string"
-    ? record.workspaceId
-    : undefined;
-  const runId = typeof record.runId === "string" ? record.runId : undefined;
-
-  if (record.source === "scenario_run_error") {
-    if (typeof record.error !== "string" || record.error.trim().length === 0) {
-      return null;
-    }
-    return {
-      source: "scenario_run_error",
-      workspaceId,
-      runId,
-      capturedAt: record.capturedAt,
-      error: record.error,
-    };
-  }
-  if (record.source === "message_rating") {
-    if (
-      typeof record.score !== "number" || !Number.isFinite(record.score) ||
-      typeof record.messageRefId !== "string" ||
-      record.messageRefId.trim().length === 0
-    ) {
-      return null;
-    }
-    return {
-      source: "message_rating",
-      workspaceId,
-      runId,
-      capturedAt: record.capturedAt,
-      messageRefId: record.messageRefId,
-      statePath: typeof record.statePath === "string"
-        ? record.statePath
-        : undefined,
-      statePointer: typeof record.statePointer === "string"
-        ? record.statePointer
-        : undefined,
-      score: record.score,
-      reason: typeof record.reason === "string" ? record.reason : undefined,
-    };
-  }
-  if (record.source === "grading_flag") {
-    if (
-      typeof record.refId !== "string" || record.refId.trim().length === 0 ||
-      typeof record.message !== "string" || record.message.trim().length === 0
-    ) {
-      return null;
-    }
-    return {
-      source: "grading_flag",
-      workspaceId,
-      runId,
-      capturedAt: record.capturedAt,
-      flagId: typeof record.flagId === "string" ? record.flagId : undefined,
-      refId: record.refId,
-      score: typeof record.score === "number" && Number.isFinite(record.score)
-        ? record.score
-        : undefined,
-      message: record.message,
-    };
-  }
-  return null;
-}
 
 function decodeLegacyWorkbenchErrorContext(content: string): {
   context: WorkbenchScenarioErrorContext;
@@ -158,7 +64,7 @@ function decodeLegacyWorkbenchErrorContext(content: string): {
   } catch {
     return null;
   }
-  const context = parseWorkbenchContext(parsed);
+  const context = parseWorkbenchMessageContext(parsed);
   if (!context || context.source !== "scenario_run_error") {
     return null;
   }
@@ -167,7 +73,7 @@ function decodeLegacyWorkbenchErrorContext(content: string): {
   const remainder = content.slice(markerEndIndex);
   const body = remainder.startsWith("\n") ? remainder.slice(1) : remainder;
   return {
-    context,
+    context: context as WorkbenchScenarioErrorContext,
     body,
   };
 }
@@ -187,7 +93,7 @@ export function encodeWorkbenchMessageWithContext(
 ): string {
   const body = message.trim();
   const encodedContexts = contexts.filter((context) =>
-    parseWorkbenchContext(context)
+    parseWorkbenchMessageContext(context)
   );
   if (encodedContexts.length === 0) return body;
   return `${WORKBENCH_CONTEXT_START_MARKER}\n${
@@ -205,7 +111,10 @@ export function decodeWorkbenchMessageWithErrorContext(content: string): {
       context.source === "scenario_run_error"
     );
     if (!errorContext) return null;
-    return { context: errorContext, body: decoded.body };
+    return {
+      context: errorContext as WorkbenchScenarioErrorContext,
+      body: decoded.body,
+    };
   }
   return decodeLegacyWorkbenchErrorContext(content);
 }
@@ -232,7 +141,7 @@ export function decodeWorkbenchMessageWithContext(content: string): {
     return null;
   }
   const records = Array.isArray(parsed) ? parsed : [parsed];
-  const contexts = records.map((record) => parseWorkbenchContext(record))
+  const contexts = records.map((record) => parseWorkbenchMessageContext(record))
     .filter((context): context is WorkbenchMessageContext => Boolean(context));
   if (contexts.length === 0) return null;
   const markerEndIndex = endMarkerIndex +
@@ -490,10 +399,12 @@ export function ChatView(props: {
     run.messages.length === 0;
   const resolvedComposerChips = composerChips ??
     (scenarioErrorChip
-      ? [{
-        ...scenarioErrorChip,
-        chipId: "scenario_run_error",
-      }]
+      ? [
+        {
+          ...scenarioErrorChip,
+          chipId: "scenario_run_error",
+        } satisfies WorkbenchComposerChip,
+      ]
       : []);
   const updateComposerChips = useCallback(
     (next: Array<WorkbenchComposerChip>) => {
@@ -504,7 +415,7 @@ export function ChatView(props: {
       if (!onScenarioErrorChipChange) return;
       const errorChip = next.find((chip) =>
         chip.source === "scenario_run_error"
-      );
+      ) as WorkbenchScenarioErrorChip | undefined;
       if (!errorChip) {
         onScenarioErrorChipChange(null);
         return;
@@ -533,41 +444,9 @@ export function ChatView(props: {
     const message = chatDraft.trim();
     const activeChips = resolvedComposerChips.filter((chip) => chip.enabled);
     const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
-    const activeContexts = activeChips
-      .map((chip) => {
-        if (chip.source === "scenario_run_error") {
-          return {
-            source: "scenario_run_error" as const,
-            workspaceId: chip.workspaceId,
-            runId: chip.runId,
-            capturedAt: chip.capturedAt,
-            error: chip.error,
-          };
-        }
-        if (chip.source === "message_rating") {
-          return {
-            source: "message_rating" as const,
-            workspaceId: chip.workspaceId,
-            runId: chip.runId,
-            capturedAt: chip.capturedAt,
-            messageRefId: chip.messageRefId,
-            statePath: chip.statePath,
-            statePointer: chip.statePointer,
-            score: chip.score,
-            reason: chip.reason,
-          };
-        }
-        return {
-          source: "grading_flag" as const,
-          workspaceId: chip.workspaceId,
-          runId: chip.runId,
-          capturedAt: chip.capturedAt,
-          flagId: chip.flagId,
-          refId: chip.refId,
-          score: chip.score,
-          message: chip.message,
-        };
-      });
+    const activeContexts = activeChips.map((chip) =>
+      toWorkbenchMessageContext(chip)
+    );
     if (!message && activeContexts.length === 0) return;
     const outboundMessage = activeContexts.length > 0
       ? encodeWorkbenchMessageWithContext(message, activeContexts)
