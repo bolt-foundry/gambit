@@ -203,6 +203,10 @@ export async function runVerifySmokeFlow(
     '[data-testid="verify-run-batch"]:not([disabled])',
   ).first().click();
 
+  await demoTarget.locator(
+    '[data-testid="verify-results-tab-batch-activity"]',
+  ).click();
+
   const requestRows = demoTarget.locator(
     '.verify-section:has(strong:has-text("Batch requests")) .verify-request-row',
   );

@@ -1,5 +1,13 @@
 import { iso } from "@iso-gambit-sim";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { buildWorkspacePath } from "../../../../src/workspace_routes.ts";
 import gambitWorkspaceVerifyBatchRunCreateMutation from "../../../mutations/GambitWorkspaceVerifyBatchRunCreateMutation.ts";
 import gambitWorkspaceVerifyLiveSubscription from "../../../subscriptions/GambitWorkspaceVerifyLiveSubscription.ts";
@@ -9,10 +17,19 @@ import { useRouter } from "../../../src/RouterContext.tsx";
 import Badge from "../../../src/gds/Badge.tsx";
 import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
+import Icon from "../../../src/gds/Icon.tsx";
 import Listbox from "../../../src/gds/Listbox.tsx";
 import PageGrid from "../../../src/gds/PageGrid.tsx";
 import PageShell from "../../../src/gds/PageShell.tsx";
 import Panel from "../../../src/gds/Panel.tsx";
+import Tabs from "../../../src/gds/Tabs.tsx";
+import Tooltip from "../../../src/gds/Tooltip.tsx";
+import type {
+  VerifyBatchRequestStatus,
+  VerifyBatchStatus,
+  VerifyBatchView,
+  VerifyResultsTabId,
+} from "./SimulatorVerifyPageTypes.ts";
 import {
   formatTimestampShort,
   scenarioNameFromValue,
@@ -38,78 +55,145 @@ const DEFAULT_SCENARIO_RUNS = VERIFY_DEFAULTS.scenarioRuns;
 const DEFAULT_GRADER_REPEATS = VERIFY_DEFAULTS.graderRepeatsPerScenario;
 const DEFAULT_BATCH_CONCURRENCY = VERIFY_DEFAULTS.concurrency;
 
-type VerifyBatchStatus = "idle" | "running" | "completed" | "error";
-type VerifyBatchRequestStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "error";
-
-type VerifyOutlierScenarioRunView = {
-  key: string;
-  scenarioRunId: string;
-  gradeSampleCount: number;
-  completedSampleCount: number;
-  executionFailureCount: number;
-  gradingFailureCount: number;
-  averageScore: number | null;
-  minScore: number | null;
-  maxScore: number | null;
-  failed: boolean;
-  minRunId?: string;
-  maxRunId?: string;
-  messageRefId?: string;
+type VerifySettingsMenuProps = {
+  batchConcurrency: number;
+  onBatchConcurrencyChange: (value: number) => void;
 };
 
-type VerifyFailureReasonView = {
-  key: string;
-  kind: "execution" | "grading";
-  reason: string;
-  count: number;
-};
+function VerifySettingsMenu(props: VerifySettingsMenuProps) {
+  const { batchConcurrency, onBatchConcurrencyChange } = props;
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties | null>(
+    null,
+  );
 
-type VerifyMetricsView = {
-  scenarioRunCountRequested: number;
-  scenarioRunCountCompleted: number;
-  scenarioRunCountFailed: number;
-  gradeSampleCountRequested: number;
-  gradeSampleCountCompleted: number;
-  gradeSampleCountFailed: number;
-  executionFailureCount: number;
-  gradingFailureCount: number;
-  passRate: number | null;
-  scoreMin: number | null;
-  scoreMedian: number | null;
-  scoreMax: number | null;
-  scoreMean: number | null;
-  outlierScenarioRuns: Array<VerifyOutlierScenarioRunView>;
-  failureReasons: Array<VerifyFailureReasonView>;
-};
+  const updatePopover = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const offset = 6;
+    const viewportPadding = 8;
+    const popoverHeight = popoverRef.current?.offsetHeight ?? 0;
+    const style: React.CSSProperties = {
+      position: "fixed",
+      top: rect.bottom + offset,
+      left: rect.right,
+      minWidth: 240,
+      transform: "translateX(-100%)",
+    };
+    if (
+      popoverHeight > 0 &&
+      rect.bottom + offset + popoverHeight >
+        window.innerHeight - viewportPadding
+    ) {
+      style.top = Math.max(
+        viewportPadding,
+        rect.top - offset - popoverHeight,
+      );
+    }
+    setPopoverStyle((prev) => {
+      if (
+        prev?.top === style.top &&
+        prev?.left === style.left &&
+        prev?.minWidth === style.minWidth &&
+        prev?.transform === style.transform
+      ) {
+        return prev;
+      }
+      return style;
+    });
+  }, []);
 
-type VerifyBatchView = {
-  id: string;
-  scenarioDeckId: string | null;
-  graderId: string;
-  scenarioRuns: number;
-  graderRepeatsPerScenario: number;
-  status: VerifyBatchStatus;
-  startedAt: string | null;
-  finishedAt: string | null;
-  requested: number;
-  active: number;
-  completed: number;
-  failed: number;
-  scenarioRunsCompleted: number;
-  scenarioRunsFailed: number;
-  requests: Array<{
-    id: string;
-    scenarioRunId?: string;
-    status: VerifyBatchRequestStatus;
-    runId?: string;
-    error?: string;
-  }>;
-  metrics: VerifyMetricsView | null;
-};
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePopover();
+  }, [open, updatePopover]);
+
+  useLayoutEffect(() => {
+    if (!open || !popoverStyle || !popoverRef.current) return;
+    updatePopover();
+  }, [open, popoverStyle, updatePopover]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      const inTrigger = triggerRef.current && target &&
+        triggerRef.current.contains(target);
+      const inPopover = popoverRef.current && target &&
+        popoverRef.current.contains(target);
+      if (!inTrigger && !inPopover) {
+        setOpen(false);
+      }
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+      }
+    };
+    const handleReposition = () => updatePopover();
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("keydown", handleKey);
+    globalThis.addEventListener("resize", handleReposition);
+    globalThis.addEventListener("scroll", handleReposition, true);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("keydown", handleKey);
+      globalThis.removeEventListener("resize", handleReposition);
+      globalThis.removeEventListener("scroll", handleReposition, true);
+    };
+  }, [open, updatePopover]);
+
+  return (
+    <>
+      <button
+        type="button"
+        className={open
+          ? "verify-settings-trigger verify-settings-trigger--open"
+          : "verify-settings-trigger"}
+        aria-label="Configure verify batch settings"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((prev) => !prev)}
+        ref={triggerRef}
+      >
+        <Icon name="settings" size={16} />
+      </button>
+      {open && popoverStyle &&
+        createPortal(
+          <div
+            className="gds-listbox-popover verify-settings-menu"
+            role="dialog"
+            aria-label="Verify batch settings"
+            style={popoverStyle}
+            ref={popoverRef}
+          >
+            <label className="verify-settings-menu-row">
+              <span>Concurrency</span>
+              <input
+                type="number"
+                min={1}
+                max={MAX_BATCH_CONCURRENCY}
+                value={batchConcurrency}
+                onChange={(event) =>
+                  onBatchConcurrencyChange(
+                    clampInt(
+                      Number(event.target.value),
+                      1,
+                      MAX_BATCH_CONCURRENCY,
+                    ),
+                  )}
+              />
+            </label>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 function toBatchStatus(
   status: string | null | undefined,
@@ -419,6 +503,7 @@ export const SimulatorVerifyPage = iso(`
     DEFAULT_BATCH_CONCURRENCY,
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [resultsTab, setResultsTab] = useState<VerifyResultsTabId>("insights");
 
   useEffect(() => {
     if (
@@ -564,6 +649,7 @@ export const SimulatorVerifyPage = iso(`
     const gradePath = buildWorkspacePath("grade", workspaceId, { runId });
     navigate(gradePath);
   }, [navigate, workspaceId]);
+  const totalRequestedRuns = scenarioRuns * graderRepeatsPerScenario;
 
   return (
     <PageShell className="verify-shell">
@@ -575,117 +661,164 @@ export const SimulatorVerifyPage = iso(`
               Generate scenario runs, then grade each run repeatedly.
             </span>
           </div>
-          <Listbox
-            label="Scenario deck"
-            value={selectedScenarioDeckId ?? ""}
-            onChange={(value) =>
-              setSelectedScenarioDeckId(value.length ? value : null)}
-            options={scenarioDecks.map((deck) => ({
-              value: deck.id,
-              label: deck.label,
-              meta: deck.path,
-            }))}
-            placeholder="Select scenario deck"
-            disabled={scenarioDecks.length === 0}
-          />
-          <Listbox
-            label="Grader"
-            value={selectedGraderId ?? ""}
-            onChange={(value) =>
-              setSelectedGraderId(value.length ? value : null)}
-            options={graders.map((grader) => ({
-              value: grader.id,
-              label: grader.label,
-              meta: grader.path,
-            }))}
-            placeholder="Select grader"
-            disabled={graders.length === 0}
-          />
-          <div className="verify-number-grid">
-            <label className="verify-number-field">
-              Scenario runs
-              <input
-                type="number"
-                min={1}
-                max={MAX_SCENARIO_RUNS}
-                value={scenarioRuns}
-                onChange={(event) =>
-                  setScenarioRuns(
-                    clampInt(Number(event.target.value), 1, MAX_SCENARIO_RUNS),
-                  )}
-              />
-            </label>
-            <label className="verify-number-field">
-              Grader repeats per scenario
-              <input
-                type="number"
-                min={1}
-                max={MAX_GRADER_REPEATS}
-                value={graderRepeatsPerScenario}
-                onChange={(event) =>
-                  setGraderRepeatsPerScenario(
-                    clampInt(
-                      Number(event.target.value),
-                      1,
-                      MAX_GRADER_REPEATS,
-                    ),
-                  )}
-              />
-            </label>
-            <label className="verify-number-field">
-              Concurrency
-              <input
-                type="number"
-                min={1}
-                max={MAX_BATCH_CONCURRENCY}
-                value={batchConcurrency}
-                onChange={(event) =>
-                  setBatchConcurrency(
-                    clampInt(
-                      Number(event.target.value),
-                      1,
-                      MAX_BATCH_CONCURRENCY,
-                    ),
-                  )}
-              />
-            </label>
-          </div>
-          <Button
-            data-testid="verify-run-batch"
-            variant="primary"
-            onClick={runBatch}
-            disabled={!canRun}
-          >
-            {hasRunningBatch || runBatchMutation.inFlight
-              ? "Running verify batch..."
-              : "Run verify batch"}
-          </Button>
-          {scenarioDecks.length === 0 && (
-            <Callout>
-              No scenario decks are available. Add <code>[[testDecks]]</code>
-              {" "}
-              entries to the active root deck.
-            </Callout>
-          )}
-          {graders.length === 0 && (
-            <Callout>
-              No graders are available. Add <code>[[graders]]</code>{" "}
-              entries to the active root deck.
-            </Callout>
-          )}
-          {selectedScenarioDeck?.description && (
-            <Callout>{selectedScenarioDeck.description}</Callout>
-          )}
-          {selectedGrader?.description && (
-            <Callout>{selectedGrader.description}</Callout>
-          )}
-          <Callout variant="emphasis" title="Build assistant stays available">
-            Use the chat drawer toggle in the top-right corner to investigate
-            and iterate while this page remains open.
+          <Callout>
+            <div className="verify-controls-row flex-column gap-8">
+              <div className="verify-listbox-with-info">
+                <div className="verify-listbox-with-info-field">
+                  <Listbox
+                    label="Scenario"
+                    value={selectedScenarioDeckId ?? ""}
+                    onChange={(value) =>
+                      setSelectedScenarioDeckId(value.length ? value : null)}
+                    options={scenarioDecks.map((deck) => ({
+                      value: deck.id,
+                      label: deck.label,
+                      meta: deck.path,
+                      triggerMeta: null,
+                    }))}
+                    placeholder="Select scenario deck"
+                    disabled={scenarioDecks.length === 0}
+                  />
+                </div>
+                {selectedScenarioDeck?.description && (
+                  <Tooltip content={selectedScenarioDeck.description}>
+                    <span
+                      className="verify-listbox-info-icon"
+                      aria-label="Show scenario deck description"
+                      role="img"
+                    >
+                      <Icon name="circleInfo" size={16} />
+                    </span>
+                  </Tooltip>
+                )}
+              </div>
+              {scenarioDecks.length === 0 && (
+                <Callout>
+                  No scenario decks are available. Add{" "}
+                  <code>[[scenarios]]</code> entries to the active root deck.
+                </Callout>
+              )}
+              <div className="verify-controls-row-scenario-runs">
+                <label className="verify-number-field verify-number-field--inline">
+                  <span>Scenario runs</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_SCENARIO_RUNS}
+                    value={scenarioRuns}
+                    onChange={(event) =>
+                      setScenarioRuns(
+                        clampInt(
+                          Number(event.target.value),
+                          1,
+                          MAX_SCENARIO_RUNS,
+                        ),
+                      )}
+                  />
+                </label>
+              </div>
+            </div>
           </Callout>
+          <Callout>
+            <div className="verify-controls-row flex-column gap-8">
+              <div className="verify-listbox-with-info">
+                <div className="verify-listbox-with-info-field">
+                  <Listbox
+                    label="Grader"
+                    value={selectedGraderId ?? ""}
+                    onChange={(value) =>
+                      setSelectedGraderId(value.length ? value : null)}
+                    options={graders.map((grader) => ({
+                      value: grader.id,
+                      label: grader.label,
+                      meta: grader.path,
+                      triggerMeta: null,
+                    }))}
+                    placeholder="Select grader"
+                    disabled={graders.length === 0}
+                  />
+                </div>
+                {selectedGrader?.description && (
+                  <Tooltip content={selectedGrader.description}>
+                    <span
+                      className="verify-listbox-info-icon"
+                      aria-label="Show grader description"
+                      role="img"
+                    >
+                      <Icon name="circleInfo" size={16} />
+                    </span>
+                  </Tooltip>
+                )}
+              </div>
+              {graders.length === 0 && (
+                <Callout>
+                  No graders are available. Add <code>[[graders]]</code>{" "}
+                  entries to the active root deck.
+                </Callout>
+              )}
+              <div className="verify-controls-row-scenario-runs">
+                <label className="verify-number-field verify-number-field--inline">
+                  <span>Grader repeats per scenario</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_GRADER_REPEATS}
+                    value={graderRepeatsPerScenario}
+                    onChange={(event) =>
+                      setGraderRepeatsPerScenario(
+                        clampInt(
+                          Number(event.target.value),
+                          1,
+                          MAX_GRADER_REPEATS,
+                        ),
+                      )}
+                  />
+                </label>
+              </div>
+            </div>
+          </Callout>
+          <div className="verify-run-summary">
+            <strong>{scenarioRuns}</strong> scenario &times;{" "}
+            <strong>{graderRepeatsPerScenario}</strong> grader ={" "}
+            <strong>{totalRequestedRuns}</strong> total runs
+          </div>
+          <div className="verify-run-row">
+            <Button
+              data-testid="verify-run-batch"
+              variant="primary"
+              onClick={runBatch}
+              disabled={!canRun}
+            >
+              {hasRunningBatch || runBatchMutation.inFlight
+                ? "Running verify batch..."
+                : "Run verify batch"}
+            </Button>
+            <VerifySettingsMenu
+              batchConcurrency={batchConcurrency}
+              onBatchConcurrencyChange={setBatchConcurrency}
+            />
+          </div>
         </Panel>
         <Panel className="verify-results" data-testid="verify-results">
           {mutationError && <div className="error">{mutationError}</div>}
+          <Tabs
+            className="panel-tabs"
+            size="small"
+            activeId={resultsTab}
+            onChange={(next) => setResultsTab(next as VerifyResultsTabId)}
+            tabs={[
+              {
+                id: "insights",
+                label: "Insights",
+                testId: "verify-results-tab-insights",
+              },
+              {
+                id: "batchActivity",
+                label: "Batch activity",
+                testId: "verify-results-tab-batch-activity",
+              },
+            ]}
+          />
           <div className="verify-status-row">
             <div className="verify-status-main">
               <strong>Batch status</strong>
@@ -731,264 +864,286 @@ export const SimulatorVerifyPage = iso(`
             </>
           )}
 
-          {metrics && (
+          {resultsTab === "insights" && (
             <>
-              <div className="verify-metric-grid">
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Scenario runs</div>
-                  <div className="verify-metric-value">
-                    {metrics.scenarioRunCountCompleted}/
-                    {metrics.scenarioRunCountRequested}
+              {metrics && (
+                <div className="verify-metric-grid">
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">Scenario runs</div>
+                    <div className="verify-metric-value">
+                      {metrics.scenarioRunCountCompleted}/
+                      {metrics.scenarioRunCountRequested}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">Grade samples</div>
+                    <div className="verify-metric-value">
+                      {metrics.gradeSampleCountCompleted}/
+                      {metrics.gradeSampleCountRequested}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">Pass rate</div>
+                    <div className="verify-metric-value">
+                      {formatPercent(metrics.passRate)}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">Score mean</div>
+                    <div className="verify-metric-value">
+                      {metrics.scoreMean === null ? "-" : metrics.scoreMean}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">
+                      Score min/median/max
+                    </div>
+                    <div className="verify-metric-value verify-metric-value--compact">
+                      {metrics.scoreMin === null
+                        ? "-"
+                        : `${metrics.scoreMin} / ${
+                          metrics.scoreMedian ?? "-"
+                        } / ${metrics.scoreMax ?? "-"}`}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">
+                      Execution failures
+                    </div>
+                    <div className="verify-metric-value">
+                      {metrics.executionFailureCount}
+                    </div>
+                  </div>
+                  <div className="verify-metric-card">
+                    <div className="verify-metric-label">Grading failures</div>
+                    <div className="verify-metric-value">
+                      {metrics.gradingFailureCount}
+                    </div>
                   </div>
                 </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Grade samples</div>
-                  <div className="verify-metric-value">
-                    {metrics.gradeSampleCountCompleted}/
-                    {metrics.gradeSampleCountRequested}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Pass rate</div>
-                  <div className="verify-metric-value">
-                    {formatPercent(metrics.passRate)}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Score mean</div>
-                  <div className="verify-metric-value">
-                    {metrics.scoreMean === null ? "-" : metrics.scoreMean}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">
-                    Score min/median/max
-                  </div>
-                  <div className="verify-metric-value verify-metric-value--compact">
-                    {metrics.scoreMin === null
-                      ? "-"
-                      : `${metrics.scoreMin} / ${
-                        metrics.scoreMedian ?? "-"
-                      } / ${metrics.scoreMax ?? "-"}`}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Execution failures</div>
-                  <div className="verify-metric-value">
-                    {metrics.executionFailureCount}
-                  </div>
-                </div>
-                <div className="verify-metric-card">
-                  <div className="verify-metric-label">Grading failures</div>
-                  <div className="verify-metric-value">
-                    {metrics.gradingFailureCount}
-                  </div>
-                </div>
+              )}
+
+              <div className="verify-section">
+                <strong>Outlier scenario runs</strong>
+                {topOutlierScenarioRuns.length === 0
+                  ? (
+                    <Callout>
+                      Outlier scenario runs appear as soon as completed grade
+                      samples are available.
+                    </Callout>
+                  )
+                  : (
+                    <div className="verify-outlier-list">
+                      {topOutlierScenarioRuns.map((outlier) => {
+                        const runLinks = [outlier.minRunId, outlier.maxRunId]
+                          .filter((value): value is string => Boolean(value));
+                        const uniqueRunLinks = [...new Set(runLinks)];
+                        return (
+                          <div
+                            key={outlier.key}
+                            className="verify-outlier-card"
+                          >
+                            <div className="verify-outlier-header">
+                              <strong>
+                                {scenarioNameFromValue(outlier.scenarioRunId) ??
+                                  outlier.scenarioRunId}
+                              </strong>
+                              <Badge
+                                variant={outlier.failed ? "error" : "completed"}
+                              >
+                                {outlier.failed ? "Failed" : "Scored"}
+                              </Badge>
+                            </div>
+                            <div className="verify-outlier-meta">
+                              avg {outlier.averageScore ?? "-"} · min/max{" "}
+                              {outlier.minScore ?? "-"}/
+                              {outlier.maxScore ?? "-"} · samples{" "}
+                              {outlier.completedSampleCount}/
+                              {outlier.gradeSampleCount} · execution failures
+                              {" "}
+                              {outlier.executionFailureCount} · grading failures
+                              {" "}
+                              {outlier.gradingFailureCount}
+                              {outlier.messageRefId
+                                ? ` · ref ${outlier.messageRefId}`
+                                : ""}
+                            </div>
+                            <div className="verify-outlier-links">
+                              <button
+                                type="button"
+                                className="link-button"
+                                data-testid="verify-outlier-add-to-chat"
+                                onClick={() =>
+                                  updateComposerChips(
+                                    mergeWorkbenchSelectedContextChip(
+                                      composerChips,
+                                      {
+                                        chipId: `verify:${outlier.key}`,
+                                        source: "verify_outlier",
+                                        workspaceId,
+                                        runId: outlier.maxRunId ??
+                                          outlier.minRunId,
+                                        capturedAt: new Date().toISOString(),
+                                        batchId: selectedBatch?.id,
+                                        scenarioRunId: outlier.scenarioRunId,
+                                        messageRefId: outlier.messageRefId,
+                                        score: outlier.averageScore ??
+                                          undefined,
+                                        instability: (outlier.maxScore ?? 0) -
+                                            (outlier.minScore ?? 0) >= 2,
+                                        message: `${
+                                          scenarioNameFromValue(
+                                            outlier.scenarioRunId,
+                                          ) ??
+                                            outlier.scenarioRunId
+                                        }: avg ${
+                                          outlier.averageScore ?? "-"
+                                        }, min/max ${outlier.minScore ?? "-"}/${
+                                          outlier.maxScore ?? "-"
+                                        }, samples ${outlier.completedSampleCount}/${outlier.gradeSampleCount}`,
+                                        enabled: true,
+                                      },
+                                    ),
+                                  )}
+                              >
+                                Add to chat
+                              </button>
+                            </div>
+                            {uniqueRunLinks.length > 0 && (
+                              <div className="verify-outlier-links">
+                                {uniqueRunLinks.map((runId) => (
+                                  <a
+                                    key={runId}
+                                    href={buildWorkspacePath(
+                                      "grade",
+                                      workspaceId,
+                                      { runId },
+                                    )}
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      navigateToGradeRun(runId);
+                                    }}
+                                  >
+                                    Open grade run {runId}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+              </div>
+
+              <div className="verify-section">
+                <strong>Failure reasons</strong>
+                {!metrics || metrics.failureReasons.length === 0
+                  ? <Callout>No failure reasons captured yet.</Callout>
+                  : (
+                    <ul className="verify-request-list">
+                      {metrics.failureReasons.map((reason) => (
+                        <li key={reason.key} className="verify-request-row">
+                          <Badge
+                            variant={reason.kind === "execution"
+                              ? "error"
+                              : "running"}
+                          >
+                            {reason.kind}
+                          </Badge>
+                          <span>{reason.reason}</span>
+                          <span className="secondary-note">
+                            x{reason.count}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
               </div>
             </>
           )}
 
-          <div className="verify-section">
-            <strong>Outlier scenario runs</strong>
-            {topOutlierScenarioRuns.length === 0
-              ? (
-                <Callout>
-                  Outlier scenario runs appear as soon as completed grade
-                  samples are available.
-                </Callout>
-              )
-              : (
-                <div className="verify-outlier-list">
-                  {topOutlierScenarioRuns.map((outlier) => {
-                    const runLinks = [outlier.minRunId, outlier.maxRunId]
-                      .filter((value): value is string => Boolean(value));
-                    const uniqueRunLinks = [...new Set(runLinks)];
-                    return (
-                      <div key={outlier.key} className="verify-outlier-card">
-                        <div className="verify-outlier-header">
-                          <strong>
-                            {scenarioNameFromValue(outlier.scenarioRunId) ??
-                              outlier.scenarioRunId}
-                          </strong>
+          {resultsTab === "batchActivity" && (
+            <>
+              {visibleBatches.length > 0 && (
+                <div className="verify-section">
+                  <strong>Batch history</strong>
+                  <ul className="verify-request-list">
+                    {visibleBatches.slice(0, 15).map((batch, index) => (
+                      <li key={batch.id} className="verify-request-row">
+                        <span className="verify-request-index">
+                          #{index + 1}
+                        </span>
+                        <Badge status={batch.status}>{batch.status}</Badge>
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() =>
+                            setSelectedBatchId(batch.id)}
+                        >
+                          {batch.id}
+                        </button>
+                        <span className="secondary-note">
+                          {batch.scenarioRuns} runs ×{" "}
+                          {batch.graderRepeatsPerScenario}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {selectedBatch?.requests.length
+                ? (
+                  <div className="verify-section">
+                    <strong>Batch requests</strong>
+                    <ul className="verify-request-list">
+                      {selectedBatch.requests.map((request, index) => (
+                        <li key={request.id} className="verify-request-row">
+                          <span className="verify-request-index">
+                            #{index + 1}
+                          </span>
                           <Badge
-                            variant={outlier.failed ? "error" : "completed"}
+                            status={request.status === "queued"
+                              ? "idle"
+                              : request.status}
                           >
-                            {outlier.failed ? "Failed" : "Scored"}
+                            {request.status}
                           </Badge>
-                        </div>
-                        <div className="verify-outlier-meta">
-                          avg {outlier.averageScore ?? "-"} · min/max{" "}
-                          {outlier.minScore ?? "-"}/{outlier.maxScore ?? "-"}
-                          {" "}
-                          · samples {outlier.completedSampleCount}/
-                          {outlier.gradeSampleCount} · execution failures{" "}
-                          {outlier.executionFailureCount} · grading failures
-                          {" "}
-                          {outlier.gradingFailureCount}
-                          {outlier.messageRefId
-                            ? ` · ref ${outlier.messageRefId}`
-                            : ""}
-                        </div>
-                        <div className="verify-outlier-links">
-                          <button
-                            type="button"
-                            className="link-button"
-                            data-testid="verify-outlier-add-to-chat"
-                            onClick={() =>
-                              updateComposerChips(
-                                mergeWorkbenchSelectedContextChip(
-                                  composerChips,
-                                  {
-                                    chipId: `verify:${outlier.key}`,
-                                    source: "verify_outlier",
-                                    workspaceId,
-                                    runId: outlier.maxRunId ?? outlier.minRunId,
-                                    capturedAt: new Date().toISOString(),
-                                    batchId: selectedBatch?.id,
-                                    scenarioRunId: outlier.scenarioRunId,
-                                    messageRefId: outlier.messageRefId,
-                                    score: outlier.averageScore ?? undefined,
-                                    instability: (outlier.maxScore ?? 0) -
-                                        (outlier.minScore ?? 0) >= 2,
-                                    message: `${
-                                      scenarioNameFromValue(
-                                        outlier.scenarioRunId,
-                                      ) ??
-                                        outlier.scenarioRunId
-                                    }: avg ${
-                                      outlier.averageScore ?? "-"
-                                    }, min/max ${outlier.minScore ?? "-"}/${
-                                      outlier.maxScore ?? "-"
-                                    }, samples ${outlier.completedSampleCount}/${outlier.gradeSampleCount}`,
-                                    enabled: true,
-                                  },
-                                ),
-                              )}
-                          >
-                            Add to chat
-                          </button>
-                        </div>
-                        {uniqueRunLinks.length > 0 && (
-                          <div className="verify-outlier-links">
-                            {uniqueRunLinks.map((runId) => (
+                          {request.scenarioRunId && (
+                            <span className="secondary-note">
+                              {scenarioNameFromValue(request.scenarioRunId) ??
+                                request.scenarioRunId}
+                            </span>
+                          )}
+                          {request.runId
+                            ? (
                               <a
-                                key={runId}
                                 href={buildWorkspacePath("grade", workspaceId, {
-                                  runId,
+                                  runId: request.runId,
                                 })}
                                 onClick={(event) => {
                                   event.preventDefault();
-                                  navigateToGradeRun(runId);
+                                  navigateToGradeRun(request.runId as string);
                                 }}
                               >
-                                Open grade run {runId}
+                                {request.runId}
                               </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-          </div>
-
-          <div className="verify-section">
-            <strong>Failure reasons</strong>
-            {!metrics || metrics.failureReasons.length === 0
-              ? <Callout>No failure reasons captured yet.</Callout>
-              : (
-                <ul className="verify-request-list">
-                  {metrics.failureReasons.map((reason) => (
-                    <li key={reason.key} className="verify-request-row">
-                      <Badge
-                        variant={reason.kind === "execution"
-                          ? "error"
-                          : "running"}
-                      >
-                        {reason.kind}
-                      </Badge>
-                      <span>{reason.reason}</span>
-                      <span className="secondary-note">x{reason.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-          </div>
-
-          {visibleBatches.length > 0 && (
-            <div className="verify-section">
-              <strong>Batch history</strong>
-              <ul className="verify-request-list">
-                {visibleBatches.slice(0, 15).map((batch, index) => (
-                  <li key={batch.id} className="verify-request-row">
-                    <span className="verify-request-index">#{index + 1}</span>
-                    <Badge status={batch.status}>{batch.status}</Badge>
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() =>
-                        setSelectedBatchId(batch.id)}
-                    >
-                      {batch.id}
-                    </button>
-                    <span className="secondary-note">
-                      {batch.scenarioRuns} runs ×{" "}
-                      {batch.graderRepeatsPerScenario}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                            )
+                            : null}
+                          {request.error && (
+                            <span className="verify-request-error">
+                              {request.error}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )
+                : null}
+            </>
           )}
-
-          {selectedBatch?.requests.length
-            ? (
-              <div className="verify-section">
-                <strong>Batch requests</strong>
-                <ul className="verify-request-list">
-                  {selectedBatch.requests.map((request, index) => (
-                    <li key={request.id} className="verify-request-row">
-                      <span className="verify-request-index">#{index + 1}</span>
-                      <Badge
-                        status={request.status === "queued"
-                          ? "idle"
-                          : request.status}
-                      >
-                        {request.status}
-                      </Badge>
-                      {request.scenarioRunId && (
-                        <span className="secondary-note">
-                          {scenarioNameFromValue(request.scenarioRunId) ??
-                            request.scenarioRunId}
-                        </span>
-                      )}
-                      {request.runId
-                        ? (
-                          <a
-                            href={buildWorkspacePath("grade", workspaceId, {
-                              runId: request.runId,
-                            })}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              navigateToGradeRun(request.runId as string);
-                            }}
-                          >
-                            {request.runId}
-                          </a>
-                        )
-                        : null}
-                      {request.error && (
-                        <span className="verify-request-error">
-                          {request.error}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )
-            : null}
         </Panel>
       </PageGrid>
     </PageShell>
