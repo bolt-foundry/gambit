@@ -9,6 +9,7 @@ import { FlagIcon } from "./icons/Flag.tsx";
 import { HamburgerMenuIcon } from "./icons/HamburgerMenu.tsx";
 import { TrashIcon } from "./icons/Trash.tsx";
 import { ReviewIcon } from "./icons/Review.tsx";
+import { SettingsIcon } from "./icons/Settings.tsx";
 import { TimesIcon } from "./icons/Times.tsx";
 
 const ICONS = {
@@ -22,6 +23,7 @@ const ICONS = {
   copied: CopiedIcon,
   circleInfo: CircleInfoIcon,
   review: ReviewIcon,
+  settings: SettingsIcon,
   trash: TrashIcon,
   times: TimesIcon,
 };

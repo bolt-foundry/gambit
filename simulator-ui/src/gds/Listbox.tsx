@@ -40,6 +40,10 @@ export type ListboxProps = {
   popoverMinWidth?: number;
   popoverAlign?: "left" | "right";
   size?: "default" | "small";
+  triggerContent?: React.ReactNode;
+  triggerAriaLabel?: string;
+  triggerClassName?: string;
+  hideCaret?: boolean;
 };
 
 export default function Listbox(props: ListboxProps) {
@@ -56,6 +60,10 @@ export default function Listbox(props: ListboxProps) {
     popoverMinWidth,
     popoverAlign = "left",
     size = "default",
+    triggerContent,
+    triggerAriaLabel,
+    triggerClassName,
+    hideCaret = false,
   } = props;
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -181,6 +189,12 @@ export default function Listbox(props: ListboxProps) {
   const rootClassName = size === "small"
     ? "gds-listbox gds-listbox--size-small"
     : "gds-listbox";
+  const triggerClassNames = [
+    "gds-listbox-trigger",
+    triggerContent ? "gds-listbox-trigger--custom" : "",
+    hideCaret ? "gds-listbox-trigger--no-caret" : "",
+    triggerClassName ?? "",
+  ].filter(Boolean).join(" ");
 
   return (
     <div className={rootClassName} ref={rootRef}>
@@ -192,27 +206,34 @@ export default function Listbox(props: ListboxProps) {
       <button
         id={controlId}
         type="button"
-        className="gds-listbox-trigger"
+        className={triggerClassNames}
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="listbox"
         aria-labelledby={label ? labelId : undefined}
+        aria-label={!label ? triggerAriaLabel : undefined}
         aria-expanded={open}
         disabled={disabled}
         ref={triggerRef}
       >
-        <ScrollingText
-          text={selected?.triggerLabel ?? selected?.label ?? placeholder}
-          className="gds-listbox-label"
-        />
-        {selectedTriggerMeta && (
-          <ScrollingText
-            text={selectedTriggerMeta}
-            className="gds-listbox-meta"
-          />
+        {triggerContent ? triggerContent : (
+          <>
+            <ScrollingText
+              text={selected?.triggerLabel ?? selected?.label ?? placeholder}
+              className="gds-listbox-label"
+            />
+            {selectedTriggerMeta && (
+              <ScrollingText
+                text={selectedTriggerMeta}
+                className="gds-listbox-meta"
+              />
+            )}
+          </>
         )}
-        <span className="gds-listbox-caret" aria-hidden="true">
-          <Icon name="chevronDown" size={8} />
-        </span>
+        {!hideCaret && (
+          <span className="gds-listbox-caret" aria-hidden="true">
+            <Icon name="chevronDown" size={8} />
+          </span>
+        )}
       </button>
       {open && popoverStyle &&
         createPortal(
