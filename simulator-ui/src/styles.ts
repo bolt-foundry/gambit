@@ -423,6 +423,9 @@ code:not(pre *) {
   align-items: center;
   justify-content: center;
   height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-text-subtle);
   cursor: help;
 }

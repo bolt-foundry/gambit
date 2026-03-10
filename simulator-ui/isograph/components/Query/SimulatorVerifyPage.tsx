@@ -682,13 +682,13 @@ export const SimulatorVerifyPage = iso(`
                 </div>
                 {selectedScenarioDeck?.description && (
                   <Tooltip content={selectedScenarioDeck.description}>
-                    <span
+                    <button
+                      type="button"
                       className="verify-listbox-info-icon"
                       aria-label="Show scenario deck description"
-                      role="img"
                     >
                       <Icon name="circleInfo" size={16} />
-                    </span>
+                    </button>
                   </Tooltip>
                 )}
               </div>
@@ -740,13 +740,13 @@ export const SimulatorVerifyPage = iso(`
                 </div>
                 {selectedGrader?.description && (
                   <Tooltip content={selectedGrader.description}>
-                    <span
+                    <button
+                      type="button"
                       className="verify-listbox-info-icon"
                       aria-label="Show grader description"
-                      role="img"
                     >
                       <Icon name="circleInfo" size={16} />
-                    </span>
+                    </button>
                   </Tooltip>
                 )}
               </div>
