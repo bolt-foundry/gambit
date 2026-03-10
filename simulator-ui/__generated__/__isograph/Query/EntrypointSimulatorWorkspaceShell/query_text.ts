@@ -24,41 +24,39 @@ export default 'query EntrypointSimulatorWorkspaceShell($workspaceId: ID!) {\
             edges {\
               node {\
                 id,\
-                outputItems____first___l_200: outputItems(first: 200) {\
-                  edges {\
-                    node {\
-                      __typename,\
-                      ... on OutputMessage {\
-                        __typename,\
-                        id,\
-                        content,\
-                        role,\
-                      },\
-                      ... on OutputReasoning {\
-                        __typename,\
-                        id,\
-                        reasoningType,\
-                        summary,\
-                      },\
-                      ... on OutputToolCall {\
-                        __typename,\
-                        id,\
-                        argumentsText,\
-                        error,\
-                        resultText,\
-                        status,\
-                        toolCallId,\
-                        toolName,\
-                      },\
-                    },\
-                  },\
-                },\
                 status,\
               },\
             },\
           },\
           startedAt,\
           status,\
+          transcriptEntries {\
+            __typename,\
+            ... on WorkspaceConversationTranscriptMessage {\
+              __typename,\
+              id,\
+              content,\
+              feedbackEligible,\
+              messageRefId,\
+              role,\
+            },\
+            ... on WorkspaceConversationTranscriptReasoning {\
+              __typename,\
+              id,\
+              reasoningType,\
+              summary,\
+            },\
+            ... on WorkspaceConversationTranscriptToolCall {\
+              __typename,\
+              id,\
+              argumentsText,\
+              error,\
+              resultText,\
+              status,\
+              toolCallId,\
+              toolName,\
+            },\
+          },\
           workspaceId,\
         },\
       },\

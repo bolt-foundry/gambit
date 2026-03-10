@@ -15,6 +15,7 @@ export type TestBotRunMessage = {
   role: string;
   content: string;
   messageRefId?: string;
+  feedbackEligible?: boolean;
   messageSource?: "scenario" | "manual" | "artifact";
   feedback?: FeedbackEntry;
   respondStatus?: number;

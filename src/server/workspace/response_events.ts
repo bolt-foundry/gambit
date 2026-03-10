@@ -117,7 +117,7 @@ export const createOpenResponsesEventPersistence = (deps: {
     state: SavedState | null | undefined;
     runId: string;
     message: string;
-    source: "build" | "scenario";
+    source: "build" | "scenario" | "manual" | "artifact";
   }) => {
     if (!args.state) return;
     const content = args.message.trim();

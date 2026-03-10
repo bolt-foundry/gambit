@@ -12,6 +12,29 @@ export const GambitSimulatorResetWorkspaceMutation = iso(`
             node {
               id
               status
+              transcriptEntries {
+                asWorkspaceConversationTranscriptMessage {
+                  id
+                  role
+                  content
+                  messageRefId
+                  feedbackEligible
+                }
+                asWorkspaceConversationTranscriptReasoning {
+                  id
+                  summary
+                  reasoningType
+                }
+                asWorkspaceConversationTranscriptToolCall {
+                  id
+                  toolCallId
+                  toolName
+                  status
+                  argumentsText
+                  resultText
+                  error
+                }
+              }
               openResponses(first: 1) {
                 edges {
                   node {

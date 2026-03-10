@@ -641,7 +641,10 @@ export function WorkspaceProvider(
               event: payload.event as TraceEvent,
             };
           } else if (
-            payloadType === "gambit.build.stream" &&
+            (
+              payloadType === "gambit.build.stream" ||
+              payloadType === "gambit.build.stream.delta"
+            ) &&
             typeof payload.chunk === "string"
           ) {
             msg = {
@@ -654,7 +657,10 @@ export function WorkspaceProvider(
               turn: typeof payload.turn === "number" ? payload.turn : undefined,
               ts: typeof payload.ts === "number" ? payload.ts : undefined,
             };
-          } else if (payloadType === "gambit.build.streamEnd") {
+          } else if (
+            payloadType === "gambit.build.streamEnd" ||
+            payloadType === "gambit.build.stream.done"
+          ) {
             msg = {
               type: "buildBotStreamEnd",
               runId: typeof payload.runId === "string"
@@ -670,7 +676,10 @@ export function WorkspaceProvider(
               run: payload.run as TestBotRun,
             };
           } else if (
-            payloadType === "gambit.test.stream" &&
+            (
+              payloadType === "gambit.test.stream" ||
+              payloadType === "gambit.test.stream.delta"
+            ) &&
             typeof payload.chunk === "string"
           ) {
             msg = {
@@ -683,7 +692,10 @@ export function WorkspaceProvider(
               turn: typeof payload.turn === "number" ? payload.turn : undefined,
               ts: typeof payload.ts === "number" ? payload.ts : undefined,
             };
-          } else if (payloadType === "gambit.test.streamEnd") {
+          } else if (
+            payloadType === "gambit.test.streamEnd" ||
+            payloadType === "gambit.test.stream.done"
+          ) {
             msg = {
               type: "testBotStreamEnd",
               runId: typeof payload.runId === "string"

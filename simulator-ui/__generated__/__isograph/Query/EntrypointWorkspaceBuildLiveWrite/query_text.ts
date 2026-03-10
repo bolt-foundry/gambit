@@ -6,44 +6,18 @@ export default 'query EntrypointWorkspaceBuildLiveWrite($workspaceId: ID!) {\
         node {\
           __typename,\
           id,\
+          error,\
           openResponses____first___l_1: openResponses(first: 1) {\
             edges {\
               node {\
                 id,\
-                outputItems____first___l_200: outputItems(first: 200) {\
-                  edges {\
-                    node {\
-                      __typename,\
-                      ... on OutputMessage {\
-                        __typename,\
-                        id,\
-                        content,\
-                        role,\
-                      },\
-                      ... on OutputReasoning {\
-                        __typename,\
-                        id,\
-                        reasoningType,\
-                        summary,\
-                      },\
-                      ... on OutputToolCall {\
-                        __typename,\
-                        id,\
-                        argumentsText,\
-                        error,\
-                        resultText,\
-                        status,\
-                        toolCallId,\
-                        toolName,\
-                      },\
-                    },\
-                  },\
-                },\
                 status,\
               },\
             },\
           },\
+          startedAt,\
           status,\
+          workspaceId,\
         },\
       },\
     },\

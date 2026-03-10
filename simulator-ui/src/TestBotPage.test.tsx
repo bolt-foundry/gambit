@@ -623,6 +623,141 @@ Deno.test("TestBotPage submits parsed JSON payload for assistant start", async (
   }
 });
 
+Deno.test("TestBotPage allows manual send while a live assistant run remains marked running", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = globalThis.EventSource;
+  const requests: Array<RequestEntry> = [];
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+
+  try {
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch =
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        await Promise.resolve();
+        const url = String(input);
+        const pathname = new URL(url, "http://localhost").pathname;
+        let body: Record<string, unknown> | undefined;
+        if (typeof init?.body === "string" && init.body.length > 0) {
+          body = JSON.parse(init.body) as Record<string, unknown>;
+        }
+        requests.push({ url, body });
+
+        if (pathname === "/api/workspaces/ws-1") {
+          return new Response(JSON.stringify(createSnapshot()), {
+            status: 200,
+          });
+        }
+        if (pathname.startsWith("/api/workspaces/ws-1/test/")) {
+          return new Response(
+            JSON.stringify({
+              ...createSnapshot(),
+              test: {
+                run: {
+                  id: "run-1",
+                  status: "running",
+                  workspaceId: "ws-1",
+                  messages: [],
+                  traces: [],
+                  toolInserts: [],
+                },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/api/test") {
+          return new Response(
+            JSON.stringify({
+              selectedDeckId: "deck-1",
+              testDecks: [{
+                id: "deck-1",
+                label: "Scenario 1",
+                path: "/tmp/scenario-1.md",
+              }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/schema") {
+          return new Response(
+            JSON.stringify({
+              startMode: "assistant",
+            }),
+            { status: 200 },
+          );
+        }
+        if (pathname === "/api/test/message") {
+          return new Response(
+            JSON.stringify({
+              run: {
+                id: "run-1",
+                status: "running",
+                workspaceId: "ws-1",
+                messages: [],
+                traces: [],
+                toolInserts: [],
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as typeof fetch;
+
+    await act(() => {
+      renderer = TestRenderer.create(
+        <WorkspaceProvider workspaceId="ws-1">
+          <TestBotPage
+            activeWorkspaceId="ws-1"
+            onReplaceTestBotSession={() => {}}
+            onResetTestBotSession={() => {}}
+          />
+        </WorkspaceProvider>,
+      );
+    });
+
+    assert(renderer);
+    await flushEffects();
+    await flushEffects();
+
+    await act(() => {
+      findByTestId(renderer!.root, "testbot-start-assistant").props.onClick();
+    });
+    await flushEffects();
+
+    const chatInput = renderer.root.findAll((node: ReactTestInstance) =>
+      node.type === "textarea" &&
+      node.props.placeholder === "Message the assistant..."
+    )[0];
+    assert(chatInput);
+
+    await act(() => {
+      chatInput.props.onChange({ target: { value: "hello from streaming" } });
+    });
+
+    const sendButton = findByTestId(renderer.root, "testbot-chat-send");
+    assertEquals(Boolean(sendButton.props.disabled), false);
+
+    await act(() => {
+      sendButton.props.onClick();
+    });
+
+    const messageRequests = requests.filter((entry) =>
+      entry.url.includes("/api/test/message")
+    );
+    assertEquals(messageRequests.length, 2);
+    assertEquals(messageRequests[1]?.body?.message, "hello from streaming");
+  } finally {
+    if (renderer) {
+      await act(() => {
+        renderer.unmount();
+      });
+    }
+    globalThis.fetch = originalFetch;
+    globalThis.EventSource = originalEventSource;
+  }
+});
+
 Deno.test("TestBotPage New chat clears current run without rehydrating latest workspace run", async () => {
   const originalFetch = globalThis.fetch;
   const originalEventSource = globalThis.EventSource;

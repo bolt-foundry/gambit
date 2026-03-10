@@ -17,12 +17,16 @@ import {
 import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
 import CodexLoginRequiredOverlay from "../../../src/CodexLoginRequiredOverlay.tsx";
-import type {
-  BuildDisplayMessage,
-  ToolCallSummary,
-} from "../../../src/utils.ts";
+import type { BuildDisplayMessage } from "../../../src/utils.ts";
+import {
+  countTranscriptMessages,
+  type OptimisticTranscriptEntry,
+  type ParsedTranscriptEntry,
+  parseTranscriptEntries,
+  toBuildDisplayEntries,
+  toOptimisticTranscriptEntries,
+} from "../../../src/transcriptEntries.ts";
 import WorkbenchDrawerIso, {
-  type WorkbenchChatMessage,
   type WorkbenchChatRunStatus,
 } from "../../../src/WorkbenchDrawerIso.tsx";
 
@@ -75,10 +79,6 @@ function toRunStatus(value: unknown): WorkbenchChatRunStatus {
     : "IDLE";
 }
 
-function toMessageRole(value: unknown): "user" | "assistant" {
-  return value === "user" ? "user" : "assistant";
-}
-
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -87,158 +87,6 @@ function toErrorMessage(error: unknown): string {
     return error;
   }
   return "GraphQL request failed";
-}
-
-type OptimisticOutputEdge = {
-  node: {
-    __typename: "OutputMessage";
-    asOutputMessage: {
-      id: string;
-      role: "user" | "assistant";
-      content: string;
-    };
-  };
-};
-
-function toOptimisticOutputEdges(
-  messages: Array<WorkbenchChatMessage>,
-): Array<OptimisticOutputEdge> {
-  return messages.map((message, index) => ({
-    node: {
-      __typename: "OutputMessage",
-      asOutputMessage: {
-        id: message.id ?? `optimistic-message-existing-${index}`,
-        role: message.role,
-        content: message.content,
-      },
-    },
-  }));
-}
-
-function toToolStatus(
-  value: unknown,
-): ToolCallSummary["status"] {
-  if (value === "COMPLETED") return "completed";
-  if (value === "ERROR") return "error";
-  if (value === "RUNNING") return "running";
-  return "pending";
-}
-
-function toOutputDisplayEntries(
-  outputItems: Array<unknown>,
-): {
-  messages: Array<WorkbenchChatMessage>;
-  display: Array<BuildDisplayMessage>;
-} {
-  const messages: Array<WorkbenchChatMessage> = [];
-  const display: Array<BuildDisplayMessage> = [];
-  for (const item of outputItems) {
-    if (!item || typeof item !== "object") continue;
-    const node = item as Record<string, unknown>;
-    const typeName = typeof node.__typename === "string" ? node.__typename : "";
-    if (typeName === "OutputMessage") {
-      const outputMessage = node.asOutputMessage &&
-          typeof node.asOutputMessage === "object"
-        ? node.asOutputMessage as Record<string, unknown>
-        : null;
-      const content = outputMessage && typeof outputMessage.content === "string"
-        ? outputMessage.content
-        : "";
-      if (content.length === 0) continue;
-      const role = toMessageRole(outputMessage?.role);
-      const message = {
-        id: typeof outputMessage?.id === "string"
-          ? outputMessage.id
-          : undefined,
-        role,
-        content,
-      };
-      messages.push(message);
-      display.push({
-        kind: "message",
-        role,
-        content,
-      });
-      continue;
-    }
-    if (typeName === "OutputReasoning") {
-      const outputReasoning = node.asOutputReasoning &&
-          typeof node.asOutputReasoning === "object"
-        ? node.asOutputReasoning as Record<string, unknown>
-        : null;
-      if (!outputReasoning || typeof outputReasoning.summary !== "string") {
-        continue;
-      }
-      display.push({
-        kind: "reasoning",
-        reasoningId: typeof outputReasoning.id === "string"
-          ? outputReasoning.id
-          : undefined,
-        content: outputReasoning.summary,
-        reasoningType: typeof outputReasoning.reasoningType === "string"
-          ? outputReasoning.reasoningType
-          : undefined,
-      });
-      continue;
-    }
-    if (typeName === "OutputToolCall") {
-      const outputToolCall = node.asOutputToolCall &&
-          typeof node.asOutputToolCall === "object"
-        ? node.asOutputToolCall as Record<string, unknown>
-        : null;
-      if (!outputToolCall) continue;
-      const toolCallId = typeof outputToolCall.toolCallId === "string"
-        ? outputToolCall.toolCallId
-        : undefined;
-      const itemId = typeof outputToolCall.id === "string"
-        ? outputToolCall.id
-        : toolCallId;
-      if (!itemId) continue;
-      display.push({
-        kind: "tool",
-        toolCallId,
-        toolSummary: {
-          key: itemId,
-          id: itemId,
-          actionCallId: toolCallId,
-          name: typeof outputToolCall.toolName === "string"
-            ? outputToolCall.toolName
-            : undefined,
-          status: toToolStatus(outputToolCall.status),
-          args: typeof outputToolCall.argumentsText === "string"
-            ? outputToolCall.argumentsText
-            : undefined,
-          result: typeof outputToolCall.resultText === "string"
-            ? outputToolCall.resultText
-            : undefined,
-          error: typeof outputToolCall.error === "string"
-            ? outputToolCall.error
-            : undefined,
-        },
-      });
-    }
-  }
-  const outputTypeCounts: Record<string, number> = {};
-  for (const item of outputItems) {
-    if (!item || typeof item !== "object") continue;
-    const key =
-      typeof (item as { __typename?: unknown }).__typename === "string"
-        ? String((item as { __typename: unknown }).__typename)
-        : "unknown";
-    outputTypeCounts[key] = (outputTypeCounts[key] ?? 0) + 1;
-  }
-  const displayTypeCounts: Record<string, number> = {};
-  for (const entry of display) {
-    displayTypeCounts[entry.kind] = (displayTypeCounts[entry.kind] ?? 0) + 1;
-  }
-  logBuildChatDebug("drawer.toOutputDisplayEntries", {
-    outputCount: outputItems.length,
-    outputTypeCounts,
-    displayCount: display.length,
-    displayTypeCounts,
-    messageCount: messages.length,
-  });
-  return { messages, display };
 }
 
 function toBuildChatRunStatus(
@@ -343,33 +191,30 @@ export const WorkbenchConversationRunChat = iso(`
         node {
           id
           status
-          outputItems(first: 200) {
-            edges {
-              node {
-                __typename
-                asOutputMessage {
-                  id
-                  role
-                  content
-                }
-                asOutputReasoning {
-                  id
-                  summary
-                  reasoningType
-                }
-                asOutputToolCall {
-                  id
-                  toolCallId
-                  toolName
-                  status
-                  argumentsText
-                  resultText
-                  error
-                }
-              }
-            }
-          }
         }
+      }
+    }
+    transcriptEntries {
+      asWorkspaceConversationTranscriptMessage {
+        id
+        role
+        content
+        messageRefId
+        feedbackEligible
+      }
+      asWorkspaceConversationTranscriptReasoning {
+        id
+        summary
+        reasoningType
+      }
+      asWorkspaceConversationTranscriptToolCall {
+        id
+        toolCallId
+        toolName
+        status
+        argumentsText
+        resultText
+        error
       }
     }
   }
@@ -392,16 +237,7 @@ export const WorkbenchConversationRunChat = iso(`
     message: string;
     optimisticOpenResponseId: string;
     optimisticMessageId: string;
-    optimisticOutputEdges: Array<{
-      node: {
-        __typename: "OutputMessage";
-        asOutputMessage: {
-          id: string;
-          role: "user" | "assistant";
-          content: string;
-        };
-      };
-    }>;
+    optimisticTranscriptEntries: Array<OptimisticTranscriptEntry>;
     onComplete: () => void;
     onError: () => void;
   }) => void;
@@ -409,16 +245,7 @@ export const WorkbenchConversationRunChat = iso(`
     workspaceId: string;
     runId: string;
     optimisticOpenResponseId: string;
-    optimisticOutputEdges: Array<{
-      node: {
-        __typename: "OutputMessage";
-        asOutputMessage: {
-          id: string;
-          role: "user" | "assistant";
-          content: string;
-        };
-      };
-    }>;
+    optimisticTranscriptEntries: Array<OptimisticTranscriptEntry>;
     onComplete: () => void;
     onError: () => void;
   }) => void;
@@ -452,46 +279,45 @@ export const WorkbenchConversationRunChat = iso(`
     : false;
   const showCodexLoginOverlay = codexLoginRequired && !codexOverlayDismissed;
   const codexLoginCommand = "codex login";
-  const firstOpenResponse = (data.openResponses?.edges ?? []).flatMap((
-    edge,
-  ) => edge?.node ? [edge.node] : [])[0] ?? null;
   const startedAtMs = typeof data.startedAt === "string"
     ? Date.parse(data.startedAt)
     : Number.NaN;
   const resolvedStartedAtMs = Number.isFinite(startedAtMs) ? startedAtMs : null;
+  const firstOpenResponse = (data.openResponses?.edges ?? []).flatMap((edge) =>
+    edge?.node ? [edge.node] : []
+  )[0] ?? null;
   const runStatus = toRunStatus(firstOpenResponse?.status ?? data.status);
   const scenarioRunError = typeof data.error === "string" &&
       data.error.trim().length > 0
     ? data.error.trim()
     : null;
-  const outputNodes = (firstOpenResponse?.outputItems?.edges ?? []).flatMap((
-    edge,
-  ) => edge?.node ? [edge.node] : []);
-  const outputDisplay = useMemo(
-    () => toOutputDisplayEntries(outputNodes),
-    [outputNodes],
+  const transcriptEntries = useMemo<Array<ParsedTranscriptEntry>>(() => {
+    return parseTranscriptEntries(data.transcriptEntries);
+  }, [data.transcriptEntries]);
+  const transcriptMessageCount = useMemo(
+    () =>
+      countTranscriptMessages(transcriptEntries),
+    [transcriptEntries],
   );
-  const messages = outputDisplay.messages;
-  const optimisticOutputEdges = useMemo(
-    () => toOptimisticOutputEdges(messages),
-    [messages],
+  const optimisticTranscriptEntries = useMemo<Array<OptimisticTranscriptEntry>>(
+    () => toOptimisticTranscriptEntries(transcriptEntries),
+    [transcriptEntries],
   );
-  const transcriptDisplay = outputDisplay.display;
+  const transcriptDisplay = useMemo<Array<BuildDisplayMessage>>(
+    () => toBuildDisplayEntries(transcriptEntries),
+    [transcriptEntries],
+  );
   useEffect(() => {
     logBuildChatDebug("drawer.state", {
       runId: data.id ?? null,
-      openResponseId: firstOpenResponse?.id ?? null,
       runStatus,
-      outputNodeCount: outputNodes.length,
-      messageCount: messages.length,
+      messageCount: transcriptMessageCount,
       transcriptCount: transcriptDisplay.length,
     });
   }, [
-    firstOpenResponse?.id,
     data.id,
-    messages.length,
-    outputNodes.length,
     runStatus,
+    transcriptMessageCount,
     transcriptDisplay.length,
   ]);
   const runId = typeof data.id === "string" && data.id.trim().length > 0
@@ -531,7 +357,7 @@ export const WorkbenchConversationRunChat = iso(`
         message: trimmedMessage,
         optimisticOpenResponseId,
         optimisticMessageId,
-        optimisticOutputEdges,
+        optimisticTranscriptEntries,
         onComplete: () => {
           setChatError(null);
           resolve();
@@ -547,7 +373,7 @@ export const WorkbenchConversationRunChat = iso(`
     componentProps,
     codexLoginRequired,
     firstOpenResponse?.id,
-    optimisticOutputEdges,
+    optimisticTranscriptEntries,
     runId,
     workspaceId,
   ]);
@@ -570,7 +396,7 @@ export const WorkbenchConversationRunChat = iso(`
         workspaceId,
         runId,
         optimisticOpenResponseId,
-        optimisticOutputEdges,
+        optimisticTranscriptEntries,
         onComplete: () => {
           setChatError(null);
           resolve();
@@ -586,14 +412,14 @@ export const WorkbenchConversationRunChat = iso(`
     componentProps,
     codexLoginRequired,
     firstOpenResponse?.id,
-    optimisticOutputEdges,
+    optimisticTranscriptEntries,
     runId,
     workspaceId,
   ]);
   const isRunning = runStatus === "RUNNING";
   const isBusy = componentProps.isSending || componentProps.isStopping;
   const canStartAssistant = !isRunning && !componentProps.isSending &&
-    messages.length === 0;
+    transcriptMessageCount === 0;
   const canSubmitMessage = !componentProps.isSending && !isRunning &&
     chatDraft.trim().length > 0;
   const showStartButton = canStartAssistant && chatDraft.trim().length === 0;

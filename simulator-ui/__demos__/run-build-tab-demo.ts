@@ -30,10 +30,33 @@ async function main(): Promise<void> {
   const gambitCliPath = path.join(gambitPackageRoot, "src", "cli.ts");
 
   await runWithTempServeRoot(async (serveRoot) => {
-    const fixture = await createTestTabDemoFixture(serveRoot);
+    const fixture = await createTestTabDemoFixture(serveRoot, {
+      includeBrokenScenario: false,
+    });
     await runE2e(
       "gambit build tab demo",
       async ({ demoTarget, screenshot, wait }) => {
+        const sendBuildPrompt = async (
+          prompt: string,
+          userBubbleText = prompt,
+        ): Promise<void> => {
+          await demoTarget.locator('[data-testid="build-chat-input"]').fill(
+            prompt,
+          );
+          const sendButton = demoTarget.locator(
+            '[data-testid="build-send"]:not([disabled])',
+          ).first();
+          await sendButton.waitFor({
+            timeout: 120_000,
+          });
+          await sendButton.click();
+          await demoTarget.locator('.imessage-bubble[title="user"]', {
+            hasText: userBubbleText,
+          }).waitFor({
+            timeout: 20_000,
+          });
+        };
+
         const normalizeWorkspacePath = (pathname: string): string => {
           return pathname.startsWith("/isograph/")
             ? pathname.slice("/isograph".length)
@@ -110,38 +133,14 @@ async function main(): Promise<void> {
         const updateModelPrompt =
           "please update the root PROMPT.md model to openai/gpt-5.1-chat";
         const followupPrompt = `demo build-tab send ${Date.now()}`;
-        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
-          chatPrompt,
-        );
-        await demoTarget.locator('[data-testid="build-send"]').click();
-        await demoTarget.locator('.imessage-bubble[title="user"]', {
-          hasText: chatPrompt,
-        }).waitFor({
-          timeout: 5_000,
-        });
+        await sendBuildPrompt(chatPrompt);
         await demoTarget.locator(".workbench-accordion-title .badge", {
           hasText: "Running",
         }).waitFor({
           timeout: 5_000,
         });
-        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
-          workspacePrompt,
-        );
-        await demoTarget.locator('[data-testid="build-send"]').click();
-        await demoTarget.locator('.imessage-bubble[title="user"]', {
-          hasText: workspacePrompt,
-        }).waitFor({
-          timeout: 5_000,
-        });
-        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
-          promptMdPrompt,
-        );
-        await demoTarget.locator('[data-testid="build-send"]').click();
-        await demoTarget.locator('.imessage-bubble[title="user"]', {
-          hasText: promptMdPrompt,
-        }).waitFor({
-          timeout: 5_000,
-        });
+        await sendBuildPrompt(workspacePrompt);
+        await sendBuildPrompt(promptMdPrompt);
         await demoTarget.locator(
           ".build-files-preview-selector .gds-listbox-trigger",
         ).click();
@@ -157,15 +156,10 @@ async function main(): Promise<void> {
           timeout: 5_000,
         });
         const refreshMarker = `refresh-marker-${Date.now()}`;
-        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
+        await sendBuildPrompt(
           `${updateModelPrompt} and include a single line "${refreshMarker}"`,
+          "please update the root PROMPT.md model",
         );
-        await demoTarget.locator('[data-testid="build-send"]').click();
-        await demoTarget.locator('.imessage-bubble[title="user"]', {
-          hasText: "please update the root PROMPT.md model",
-        }).waitFor({
-          timeout: 5_000,
-        });
         await demoTarget.locator(".build-file-preview", {
           hasText: "openai/gpt-5.1-chat",
         }).waitFor({
@@ -176,15 +170,7 @@ async function main(): Promise<void> {
         }).waitFor({
           timeout: 120_000,
         });
-        await demoTarget.locator('[data-testid="build-chat-input"]').fill(
-          followupPrompt,
-        );
-        await demoTarget.locator('[data-testid="build-send"]').click();
-        await demoTarget.locator('.imessage-bubble[title="user"]', {
-          hasText: followupPrompt,
-        }).waitFor({
-          timeout: 5_000,
-        });
+        await sendBuildPrompt(followupPrompt);
         await demoTarget.locator('.imessage-bubble[title="assistant"]').first()
           .waitFor({
             timeout: 20_000,

@@ -55,7 +55,7 @@ export const createWorkspaceBuildService = (deps: {
     state: SavedState | null | undefined;
     runId: string;
     message: string;
-    source: "build" | "scenario";
+    source: "build" | "scenario" | "manual" | "artifact";
   }) => void;
   persistOpenResponsesTracesFromState: (
     state: SavedState | null | undefined,

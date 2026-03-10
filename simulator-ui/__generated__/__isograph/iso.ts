@@ -27,6 +27,7 @@ import { type Query__EntrypointSimulatorWorkspaces__param } from './Query/Entryp
 import { type Query__EntrypointWorkspaceBuildLiveWrite__param } from './Query/EntrypointWorkspaceBuildLiveWrite/param_type.ts';
 import { type Query__EntrypointWorkspaceBuildTabLiveWrite__param } from './Query/EntrypointWorkspaceBuildTabLiveWrite/param_type.ts';
 import { type Query__EntrypointWorkspaceGradeLiveWrite__param } from './Query/EntrypointWorkspaceGradeLiveWrite/param_type.ts';
+import { type Query__EntrypointWorkspaceTestLiveWrite__param } from './Query/EntrypointWorkspaceTestLiveWrite/param_type.ts';
 import { type Query__EntrypointWorkspaceVerifyLiveWrite__param } from './Query/EntrypointWorkspaceVerifyLiveWrite/param_type.ts';
 import { type Query__EntrypointWorkspaceWorkbenchLiveWrite__param } from './Query/EntrypointWorkspaceWorkbenchLiveWrite/param_type.ts';
 import { type Query__SimulatorAppDrawer__param } from './Query/SimulatorAppDrawer/param_type.ts';
@@ -69,6 +70,7 @@ import entrypoint_Query__EntrypointSimulatorWorkspaces from '../__isograph/Query
 import entrypoint_Query__EntrypointWorkspaceBuildLiveWrite from '../__isograph/Query/EntrypointWorkspaceBuildLiveWrite/entrypoint.ts';
 import entrypoint_Query__EntrypointWorkspaceBuildTabLiveWrite from '../__isograph/Query/EntrypointWorkspaceBuildTabLiveWrite/entrypoint.ts';
 import entrypoint_Query__EntrypointWorkspaceGradeLiveWrite from '../__isograph/Query/EntrypointWorkspaceGradeLiveWrite/entrypoint.ts';
+import entrypoint_Query__EntrypointWorkspaceTestLiveWrite from '../__isograph/Query/EntrypointWorkspaceTestLiveWrite/entrypoint.ts';
 import entrypoint_Query__EntrypointWorkspaceVerifyLiveWrite from '../__isograph/Query/EntrypointWorkspaceVerifyLiveWrite/entrypoint.ts';
 import entrypoint_Query__EntrypointWorkspaceWorkbenchLiveWrite from '../__isograph/Query/EntrypointWorkspaceWorkbenchLiveWrite/entrypoint.ts';
 
@@ -231,6 +233,10 @@ export function iso<T>(
 export function iso<T>(
   param: T & MatchesWhitespaceAndString<'field Query.EntrypointWorkspaceGradeLiveWrite', T>
 ): IdentityWithParam<Query__EntrypointWorkspaceGradeLiveWrite__param>;
+
+export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'field Query.EntrypointWorkspaceTestLiveWrite', T>
+): IdentityWithParam<Query__EntrypointWorkspaceTestLiveWrite__param>;
 
 export function iso<T>(
   param: T & MatchesWhitespaceAndString<'field Query.EntrypointWorkspaceVerifyLiveWrite', T>
@@ -401,6 +407,10 @@ export function iso<T>(
 ): typeof entrypoint_Query__EntrypointWorkspaceGradeLiveWrite;
 
 export function iso<T>(
+  param: T & MatchesWhitespaceAndString<'entrypoint Query.EntrypointWorkspaceTestLiveWrite', T>
+): typeof entrypoint_Query__EntrypointWorkspaceTestLiveWrite;
+
+export function iso<T>(
   param: T & MatchesWhitespaceAndString<'entrypoint Query.EntrypointWorkspaceVerifyLiveWrite', T>
 ): typeof entrypoint_Query__EntrypointWorkspaceVerifyLiveWrite;
 
@@ -470,6 +480,8 @@ export function iso(isographLiteralText: string):
       return entrypoint_Query__EntrypointWorkspaceBuildTabLiveWrite;
     case 'entrypoint Query.EntrypointWorkspaceGradeLiveWrite':
       return entrypoint_Query__EntrypointWorkspaceGradeLiveWrite;
+    case 'entrypoint Query.EntrypointWorkspaceTestLiveWrite':
+      return entrypoint_Query__EntrypointWorkspaceTestLiveWrite;
     case 'entrypoint Query.EntrypointWorkspaceVerifyLiveWrite':
       return entrypoint_Query__EntrypointWorkspaceVerifyLiveWrite;
     case 'entrypoint Query.EntrypointWorkspaceWorkbenchLiveWrite':

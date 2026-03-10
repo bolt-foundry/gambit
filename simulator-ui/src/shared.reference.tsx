@@ -297,6 +297,7 @@ export function ReasoningBubble(props: { detail: ReasoningDetail }) {
 export function FeedbackControls(props: {
   messageRefId: string;
   feedback?: FeedbackEntry;
+  disabled?: boolean;
   onScore: (
     messageRefId: string,
     score: number | null,
@@ -308,7 +309,8 @@ export function FeedbackControls(props: {
     reason: string,
   ) => void | Promise<void>;
 }) {
-  const { messageRefId, feedback, onScore, onReasonChange } = props;
+  const { messageRefId, feedback, disabled = false, onScore, onReasonChange } =
+    props;
   const [reason, setReason] = useState(feedback?.reason ?? "");
   const [opened, setOpened] = useState(false);
   const [localScore, setLocalScore] = useState<number | null>(null);
@@ -409,7 +411,9 @@ export function FeedbackControls(props: {
               "score-button",
               effectiveScore === value && "score-button-active",
             )}
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return;
               if (effectiveScore === value) {
                 setLocalScore(null);
                 setOpened(false);
@@ -432,12 +436,15 @@ export function FeedbackControls(props: {
             className="feedback-reason"
             placeholder="Why?"
             value={reason}
+            disabled={disabled}
             onChange={(e) => {
+              if (disabled) return;
               setReason(e.target.value);
               setStatus("unsaved");
               setErrorMessage(null);
             }}
             onBlur={() => {
+              if (disabled) return;
               if (typeof effectiveScore !== "number") return;
               if (status !== "unsaved") return;
               persistReason(effectiveScore, reason);

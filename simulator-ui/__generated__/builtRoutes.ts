@@ -36,6 +36,7 @@ iso(`entrypoint Query.EntrypointSimulatorWorkspaces`)
 iso(`entrypoint Query.EntrypointWorkspaceBuildLiveWrite`)
 iso(`entrypoint Query.EntrypointWorkspaceBuildTabLiveWrite`)
 iso(`entrypoint Query.EntrypointWorkspaceGradeLiveWrite`)
+iso(`entrypoint Query.EntrypointWorkspaceTestLiveWrite`)
 iso(`entrypoint Query.EntrypointWorkspaceVerifyLiveWrite`)
 iso(`entrypoint Query.EntrypointWorkspaceWorkbenchLiveWrite`)
 
@@ -51,6 +52,7 @@ import entrypointSimulatorWorkspaces from "@iso-gambit-sim/Query/EntrypointSimul
 import entrypointWorkspaceBuildLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceBuildLiveWrite/entrypoint.ts"
 import entrypointWorkspaceBuildTabLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceBuildTabLiveWrite/entrypoint.ts"
 import entrypointWorkspaceGradeLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceGradeLiveWrite/entrypoint.ts"
+import entrypointWorkspaceTestLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceTestLiveWrite/entrypoint.ts"
 import entrypointWorkspaceVerifyLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceVerifyLiveWrite/entrypoint.ts"
 import entrypointWorkspaceWorkbenchLiveWrite from "@iso-gambit-sim/Query/EntrypointWorkspaceWorkbenchLiveWrite/entrypoint.ts"
 import gambitSimulatorResetWorkspace from "@iso-gambit-sim/Mutation/GambitSimulatorResetWorkspace/entrypoint.ts"
@@ -82,6 +84,7 @@ export {entrypointSimulatorWorkspaces};
 export {entrypointWorkspaceBuildLiveWrite};
 export {entrypointWorkspaceBuildTabLiveWrite};
 export {entrypointWorkspaceGradeLiveWrite};
+export {entrypointWorkspaceTestLiveWrite};
 export {entrypointWorkspaceVerifyLiveWrite};
 export {entrypointWorkspaceWorkbenchLiveWrite};
 export {gambitSimulatorResetWorkspace};

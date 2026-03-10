@@ -420,6 +420,128 @@ Deno.test("WorkspaceContext test chat start/send/stream/reset transitions", asyn
   }
 });
 
+Deno.test("WorkspaceContext eventsource accepts canonical test stream delta/done payloads", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEventSource = (globalThis as { EventSource?: unknown })
+    .EventSource;
+
+  let hook: any = null;
+  const previousLocation = windowObj.location
+    ? { ...windowObj.location }
+    : undefined;
+  globals.localStorage?.clear();
+  globals.sessionStorage?.clear();
+  windowObj.location = {
+    pathname: "/workspaces/ws-1/test",
+    search: "",
+    origin: "http://localhost",
+  };
+  FakeEventSource.reset();
+  (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+  globalThis.fetch = createGraphqlAwareFetch((request) => {
+    const { url } = request;
+    if (url.endsWith("/api/workspaces/ws-1")) {
+      return new Response(JSON.stringify(createSnapshot()), { status: 200 });
+    }
+    if (url.endsWith("/api/test/message")) {
+      return new Response(
+        JSON.stringify({
+          run: {
+            id: "run-1",
+            status: "running",
+            workspaceId: "ws-1",
+            messages: [{ role: "user", content: "hello" }],
+            traces: [],
+            toolInserts: [],
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.includes("/graphql/streams/")) {
+      return new Response(JSON.stringify({ events: [] }), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  function Harness() {
+    hook = useWorkspaceTest();
+    return null;
+  }
+
+  let renderer: TestRenderer.ReactTestRenderer | null = null;
+  try {
+    await act(async () => {
+      renderer = TestRenderer.create(
+        <WorkspaceProvider workspaceId="ws-1">
+          <Harness />
+        </WorkspaceProvider>,
+      );
+    });
+    assert(hook);
+    const source = [...FakeEventSource.connections][0];
+    assert(source);
+
+    await act(async () => {
+      await hook.sendMessage("hello", {
+        runId: "run-1",
+        workspaceId: "ws-1",
+        runWorkspaceId: "ws-1",
+      });
+    });
+    assertEquals(hook.run.status, "running");
+
+    await act(async () => {
+      FakeEventSource.emit({
+        sessionId: "",
+        eventType: "next",
+        sessionOffset: 0,
+        data: {
+          type: "next",
+          payload: {
+            type: "gambit.test.stream.delta",
+            runId: "run-1",
+            role: "assistant",
+            chunk: "canonical partial",
+            turn: 0,
+          },
+        },
+      });
+    });
+    assertEquals(hook.streamingAssistant?.text, "canonical partial");
+
+    await act(async () => {
+      FakeEventSource.emit({
+        sessionId: "",
+        eventType: "next",
+        sessionOffset: 1,
+        data: {
+          type: "next",
+          payload: {
+            type: "gambit.test.stream.done",
+            runId: "run-1",
+            role: "assistant",
+            turn: 0,
+          },
+        },
+      });
+    });
+    assertEquals(hook.streamingAssistant, null);
+  } finally {
+    if (renderer) {
+      await act(async () => {
+        renderer?.unmount();
+      });
+    }
+    (globalThis as { EventSource?: unknown }).EventSource = originalEventSource;
+    globalThis.fetch = originalFetch;
+    FakeEventSource.reset();
+    if (previousLocation) {
+      windowObj.location = previousLocation;
+    }
+  }
+});
+
 Deno.test("WorkspaceContext build chat stop cancels run and ignores post-stop stream chunks", async () => {
   const originalFetch = globalThis.fetch;
 

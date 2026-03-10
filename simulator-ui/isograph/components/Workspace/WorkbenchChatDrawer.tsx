@@ -368,31 +368,32 @@ export const WorkbenchChatDrawer = iso(`
                         node: {
                           __typename: "WorkspaceBuildRun",
                           id: args.runId,
-                          status: "RUNNING",
+                          workspaceId: args.workspaceId,
+                          error: null,
+                          startedAt: null,
                           openResponses____first___l_1: {
                             edges: [{
                               node: {
                                 __typename: "OpenResponse",
                                 id: args.optimisticOpenResponseId,
                                 status: "RUNNING",
-                                outputItems____first___l_200: {
-                                  edges: [
-                                    ...args.optimisticOutputEdges,
-                                    {
-                                      node: {
-                                        __typename: "OutputMessage",
-                                        asOutputMessage: {
-                                          id: args.optimisticMessageId,
-                                          role: "user",
-                                          content: args.message,
-                                        },
-                                      },
-                                    },
-                                  ],
-                                },
                               },
                             }],
                           },
+                          status: "RUNNING",
+                          transcriptEntries: [
+                            ...args.optimisticTranscriptEntries,
+                            {
+                              __typename:
+                                "WorkspaceConversationTranscriptMessage",
+                              id: args.optimisticMessageId,
+                              role: "user",
+                              content: args.message,
+                              messageRefId: null,
+                              feedbackEligible: false,
+                              feedback: null,
+                            },
+                          ],
                         },
                       }],
                     },
@@ -400,31 +401,31 @@ export const WorkbenchChatDrawer = iso(`
                   run: {
                     __typename: "WorkspaceBuildRun",
                     id: args.runId,
-                    status: "RUNNING",
+                    workspaceId: args.workspaceId,
+                    error: null,
+                    startedAt: null,
                     openResponses____first___l_1: {
                       edges: [{
                         node: {
                           __typename: "OpenResponse",
                           id: args.optimisticOpenResponseId,
                           status: "RUNNING",
-                          outputItems____first___l_200: {
-                            edges: [
-                              ...args.optimisticOutputEdges,
-                              {
-                                node: {
-                                  __typename: "OutputMessage",
-                                  asOutputMessage: {
-                                    id: args.optimisticMessageId,
-                                    role: "user",
-                                    content: args.message,
-                                  },
-                                },
-                              },
-                            ],
-                          },
                         },
                       }],
                     },
+                    status: "RUNNING",
+                    transcriptEntries: [
+                      ...args.optimisticTranscriptEntries,
+                      {
+                        __typename: "WorkspaceConversationTranscriptMessage",
+                        id: args.optimisticMessageId,
+                        role: "user",
+                        content: args.message,
+                        messageRefId: null,
+                        feedbackEligible: false,
+                        feedback: null,
+                      },
+                    ],
                   },
                 },
               } as never,
@@ -451,19 +452,20 @@ export const WorkbenchChatDrawer = iso(`
                         node: {
                           __typename: "WorkspaceBuildRun",
                           id: args.runId,
-                          status: "CANCELED",
+                          workspaceId: args.workspaceId,
+                          error: null,
+                          startedAt: null,
                           openResponses____first___l_1: {
                             edges: [{
                               node: {
                                 __typename: "OpenResponse",
                                 id: args.optimisticOpenResponseId,
                                 status: "CANCELED",
-                                outputItems____first___l_200: {
-                                  edges: args.optimisticOutputEdges,
-                                },
                               },
                             }],
                           },
+                          status: "CANCELED",
+                          transcriptEntries: args.optimisticTranscriptEntries,
                         },
                       }],
                     },
@@ -471,19 +473,20 @@ export const WorkbenchChatDrawer = iso(`
                   run: {
                     __typename: "WorkspaceBuildRun",
                     id: args.runId,
-                    status: "CANCELED",
+                    workspaceId: args.workspaceId,
+                    error: null,
+                    startedAt: null,
                     openResponses____first___l_1: {
                       edges: [{
                         node: {
                           __typename: "OpenResponse",
                           id: args.optimisticOpenResponseId,
                           status: "CANCELED",
-                          outputItems____first___l_200: {
-                            edges: args.optimisticOutputEdges,
-                          },
                         },
                       }],
                     },
+                    status: "CANCELED",
+                    transcriptEntries: args.optimisticTranscriptEntries,
                   },
                 },
               } as never,

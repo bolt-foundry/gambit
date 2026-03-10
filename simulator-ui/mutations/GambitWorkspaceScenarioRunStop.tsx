@@ -15,24 +15,27 @@ export const GambitWorkspaceScenarioRunStopMutation = iso(`
               startedAt
               finishedAt
               error
-              openResponses(first: 1) {
-                edges {
-                  node {
-                    id
-                    status
-                    outputItems(first: 200) {
-                      edges {
-                        node {
-                          __typename
-                          asOutputMessage {
-                            id
-                            role
-                            content
-                          }
-                        }
-                      }
-                    }
-                  }
+              transcriptEntries {
+                asWorkspaceConversationTranscriptMessage {
+                  id
+                  messageRefId
+                  feedbackEligible
+                  role
+                  content
+                }
+                asWorkspaceConversationTranscriptReasoning {
+                  id
+                  summary
+                  reasoningType
+                }
+                asWorkspaceConversationTranscriptToolCall {
+                  id
+                  toolCallId
+                  toolName
+                  status
+                  argumentsText
+                  resultText
+                  error
                 }
               }
             }
@@ -46,38 +49,27 @@ export const GambitWorkspaceScenarioRunStopMutation = iso(`
         startedAt
         finishedAt
         error
-        openResponses(first: 1) {
-          edges {
-            node {
-              id
-              status
-              outputItems(first: 200) {
-                edges {
-                  node {
-                    __typename
-                    asOutputMessage {
-                      id
-                      role
-                      content
-                    }
-                    asOutputReasoning {
-                      id
-                      summary
-                      reasoningType
-                    }
-                    asOutputToolCall {
-                      id
-                      toolCallId
-                      toolName
-                      status
-                      argumentsText
-                      resultText
-                      error
-                    }
-                  }
-                }
-              }
-            }
+        transcriptEntries {
+          asWorkspaceConversationTranscriptMessage {
+            id
+            messageRefId
+            feedbackEligible
+            role
+            content
+          }
+          asWorkspaceConversationTranscriptReasoning {
+            id
+            summary
+            reasoningType
+          }
+          asWorkspaceConversationTranscriptToolCall {
+            id
+            toolCallId
+            toolName
+            status
+            argumentsText
+            resultText
+            error
           }
         }
       }
