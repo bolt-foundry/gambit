@@ -58,16 +58,20 @@ function normalizePersistedTraceRecord(
 export function resolveWorkspaceSqlitePath(
   inputPath: string,
 ): string | undefined {
-  const normalized = path.resolve(inputPath);
-  const candidate = path.basename(normalized) === WORKSPACE_SQLITE_FILENAME
-    ? normalized
-    : path.join(path.dirname(normalized), WORKSPACE_SQLITE_FILENAME);
+  const candidate = normalizeWorkspaceSqlitePath(inputPath);
   try {
     const stat = Deno.statSync(candidate);
     return stat.isFile ? candidate : undefined;
   } catch {
     return undefined;
   }
+}
+
+export function normalizeWorkspaceSqlitePath(inputPath: string): string {
+  const normalized = path.resolve(inputPath);
+  return path.basename(normalized) === WORKSPACE_SQLITE_FILENAME
+    ? normalized
+    : path.join(path.dirname(normalized), WORKSPACE_SQLITE_FILENAME);
 }
 
 export function readWorkspaceStateFromSqlite(
@@ -202,7 +206,7 @@ export function saveCanonicalWorkspaceState(
   sqlitePath: string,
   state: SavedState,
 ): { sqlitePath: string; workspaceId: string; state: SavedState } {
-  const resolvedPath = path.resolve(sqlitePath);
+  const resolvedPath = normalizeWorkspaceSqlitePath(sqlitePath);
   Deno.mkdirSync(path.dirname(resolvedPath), { recursive: true });
   const workspaceId = resolveWorkspaceIdFromPath(state, resolvedPath);
   const nextState: SavedState = {
