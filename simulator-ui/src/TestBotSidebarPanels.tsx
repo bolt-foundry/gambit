@@ -38,6 +38,7 @@ type Props = {
   hasScenarioInputSchema: boolean;
   scenarioJsonText: string;
   onScenarioJsonChange: (text: string) => void;
+  onScenarioJsonReset: () => void;
   scenarioJsonError?: string | null;
   scenarioMissingFields: Array<string>;
   assistantDeckTab: "input" | "tools" | "schema";
@@ -78,6 +79,7 @@ export default function TestBotSidebarPanels(props: Props) {
     hasScenarioInputSchema,
     scenarioJsonText,
     onScenarioJsonChange,
+    onScenarioJsonReset,
     scenarioJsonError,
     scenarioMissingFields,
     assistantDeckTab,
@@ -142,33 +144,40 @@ export default function TestBotSidebarPanels(props: Props) {
           <div className="error">{scenarioInputSchemaError}</div>
         )}
         {hasScenarioInputSchema && (
-          <div className="init-field">
-            <label>
-              <span>Scenario JSON</span>
-            </label>
-            <textarea
-              className="json-input"
-              data-testid="testbot-scenario-json-input"
-              value={scenarioJsonText}
-              placeholder="Paste full scenario JSON payload"
-              onChange={(e) => onScenarioJsonChange(e.target.value)}
-              style={{ minHeight: 160 }}
-            />
-            {scenarioJsonError && (
-              <div className="error">{scenarioJsonError}</div>
-            )}
-            {!scenarioJsonError && (
-              <div className="secondary-note">
-                Paste a complete JSON payload matching the schema.
-              </div>
-            )}
-            {scenarioMissingFields.length > 0 && (
-              <div className="error">
-                Missing required scenario fields:{" "}
-                {scenarioMissingFields.join(", ")}
-              </div>
-            )}
-          </div>
+          <>
+            <div className="init-field">
+              <label>
+                <span>Scenario JSON</span>
+              </label>
+              <textarea
+                className="json-input"
+                data-testid="testbot-scenario-json-input"
+                value={scenarioJsonText}
+                placeholder="Paste full scenario JSON payload"
+                onChange={(e) => onScenarioJsonChange(e.target.value)}
+                style={{ minHeight: 160 }}
+              />
+              {scenarioJsonError && (
+                <div className="error">{scenarioJsonError}</div>
+              )}
+              {!scenarioJsonError && (
+                <div className="secondary-note">
+                  Paste a complete JSON payload matching the schema.
+                </div>
+              )}
+              {scenarioMissingFields.length > 0 && (
+                <div className="error">
+                  Missing required scenario fields:{" "}
+                  {scenarioMissingFields.join(", ")}
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button variant="ghost" onClick={onScenarioJsonReset}>
+                Reset scenario
+              </Button>
+            </div>
+          </>
         )}
         {!hasScenarioInputSchema && (
           <Callout>
