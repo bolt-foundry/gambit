@@ -3,8 +3,11 @@
 
 import * as path from "@std/path";
 import { DatabaseSync } from "node:sqlite";
-import { runE2e, waitForPath } from "../../../demo-runner/src/e2e/utils.ts";
-import { DemoServerError } from "../../../demo-runner/src/runner.ts";
+import {
+  DemoServerError,
+  runE2e,
+  waitForPath,
+} from "@bolt-foundry/demo-runner";
 
 function logTestTabDemo(
   label: string,
