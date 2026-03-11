@@ -21,6 +21,13 @@ const readerAst: ReaderAst<Workspace__TestTab__param> = [
     isUpdatable: true,
   },
   {
+    kind: "Scalar",
+    fieldName: "sqlitePath",
+    alias: null,
+    arguments: null,
+    isUpdatable: false,
+  },
+  {
     kind: "Linked",
     fieldName: "scenarioDecks",
     alias: null,

@@ -1,9 +1,13 @@
 import * as path from "@std/path";
 import type { ZodTypeAny } from "zod";
 import { loadDeck } from "@bolt-foundry/gambit-core";
-import { loadState, saveState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider, TraceEvent } from "@bolt-foundry/gambit-core";
 import { runDeckWithFallback } from "./test_bot.ts";
+import {
+  loadCanonicalWorkspaceState,
+  loadTraceEventsFromWorkspaceSqlite,
+  saveCanonicalWorkspaceState,
+} from "../workspace_sqlite.ts";
 
 const logger = console;
 
@@ -24,86 +28,22 @@ type GradingRunRecord = {
   error?: string;
 };
 
-const TRACE_EVENT_TYPES = new Set<string>([
-  "run.start",
-  "message.user",
-  "run.end",
-  "deck.start",
-  "deck.end",
-  "action.start",
-  "action.end",
-  "tool.call",
-  "tool.result",
-  "model.call",
-  "model.result",
-  "model.stream.event",
-  "log",
-  "monolog",
-]);
-
-function isTraceEventType(type: string): boolean {
-  if (TRACE_EVENT_TYPES.has(type)) return true;
-  if (type.startsWith("response.")) return true;
-  if (type.startsWith("gambit.")) {
-    const suffix = type.slice("gambit.".length);
-    if (TRACE_EVENT_TYPES.has(suffix)) return true;
-  }
-  return false;
-}
-
-function normalizePersistedTraceRecord(
-  record: Record<string, unknown>,
-): TraceEvent | null {
-  const type = typeof record.type === "string" ? record.type : "";
-  if (!type) return null;
-  if (TRACE_EVENT_TYPES.has(type) || type.startsWith("response.")) {
-    return record as TraceEvent;
-  }
-  if (!type.startsWith("gambit.")) return null;
-  const rawMeta = record._gambit;
-  const meta = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-    ? rawMeta as Record<string, unknown>
-    : undefined;
-  const sourceType = typeof meta?.source_type === "string" &&
-      meta.source_type.trim().length > 0
-    ? meta.source_type.trim()
-    : type.slice("gambit.".length);
-  if (!TRACE_EVENT_TYPES.has(sourceType)) return null;
-  return {
-    ...record,
-    type: sourceType,
-  } as TraceEvent;
-}
-
 function loadTraceEventsFromSession(
-  statePath: string,
+  _statePath: string,
   state: { meta?: Record<string, unknown> },
 ): Array<TraceEvent> {
-  const meta = state.meta ?? {};
-  const eventsPath = typeof meta.sessionEventsPath === "string"
-    ? meta.sessionEventsPath
-    : path.join(path.dirname(statePath), "events.jsonl");
-  try {
-    const text = Deno.readTextFileSync(eventsPath);
-    const traces: Array<TraceEvent> = [];
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const record = JSON.parse(line) as Record<string, unknown>;
-        const kind = typeof record.kind === "string" ? record.kind : "";
-        const type = typeof record.type === "string" ? record.type : "";
-        if (kind === "trace" || isTraceEventType(type)) {
-          const normalized = normalizePersistedTraceRecord(record);
-          if (normalized) traces.push(normalized);
-        }
-      } catch {
-        // ignore invalid lines
-      }
-    }
-    return traces;
-  } catch {
+  const workspaceId = typeof state.meta?.workspaceId === "string"
+    ? state.meta.workspaceId
+    : typeof state.meta?.sessionId === "string"
+    ? state.meta.sessionId
+    : undefined;
+  const sqlitePath = typeof state.meta?.sessionSqlitePath === "string"
+    ? state.meta.sessionSqlitePath
+    : undefined;
+  if (!workspaceId || !sqlitePath) {
     return [];
   }
+  return loadTraceEventsFromWorkspaceSqlite(sqlitePath, workspaceId);
 }
 
 function randomId(prefix: string): string {
@@ -196,10 +136,8 @@ export async function runGraderAgainstState(opts: {
   responsesMode?: boolean;
   workerSandbox?: boolean;
 }) {
-  const state = loadState(opts.statePath);
-  if (!state) {
-    throw new Error(`State file not found or invalid: ${opts.statePath}`);
-  }
+  const loaded = loadCanonicalWorkspaceState(opts.statePath);
+  const state = loaded.state;
   const deck = await loadDeck(opts.graderPath);
   const graderLabel = deck.label ?? path.basename(opts.graderPath);
   const runMode = schemaHasField(deck.inputSchema, "messageToGrade")
@@ -238,7 +176,7 @@ export async function runGraderAgainstState(opts: {
     runAt: startedAt,
     input: { session: sessionPayload },
   });
-  saveState(opts.statePath, currentState);
+  saveCanonicalWorkspaceState(opts.statePath, currentState);
 
   try {
     const result = await (async () => {
@@ -305,7 +243,7 @@ export async function runGraderAgainstState(opts: {
     };
   }
   currentState = upsertRun(currentState, entry);
-  saveState(opts.statePath, currentState);
+  saveCanonicalWorkspaceState(opts.statePath, currentState);
   logger.log(
     `Grading run (${runMode}) saved to ${opts.statePath} [${entry.status}]`,
   );

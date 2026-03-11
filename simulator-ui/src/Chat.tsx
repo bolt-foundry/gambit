@@ -47,6 +47,37 @@ const ERROR_CONTEXT_END_MARKER = "[/gambit:error-context/v1]";
 const WORKBENCH_CONTEXT_START_MARKER = "[gambit:workbench-context/v2]";
 const WORKBENCH_CONTEXT_END_MARKER = "[/gambit:workbench-context/v2]";
 
+function isBuildChatDebugEnabled(): boolean {
+  if (typeof globalThis === "undefined") return false;
+  const debugGlobal = (globalThis as { __GAMBIT_BUILD_CHAT_DEBUG__?: unknown })
+    .__GAMBIT_BUILD_CHAT_DEBUG__;
+  if (debugGlobal === true) return true;
+  const search = typeof globalThis.location?.search === "string"
+    ? globalThis.location.search
+    : "";
+  if (search.length > 0) {
+    const value = new URLSearchParams(search).get("gambitBuildChatDebug");
+    if (value === "1" || value === "true") return true;
+  }
+  let stored = "";
+  try {
+    stored = (globalThis.localStorage?.getItem("gambit:build-chat-debug") ?? "")
+      .toLowerCase()
+      .trim();
+  } catch {
+    return false;
+  }
+  return stored === "1" || stored === "true" || stored === "yes";
+}
+
+function logBuildChatDebug(
+  event: string,
+  payload: Record<string, unknown>,
+): void {
+  if (!isBuildChatDebugEnabled()) return;
+  console.info(`[build-chat-debug] ${event}`, payload);
+}
+
 function decodeLegacyWorkbenchErrorContext(content: string): {
   context: WorkbenchScenarioErrorContext;
   body: string;
@@ -101,6 +132,16 @@ export function encodeWorkbenchMessageWithContext(
   }\n${WORKBENCH_CONTEXT_END_MARKER}${body ? `\n${body}` : ""}`;
 }
 
+export function synthesizeWorkbenchMessageBody(
+  contexts: Array<WorkbenchMessageContext>,
+): string {
+  if (contexts.length === 0) return "";
+  if (contexts.every((context) => context.source === "message_rating")) {
+    return "I saw there was feedback on our prompt. Can you help me investigate it and update the bot if needed?";
+  }
+  return "I saw there was some context from a simulator run. Can you help me investigate it and update the bot if needed?";
+}
+
 export function decodeWorkbenchMessageWithErrorContext(content: string): {
   context: WorkbenchScenarioErrorContext;
   body: string;
@@ -151,6 +192,19 @@ export function decodeWorkbenchMessageWithContext(content: string): {
   return {
     contexts,
     body,
+  };
+}
+
+export function describeWorkbenchOutboundMessage(content: string): {
+  rawMessage: string;
+  body: string;
+  contexts: Array<WorkbenchMessageContext>;
+} {
+  const decoded = decodeWorkbenchMessageWithContext(content);
+  return {
+    rawMessage: content,
+    body: decoded?.body ?? content,
+    contexts: decoded?.contexts ?? [],
   };
 }
 
@@ -448,9 +502,17 @@ export function ChatView(props: {
       toWorkbenchMessageContext(chip)
     );
     if (!message && activeContexts.length === 0) return;
+    const outboundBody = message || synthesizeWorkbenchMessageBody(
+      activeContexts,
+    );
     const outboundMessage = activeContexts.length > 0
-      ? encodeWorkbenchMessageWithContext(message, activeContexts)
-      : message;
+      ? encodeWorkbenchMessageWithContext(outboundBody, activeContexts)
+      : outboundBody;
+    const outboundDebug = describeWorkbenchOutboundMessage(outboundMessage);
+    logBuildChatDebug("chat.send.outbound", {
+      ...outboundDebug,
+      activeContexts,
+    });
     setOptimisticUser({ id: crypto.randomUUID(), text: outboundMessage });
     setChatDraft("");
     try {

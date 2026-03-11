@@ -9,10 +9,6 @@ import type {
 } from "@bolt-foundry/gambit-core";
 import { createProviderMatchers } from "./model_matchers.ts";
 import {
-  type SessionArtifactsConfig,
-  withSessionArtifacts,
-} from "./session_artifacts.ts";
-import {
   createModelAliasResolver,
   type GambitConfig,
   type LoadedProjectConfig,
@@ -30,6 +26,13 @@ import {
 import { createOpenRouterProvider } from "./providers/openrouter.ts";
 import { createProviderRouter, type ProviderKey } from "./providers/router.ts";
 import { createClaudeCodeProvider } from "./providers/claude_code.ts";
+
+export type SessionArtifactsConfig = {
+  rootDir: string;
+  sessionId?: string;
+  continueSession?: boolean;
+  resumeState?: boolean;
+};
 
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
@@ -168,20 +171,9 @@ function resolveSessionArtifactsConfig(opts: {
 }): SessionArtifactsConfig | undefined {
   if (opts.runConfig === false) return undefined;
   if (!opts.runtimeConfig && !opts.runConfig) return undefined;
-  const merged = {
-    ...(opts.runtimeConfig ?? {}),
-    ...(opts.runConfig ?? {}),
-  };
-  if (typeof merged.rootDir !== "string" || !merged.rootDir.trim()) {
-    throw new Error(
-      "sessionArtifacts.rootDir is required when persistence is enabled.",
-    );
-  }
-  return {
-    rootDir: merged.rootDir,
-    sessionId: merged.sessionId,
-    continueSession: merged.continueSession,
-  };
+  throw new Error(
+    "sessionArtifacts persistence has been removed. Use sqlite-backed workspace flows instead.",
+  );
 }
 
 function buildDefaultModelProvider(opts: {
@@ -573,22 +565,9 @@ export async function createDefaultedRuntime(
       if (!effectiveSessionArtifacts) {
         return await runDeckCore(resolved);
       }
-      const artifacts = withSessionArtifacts({
-        config: effectiveSessionArtifacts,
-        trace: resolved.trace,
-        onStateUpdate: resolved.onStateUpdate,
-        state: resolved.state,
-      });
-      try {
-        return await runDeckCore({
-          ...resolved,
-          state: artifacts.state,
-          trace: artifacts.trace,
-          onStateUpdate: artifacts.onStateUpdate,
-        });
-      } finally {
-        artifacts.finalize();
-      }
+      throw new Error(
+        "sessionArtifacts persistence has been removed. Use sqlite-backed workspace flows instead.",
+      );
     },
   };
 }

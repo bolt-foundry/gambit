@@ -67,6 +67,7 @@ export default 'query EntrypointSimulatorTestPage($workspaceId: ID!) {\
         },\
       },\
     },\
+    sqlitePath,\
     workbenchSelectedContextChips,\
   },\
 }';

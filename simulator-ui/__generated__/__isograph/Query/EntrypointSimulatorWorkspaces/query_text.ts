@@ -7,7 +7,7 @@ export default 'query EntrypointSimulatorWorkspaces {\
         deck,\
         deckSlug,\
         sessionDir,\
-        statePath,\
+        sqlitePath,\
         testBotName,\
       },\
     },\

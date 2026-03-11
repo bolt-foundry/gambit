@@ -73,7 +73,7 @@ type SessionMetaRecord = {
   testBotName?: string;
   createdAt?: string;
   sessionDir?: string;
-  statePath?: string;
+  sqlitePath?: string;
 };
 
 type BuildRunRecord = {
@@ -425,6 +425,7 @@ function buildTranscriptEntries(args: {
 
   const transcriptEntries: Array<TranscriptEntryRecord> = [];
   const consumedCanonicalMessageIndexes = new Set<number>();
+  const bufferedScenarioEntries: Array<TranscriptEntryRecord> = [];
   let messageCursor = 0;
 
   const markCanonicalMessageConsumed = (
@@ -438,6 +439,19 @@ function buildTranscriptEntries(args: {
       messageCursor += 1;
     }
     return transcriptMessages[index];
+  };
+
+  const flushCanonicalMessagesBefore = (index: number) => {
+    for (let cursor = messageCursor; cursor < index; cursor += 1) {
+      if (consumedCanonicalMessageIndexes.has(cursor)) continue;
+      transcriptEntries.push(markCanonicalMessageConsumed(cursor));
+    }
+  };
+
+  const flushBufferedScenarioEntries = () => {
+    if (bufferedScenarioEntries.length === 0) return;
+    transcriptEntries.push(...bufferedScenarioEntries);
+    bufferedScenarioEntries.length = 0;
   };
 
   const toTranscriptEntryFromOutputItem = (
@@ -475,9 +489,9 @@ function buildTranscriptEntries(args: {
     }
   };
 
-  const takeCanonicalMessageForOutput = (
+  const findCanonicalMessageIndexForOutput = (
     item: OutputMessageRecord,
-  ): Maybe<TranscriptMessageRecord> => {
+  ): Maybe<number> => {
     if (item.messageRefId) {
       for (
         let index = messageCursor;
@@ -489,7 +503,7 @@ function buildTranscriptEntries(args: {
           !consumedCanonicalMessageIndexes.has(index) &&
           message.messageRefId === item.messageRefId
         ) {
-          return markCanonicalMessageConsumed(index);
+          return index;
         }
       }
     }
@@ -504,7 +518,7 @@ function buildTranscriptEntries(args: {
         message.role === toTranscriptMessageRole(item.role) &&
         message.content.trim() === item.content.trim()
       ) {
-        return markCanonicalMessageConsumed(index);
+        return index;
       }
     }
     return null;
@@ -512,19 +526,36 @@ function buildTranscriptEntries(args: {
 
   for (const item of args.outputItems) {
     if (item.__typename === "OutputMessage") {
+      const matchedIndex = findCanonicalMessageIndexForOutput(item);
+      if (
+        args.parent.conversationRunKind === "scenario" &&
+        matchedIndex !== null
+      ) {
+        flushCanonicalMessagesBefore(matchedIndex);
+        flushBufferedScenarioEntries();
+        transcriptEntries.push(markCanonicalMessageConsumed(matchedIndex));
+        continue;
+      }
+      flushBufferedScenarioEntries();
       transcriptEntries.push(
-        takeCanonicalMessageForOutput(item) ??
-          toTranscriptEntryFromOutputItem(item)!,
+        matchedIndex !== null
+          ? markCanonicalMessageConsumed(matchedIndex)
+          : toTranscriptEntryFromOutputItem(item)!,
       );
       continue;
     }
     const entry = toTranscriptEntryFromOutputItem(item);
     if (entry) {
-      transcriptEntries.push(entry);
+      if (args.parent.conversationRunKind === "scenario") {
+        bufferedScenarioEntries.push(entry);
+      } else {
+        transcriptEntries.push(entry);
+      }
     }
   }
 
   if (args.parent.conversationRunKind === "scenario") {
+    flushBufferedScenarioEntries();
     for (let index = 0; index < transcriptMessages.length; index += 1) {
       if (consumedCanonicalMessageIndexes.has(index)) continue;
       transcriptEntries.push(transcriptMessages[index]);
@@ -850,9 +881,9 @@ WorkspaceSessionMetaType.implement({
       nullable: true,
       resolve: (parent) => parent.sessionDir ?? null,
     }),
-    statePath: t.string({
+    sqlitePath: t.string({
       nullable: true,
-      resolve: (parent) => parent.statePath ?? null,
+      resolve: (parent) => parent.sqlitePath ?? null,
     }),
   }),
 });
@@ -2314,6 +2345,16 @@ const WorkspaceType = builder.objectRef<WorkspaceRecord>("Workspace");
 WorkspaceType.implement({
   fields: (t) => ({
     id: t.id({ resolve: (parent) => parent.id }),
+    sqlitePath: t.string({
+      nullable: true,
+      resolve: async (parent, _args, context) => {
+        if (!context.listWorkspaces) return null;
+        const workspace = (await context.listWorkspaces()).find((entry) =>
+          entry.id === parent.id
+        );
+        return workspace?.sqlitePath ?? null;
+      },
+    }),
     scenarioDecks: t.field({
       type: [WorkspaceScenarioDeckType],
       resolve: async (parent, _args, context) =>
@@ -3459,6 +3500,7 @@ builder.mutationType({
     }),
     workspaceFeedbackSave: t.field({
       type: WorkspaceFeedbackSavePayloadType,
+      nullable: true,
       args: {
         input: t.arg({
           type: WorkspaceFeedbackSaveInput,
@@ -3469,13 +3511,24 @@ builder.mutationType({
         if (!context.saveWorkspaceFeedback) {
           throw new Error("workspace feedback save is unavailable");
         }
-        const result = await context.saveWorkspaceFeedback({
-          workspaceId: args.input.workspaceId,
-          runId: args.input.runId ?? null,
-          messageRefId: args.input.messageRefId,
-          score: args.input.score ?? null,
-          reason: args.input.reason ?? null,
-        });
+        let result;
+        try {
+          result = await context.saveWorkspaceFeedback({
+            workspaceId: args.input.workspaceId,
+            runId: args.input.runId ?? null,
+            messageRefId: args.input.messageRefId,
+            score: args.input.score ?? null,
+            reason: args.input.reason ?? null,
+          });
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "Feedback target is not eligible"
+          ) {
+            return null;
+          }
+          throw error;
+        }
         return {
           workspace: { id: asGambitID(args.input.workspaceId) },
           run: result.run,

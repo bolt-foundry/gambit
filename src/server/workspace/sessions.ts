@@ -221,10 +221,10 @@ export const createWorkspaceSessionService = (deps: {
     const sessionDir = typeof meta.sessionDir === "string"
       ? meta.sessionDir
       : path.join(deps.sessionsRoot, sessionId);
-    const statePath = typeof (meta as { sessionStatePath?: string })
-        .sessionStatePath === "string"
-      ? (meta as { sessionStatePath?: string }).sessionStatePath
-      : path.join(sessionDir, "state.json");
+    const sqlitePath = typeof (meta as { sessionSqlitePath?: string })
+        .sessionSqlitePath === "string"
+      ? (meta as { sessionSqlitePath?: string }).sessionSqlitePath
+      : path.join(sessionDir, "workspace.sqlite");
     return {
       id: sessionId,
       deck,
@@ -233,7 +233,7 @@ export const createWorkspaceSessionService = (deps: {
       testBotName,
       gradingRuns,
       sessionDir,
-      statePath,
+      sqlitePath,
     };
   };
 

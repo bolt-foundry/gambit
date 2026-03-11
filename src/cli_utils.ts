@@ -5,6 +5,7 @@ import {
 } from "@bolt-foundry/gambit-core";
 import type { ModelMessage } from "@bolt-foundry/gambit-core";
 import type { SavedState } from "@bolt-foundry/gambit-core";
+import { WORKSPACE_SQLITE_FILENAME } from "./workspace_sqlite.ts";
 
 export function parsePortValue(
   value: unknown,
@@ -80,13 +81,13 @@ export function defaultSessionRoot(deckPath: string): string {
   return path.join(baseDir, ".gambit", "workspaces");
 }
 
-export function defaultTestBotStatePath(deckPath: string): string {
+export function defaultTestBotSqlitePath(deckPath: string): string {
   const slug = slugifyDeckPath(deckPath);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   return path.join(
     defaultSessionRoot(deckPath),
     `${slug}-${stamp}`,
-    "state.json",
+    WORKSPACE_SQLITE_FILENAME,
   );
 }
 

@@ -321,25 +321,10 @@ export function startWebSocketSimulator(opts: {
       meta.sessionDir = path.join(sessionsRoot, String(meta.sessionId));
     }
     if (
-      typeof meta.sessionStatePath !== "string" &&
+      typeof meta.sessionSqlitePath !== "string" &&
       typeof meta.sessionDir === "string"
     ) {
-      meta.sessionStatePath = path.join(meta.sessionDir, "state.json");
-    }
-    if (
-      typeof meta.sessionEventsPath !== "string" &&
-      typeof meta.sessionDir === "string"
-    ) {
-      meta.sessionEventsPath = path.join(meta.sessionDir, "events.jsonl");
-    }
-    if (
-      typeof meta.sessionBuildStatePath !== "string" &&
-      typeof meta.sessionDir === "string"
-    ) {
-      meta.sessionBuildStatePath = path.join(
-        meta.sessionDir,
-        "build_state.json",
-      );
+      meta.sessionSqlitePath = path.join(meta.sessionDir, "workspace.sqlite");
     }
     const dir = typeof meta.sessionDir === "string"
       ? meta.sessionDir

@@ -100,7 +100,7 @@ export type SessionMeta = {
   testBotName?: string;
   createdAt?: string;
   sessionDir?: string;
-  statePath?: string;
+  sqlitePath?: string;
 };
 
 export type GraderDeckMeta = {

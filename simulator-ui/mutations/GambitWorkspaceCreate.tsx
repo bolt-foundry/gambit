@@ -15,7 +15,7 @@ export const GambitWorkspaceCreateMutation = iso(`
             testBotName
             createdAt
             sessionDir
-            statePath
+            sqlitePath
           }
         }
       }

@@ -12,7 +12,7 @@ export type WorkbenchRatingContext = {
   runId?: string;
   capturedAt: string;
   messageRefId: string;
-  statePath?: string;
+  sqlitePath?: string;
   statePointer?: string;
   score: number;
   reason?: string;
@@ -105,7 +105,7 @@ export function parseWorkbenchMessageContext(
       runId,
       capturedAt,
       messageRefId,
-      statePath: asOptionalString(record.statePath),
+      sqlitePath: asOptionalString(record.sqlitePath),
       statePointer: asOptionalString(record.statePointer),
       score,
       reason: asOptionalString(record.reason),
@@ -185,7 +185,7 @@ export function toWorkbenchMessageContext(
       runId: chip.runId,
       capturedAt: chip.capturedAt,
       messageRefId: chip.messageRefId,
-      statePath: chip.statePath,
+      sqlitePath: chip.sqlitePath,
       statePointer: chip.statePointer,
       score: chip.score,
       reason: chip.reason,

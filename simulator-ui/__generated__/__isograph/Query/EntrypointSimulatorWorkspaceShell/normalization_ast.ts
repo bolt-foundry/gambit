@@ -52,7 +52,7 @@ const normalizationAst: NormalizationAst = {
                 },
                 {
                   kind: "Scalar",
-                  fieldName: "statePath",
+                  fieldName: "sqlitePath",
                   arguments: null,
                 },
                 {

@@ -40,7 +40,7 @@ type Mutation {
   workspaceConversationSessionSend(input: WorkspaceConversationSessionSendInput!): WorkspaceConversationSessionPayload!
   workspaceConversationSessionStart(input: WorkspaceConversationSessionStartInput!): WorkspaceConversationSessionPayload!
   workspaceConversationSessionStop(input: WorkspaceConversationSessionStopInput!): WorkspaceConversationSessionPayload!
-  workspaceFeedbackSave(input: WorkspaceFeedbackSaveInput!): WorkspaceFeedbackSavePayload!
+  workspaceFeedbackSave(input: WorkspaceFeedbackSaveInput!): WorkspaceFeedbackSavePayload
   workspaceGradeFlagReasonUpdate(input: WorkspaceGradeFlagReasonUpdateInput!): WorkspaceGradeFlagReasonUpdatePayload!
   workspaceGradeFlagToggle(input: WorkspaceGradeFlagToggleInput!): WorkspaceGradeFlagTogglePayload!
   workspaceGradeRunCreate(input: WorkspaceGradeRunCreateInput!): WorkspaceGradeRunCreatePayload!
@@ -199,6 +199,7 @@ type Workspace {
   models: WorkspaceModels!
   scenarioDecks: [WorkspaceScenarioDeck!]!
   scenarioRuns(after: String, before: String, first: Int, last: Int): WorkspaceScenarioRunsConnection!
+  sqlitePath: String
   verification: WorkspaceVerification!
 
   """
@@ -645,7 +646,7 @@ type WorkspaceSessionMeta {
   deckSlug: String
   id: ID!
   sessionDir: String
-  statePath: String
+  sqlitePath: String
   testBotName: String
 }
 

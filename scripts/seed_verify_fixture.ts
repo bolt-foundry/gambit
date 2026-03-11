@@ -45,7 +45,7 @@ function parseArgs(args: string[]): SeedVerifyFixtureOptions {
 async function main() {
   const opts = parseArgs(Deno.args);
   const seeded = await seedVerifyFixture(opts);
-  const relativeState = path.relative(Deno.cwd(), seeded.statePath);
+  const relativeSqlite = path.relative(Deno.cwd(), seeded.sqlitePath);
   console.log(
     [
       "[verify-fixture] seeded workspace fixture",
@@ -53,7 +53,7 @@ async function main() {
       `deckPath: ${seeded.deckPath}`,
       `graderId: ${seeded.graderId}`,
       `runCount: ${seeded.runCount}`,
-      `statePath: ${relativeState || seeded.statePath}`,
+      `sqlitePath: ${relativeSqlite || seeded.sqlitePath}`,
     ].join("\n"),
   );
 }

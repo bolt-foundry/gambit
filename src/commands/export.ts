@@ -3,10 +3,10 @@ import { walk } from "@std/fs";
 import { extract } from "@std/front-matter/any";
 import { TarStream } from "@std/tar/tar-stream";
 import { loadDeck } from "@bolt-foundry/gambit-core";
-import { loadState } from "@bolt-foundry/gambit-core";
 import type {
   HandlersConfig,
   ModelMessage,
+  SavedState,
   TraceEvent,
 } from "@bolt-foundry/gambit-core";
 import {
@@ -14,6 +14,13 @@ import {
   findLastAssistantMessage,
   slugifyDeckPath,
 } from "../cli_utils.ts";
+import {
+  exportWorkspaceEventsJsonlFromSqlite,
+  loadCanonicalWorkspaceState,
+  loadTraceEventsFromWorkspaceSqlite,
+  resolveWorkspaceSqlitePath,
+  WORKSPACE_SQLITE_FILENAME,
+} from "../workspace_sqlite.ts";
 
 type ExportArgs = {
   statePath: string;
@@ -30,86 +37,26 @@ type GradingRunRecord = {
   error?: string;
 };
 
-const TRACE_EVENT_TYPES = new Set<string>([
-  "run.start",
-  "message.user",
-  "run.end",
-  "deck.start",
-  "deck.end",
-  "action.start",
-  "action.end",
-  "tool.call",
-  "tool.result",
-  "model.call",
-  "model.result",
-  "model.stream.event",
-  "log",
-  "monolog",
-]);
-
-function isTraceEventType(type: string): boolean {
-  if (TRACE_EVENT_TYPES.has(type)) return true;
-  if (type.startsWith("response.")) return true;
-  if (type.startsWith("gambit.")) {
-    const suffix = type.slice("gambit.".length);
-    if (TRACE_EVENT_TYPES.has(suffix)) return true;
-  }
-  return false;
-}
-
-function normalizePersistedTraceRecord(
-  record: Record<string, unknown>,
-): TraceEvent | null {
-  const type = typeof record.type === "string" ? record.type : "";
-  if (!type) return null;
-  if (TRACE_EVENT_TYPES.has(type) || type.startsWith("response.")) {
-    return record as TraceEvent;
-  }
-  if (!type.startsWith("gambit.")) return null;
-  const rawMeta = record._gambit;
-  const meta = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-    ? rawMeta as Record<string, unknown>
-    : undefined;
-  const sourceType = typeof meta?.source_type === "string" &&
-      meta.source_type.trim().length > 0
-    ? meta.source_type.trim()
-    : type.slice("gambit.".length);
-  if (!TRACE_EVENT_TYPES.has(sourceType)) return null;
-  return {
-    ...record,
-    type: sourceType,
-  } as TraceEvent;
-}
-
 function loadTraceEventsFromSession(
   statePath: string,
-  state: { meta?: Record<string, unknown> },
+  state: SavedState,
 ): Array<TraceEvent> {
-  const meta = state.meta ?? {};
-  const eventsPath = typeof meta.sessionEventsPath === "string"
-    ? meta.sessionEventsPath
-    : path.join(path.dirname(statePath), "events.jsonl");
-  try {
-    const text = Deno.readTextFileSync(eventsPath);
-    const traces: Array<TraceEvent> = [];
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const record = JSON.parse(line) as Record<string, unknown>;
-        const kind = typeof record.kind === "string" ? record.kind : "";
-        const type = typeof record.type === "string" ? record.type : "";
-        if (kind === "trace" || isTraceEventType(type)) {
-          const normalized = normalizePersistedTraceRecord(record);
-          if (normalized) traces.push(normalized);
-        }
-      } catch {
-        // ignore invalid lines
-      }
-    }
-    return traces;
-  } catch {
-    return [];
+  const sqlitePath = resolveWorkspaceSqlitePath(statePath);
+  const workspaceId = typeof state.meta?.workspaceId === "string" &&
+      state.meta.workspaceId.trim().length > 0
+    ? state.meta.workspaceId
+    : typeof state.meta?.sessionId === "string" &&
+        state.meta.sessionId.trim().length > 0
+    ? state.meta.sessionId
+    : undefined;
+  if (sqlitePath && workspaceId) {
+    const sqliteTraces = loadTraceEventsFromWorkspaceSqlite(
+      sqlitePath,
+      workspaceId,
+    );
+    if (sqliteTraces.length > 0) return sqliteTraces;
   }
+  return [];
 }
 
 function normalizeId(prefix: string, raw?: string): string {
@@ -427,10 +374,8 @@ async function collectDeckDependencyPaths(
 export async function exportBundle(
   args: ExportArgs,
 ): Promise<string> {
-  const state = loadState(args.statePath);
-  if (!state) {
-    throw new Error(`State file not found or invalid: ${args.statePath}`);
-  }
+  const source = loadCanonicalWorkspaceState(args.statePath);
+  const state = source.state;
   const rootDeckPath = args.deckPath ??
     (typeof state.meta?.deck === "string" ? state.meta.deck : undefined);
   if (!rootDeckPath) {
@@ -553,27 +498,32 @@ export async function exportBundle(
       );
     };
 
-    const sessionStateBundlePath = "session/state.json";
-    const sessionEventsBundlePath = "session/events.jsonl";
-    const sessionStateTarget = path.join(
+    if (!source.sqlitePath) {
+      throw new Error(
+        "export requires a sqlite-authoritative workspace (workspace.sqlite).",
+      );
+    }
+
+    const sessionSqliteBundlePath = `session/${WORKSPACE_SQLITE_FILENAME}`;
+    const sessionEventsBundlePath = "session/workspace.events.jsonl";
+    const sessionSqliteTarget = path.join(
       tempDir,
-      ...sessionStateBundlePath.split("/"),
+      ...sessionSqliteBundlePath.split("/"),
     );
     const sessionEventsTarget = path.join(
       tempDir,
       ...sessionEventsBundlePath.split("/"),
     );
-    await Deno.mkdir(path.dirname(sessionStateTarget), { recursive: true });
-    await Deno.copyFile(args.statePath, sessionStateTarget);
+    await Deno.mkdir(path.dirname(sessionSqliteTarget), { recursive: true });
+    await Deno.copyFile(source.sqlitePath, sessionSqliteTarget);
     await Deno.mkdir(path.dirname(sessionEventsTarget), { recursive: true });
-    const sourceEventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : path.join(path.dirname(args.statePath), "events.jsonl");
-    try {
-      await Deno.copyFile(sourceEventsPath, sessionEventsTarget);
-    } catch {
-      await Deno.writeTextFile(sessionEventsTarget, "");
-    }
+    await Deno.writeTextFile(
+      sessionEventsTarget,
+      exportWorkspaceEventsJsonlFromSqlite(
+        source.sqlitePath,
+        source.workspaceId,
+      ),
+    );
 
     const runEntries: Array<Record<string, unknown>> = [];
     const usedRunIds = new Set<string>();
@@ -737,7 +687,7 @@ export async function exportBundle(
         id: bundleId,
         deck_hash: deckHash,
         session_files: {
-          state: sessionStateBundlePath,
+          sqlite: sessionSqliteBundlePath,
           events: sessionEventsBundlePath,
         },
       },

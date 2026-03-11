@@ -1,8 +1,11 @@
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
-import { loadState, saveState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { enrichStateMeta } from "../cli_utils.ts";
+import {
+  loadCanonicalWorkspaceState,
+  saveCanonicalWorkspaceState,
+} from "../workspace_sqlite.ts";
 
 const logger = console;
 
@@ -26,10 +29,15 @@ export async function handleRunCommand(opts: {
   sessionPermissionsBaseDir?: string;
   workerSandbox?: boolean;
 }) {
-  const state = opts.statePath ? loadState(opts.statePath) : undefined;
+  const state = opts.statePath
+    ? loadCanonicalWorkspaceState(opts.statePath).state
+    : undefined;
   const onStateUpdate = opts.statePath
     ? (s: import("@bolt-foundry/gambit-core").SavedState) => {
-      saveState(opts.statePath!, enrichStateMeta(s, opts.deckPath));
+      saveCanonicalWorkspaceState(
+        opts.statePath!,
+        enrichStateMeta(s, opts.deckPath),
+      );
     }
     : undefined;
 

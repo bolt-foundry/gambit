@@ -19,7 +19,7 @@ export const SimulatorWorkspacesPage = iso(`
           testBotName
           createdAt
           sessionDir
-          statePath
+          sqlitePath
         }
       }
     }
@@ -38,7 +38,7 @@ export const SimulatorWorkspacesPage = iso(`
         testBotName: node.testBotName ?? undefined,
         createdAt: node.createdAt ?? undefined,
         sessionDir: node.sessionDir ?? undefined,
-        statePath: node.statePath ?? undefined,
+        sqlitePath: node.sqlitePath ?? undefined,
       }];
     });
 

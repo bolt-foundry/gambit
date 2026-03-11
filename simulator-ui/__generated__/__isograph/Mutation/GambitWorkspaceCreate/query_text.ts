@@ -11,7 +11,7 @@ export default 'mutation GambitWorkspaceCreate {\
           deck,\
           deckSlug,\
           sessionDir,\
-          statePath,\
+          sqlitePath,\
           testBotName,\
         },\
       },\

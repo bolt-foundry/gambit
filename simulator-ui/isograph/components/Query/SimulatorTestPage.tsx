@@ -147,6 +147,7 @@ export const SimulatorTestPage = iso(`
   field Workspace.TestTab @component {
     id
     workbenchSelectedContextChips @updatable
+    sqlitePath
     scenarioDecks {
       id
       label
@@ -233,6 +234,9 @@ export const SimulatorTestPage = iso(`
     [],
   );
   const workspaceId = data.id ?? "";
+  const workspaceSqlitePath = typeof data.sqlitePath === "string"
+    ? data.sqlitePath
+    : undefined;
   const composerChips = useMemo(
     () =>
       resolveWorkbenchSelectedContextChips(
@@ -896,7 +900,13 @@ export const SimulatorTestPage = iso(`
                 },
               },
             } as never,
-            onComplete: () => resolve(),
+            onComplete: (result) => {
+              if (!result) {
+                reject(new Error("This message can't receive feedback."));
+                return;
+              }
+              resolve();
+            },
             onError: reject,
           },
         );
@@ -1024,6 +1034,7 @@ export const SimulatorTestPage = iso(`
               runId: feedback.runId,
               capturedAt: feedback.createdAt ?? new Date().toISOString(),
               messageRefId: feedback.messageRefId,
+              sqlitePath: workspaceSqlitePath,
               score: feedback.score,
               reason: feedback.reason,
               enabled: true,
