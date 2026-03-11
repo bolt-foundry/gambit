@@ -23,6 +23,12 @@ import {
 import { buildTestRunHistoryDisplayOptions } from "../../../src/testBotSidebarDisplay.ts";
 import { runAwaitsAssistantKickoff } from "../../../src/test_tab_start_gate.ts";
 import {
+  buildAssistantChatStartInput,
+  buildScenarioRunStartInput,
+  canStartAssistantRun,
+  canStartScenarioRun,
+} from "../../../src/testTabScenarioRun.ts";
+import {
   countTranscriptMessages,
   countTranscriptUserMessages,
   getTranscriptMessages,
@@ -435,38 +441,50 @@ export const SimulatorTestPage = iso(`
   const saveFeedbackMutation = useGambitTypedMutation(
     gambitWorkspaceFeedbackSaveMutation,
   );
-  const canStartScenarioRun = useMemo(() => {
-    if (!workspaceId || !selectedScenarioDeck) return false;
-    if (startScenarioRun.inFlight) return false;
-    if (selectedScenarioDeck.inputSchemaError) return false;
-    if (assistantDeck?.inputSchemaError) return false;
-    if (parsedScenarioJson.error) return false;
-    if (missingScenarioFields.length > 0) return false;
-    if (parsedAssistantInitJson.error) return false;
-    if (missingAssistantInitFields.length > 0) return false;
-    return true;
-  }, [
+  const canStartScenarioRunValue = useMemo(() =>
+    canStartScenarioRun({
+      workspaceId,
+      selectedScenarioDeckId: selectedScenarioDeck?.id ?? null,
+      startRunInFlight: startScenarioRun.inFlight,
+      sendRunInFlight: sendScenarioRun.inFlight,
+      scenarioInputSchemaError: selectedScenarioDeck?.inputSchemaError ?? null,
+      assistantInputSchemaError: assistantDeck?.inputSchemaError ?? null,
+      scenarioJsonError: parsedScenarioJson.error,
+      assistantInitJsonError: parsedAssistantInitJson.error,
+      missingScenarioFields,
+      missingAssistantInitFields,
+    }), [
     assistantDeck?.inputSchemaError,
-    missingAssistantInitFields.length,
-    missingScenarioFields.length,
+    missingAssistantInitFields,
+    missingScenarioFields,
     parsedAssistantInitJson.error,
     parsedScenarioJson.error,
-    selectedScenarioDeck,
+    selectedScenarioDeck?.id,
+    selectedScenarioDeck?.inputSchemaError,
+    sendScenarioRun.inFlight,
     startScenarioRun.inFlight,
     workspaceId,
   ]);
-  const canStartAssistantRun = useMemo(() => {
-    if (!workspaceId) return false;
-    if (startScenarioRun.inFlight) return false;
-    if (sendScenarioRun.inFlight) return false;
-    if (assistantDeck?.inputSchemaError) return false;
-    if (parsedAssistantInitJson.error) return false;
-    if (missingAssistantInitFields.length > 0) return false;
-    return true;
-  }, [
+  const canStartAssistantRunValue = useMemo(() =>
+    canStartAssistantRun({
+      workspaceId,
+      selectedScenarioDeckId: selectedScenarioDeck?.id ?? null,
+      startRunInFlight: startScenarioRun.inFlight,
+      sendRunInFlight: sendScenarioRun.inFlight,
+      scenarioInputSchemaError: selectedScenarioDeck?.inputSchemaError ?? null,
+      assistantInputSchemaError: assistantDeck?.inputSchemaError ?? null,
+      scenarioJsonError: parsedScenarioJson.error,
+      assistantInitJsonError: parsedAssistantInitJson.error,
+      missingScenarioFields,
+      missingAssistantInitFields,
+    }), [
     assistantDeck?.inputSchemaError,
-    missingAssistantInitFields.length,
+    missingAssistantInitFields,
+    missingScenarioFields,
     parsedAssistantInitJson.error,
+    parsedScenarioJson.error,
+    selectedScenarioDeck?.id,
+    selectedScenarioDeck?.inputSchemaError,
     sendScenarioRun.inFlight,
     startScenarioRun.inFlight,
     workspaceId,
@@ -476,19 +494,17 @@ export const SimulatorTestPage = iso(`
     workspaceId ? { workspaceId } : null,
   );
   const startNewScenarioRun = useCallback(() => {
-    if (!workspaceId || !selectedScenarioDeck || !canStartScenarioRun) return;
+    if (!workspaceId || !selectedScenarioDeck || !canStartScenarioRunValue) {
+      return;
+    }
     startScenarioRun.commit(
       {
-        input: {
+        input: buildScenarioRunStartInput({
           workspaceId,
-          scenarioDeckId: selectedScenarioDeck.id,
-          scenarioInput: scenarioJsonText.trim().length > 0
-            ? scenarioJsonText
-            : null,
-          assistantInit: assistantInitJsonText.trim().length > 0
-            ? assistantInitJsonText
-            : null,
-        },
+          selectedScenarioDeckId: selectedScenarioDeck.id,
+          scenarioJsonText,
+          assistantInitJsonText,
+        }),
       },
       {
         onComplete: (result) => {
@@ -499,7 +515,7 @@ export const SimulatorTestPage = iso(`
       },
     );
   }, [
-    canStartScenarioRun,
+    canStartScenarioRunValue,
     navigate,
     assistantInitJsonText,
     scenarioJsonText,
@@ -513,7 +529,7 @@ export const SimulatorTestPage = iso(`
       status: string | null;
     } | null
   > => {
-    if (!workspaceId || !canStartAssistantRun) return null;
+    if (!workspaceId || !canStartAssistantRunValue) return null;
     const started = await new Promise<
       {
         runId: string;
@@ -522,14 +538,10 @@ export const SimulatorTestPage = iso(`
     >((resolve) => {
       startScenarioRun.commit(
         {
-          input: {
+          input: buildAssistantChatStartInput({
             workspaceId,
-            scenarioDeckId: null,
-            scenarioInput: null,
-            assistantInit: assistantInitJsonText.trim().length > 0
-              ? assistantInitJsonText
-              : null,
-          },
+            assistantInitJsonText,
+          }),
         },
         {
           onComplete: (result) => {
@@ -556,7 +568,7 @@ export const SimulatorTestPage = iso(`
     return started;
   }, [
     assistantInitJsonText,
-    canStartAssistantRun,
+    canStartAssistantRunValue,
     navigate,
     startScenarioRun,
     workspaceId,
@@ -914,8 +926,8 @@ export const SimulatorTestPage = iso(`
     },
     [saveFeedbackMutation, scenarioRuns, selectedRun, workspaceId],
   );
-  const canRunPersona = scenarioDecks.length > 0;
-  const hasPersonaSelection = Boolean(selectedScenarioDeck);
+  const hasScenarioDecks = scenarioDecks.length > 0;
+  const hasScenarioSelection = Boolean(selectedScenarioDeck);
 
   return (
     <PageShell>
@@ -933,7 +945,7 @@ export const SimulatorTestPage = iso(`
           runHistoryPlaceholder={runHistoryOptions.length > 0
             ? "Select previous run"
             : "No previous runs"}
-          canStart={canStartScenarioRun}
+          canStart={canStartScenarioRunValue}
           onStartRun={startNewScenarioRun}
           selectedDeckValue={selectedScenarioDeck?.id ?? null}
           onDeckSelection={handleScenarioDeckChange}
@@ -997,17 +1009,17 @@ export const SimulatorTestPage = iso(`
           transcriptUserMessageCount={transcriptUserMessageCount}
           activeWorkspaceId={workspaceId || null}
           requestedRunNotFound={hasMissingSelectedRun}
-          canStart={canStartScenarioRun}
-          canRunPersona={canRunPersona}
-          hasPersonaSelection={hasPersonaSelection}
-          botJsonErrorCount={parsedScenarioJson.error ? 1 : 0}
-          deckJsonErrorCount={parsedAssistantInitJson.error ? 1 : 0}
-          missingBotInput={missingScenarioFields}
-          missingDeckInit={missingAssistantInitFields}
+          canStart={canStartScenarioRunValue}
+          hasScenarioDecks={hasScenarioDecks}
+          hasScenarioSelection={hasScenarioSelection}
+          scenarioJsonErrorCount={parsedScenarioJson.error ? 1 : 0}
+          assistantInitJsonErrorCount={parsedAssistantInitJson.error ? 1 : 0}
+          missingScenarioFields={missingScenarioFields}
+          missingAssistantInitFields={missingAssistantInitFields}
           lastInitFill={null}
           isUserStart={assistantDeck?.startMode === "user"}
           showStartOverlay={showStartOverlay}
-          canStartAssistant={canStartAssistantRun}
+          canStartAssistant={canStartAssistantRunValue}
           canSendChat={chatDraft.trim().length > 0 && !showStartOverlay &&
             !sendScenarioRun.inFlight && !hasActiveScenarioTurn}
           chatDraft={chatDraft}

@@ -2769,6 +2769,347 @@ leakTolerantTest(
 );
 
 leakTolerantTest(
+  "/graphql workspaceScenarioRunStart accepts strict root and scenario JSON object inputs",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const deckPath = path.join(dir, "graphql-scenario-input-strict.deck.ts");
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "input-strict.deck.ts",
+    );
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({
+          assistantToken: z.literal("assistant-input"),
+        }).strict(),
+        responseSchema: z.string(),
+        startMode: "assistant",
+        modelParams: { model: "dummy-model" },
+        testDecks: [{
+          id: "input-strict",
+          path: "./scenarios/input-strict.deck.ts",
+          label: "Input strict",
+          maxTurns: 1,
+        }],
+      });
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({
+          scenarioToken: z.literal("scenario-input"),
+        }).strict(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+`,
+    );
+
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(
+        query: string,
+        variables?: Record<string, unknown>,
+      ): Promise<GraphqlEnvelope<TData>> => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const createWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId =
+        createWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ?? "";
+      assert(workspaceId.length > 0);
+
+      const startResponse = await gql<{
+        workspaceScenarioRunStart?: {
+          run?: { id?: string };
+        };
+      }>(
+        `
+          mutation StartScenarioRun($input: WorkspaceScenarioRunStartInput!) {
+            workspaceScenarioRunStart(input: $input) {
+              run { id }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            scenarioDeckId: "input-strict",
+            scenarioInput: { scenarioToken: "scenario-input" },
+            assistantInit: { assistantToken: "assistant-input" },
+          },
+        },
+      );
+      const runId = startResponse.data?.workspaceScenarioRunStart?.run?.id ??
+        "";
+      assert(runId.length > 0);
+
+      const readRun = async () => {
+        const queried = await gql<{
+          workspace?: {
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  status?: string;
+                  error?: string | null;
+                };
+              }>;
+            };
+          } | null;
+        }>(
+          `
+            query ScenarioRunStatus($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      status
+                      error
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId },
+        );
+        return queried.data?.workspace?.scenarioRuns?.edges?.find((edge) =>
+          edge?.node?.id === runId
+        )?.node;
+      };
+
+      await waitFor(async () => {
+        const run = await readRun();
+        return run?.status === "COMPLETED" || run?.status === "ERROR";
+      }, 5_000);
+      const run = await readRun();
+      assertEquals(run?.status, "COMPLETED");
+      assertEquals(run?.error ?? null, null);
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
+  "/graphql workspaceScenarioRunStart also accepts strict root and scenario JSON string inputs",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const deckPath = path.join(
+      dir,
+      "graphql-scenario-input-strict-string.deck.ts",
+    );
+    const scenarioDeckPath = path.join(
+      dir,
+      "scenarios",
+      "input-strict-string.deck.ts",
+    );
+    await Deno.mkdir(path.dirname(scenarioDeckPath), { recursive: true });
+    await Deno.writeTextFile(
+      deckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({
+          assistantToken: z.literal("assistant-input"),
+        }).strict(),
+        responseSchema: z.string(),
+        startMode: "assistant",
+        modelParams: { model: "dummy-model" },
+        testDecks: [{
+          id: "input-strict-string",
+          path: "./scenarios/input-strict-string.deck.ts",
+          label: "Input strict string",
+          maxTurns: 1,
+        }],
+      });
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioDeckPath,
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({
+          scenarioToken: z.literal("scenario-input"),
+        }).strict(),
+        responseSchema: z.string(),
+        modelParams: { model: "dummy-model" },
+      });
+`,
+    );
+
+    const provider: ModelProvider = {
+      chat() {
+        return Promise.resolve({
+          message: { role: "assistant", content: "ok" },
+          finishReason: "stop",
+        });
+      },
+    };
+
+    const server = startWebSocketSimulator({
+      deckPath,
+      modelProvider: provider,
+      port: 0,
+    });
+
+    try {
+      const port = tcpPortOf(server.addr);
+      const gql = async <TData>(
+        query: string,
+        variables?: Record<string, unknown>,
+      ): Promise<GraphqlEnvelope<TData>> => {
+        const response = await fetch(`http://127.0.0.1:${port}/graphql`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ query, variables }),
+        });
+        assertEquals(response.status, 200);
+        return await parseGraphqlEnvelope<TData>(response);
+      };
+
+      const createWorkspace = await gql<{
+        gambitWorkspaceCreate?: { workspace?: { id?: string } };
+      }>(
+        `
+          mutation {
+            gambitWorkspaceCreate {
+              workspace { id }
+            }
+          }
+        `,
+      );
+      const workspaceId =
+        createWorkspace.data?.gambitWorkspaceCreate?.workspace?.id ?? "";
+      assert(workspaceId.length > 0);
+
+      const startResponse = await gql<{
+        workspaceScenarioRunStart?: {
+          run?: { id?: string };
+        };
+      }>(
+        `
+          mutation StartScenarioRun($input: WorkspaceScenarioRunStartInput!) {
+            workspaceScenarioRunStart(input: $input) {
+              run { id }
+            }
+          }
+        `,
+        {
+          input: {
+            workspaceId,
+            scenarioDeckId: "input-strict-string",
+            scenarioInput: JSON.stringify({ scenarioToken: "scenario-input" }),
+            assistantInit: JSON.stringify({
+              assistantToken: "assistant-input",
+            }),
+          },
+        },
+      );
+      const runId = startResponse.data?.workspaceScenarioRunStart?.run?.id ??
+        "";
+      assert(runId.length > 0);
+
+      const readRun = async () => {
+        const queried = await gql<{
+          workspace?: {
+            scenarioRuns?: {
+              edges?: Array<{
+                node?: {
+                  id?: string;
+                  status?: string;
+                  error?: string | null;
+                };
+              }>;
+            };
+          } | null;
+        }>(
+          `
+            query ScenarioRunStatus($workspaceId: ID!) {
+              workspace(id: $workspaceId) {
+                scenarioRuns(first: 10) {
+                  edges {
+                    node {
+                      id
+                      status
+                      error
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          { workspaceId },
+        );
+        return queried.data?.workspace?.scenarioRuns?.edges?.find((edge) =>
+          edge?.node?.id === runId
+        )?.node;
+      };
+
+      await waitFor(async () => {
+        const run = await readRun();
+        return run?.status === "COMPLETED" || run?.status === "ERROR";
+      }, 5_000);
+      const run = await readRun();
+      assertEquals(run?.status, "COMPLETED");
+      assertEquals(run?.error ?? null, null);
+    } finally {
+      await server.shutdown();
+      await server.finished;
+    }
+  },
+);
+
+leakTolerantTest(
   "/graphql scenario runs persist chat-only transcripts into openresponses projection",
   async () => {
     const dir = await Deno.makeTempDir();
