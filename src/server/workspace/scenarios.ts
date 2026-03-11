@@ -13,13 +13,11 @@ import type {
 } from "@bolt-foundry/gambit-core";
 import { sanitizeNumber } from "../../test_bot.ts";
 import type {
-  NormalizedSchema,
   SchemaDescription,
   WorkspaceDeckState,
 } from "../../server_types.ts";
 import type { WorkspaceRecord } from "../../server_workspace_runtime.ts";
 import type { Maybe } from "../../utility_types.ts";
-import { cloneValue, deriveInitialFromSchema } from "./schema.ts";
 import type {
   TestBotInitFill,
   TestBotRunEntry,
@@ -681,20 +679,7 @@ export const createWorkspaceScenarioService = (deps: {
       args.assistantInit,
       "assistantInit",
     );
-    let assistantInit = parsedAssistantInit;
-    if (assistantInit === undefined) {
-      try {
-        const desc = await deps.getSchemaPromise() as {
-          defaults?: unknown;
-          schema?: NormalizedSchema;
-        };
-        assistantInit = desc.defaults !== undefined
-          ? cloneValue(desc.defaults)
-          : deriveInitialFromSchema(desc.schema);
-      } catch {
-        // keep assistantInit undefined when schema introspection fails
-      }
-    }
+    const assistantInit = parsedAssistantInit;
     if (!requestedDeckId) {
       const startedAt = new Date().toISOString();
       const manualRun: TestBotRunStatus = {

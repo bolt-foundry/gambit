@@ -13,7 +13,6 @@ import { useGambitTypedMutation } from "../../../src/hooks/useGambitTypedMutatio
 import { useGambitTypedSubscription } from "../../../src/hooks/useGambitTypedSubscription.tsx";
 import { useRouter } from "../../../src/RouterContext.tsx";
 import {
-  deriveInitialFromSchema,
   type FeedbackEntry,
   findMissingRequiredFields,
   formatJson,
@@ -359,9 +358,9 @@ export const SimulatorTestPage = iso(`
     if (!selectedScenarioDeck) return "";
     const edited = scenarioJsonByDeckId[selectedScenarioDeck.id];
     if (typeof edited === "string") return edited;
-    const defaults = selectedScenarioDeck.defaults ??
-      deriveInitialFromSchema(selectedScenarioDeck.inputSchema ?? undefined);
-    return formatJson(defaults);
+    return selectedScenarioDeck.defaults !== undefined
+      ? formatJson(selectedScenarioDeck.defaults)
+      : "";
   }, [scenarioJsonByDeckId, selectedScenarioDeck]);
   const parsedScenarioJson = useMemo(
     () => parseRootJsonInput(scenarioJsonText),
@@ -375,26 +374,22 @@ export const SimulatorTestPage = iso(`
       ),
     [parsedScenarioJson.parsed, selectedScenarioDeck?.inputSchema],
   );
-  const assistantInitDefault = useMemo(
-    () =>
-      assistantDeck?.defaults ??
-        deriveInitialFromSchema(assistantDeck?.inputSchema ?? undefined),
-    [assistantDeck?.defaults, assistantDeck?.inputSchema],
-  );
   const assistantInitJsonText = useMemo(
-    () => assistantInitJsonOverride ?? formatJson(assistantInitDefault),
-    [assistantInitDefault, assistantInitJsonOverride],
+    () => assistantInitJsonOverride ?? "",
+    [assistantInitJsonOverride],
   );
   const parsedAssistantInitJson = useMemo(
     () => parseRootJsonInput(assistantInitJsonText),
     [assistantInitJsonText, parseRootJsonInput],
   );
   const missingAssistantInitFields = useMemo(
-    () =>
-      findMissingRequiredFields(
+    () => {
+      if (parsedAssistantInitJson.parsed === undefined) return [];
+      return findMissingRequiredFields(
         assistantDeck?.inputSchema ?? undefined,
         parsedAssistantInitJson.parsed,
-      ),
+      );
+    },
     [assistantDeck?.inputSchema, parsedAssistantInitJson.parsed],
   );
   const scenarioRuns = useMemo<Array<ScenarioRunSnapshot>>(
@@ -974,6 +969,14 @@ export const SimulatorTestPage = iso(`
               ...previous,
               [selectedScenarioDeck.id]: text,
             }));
+          }}
+          onScenarioJsonReset={() => {
+            if (!selectedScenarioDeck) return;
+            setScenarioJsonByDeckId((previous) => {
+              const next = { ...previous };
+              delete next[selectedScenarioDeck.id];
+              return next;
+            });
           }}
           scenarioJsonError={parsedScenarioJson.error}
           scenarioMissingFields={missingScenarioFields}

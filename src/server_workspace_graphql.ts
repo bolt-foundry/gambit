@@ -39,6 +39,7 @@ export const createWorkspaceDeckGraphqlOperations = (
       | "graphql:readWorkspaceAssistantDeck",
   ): Promise<WorkspaceDeckState | null> => {
     await deps.activateWorkspaceDeck(workspaceId, {
+      forceReload: true,
       source,
     });
     const deckState = deps.readWorkspaceDeckState(workspaceId);
