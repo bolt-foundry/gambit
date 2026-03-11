@@ -1,15 +1,18 @@
 import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
-import { loadState, saveState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider, TraceEvent } from "@bolt-foundry/gambit-core";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import * as path from "@std/path";
 import type { ZodTypeAny } from "zod";
 import {
-  defaultTestBotStatePath,
+  defaultTestBotSqlitePath,
   enrichStateMeta,
   findLastAssistantMessage,
 } from "../cli_utils.ts";
+import {
+  loadCanonicalWorkspaceState,
+  saveCanonicalWorkspaceState,
+} from "../workspace_sqlite.ts";
 
 const logger = console;
 
@@ -528,7 +531,7 @@ export async function runTestBotLoop(opts: {
     | import("@bolt-foundry/gambit-core").SavedState
     | undefined = undefined;
   const statePath = opts.statePath ??
-    defaultTestBotStatePath(opts.rootDeckPath);
+    defaultTestBotSqlitePath(opts.rootDeckPath);
   const capturedTraces: Array<
     import("@bolt-foundry/gambit-core").TraceEvent
   > = [];
@@ -566,10 +569,16 @@ export async function runTestBotLoop(opts: {
       { ...state, traces: capturedTraces },
       opts.rootDeckPath,
     );
-    saveState(statePath, enriched);
+    saveCanonicalWorkspaceState(statePath, enriched);
   };
 
-  const existingState = loadState(statePath);
+  const existingState = (() => {
+    try {
+      return loadCanonicalWorkspaceState(statePath).state;
+    } catch {
+      return undefined;
+    }
+  })();
   if (existingState) {
     rootState = enrichScenarioState(undefined, existingState);
     if (Array.isArray(existingState.traces)) {

@@ -2,7 +2,7 @@ import type { Mutation__GambitWorkspaceFeedbackSave__parameters } from './parame
 
 export type Mutation__GambitWorkspaceFeedbackSave__param = {
   readonly data: {
-    readonly workspaceFeedbackSave: {
+    readonly workspaceFeedbackSave: ({
       readonly deleted: boolean,
       readonly feedback: ({
         readonly id: string,
@@ -114,7 +114,7 @@ A client pointer for the WorkspaceConversationTranscriptToolCall type.
           } | null),
         }>,
       },
-    },
+    } | null),
   },
   readonly parameters: Mutation__GambitWorkspaceFeedbackSave__parameters,
 };

@@ -62,6 +62,7 @@ export type Query__EntrypointSimulatorTestPage__raw_response_type = {
         },
       }>,
     },
+    sqlitePath?: (string | null),
     workbenchSelectedContextChips: string,
   },
 }

@@ -1,14 +1,17 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { TarStream } from "@std/tar";
 import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import { restoreServeArtifactBundle } from "./serve_artifact.ts";
 import { handleServeCommand } from "./serve.ts";
 
 async function tarGzBytes(
-  entries: Array<{ path: string; body: string }>,
+  entries: Array<{ path: string; body: string | Uint8Array }>,
 ): Promise<Uint8Array> {
   const tarEntries = entries.map((entry) => {
-    const bytes = new TextEncoder().encode(entry.body);
+    const bytes = typeof entry.body === "string"
+      ? new TextEncoder().encode(entry.body)
+      : entry.body;
     return {
       type: "file" as const,
       path: entry.path,
@@ -37,15 +40,72 @@ async function tarGzBytes(
   return out;
 }
 
+function createFixtureSqlite(
+  sqlitePath: string,
+  workspaceId: string,
+): void {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    db.exec(`
+      CREATE TABLE workspace_state_v0 (
+        workspace_id TEXT NOT NULL PRIMARY KEY,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_applied_offset INTEGER NOT NULL DEFAULT -1
+      );
+      CREATE TABLE workspace_deck_state_v0 (
+        workspace_id TEXT NOT NULL PRIMARY KEY,
+        root_deck_path TEXT NOT NULL,
+        assistant_deck_json TEXT NOT NULL,
+        scenario_decks_json TEXT NOT NULL,
+        grader_decks_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO workspace_state_v0 (
+        workspace_id, state_json, updated_at, last_applied_offset
+      ) VALUES (?, ?, ?, ?)`,
+    ).run(
+      workspaceId,
+      JSON.stringify({
+        runId: "run-1",
+        format: "chat",
+        messages: [],
+        meta: { sessionId: workspaceId, workspaceId },
+      }),
+      new Date().toISOString(),
+      0,
+    );
+    db.prepare(
+      `INSERT INTO workspace_deck_state_v0 (
+        workspace_id, root_deck_path, assistant_deck_json,
+        scenario_decks_json, grader_decks_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      workspaceId,
+      "/tmp/original.deck.md",
+      JSON.stringify({ deck: "/tmp/original.deck.md", startMode: "assistant" }),
+      JSON.stringify([]),
+      JSON.stringify([]),
+      new Date().toISOString(),
+    );
+  } finally {
+    db.close();
+  }
+}
+
 Deno.test({
   name: "restoreServeArtifactBundle restores workspace and is idempotent",
   permissions: { read: true, write: true },
 }, async () => {
   const projectRoot = await Deno.makeTempDir({ prefix: "serve-artifact-" });
   const artifactPath = path.join(projectRoot, "bundle.tar.gz");
+  const sqlitePath = path.join(projectRoot, "workspace.sqlite");
   await Deno.writeTextFile(path.join(projectRoot, "deno.jsonc"), "{}\n");
 
   try {
+    createFixtureSqlite(sqlitePath, "faq-session-001");
     const bundle = await tarGzBytes([
       {
         path: "manifest.json",
@@ -58,17 +118,8 @@ Deno.test({
         body: "# root deck\n",
       },
       {
-        path: "session/state.json",
-        body: JSON.stringify({
-          runId: "run-1",
-          format: "chat",
-          messages: [],
-          meta: { sessionId: "faq-session-001" },
-        }),
-      },
-      {
-        path: "session/events.jsonl",
-        body: "",
+        path: "session/workspace.sqlite",
+        body: await Deno.readFile(sqlitePath),
       },
     ]);
     await Deno.writeFile(artifactPath, bundle);
@@ -80,18 +131,30 @@ Deno.test({
     assertEquals(first.sessionId, "faq-session-001");
     assertEquals(first.restored, true);
 
-    const restoredState = JSON.parse(
-      await Deno.readTextFile(path.join(first.sessionDir, "state.json")),
-    ) as { meta?: Record<string, unknown> };
-    assertEquals(restoredState.meta?.sessionId, "faq-session-001");
-    assertEquals(
-      restoredState.meta?.workspaceRootDeckPath,
-      first.rootDeckPath,
+    const restoredDb = new DatabaseSync(
+      path.join(first.sessionDir, "workspace.sqlite"),
     );
-    assertEquals(
-      restoredState.meta?.workspaceRootDir,
-      path.join(first.sessionDir, "deck"),
-    );
+    try {
+      const row = restoredDb.prepare(
+        `SELECT state_json
+         FROM workspace_state_v0
+         WHERE workspace_id = ?`,
+      ).get("faq-session-001") as { state_json?: string } | undefined;
+      const restoredState = JSON.parse(row?.state_json ?? "{}") as {
+        meta?: Record<string, unknown>;
+      };
+      assertEquals(restoredState.meta?.sessionId, "faq-session-001");
+      assertEquals(
+        restoredState.meta?.workspaceRootDeckPath,
+        first.rootDeckPath,
+      );
+      assertEquals(
+        restoredState.meta?.workspaceRootDir,
+        path.join(first.sessionDir, "deck"),
+      );
+    } finally {
+      restoredDb.close();
+    }
 
     const second = await restoreServeArtifactBundle({
       artifactPath,

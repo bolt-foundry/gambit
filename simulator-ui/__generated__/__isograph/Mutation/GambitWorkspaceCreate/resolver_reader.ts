@@ -107,7 +107,7 @@ const readerAst: ReaderAst<Mutation__GambitWorkspaceCreate__param> = [
                   },
                   {
                     kind: "Scalar",
-                    fieldName: "statePath",
+                    fieldName: "sqlitePath",
                     alias: null,
                     arguments: null,
                     isUpdatable: false,

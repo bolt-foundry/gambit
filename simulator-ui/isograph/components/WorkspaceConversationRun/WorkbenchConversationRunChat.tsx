@@ -12,8 +12,10 @@ import {
   type BuildChatActivityState,
   BuildChatRows,
   deriveBuildChatActivityState,
+  describeWorkbenchOutboundMessage,
   encodeWorkbenchMessageWithContext,
   formatElapsedDuration,
+  synthesizeWorkbenchMessageBody,
 } from "../../../src/Chat.tsx";
 import Button from "../../../src/gds/Button.tsx";
 import Callout from "../../../src/gds/Callout.tsx";
@@ -514,18 +516,23 @@ export const WorkbenchConversationRunChat = iso(`
     if (!canSubmitMessage || isBusy) return;
     const activeChips = composerChips.filter((chip) => chip.enabled);
     const activeChipIds = new Set(activeChips.map((chip) => chip.chipId));
+    const outboundBody = trimmed ||
+      synthesizeWorkbenchMessageBody(
+        activeChips.map((chip) => toWorkbenchMessageContext(chip)),
+      );
     const outboundMessage = activeChips.length > 0
       ? encodeWorkbenchMessageWithContext(
-        trimmed,
+        outboundBody,
         activeChips.map((chip) => toWorkbenchMessageContext(chip)),
       )
-      : trimmed;
+      : outboundBody;
+    const outboundDebug = describeWorkbenchOutboundMessage(outboundMessage);
     logBuildChatDebug("send.outbound", {
       runId,
       workspaceId,
       trimmed,
       activeChips,
-      outboundMessage,
+      ...outboundDebug,
     });
     setLocalError(null);
     try {

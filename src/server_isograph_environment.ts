@@ -53,7 +53,7 @@ type SessionMetaRecord = {
   testBotName?: string;
   createdAt?: string;
   sessionDir?: string;
-  statePath?: string;
+  sqlitePath?: string;
 };
 
 type ScenarioRunRecord = {

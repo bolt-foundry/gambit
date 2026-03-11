@@ -1,13 +1,18 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import {
   modImportPath,
   parseGraphqlEnvelope,
-  readJsonLines,
   startScenarioConversation,
 } from "./server_test_utils.ts";
+import {
+  exportWorkspaceEventsJsonlFromSqlite,
+  loadCanonicalWorkspaceState,
+  saveCanonicalWorkspaceState,
+} from "./workspace_sqlite.ts";
 
 async function saveWorkspaceFeedback(args: {
   port: number;
@@ -47,15 +52,13 @@ async function saveWorkspaceFeedback(args: {
   });
 }
 
-async function readStateMessageRefs(args: {
+function readStateMessageRefs(args: {
   sessionsDir: string;
   workspaceId: string;
-}): Promise<Array<{ id?: string; role?: string; source?: string }>> {
-  const state = JSON.parse(
-    await Deno.readTextFile(
-      path.join(args.sessionsDir, args.workspaceId, "state.json"),
-    ),
-  ) as {
+}): Array<{ id?: string; role?: string; source?: string }> {
+  const state = loadCanonicalWorkspaceState(
+    path.join(args.sessionsDir, args.workspaceId, "workspace.sqlite"),
+  ).state as {
     messageRefs?: Array<{ id?: string; role?: string; source?: string }>;
   };
   return Array.isArray(state.messageRefs) ? state.messageRefs : [];
@@ -80,23 +83,53 @@ async function waitForMessageRef(args: {
   return undefined;
 }
 
-async function readWorkspaceState(args: {
+function readWorkspaceState(args: {
   sessionsDir: string;
   workspaceId: string;
-}): Promise<{
+}): {
   feedback?: Array<
     { messageRefId?: string; runId?: string; score?: number; reason?: string }
   >;
-}> {
-  return JSON.parse(
-    await Deno.readTextFile(
-      path.join(args.sessionsDir, args.workspaceId, "state.json"),
-    ),
-  ) as {
+} {
+  return loadCanonicalWorkspaceState(
+    path.join(args.sessionsDir, args.workspaceId, "workspace.sqlite"),
+  ).state as {
     feedback?: Array<
       { messageRefId?: string; runId?: string; score?: number; reason?: string }
     >;
   };
+}
+
+function appendWorkspaceTestEvent(args: {
+  sqlitePath: string;
+  workspaceId: string;
+  payload: Record<string, unknown>;
+}) {
+  const db = new DatabaseSync(args.sqlitePath);
+  try {
+    const row = db.prepare(
+      `SELECT MAX(offset) AS offset
+       FROM workspace_events_v0
+       WHERE workspace_id = ?`,
+    ).get(args.workspaceId) as { offset?: number } | undefined;
+    const offset = typeof row?.offset === "number" ? row.offset + 1 : 0;
+    db.prepare(
+      `INSERT INTO workspace_events_v0 (
+        workspace_id,
+        offset,
+        domain,
+        created_at,
+        payload_json
+      ) VALUES (?, ?, 'test', ?, ?)`,
+    ).run(
+      args.workspaceId,
+      offset,
+      new Date().toISOString(),
+      JSON.stringify(args.payload),
+    );
+  } finally {
+    db.close();
+  }
 }
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
@@ -159,12 +192,18 @@ leakTolerantTest("simulator appends feedback log entries", async () => {
   }>(res);
   assertEquals(body.data?.workspaceFeedbackSave?.feedback?.score, 1);
 
-  const eventsPath = path.join(sessionDir, "events.jsonl");
+  const sqlitePath = path.join(sessionDir, "workspace.sqlite");
   let hasFeedbackUpdate = false;
   for (let i = 0; i < 20; i++) {
-    const entries = await readJsonLines(eventsPath);
+    const entries = exportWorkspaceEventsJsonlFromSqlite(
+      sqlitePath,
+      result.workspaceId,
+    )
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as { data?: { type?: string } });
     hasFeedbackUpdate = entries.some((entry) =>
-      (entry as { type?: string }).type === "gambit.feedback.update"
+      entry.data?.type === "gambit.feedback.update"
     );
     if (hasFeedbackUpdate) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -236,6 +275,7 @@ leakTolerantTest(
       res,
     );
     assertEquals(body.data?.workspaceFeedbackSave ?? null, null);
+    assertEquals(Array.isArray(body.errors), false);
     const nextState = await readWorkspaceState({ sessionsDir, workspaceId });
     assertEquals(
       (nextState.feedback ?? []).some((entry) =>
@@ -375,32 +415,25 @@ leakTolerantTest(
 
     const workspaceId = "workspace-feedback-persisted";
     const workspaceDir = path.join(sessionsDir, workspaceId);
+    const sqlitePath = path.join(workspaceDir, "workspace.sqlite");
     await Deno.mkdir(workspaceDir, { recursive: true });
-    await Deno.writeTextFile(
-      path.join(workspaceDir, "state.json"),
-      JSON.stringify({
-        runId: "session-current",
-        messages: [{ role: "assistant", content: "latest response" }],
-        messageRefs: [{ id: "msg-current", role: "assistant" }],
-        meta: {
-          workspaceSchemaVersion: "workspace-state.v1",
-          sessionId: workspaceId,
-          workspaceId,
-          scenarioRunId: "testbot-older-run",
-          testBotRunId: "testbot-older-run",
-        },
-      }),
-    );
-    await Deno.writeTextFile(
-      path.join(workspaceDir, "events.jsonl"),
-      JSON.stringify({
+    saveCanonicalWorkspaceState(sqlitePath, {
+      runId: "session-current",
+      messages: [{ role: "assistant", content: "latest response" }],
+      messageRefs: [{ id: "msg-current", role: "assistant" }],
+      meta: {
+        workspaceSchemaVersion: "workspace-state.v1",
+        sessionId: workspaceId,
+        workspaceId,
+        scenarioRunId: "testbot-older-run",
+        testBotRunId: "testbot-older-run",
+      },
+    });
+    appendWorkspaceTestEvent({
+      sqlitePath,
+      workspaceId,
+      payload: {
         type: "testBotStatus",
-        offset: 0,
-        createdAt: new Date().toISOString(),
-        _gambit: {
-          domain: "test",
-          offset: 0,
-        },
         run: {
           id: "testbot-older-run",
           status: "completed",
@@ -414,8 +447,8 @@ leakTolerantTest(
           traces: [],
           toolInserts: [],
         },
-      }) + "\n",
-    );
+      },
+    });
 
     const provider: ModelProvider = {
       chat() {
@@ -526,30 +559,28 @@ leakTolerantTest(
 
     const workspaceId = "workspace-feedback-user-source";
     const workspaceDir = path.join(sessionsDir, workspaceId);
+    const sqlitePath = path.join(workspaceDir, "workspace.sqlite");
     await Deno.mkdir(workspaceDir, { recursive: true });
-    await Deno.writeTextFile(
-      path.join(workspaceDir, "state.json"),
-      JSON.stringify({
-        runId: "scenario-user-run",
-        messages: [
-          { role: "user", content: "scenario prompt" },
-          { role: "user", content: "manual prompt" },
-          { role: "user", content: "artifact prompt" },
-        ],
-        messageRefs: [
-          { id: "msg-scenario-user", role: "user", source: "scenario" },
-          { id: "msg-manual-user", role: "user", source: "manual" },
-          { id: "msg-artifact-user", role: "user", source: "artifact" },
-        ],
-        meta: {
-          workspaceSchemaVersion: "workspace-state.v1",
-          sessionId: workspaceId,
-          workspaceId,
-          scenarioRunId: "scenario-user-run",
-          testBotRunId: "scenario-user-run",
-        },
-      }),
-    );
+    saveCanonicalWorkspaceState(sqlitePath, {
+      runId: "scenario-user-run",
+      messages: [
+        { role: "user", content: "scenario prompt" },
+        { role: "user", content: "manual prompt" },
+        { role: "user", content: "artifact prompt" },
+      ],
+      messageRefs: [
+        { id: "msg-scenario-user", role: "user", source: "scenario" },
+        { id: "msg-manual-user", role: "user", source: "manual" },
+        { id: "msg-artifact-user", role: "user", source: "artifact" },
+      ],
+      meta: {
+        workspaceSchemaVersion: "workspace-state.v1",
+        sessionId: workspaceId,
+        workspaceId,
+        scenarioRunId: "scenario-user-run",
+        testBotRunId: "scenario-user-run",
+      },
+    });
 
     const provider: ModelProvider = {
       chat() {
@@ -604,6 +635,7 @@ leakTolerantTest(
       workspaceFeedbackSave?: unknown;
     }>(manualRes);
     assertEquals(manualBody.data?.workspaceFeedbackSave ?? null, null);
+    assertEquals(Array.isArray(manualBody.errors), false);
 
     const artifactRes = await saveWorkspaceFeedback({
       port,
@@ -618,6 +650,7 @@ leakTolerantTest(
       workspaceFeedbackSave?: unknown;
     }>(artifactRes);
     assertEquals(artifactBody.data?.workspaceFeedbackSave ?? null, null);
+    assertEquals(Array.isArray(artifactBody.errors), false);
 
     const nextState = await readWorkspaceState({ sessionsDir, workspaceId });
     assertEquals(
@@ -670,34 +703,32 @@ leakTolerantTest(
 
     const workspaceId = "workspace-grading";
     const workspaceDir = path.join(sessionsDir, workspaceId);
+    const sqlitePath = path.join(workspaceDir, "workspace.sqlite");
     await Deno.mkdir(workspaceDir, { recursive: true });
-    await Deno.writeTextFile(
-      path.join(workspaceDir, "state.json"),
-      JSON.stringify({
-        runId: workspaceId,
-        messages: [{ role: "assistant", content: "assistant output" }],
-        messageRefs: [{ id: "msg-1", role: "assistant" }],
-        meta: {
-          workspaceSchemaVersion: "workspace-state.v1",
-          sessionId: workspaceId,
-          workspaceId,
-          gradingRuns: [{
-            id: "cal-1",
-            graderId: "grader-1",
-            graderPath: deckPath,
-            status: "completed",
-            result: {
-              mode: "turns",
-              totalTurns: 2,
-              turns: [
-                { index: 0, messageRefId: "msg-1", result: { score: 1 } },
-                { index: 1, result: { score: 1 } },
-              ],
-            },
-          }],
-        },
-      }),
-    );
+    saveCanonicalWorkspaceState(sqlitePath, {
+      runId: workspaceId,
+      messages: [{ role: "assistant", content: "assistant output" }],
+      messageRefs: [{ id: "msg-1", role: "assistant" }],
+      meta: {
+        workspaceSchemaVersion: "workspace-state.v1",
+        sessionId: workspaceId,
+        workspaceId,
+        gradingRuns: [{
+          id: "cal-1",
+          graderId: "grader-1",
+          graderPath: deckPath,
+          status: "completed",
+          result: {
+            mode: "turns",
+            totalTurns: 2,
+            turns: [
+              { index: 0, messageRefId: "msg-1", result: { score: 1 } },
+              { index: 1, result: { score: 1 } },
+            ],
+          },
+        }],
+      },
+    });
 
     const server = startWebSocketSimulator({
       deckPath,

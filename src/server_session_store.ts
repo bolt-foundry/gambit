@@ -1,5 +1,4 @@
 import * as path from "@std/path";
-import { existsSync } from "@std/fs";
 import { DatabaseSync } from "node:sqlite";
 import type {
   AppendOpenResponsesRunEventV0Input,
@@ -39,10 +38,6 @@ export type WorkspaceEventEnvelope = {
   createdAt: string;
   type: WorkspaceEventDomain;
   data: Record<string, unknown>;
-};
-
-type WorkspaceEventRecord = Record<string, unknown> & {
-  type: string;
 };
 
 export type BuildProjectionRun = {
@@ -149,41 +144,6 @@ const normalizePersistedTraceRecord = (
   } as TraceEvent;
 };
 
-const inferWorkspaceDomain = (
-  payloadType: string,
-): WorkspaceEventDomain | null => {
-  if (
-    payloadType === "buildBotStatus" || payloadType === "buildBotTrace" ||
-    payloadType === "buildBotStream" || payloadType === "buildBotStreamEnd" ||
-    payloadType.startsWith("gambit.build.")
-  ) {
-    return "build";
-  }
-  if (
-    payloadType === "testBotStatus" || payloadType === "testBotTrace" ||
-    payloadType === "testBotStream" || payloadType === "testBotStreamEnd" ||
-    payloadType.startsWith("gambit.test.")
-  ) {
-    return "test";
-  }
-  if (
-    payloadType === "calibrateSession" || payloadType === "grading.run" ||
-    payloadType === "grading.flag" || payloadType === "grading.flag.reason" ||
-    payloadType === "grading.reference" ||
-    payloadType.startsWith("gambit.grade.") ||
-    payloadType.startsWith("gambit.grading.")
-  ) {
-    return "grade";
-  }
-  return "session";
-};
-
-const isWorkspaceEventDomain = (
-  value: unknown,
-): value is WorkspaceEventDomain =>
-  value === "build" || value === "test" || value === "grade" ||
-  value === "session";
-
 const CANONICAL_EVENT_TYPE_BY_LEGACY = new Map<string, string>([
   ["buildBotStatus", "gambit.build.status"],
   ["buildBotTrace", "gambit.build.trace"],
@@ -245,10 +205,13 @@ const safeStringify = (value: unknown, space?: number): string => {
 const OPENRESPONSES_RUN_EVENT_RECORD_TYPE = "gambit.openresponses.run_event";
 const OPENRESPONSES_RUN_EVENT_RECORD_KIND = "openresponses.run_event.v0";
 const SESSION_SQLITE_DB_FILENAME = "workspace.sqlite";
-const SESSION_SQLITE_SCHEMA_VERSION = 4;
+const SESSION_SQLITE_SCHEMA_VERSION = 7;
 const OPENRESPONSES_EVENTS_SQLITE_TABLE = "openresponses_run_events_v0";
 const OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE = "openresponses_output_items_v0";
 const WORKSPACE_DECK_STATE_SQLITE_TABLE = "workspace_deck_state_v0";
+const WORKSPACE_STATE_SQLITE_TABLE = "workspace_state_v0";
+const WORKSPACE_EVENTS_SQLITE_TABLE = "workspace_events_v0";
+const BUILD_PROJECTION_SQLITE_TABLE = "build_projection_v0";
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -380,79 +343,43 @@ function ensureSessionSqliteSchema(db: DatabaseSync): void {
       );
     `);
   }
+  if (current < 5) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${WORKSPACE_STATE_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL PRIMARY KEY,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_applied_offset INTEGER NOT NULL DEFAULT -1
+      );
+    `);
+  }
+  if (current < 6) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${WORKSPACE_EVENTS_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL,
+        offset INTEGER NOT NULL,
+        domain TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, offset)
+      );
+      CREATE INDEX IF NOT EXISTS ${WORKSPACE_EVENTS_SQLITE_TABLE}_workspace_domain_offset_idx
+        ON ${WORKSPACE_EVENTS_SQLITE_TABLE}(workspace_id, domain, offset);
+    `);
+  }
+  if (current < 7) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ${BUILD_PROJECTION_SQLITE_TABLE} (
+        workspace_id TEXT NOT NULL PRIMARY KEY,
+        projection_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_applied_offset INTEGER NOT NULL DEFAULT -1
+      );
+    `);
+  }
   if (current < SESSION_SQLITE_SCHEMA_VERSION) {
     db.exec(`PRAGMA user_version = ${SESSION_SQLITE_SCHEMA_VERSION};`);
   }
-}
-
-function parseOpenResponsesRunEventRecord(
-  value: unknown,
-): OpenResponsesRunEventV0 | null {
-  if (!isObjectRecord(value)) return null;
-  if (value.type !== OPENRESPONSES_RUN_EVENT_RECORD_TYPE) return null;
-  const meta = isObjectRecord(value._gambit) ? value._gambit : null;
-  if (
-    meta?.kind !== OPENRESPONSES_RUN_EVENT_RECORD_KIND ||
-    !isOpenResponsesRunEventPayload(value.payload)
-  ) {
-    return null;
-  }
-  const sequence = typeof value.sequence === "number" &&
-      Number.isInteger(value.sequence)
-    ? value.sequence
-    : null;
-  if (sequence === null || sequence < 0) return null;
-  const workspaceId = typeof value.workspace_id === "string"
-    ? value.workspace_id.trim()
-    : "";
-  const runId = typeof value.run_id === "string" ? value.run_id.trim() : "";
-  const eventType = typeof value.event_type === "string"
-    ? value.event_type.trim()
-    : "";
-  const idempotencyKey = typeof value.idempotency_key === "string"
-    ? value.idempotency_key.trim()
-    : "";
-  const createdAt = typeof value.created_at === "string"
-    ? value.created_at
-    : "";
-  if (
-    !workspaceId || !runId || !eventType || !idempotencyKey || !createdAt
-  ) {
-    return null;
-  }
-  return {
-    workspace_id: workspaceId,
-    run_id: runId,
-    sequence,
-    event_type: eventType,
-    payload: value.payload,
-    idempotency_key: idempotencyKey,
-    created_at: createdAt,
-  };
-}
-
-type PersistedOpenResponsesRunEventRecord = OpenResponsesRunEventV0 & {
-  offset: number | null;
-};
-
-function parsePersistedOpenResponsesRunEventRecord(
-  value: unknown,
-): PersistedOpenResponsesRunEventRecord | null {
-  const parsed = parseOpenResponsesRunEventRecord(value);
-  if (!parsed || !isObjectRecord(value)) return null;
-  const offset = typeof value.offset === "number" &&
-      Number.isInteger(value.offset) &&
-      value.offset >= 0
-    ? value.offset
-    : typeof (value._gambit as { offset?: unknown } | undefined)?.offset ===
-          "number" &&
-        Number.isInteger(
-          (value._gambit as { offset?: number } | undefined)?.offset,
-        ) &&
-        ((value._gambit as { offset?: number } | undefined)?.offset ?? -1) >= 0
-    ? (value._gambit as { offset: number }).offset
-    : null;
-  return { ...parsed, offset };
 }
 
 type OpenResponsesOutputMessageV0 = {
@@ -648,7 +575,6 @@ function toEventMessageText(value: unknown): string {
 export const createSessionStore = (deps: SessionStoreDeps) => {
   const {
     sessionsRoot,
-    randomId,
     logger,
     enrichStateWithSession,
     workspaceStateSchemaVersion,
@@ -794,6 +720,155 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     return db;
   };
 
+  const getWorkspaceIdForState = (
+    sessionId: string,
+    state?: SavedState,
+  ): string => {
+    const workspaceId = typeof state?.meta?.workspaceId === "string"
+      ? state.meta.workspaceId.trim()
+      : "";
+    return workspaceId || sessionId;
+  };
+
+  const readWorkspaceStateRow = (
+    sessionId: string,
+    state?: SavedState,
+  ): {
+    state_json: string;
+    updated_at: string;
+    last_applied_offset: number;
+  } | null => {
+    const workspaceId = getWorkspaceIdForState(sessionId, state);
+    const db = getSessionSqliteDb(sessionId, state);
+    return db.prepare(
+      `SELECT state_json, updated_at, last_applied_offset
+       FROM ${WORKSPACE_STATE_SQLITE_TABLE}
+       WHERE workspace_id = ?`,
+    ).get(workspaceId) as
+      | {
+        state_json: string;
+        updated_at: string;
+        last_applied_offset: number;
+      }
+      | null;
+  };
+
+  const writeWorkspaceStateRow = (args: {
+    sessionId: string;
+    state: SavedState;
+    updatedAt?: string;
+  }): SavedState => {
+    const workspaceId = getWorkspaceIdForState(args.sessionId, args.state);
+    const db = getSessionSqliteDb(args.sessionId, args.state);
+    const snapshot = materializeSnapshot(args.state);
+    const lastAppliedOffset = parseFiniteInteger(
+      (snapshot.meta as { lastAppliedOffset?: unknown } | undefined)
+        ?.lastAppliedOffset,
+    ) ??
+      parseFiniteInteger(
+        (snapshot.meta as { lastAppliedEventSeq?: unknown } | undefined)
+          ?.lastAppliedEventSeq,
+      ) ?? -1;
+    const updatedAt = args.updatedAt ?? new Date().toISOString();
+    db.prepare(
+      `INSERT INTO ${WORKSPACE_STATE_SQLITE_TABLE} (
+        workspace_id,
+        state_json,
+        updated_at,
+        last_applied_offset
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_id) DO UPDATE SET
+        state_json = excluded.state_json,
+        updated_at = excluded.updated_at,
+        last_applied_offset = excluded.last_applied_offset`,
+    ).run(
+      workspaceId,
+      safeStringify(snapshot),
+      updatedAt,
+      lastAppliedOffset,
+    );
+    return snapshot;
+  };
+
+  const readWorkspaceEventRows = (args: {
+    sessionId: string;
+    state?: SavedState;
+    workspaceId?: string;
+    domain?: WorkspaceEventDomain;
+    fromOffset?: number;
+  }): Array<{
+    offset: number;
+    domain: WorkspaceEventDomain;
+    created_at: string;
+    payload_json: string;
+  }> => {
+    const workspaceId = args.workspaceId ??
+      getWorkspaceIdForState(args.sessionId, args.state);
+    const fromOffset = args.fromOffset ?? 0;
+    const db = getSessionSqliteDb(args.sessionId, args.state);
+    if (args.domain) {
+      return db.prepare(
+        `SELECT offset, domain, created_at, payload_json
+         FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+         WHERE workspace_id = ? AND domain = ? AND offset >= ?
+         ORDER BY offset ASC`,
+      ).all(workspaceId, args.domain, fromOffset) as Array<{
+        offset: number;
+        domain: WorkspaceEventDomain;
+        created_at: string;
+        payload_json: string;
+      }>;
+    }
+    return db.prepare(
+      `SELECT offset, domain, created_at, payload_json
+       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+       WHERE workspace_id = ? AND offset >= ?
+       ORDER BY offset ASC`,
+    ).all(workspaceId, fromOffset) as Array<{
+      offset: number;
+      domain: WorkspaceEventDomain;
+      created_at: string;
+      payload_json: string;
+    }>;
+  };
+
+  const listWorkspaceEnvelopes = (args: {
+    workspaceId: string;
+    fromOffset?: number;
+    domain?: WorkspaceEventDomain;
+    state?: SavedState;
+    sessionId?: string;
+  }): Array<WorkspaceEventEnvelope> => {
+    const state = args.state;
+    const sessionId = args.sessionId ??
+      (typeof state?.meta?.sessionId === "string"
+        ? state.meta.sessionId
+        : args.workspaceId);
+    return readWorkspaceEventRows({
+      sessionId,
+      state,
+      workspaceId: args.workspaceId,
+      fromOffset: args.fromOffset,
+      domain: args.domain,
+    }).flatMap((row) => {
+      let payload: unknown = null;
+      try {
+        payload = JSON.parse(row.payload_json);
+      } catch {
+        return [];
+      }
+      if (!isObjectRecord(payload)) return [];
+      return [
+        {
+          offset: row.offset,
+          createdAt: row.created_at,
+          type: row.domain,
+          data: payload,
+        } satisfies WorkspaceEventEnvelope,
+      ];
+    });
+  };
+
   const readWorkspaceDeckState = (
     workspaceId: string,
   ): WorkspaceDeckState | null => {
@@ -896,130 +971,6 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     };
   };
 
-  const toCanonicalEventRecord = (args: {
-    eventType: WorkspaceEventDomain;
-    offset: number;
-    createdAt: string;
-    data: Record<string, unknown>;
-  }): WorkspaceEventRecord => {
-    const payloadType = typeof args.data.type === "string"
-      ? args.data.type
-      : `gambit.${args.eventType}.event`;
-    const rawMeta = args.data._gambit;
-    const meta =
-      rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-        ? rawMeta as Record<string, unknown>
-        : {};
-    return {
-      ...args.data,
-      type: payloadType,
-      offset: args.offset,
-      createdAt: args.createdAt,
-      _gambit: {
-        ...meta,
-        domain: args.eventType,
-        offset: args.offset,
-      },
-    };
-  };
-
-  const parseEnvelopeRecords = (
-    text: string,
-  ): {
-    records: Array<WorkspaceEventEnvelope>;
-    maxOffset: number;
-  } => {
-    const records: Array<WorkspaceEventEnvelope> = [];
-    let maxOffset = -1;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      const offset = parseFiniteInteger(parsed.offset) ??
-        parseFiniteInteger(
-          (parsed._gambit as { offset?: unknown } | undefined)?.offset,
-        );
-      if (offset === undefined) continue;
-      const envelopeType = typeof parsed.type === "string" ? parsed.type : "";
-      const nestedData = parsed.data;
-      const payload = isWorkspaceEventDomain(envelopeType) &&
-          nestedData && typeof nestedData === "object" &&
-          !Array.isArray(nestedData)
-        ? nestedData as Record<string, unknown>
-        : parsed;
-      const payloadType = typeof payload.type === "string" ? payload.type : "";
-      if (!payloadType) continue;
-      const meta = parsed._gambit &&
-          typeof parsed._gambit === "object" &&
-          !Array.isArray(parsed._gambit)
-        ? parsed._gambit as Record<string, unknown>
-        : null;
-      const domain = (() => {
-        const explicit = meta?.domain;
-        if (
-          explicit === "build" || explicit === "test" ||
-          explicit === "grade" || explicit === "session"
-        ) {
-          return explicit;
-        }
-        if (isWorkspaceEventDomain(envelopeType)) {
-          return envelopeType;
-        }
-        return inferWorkspaceDomain(payloadType);
-      })();
-      if (!domain) continue;
-      const createdAt = typeof parsed.createdAt === "string"
-        ? parsed.createdAt
-        : typeof parsed.created_at === "string"
-        ? parsed.created_at
-        : typeof payload.createdAt === "string"
-        ? payload.createdAt
-        : typeof payload.created_at === "string"
-        ? payload.created_at
-        : typeof meta?.created_at === "string"
-        ? meta.created_at
-        : new Date(0).toISOString();
-      const envelope: WorkspaceEventEnvelope = {
-        offset,
-        type: domain,
-        createdAt,
-        data: payload,
-      };
-      records.push(envelope);
-      if (offset > maxOffset) {
-        maxOffset = offset;
-      }
-    }
-    return { records, maxOffset };
-  };
-
-  const readEnvelopeRecords = (
-    eventsPath: string,
-  ): {
-    records: Array<WorkspaceEventEnvelope>;
-    maxOffset: number;
-  } => {
-    try {
-      const text = Deno.readTextFileSync(eventsPath);
-      return parseEnvelopeRecords(text);
-    } catch {
-      return { records: [], maxOffset: -1 };
-    }
-  };
-
-  const readEnvelopeRecordsAsync = async (
-    eventsPath: string,
-  ): Promise<{
-    records: Array<WorkspaceEventEnvelope>;
-    maxOffset: number;
-  }> => {
-    try {
-      const text = await Deno.readTextFile(eventsPath);
-      return parseEnvelopeRecords(text);
-    } catch {
-      return { records: [], maxOffset: -1 };
-    }
-  };
-
   const ensureMonotonicOffsets = (
     records: Array<WorkspaceEventEnvelope>,
     eventsPath: string,
@@ -1083,13 +1034,6 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     byRun.push(event);
     byRun.sort((a, b) => a.sequence - b.sequence);
     store.byRunId.set(runStoreKey, byRun);
-  };
-
-  const resetOpenResponsesRunEventStore = (sessionId: string) => {
-    const store = getOpenResponsesRunEventStore(sessionId);
-    store.byIdempotencyKey.clear();
-    store.byRunId.clear();
-    store.hydrated = false;
   };
 
   type OutputItemUpsertRow = {
@@ -1460,100 +1404,13 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     }
   };
 
-  const importOpenResponsesRunEventsFromJsonl = (
-    sessionId: string,
-    eventsPath: string,
-    db: DatabaseSync,
-  ): number => {
-    let text = "";
-    try {
-      text = Deno.readTextFileSync(eventsPath);
-    } catch {
-      return 0;
-    }
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO ${OPENRESPONSES_EVENTS_SQLITE_TABLE} (
-        workspace_id,
-        run_id,
-        sequence,
-        event_type,
-        payload_json,
-        idempotency_key,
-        created_at,
-        offset
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const maxOffsetRow = db.prepare(`
-      SELECT MAX(offset) AS offset
-      FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}
-    `).get() as { offset?: number };
-    let nextSyntheticOffset = typeof maxOffsetRow.offset === "number"
-      ? maxOffsetRow.offset + 1
-      : 0;
-    let inserted = 0;
-    db.exec("BEGIN IMMEDIATE;");
-    try {
-      for (const line of text.split("\n")) {
-        if (!line.trim()) continue;
-        let parsed: unknown = null;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        const record = parsePersistedOpenResponsesRunEventRecord(parsed);
-        if (!record) continue;
-        const event: OpenResponsesRunEventV0 = {
-          workspace_id: record.workspace_id,
-          run_id: record.run_id,
-          sequence: record.sequence,
-          event_type: record.event_type,
-          payload: record.payload,
-          idempotency_key: record.idempotency_key,
-          created_at: record.created_at,
-        };
-        const offset = record.offset ?? nextSyntheticOffset;
-        if (record.offset === null) {
-          nextSyntheticOffset += 1;
-        } else if (record.offset >= nextSyntheticOffset) {
-          nextSyntheticOffset = record.offset + 1;
-        }
-        const result = insert.run(
-          record.workspace_id,
-          record.run_id,
-          record.sequence,
-          record.event_type,
-          safeStringify(record.payload),
-          record.idempotency_key,
-          record.created_at,
-          offset,
-        );
-        const changes = Number(result.changes ?? 0);
-        if (changes > 0) {
-          persistOutputItemsFromRunEvent(db, event);
-        }
-        inserted += changes;
-      }
-      db.exec("COMMIT;");
-    } catch (error) {
-      db.exec("ROLLBACK;");
-      throw error;
-    }
-    if (inserted > 0) {
-      resetOpenResponsesRunEventStore(sessionId);
-    }
-    return inserted;
-  };
-
   const hydrateOpenResponsesRunEvents = (
     sessionId: string,
     state: SavedState | undefined,
-    eventsPath: string,
   ) => {
     const store = getOpenResponsesRunEventStore(sessionId);
     if (store.hydrated) return;
     const db = getSessionSqliteDb(sessionId, state);
-    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
     const rows = db.prepare(`
       SELECT
         workspace_id,
@@ -1598,13 +1455,11 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   const appendOpenResponsesRunEventSqlite = (args: {
     sessionId: string;
     state: SavedState;
-    eventsPath: string;
     input: AppendOpenResponsesRunEventV0Input;
     workspaceId: string;
     offset: number;
   }): { event: OpenResponsesRunEventV0; inserted: boolean } => {
     const db = getSessionSqliteDb(args.sessionId, args.state);
-    importOpenResponsesRunEventsFromJsonl(args.sessionId, args.eventsPath, db);
     const existing = db.prepare(`
       SELECT
         workspace_id,
@@ -1705,8 +1560,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     sessionId: string,
     state?: SavedState,
   ): number => {
-    const cached = sessionOffsetById.get(sessionId);
-    if (cached !== undefined) return cached;
+    const cached = sessionOffsetById.get(sessionId) ?? -1;
     const fromMeta = parseFiniteInteger(
       (state?.meta as { lastAppliedOffset?: unknown } | undefined)
         ?.lastAppliedOffset,
@@ -1715,21 +1569,42 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         (state?.meta as { lastAppliedEventSeq?: unknown } | undefined)
           ?.lastAppliedEventSeq,
       );
-    if (fromMeta !== undefined) {
-      sessionOffsetById.set(sessionId, fromMeta);
-      return fromMeta;
+    let resolved = fromMeta ?? cached;
+    try {
+      const db = getSessionSqliteDb(sessionId, state);
+      const maxWorkspaceRow = db.prepare(
+        `SELECT MAX(offset) AS offset
+         FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}`,
+      ).get() as { offset?: number };
+      const maxRunEventRow = db.prepare(
+        `SELECT MAX(offset) AS offset
+         FROM ${OPENRESPONSES_EVENTS_SQLITE_TABLE}`,
+      ).get() as { offset?: number };
+      resolved = Math.max(
+        resolved,
+        parseFiniteInteger(maxWorkspaceRow.offset) ?? -1,
+        parseFiniteInteger(maxRunEventRow.offset) ?? -1,
+      );
+    } catch {
+      // sqlite may not exist yet for brand-new sessions
     }
-    const eventsPath = typeof state?.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : path.join(sessionsRoot, sessionId, "events.jsonl");
-    const { records } = readEnvelopeRecords(eventsPath);
-    if (records.length > 0) {
-      const validated = ensureMonotonicOffsets(records, eventsPath);
-      sessionOffsetById.set(sessionId, validated);
-      return validated;
+    if (resolved === -1) {
+      const records = listWorkspaceEnvelopes({
+        workspaceId: getWorkspaceIdForState(sessionId, state),
+        state,
+        sessionId,
+      });
+      if (records.length > 0) {
+        resolved = ensureMonotonicOffsets(
+          records,
+          `${
+            getSessionSqlitePath(sessionId, state)
+          }:${WORKSPACE_EVENTS_SQLITE_TABLE}`,
+        );
+      }
     }
-    sessionOffsetById.set(sessionId, -1);
-    return -1;
+    sessionOffsetById.set(sessionId, resolved);
+    return resolved;
   };
 
   const nextSessionOffsetCandidate = (
@@ -1876,32 +1751,24 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     }
   };
 
-  const writeJsonAtomic = async (filePath: string, payload: unknown) => {
-    const dir = path.dirname(filePath);
-    await ensureDirAsync(dir);
-    const tmpPath = path.join(
-      dir,
-      `.tmp-${path.basename(filePath)}-${randomId("tmp")}`,
-    );
-    await Deno.writeTextFile(tmpPath, safeStringify(payload, 2));
-    await Deno.rename(tmpPath, filePath);
-  };
-
-  const appendJsonl = async (filePath: string, payload: unknown) => {
-    const dir = path.dirname(filePath);
-    await ensureDirAsync(dir);
-    const line = safeStringify(payload);
-    await Deno.writeTextFile(filePath, `${line}\n`, { append: true });
-  };
-
   const readBuildProjection = (workspaceId: string): BuildProjectionState => {
     const cached = buildProjectionCache.get(workspaceId);
     if (cached) return cached;
-    const filePath = path.join(sessionsRoot, workspaceId, "build_state.json");
+    const state = readSessionState(workspaceId);
+    const sessionId = typeof state?.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : workspaceId;
     try {
-      const parsed = JSON.parse(
-        Deno.readTextFileSync(filePath),
-      ) as Record<string, unknown>;
+      const db = getSessionSqliteDb(sessionId, state);
+      const row = db.prepare(
+        `SELECT projection_json
+         FROM ${BUILD_PROJECTION_SQLITE_TABLE}
+         WHERE workspace_id = ?`,
+      ).get(workspaceId) as { projection_json?: string } | undefined;
+      if (!row?.projection_json) {
+        throw new Error("missing build projection");
+      }
+      const parsed = JSON.parse(row.projection_json) as Record<string, unknown>;
       const lastAppliedOffset = parseFiniteInteger(parsed.lastAppliedOffset) ??
         -1;
       const run = normalizeBuildProjectionRun(
@@ -1997,47 +1864,42 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     return state;
   };
 
-  const rebuildBuildProjectionFromEvents = async (
+  const rebuildBuildProjectionFromEvents = (
     workspaceId: string,
-    eventsPath: string,
   ) => {
-    const { records } = await readEnvelopeRecordsAsync(eventsPath);
+    const state = readSessionState(workspaceId);
+    const sessionId = typeof state?.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : workspaceId;
+    const records = listWorkspaceEnvelopes({ workspaceId, state, sessionId });
     if (records.length > 0) {
-      ensureMonotonicOffsets(records, eventsPath);
+      ensureMonotonicOffsets(
+        records,
+        `${
+          getSessionSqlitePath(sessionId, state)
+        }:${WORKSPACE_EVENTS_SQLITE_TABLE}`,
+      );
     }
     const projection = replayBuildProjection(workspaceId, records);
-    const buildPath = path.join(sessionsRoot, workspaceId, "build_state.json");
-    await writeJsonAtomic(buildPath, projection);
+    const db = getSessionSqliteDb(sessionId, state);
+    db.prepare(
+      `INSERT INTO ${BUILD_PROJECTION_SQLITE_TABLE} (
+        workspace_id,
+        projection_json,
+        updated_at,
+        last_applied_offset
+      ) VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_id) DO UPDATE SET
+        projection_json = excluded.projection_json,
+        updated_at = excluded.updated_at,
+        last_applied_offset = excluded.last_applied_offset`,
+    ).run(
+      workspaceId,
+      safeStringify(projection),
+      new Date().toISOString(),
+      projection.lastAppliedOffset,
+    );
     buildProjectionCache.set(workspaceId, projection);
-  };
-
-  const updateSnapshotBoundary = async (
-    sessionId: string,
-    statePath: string | undefined,
-    offset: number,
-  ) => {
-    if (!statePath) return;
-    try {
-      const text = await Deno.readTextFile(statePath);
-      const parsed = JSON.parse(text) as SavedState;
-      const parsedMeta = parsed.meta && typeof parsed.meta === "object"
-        ? parsed.meta as Record<string, unknown>
-        : {};
-      const previousBoundary =
-        parseFiniteInteger(parsedMeta.lastAppliedOffset) ??
-          parseFiniteInteger(parsedMeta.lastAppliedEventSeq) ??
-          -1;
-      if (offset <= previousBoundary) return;
-      parsedMeta.lastAppliedOffset = offset;
-      parsedMeta.lastAppliedEventSeq = offset;
-      parsedMeta.sessionUpdatedAt = new Date().toISOString();
-      upsertScenarioRunSummary(parsedMeta);
-      const nextState = { ...parsed, meta: parsedMeta };
-      await writeJsonAtomic(statePath, nextState);
-      sessionStateCache.set(sessionId, nextState);
-    } catch {
-      // Keep append-only logging best-effort even if snapshot boundary update fails.
-    }
   };
 
   const appendWorkspaceEnvelope = (
@@ -2048,13 +1910,8 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     const sessionId = typeof state.meta?.sessionId === "string"
       ? state.meta.sessionId
       : undefined;
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : undefined;
-    const statePath = typeof state.meta?.sessionStatePath === "string"
-      ? state.meta.sessionStatePath
-      : undefined;
-    if (!sessionId || !eventsPath) return null;
+    if (!sessionId) return null;
+    const workspaceId = getWorkspaceIdForState(sessionId, state);
     const normalizedData = (() => {
       const rawType = typeof data.type === "string" ? data.type : "";
       if (!rawType) return data;
@@ -2090,23 +1947,35 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     };
     enqueueSessionWrite(sessionId, async () => {
       const offset = nextSessionOffsetCandidate(sessionId, state);
-      await appendJsonl(
-        eventsPath,
-        toCanonicalEventRecord({
-          eventType,
+      const db = getSessionSqliteDb(sessionId, state);
+      db.prepare(
+        `INSERT INTO ${WORKSPACE_EVENTS_SQLITE_TABLE} (
+          workspace_id,
           offset,
-          createdAt,
-          data: normalizedData,
-        }),
+          domain,
+          created_at,
+          payload_json
+        ) VALUES (?, ?, ?, ?, ?)`,
+      ).run(
+        workspaceId,
+        offset,
+        eventType,
+        createdAt,
+        safeStringify(normalizedData),
       );
       sessionOffsetById.set(sessionId, offset);
       if (state.meta && typeof state.meta === "object") {
         (state.meta as Record<string, unknown>).lastAppliedOffset = offset;
         (state.meta as Record<string, unknown>).lastAppliedEventSeq = offset;
+        (state.meta as Record<string, unknown>).sessionUpdatedAt = createdAt;
       }
-      await updateSnapshotBoundary(sessionId, statePath, offset);
+      writeWorkspaceStateRow({
+        sessionId,
+        state,
+        updatedAt: createdAt,
+      });
       if (eventType === "build") {
-        await rebuildBuildProjectionFromEvents(sessionId, eventsPath);
+        await rebuildBuildProjectionFromEvents(workspaceId);
       }
     });
     return envelope;
@@ -2119,27 +1988,16 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     const sessionId = typeof state.meta?.sessionId === "string"
       ? state.meta.sessionId
       : undefined;
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : undefined;
-    const statePath = typeof state.meta?.sessionStatePath === "string"
-      ? state.meta.sessionStatePath
-      : undefined;
     const workspaceId = typeof state.meta?.workspaceId === "string"
       ? state.meta.workspaceId
       : sessionId;
-    if (!sessionId || !eventsPath || !workspaceId) return null;
+    if (!sessionId || !workspaceId) return null;
     if (!isOpenResponsesRunEventPayload(input.payload)) {
       throw new Error("OpenResponses run event payload must include a type");
     }
 
-    importOpenResponsesRunEventsFromJsonl(
-      sessionId,
-      eventsPath,
-      getSessionSqliteDb(sessionId, state),
-    );
     const store = getOpenResponsesRunEventStore(sessionId);
-    hydrateOpenResponsesRunEvents(sessionId, state, eventsPath);
+    hydrateOpenResponsesRunEvents(sessionId, state);
     const idempotencyStoreKey = openResponsesRunEventIdempotencyKey(
       workspaceId,
       input.run_id,
@@ -2147,14 +2005,9 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     );
     const existing = store.byIdempotencyKey.get(idempotencyStoreKey);
     if (existing) return existing;
-    return await enqueueSessionWriteResult(sessionId, async () => {
-      importOpenResponsesRunEventsFromJsonl(
-        sessionId,
-        eventsPath,
-        getSessionSqliteDb(sessionId, state),
-      );
+    return await enqueueSessionWriteResult(sessionId, () => {
       const localStore = getOpenResponsesRunEventStore(sessionId);
-      hydrateOpenResponsesRunEvents(sessionId, state, eventsPath);
+      hydrateOpenResponsesRunEvents(sessionId, state);
       const idempotent = localStore.byIdempotencyKey.get(idempotencyStoreKey);
       if (idempotent) {
         publishOpenResponsesRunEvent(idempotent);
@@ -2164,7 +2017,6 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       const { event, inserted } = appendOpenResponsesRunEventSqlite({
         sessionId,
         state,
-        eventsPath,
         input,
         workspaceId,
         offset,
@@ -2174,23 +2026,43 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         publishOpenResponsesRunEvent(event);
         return event;
       }
-      const record = {
-        ...event,
-        offset,
-        type: OPENRESPONSES_RUN_EVENT_RECORD_TYPE,
-        _gambit: {
-          kind: OPENRESPONSES_RUN_EVENT_RECORD_KIND,
-          domain: "session",
+      const db = getSessionSqliteDb(sessionId, state);
+      db.prepare(
+        `INSERT INTO ${WORKSPACE_EVENTS_SQLITE_TABLE} (
+          workspace_id,
           offset,
-        },
-      };
-      await appendJsonl(eventsPath, record);
+          domain,
+          created_at,
+          payload_json
+        ) VALUES (?, ?, ?, ?, ?)`,
+      ).run(
+        workspaceId,
+        offset,
+        "session",
+        event.created_at,
+        safeStringify({
+          ...event,
+          offset,
+          type: OPENRESPONSES_RUN_EVENT_RECORD_TYPE,
+          _gambit: {
+            kind: OPENRESPONSES_RUN_EVENT_RECORD_KIND,
+            domain: "session",
+            offset,
+          },
+        }),
+      );
       sessionOffsetById.set(sessionId, offset);
       if (state.meta && typeof state.meta === "object") {
         (state.meta as Record<string, unknown>).lastAppliedOffset = offset;
         (state.meta as Record<string, unknown>).lastAppliedEventSeq = offset;
+        (state.meta as Record<string, unknown>).sessionUpdatedAt =
+          event.created_at;
       }
-      await updateSnapshotBoundary(sessionId, statePath, offset);
+      writeWorkspaceStateRow({
+        sessionId,
+        state,
+        updatedAt: event.created_at,
+      });
       indexOpenResponsesRunEvent(localStore, event);
       publishOpenResponsesRunEvent(event);
       return event;
@@ -2207,12 +2079,8 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     const sessionId = typeof state.meta?.sessionId === "string"
       ? state.meta.sessionId
       : args.workspaceId;
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : path.join(sessionsRoot, sessionId, "events.jsonl");
     const fromSequence = parseFiniteInteger(args.fromSequence) ?? 0;
     const db = getSessionSqliteDb(sessionId, state);
-    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
     const rows = db.prepare(`
       SELECT
         workspace_id,
@@ -2263,11 +2131,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     const sessionId = typeof state.meta?.sessionId === "string"
       ? state.meta.sessionId
       : args.workspaceId;
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : path.join(sessionsRoot, sessionId, "events.jsonl");
     const db = getSessionSqliteDb(sessionId, state);
-    importOpenResponsesRunEventsFromJsonl(sessionId, eventsPath, db);
     const feedbackByRef = new Map(
       (state.feedback ?? []).map((entry) => [entry.messageRefId, entry]),
     );
@@ -2477,15 +2341,16 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   };
 
   const loadSessionTraces = (state: SavedState): Array<TraceEvent> => {
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
+    const sessionId = typeof state.meta?.sessionId === "string"
+      ? state.meta.sessionId
+      : typeof state.meta?.workspaceId === "string"
+      ? state.meta.workspaceId
       : undefined;
-    if (!eventsPath) return [];
+    if (!sessionId) return [];
     try {
-      const { records } = readEnvelopeRecords(eventsPath);
-      if (records.length > 0) {
-        ensureMonotonicOffsets(records, eventsPath);
-      }
+      const records = listWorkspaceEnvelopes({
+        workspaceId: getWorkspaceIdForState(sessionId, state),
+      });
       const traces: Array<TraceEvent> = [];
       for (const envelope of records) {
         const record = envelope.data;
@@ -2530,54 +2395,46 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     }
     if (dir && sessionId) {
       const snapshot = materializeSnapshot(merged);
-      const eventsPath = typeof snapshot.meta?.sessionEventsPath === "string"
-        ? snapshot.meta.sessionEventsPath
-        : path.join(dir, "events.jsonl");
-      const statePath = typeof snapshot.meta?.sessionStatePath === "string"
-        ? snapshot.meta.sessionStatePath
-        : path.join(dir, "state.json");
       const sqlitePath = typeof snapshot.meta?.sessionSqlitePath === "string"
         ? snapshot.meta.sessionSqlitePath
         : path.join(dir, SESSION_SQLITE_DB_FILENAME);
       enqueueSessionWrite(sessionId, async () => {
         try {
           await ensureDirAsync(dir);
-          getSessionSqliteDb(sessionId, {
+          const sqliteState: SavedState = {
             ...snapshot,
             meta: {
               ...(snapshot.meta ?? {}),
               sessionSqlitePath: sqlitePath,
             },
-          });
-          let firstWrite = false;
-          try {
-            await Deno.stat(eventsPath);
-          } catch (err) {
-            if (err instanceof Deno.errors.NotFound) {
-              firstWrite = true;
-            } else {
-              throw err;
-            }
-          }
-          if (firstWrite) {
+          };
+          const db = getSessionSqliteDb(sessionId, sqliteState);
+          const workspaceId = getWorkspaceIdForState(sessionId, sqliteState);
+          if (!readWorkspaceStateRow(sessionId, sqliteState)) {
             const startOffset = nextSessionOffsetCandidate(sessionId, snapshot);
-            await appendJsonl(
-              eventsPath,
-              toCanonicalEventRecord({
-                eventType: "session",
-                offset: startOffset,
-                createdAt: new Date().toISOString(),
-                data: {
-                  type: "gambit.session.start",
-                  _gambit: {
-                    legacy_type: "session.start",
-                    domain: "session",
-                  },
-                  category: "lifecycle",
-                  sessionId,
-                  runId: snapshot.runId,
-                  deck: snapshot.meta?.deck,
+            db.prepare(
+              `INSERT INTO ${WORKSPACE_EVENTS_SQLITE_TABLE} (
+                workspace_id,
+                offset,
+                domain,
+                created_at,
+                payload_json
+              ) VALUES (?, ?, ?, ?, ?)`,
+            ).run(
+              workspaceId,
+              startOffset,
+              "session",
+              new Date().toISOString(),
+              safeStringify({
+                type: "gambit.session.start",
+                _gambit: {
+                  legacy_type: "session.start",
+                  domain: "session",
                 },
+                category: "lifecycle",
+                sessionId,
+                runId: snapshot.runId,
+                deck: snapshot.meta?.deck,
               }),
             );
             sessionOffsetById.set(sessionId, startOffset);
@@ -2596,26 +2453,33 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
               sessionSqlitePath: sqlitePath,
             },
           };
-          await appendJsonl(
-            eventsPath,
-            toCanonicalEventRecord({
-              eventType: "session",
-              offset: snapshotOffset,
-              createdAt: new Date().toISOString(),
-              data: {
-                type: "session.snapshot",
-                category: "snapshot",
-                sessionId,
-                runId: snapshotToWrite.runId,
-                state: snapshotToWrite,
-              },
+          db.prepare(
+            `INSERT INTO ${WORKSPACE_EVENTS_SQLITE_TABLE} (
+              workspace_id,
+              offset,
+              domain,
+              created_at,
+              payload_json
+            ) VALUES (?, ?, ?, ?, ?)`,
+          ).run(
+            workspaceId,
+            snapshotOffset,
+            "session",
+            new Date().toISOString(),
+            safeStringify({
+              type: "session.snapshot",
+              category: "snapshot",
+              sessionId,
+              runId: snapshotToWrite.runId,
+              state: snapshotToWrite,
             }),
           );
-          // Advance in-memory offset immediately after append so a later
-          // snapshot write failure cannot cause duplicate offsets on retry.
           sessionOffsetById.set(sessionId, snapshotOffset);
-          await writeJsonAtomic(statePath, snapshotToWrite);
-          await rebuildBuildProjectionFromEvents(sessionId, eventsPath);
+          writeWorkspaceStateRow({
+            sessionId,
+            state: snapshotToWrite,
+          });
+          await rebuildBuildProjectionFromEvents(workspaceId);
         } catch (err) {
           logger.warn(
             `[sim] failed to persist session state: ${
@@ -2644,11 +2508,31 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       return withTraces;
     }
     const dir = path.join(sessionsRoot, sessionId);
-    const filePath = path.join(dir, "state.json");
-    const text = Deno.readTextFileSync(filePath);
-    const parsed = JSON.parse(text) as SavedState;
+    const sqlitePath = path.join(dir, SESSION_SQLITE_DB_FILENAME);
+    let parsed: SavedState | null = null;
+    const row = readWorkspaceStateRow(
+      sessionId,
+      {
+        runId: sessionId,
+        messages: [],
+        meta: {
+          sessionId,
+          workspaceId: sessionId,
+          sessionDir: dir,
+          sessionSqlitePath: sqlitePath,
+        },
+      },
+    );
+    if (typeof row?.state_json === "string") {
+      parsed = JSON.parse(row.state_json) as SavedState;
+      const lastAppliedOffset = parseFiniteInteger(row.last_applied_offset) ??
+        -1;
+      sessionOffsetById.set(sessionId, lastAppliedOffset);
+    } else {
+      throw new Deno.errors.NotFound(`Workspace ${sessionId} was not found`);
+    }
     if (!parsed || typeof parsed !== "object") {
-      throw new Error(`Invalid workspace state payload at ${filePath}`);
+      throw new Error(`Invalid workspace state payload for ${sessionId}`);
     }
     const parsedMeta = parsed.meta && typeof parsed.meta === "object"
       ? parsed.meta as Record<string, unknown>
@@ -2671,34 +2555,26 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       sessionDir: dir,
       workspaceSchemaVersion: workspaceStateSchemaVersion,
     } as Record<string, unknown>;
-    if (typeof meta.sessionStatePath !== "string") {
-      meta.sessionStatePath = filePath;
-    }
-    if (typeof meta.sessionEventsPath !== "string") {
-      meta.sessionEventsPath = path.join(dir, "events.jsonl");
-    }
-    if (typeof meta.sessionBuildStatePath !== "string") {
-      meta.sessionBuildStatePath = path.join(dir, "build_state.json");
-    }
     if (typeof meta.sessionSqlitePath !== "string") {
-      meta.sessionSqlitePath = path.join(dir, SESSION_SQLITE_DB_FILENAME);
+      meta.sessionSqlitePath = sqlitePath;
     }
 
-    const eventsPath = typeof meta.sessionEventsPath === "string"
-      ? meta.sessionEventsPath
-      : undefined;
-    if (eventsPath) {
-      const { records, maxOffset } = readEnvelopeRecords(eventsPath);
-      if (records.length > 0) {
-        const validated = ensureMonotonicOffsets(records, eventsPath);
-        const lastAppliedOffset = validated >= 0 ? validated : maxOffset;
-        meta.lastAppliedOffset = lastAppliedOffset;
-        meta.lastAppliedEventSeq = lastAppliedOffset;
-        sessionOffsetById.set(sessionId, lastAppliedOffset);
-      } else if (typeof meta.lastAppliedOffset !== "number") {
-        meta.lastAppliedOffset = -1;
-        meta.lastAppliedEventSeq = -1;
-      }
+    const records = listWorkspaceEnvelopes({
+      workspaceId: typeof meta.workspaceId === "string"
+        ? meta.workspaceId
+        : sessionId,
+    });
+    if (records.length > 0) {
+      const lastAppliedOffset = ensureMonotonicOffsets(
+        records,
+        `${sqlitePath}:${WORKSPACE_EVENTS_SQLITE_TABLE}`,
+      );
+      meta.lastAppliedOffset = lastAppliedOffset;
+      meta.lastAppliedEventSeq = lastAppliedOffset;
+      sessionOffsetById.set(sessionId, lastAppliedOffset);
+    } else if (typeof meta.lastAppliedOffset !== "number") {
+      meta.lastAppliedOffset = -1;
+      meta.lastAppliedEventSeq = -1;
     }
 
     const enriched = { ...parsed, meta } as SavedState;
@@ -2738,35 +2614,30 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
   ): BuildProjectionState | undefined => {
     const state = readSessionState(workspaceId);
     if (!state) return undefined;
-    const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-      ? state.meta.sessionEventsPath
-      : path.join(sessionsRoot, workspaceId, "events.jsonl");
     const projection = readBuildProjection(workspaceId);
-    if (existsSync(eventsPath)) {
-      const targetOffset = parseFiniteInteger(
-        (state.meta as { lastAppliedOffset?: unknown } | undefined)
-          ?.lastAppliedOffset,
+    const targetOffset = parseFiniteInteger(
+      (state.meta as { lastAppliedOffset?: unknown } | undefined)
+        ?.lastAppliedOffset,
+    ) ??
+      parseFiniteInteger(
+        (state.meta as { lastAppliedEventSeq?: unknown } | undefined)
+          ?.lastAppliedEventSeq,
       ) ??
-        parseFiniteInteger(
-          (state.meta as { lastAppliedEventSeq?: unknown } | undefined)
-            ?.lastAppliedEventSeq,
-        ) ??
-        -1;
-      if (projection.lastAppliedOffset < targetOffset) {
-        if (!buildProjectionRefreshInFlight.has(workspaceId)) {
-          const task = rebuildBuildProjectionFromEvents(workspaceId, eventsPath)
-            .catch((err) => {
-              logger.warn(
-                `[sim] failed to refresh build projection for ${workspaceId}: ${
-                  err instanceof Error ? err.message : err
-                }`,
-              );
-            })
-            .finally(() => {
-              buildProjectionRefreshInFlight.delete(workspaceId);
-            });
-          buildProjectionRefreshInFlight.set(workspaceId, task);
-        }
+      -1;
+    if (projection.lastAppliedOffset < targetOffset) {
+      if (!buildProjectionRefreshInFlight.has(workspaceId)) {
+        const task = Promise.resolve().then(() => {
+          rebuildBuildProjectionFromEvents(workspaceId);
+        }).catch((err: unknown) => {
+          logger.warn(
+            `[sim] failed to refresh build projection for ${workspaceId}: ${
+              err instanceof Error ? err.message : err
+            }`,
+          );
+        }).finally(() => {
+          buildProjectionRefreshInFlight.delete(workspaceId);
+        });
+        buildProjectionRefreshInFlight.set(workspaceId, task);
       }
     }
     return projection;
@@ -2787,6 +2658,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     readSessionState,
     readWorkspaceDeckState,
     readBuildState,
+    listWorkspaceEnvelopes,
     listOpenResponsesRunEvents,
     listOpenResponsesOutputItems,
     subscribeOpenResponsesRunEvents,

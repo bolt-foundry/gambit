@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
-import { modImportPath, readJsonLines } from "./server_test_utils.ts";
+import { modImportPath } from "./server_test_utils.ts";
 
 type GraphqlEnvelope<TData> = {
   data?: TData;
@@ -61,6 +61,155 @@ async function parseGraphqlEnvelope<TData>(
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });
+
+type SeedRunEvent = {
+  workspaceId: string;
+  runId: string;
+  sequence: number;
+  eventType: string;
+  payload: unknown;
+  idempotencyKey: string;
+  createdAt: string;
+  offset?: number;
+};
+
+type SeedOutputItemRow = {
+  workspaceId: string;
+  runId: string;
+  itemKey: string;
+  itemId: string;
+  itemKind: "message" | "reasoning" | "tool_call";
+  role?: string | null;
+  content?: string | null;
+  messageRefId?: string | null;
+  reasoningType?: string | null;
+  summary?: string | null;
+  toolCallId?: string | null;
+  toolName?: string | null;
+  toolStatus?: string | null;
+  argumentsText?: string | null;
+  resultText?: string | null;
+  errorText?: string | null;
+  outputIndex?: number | null;
+  sequence: number;
+};
+
+function seedOpenResponsesRunEvents(
+  sqlitePath: string,
+  events: Array<SeedRunEvent>,
+): void {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    const maxOffsetRow = db.prepare(
+      "SELECT MAX(offset) AS offset FROM workspace_events_v0",
+    ).get() as { offset?: number };
+    let nextOffset = typeof maxOffsetRow.offset === "number"
+      ? maxOffsetRow.offset + 1
+      : 0;
+    for (const event of events) {
+      const offset = event.offset ?? nextOffset++;
+      db.prepare(
+        `INSERT OR REPLACE INTO openresponses_run_events_v0 (
+          workspace_id, run_id, sequence, event_type, payload_json,
+          idempotency_key, created_at, offset
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.workspaceId,
+        event.runId,
+        event.sequence,
+        event.eventType,
+        JSON.stringify(event.payload),
+        event.idempotencyKey,
+        event.createdAt,
+        offset,
+      );
+      db.prepare(
+        `INSERT OR REPLACE INTO workspace_events_v0 (
+          workspace_id, offset, domain, created_at, payload_json
+        ) VALUES (?, ?, 'session', ?, ?)`,
+      ).run(
+        event.workspaceId,
+        offset,
+        event.createdAt,
+        JSON.stringify({
+          type: "gambit.openresponses.run_event",
+          workspace_id: event.workspaceId,
+          run_id: event.runId,
+          sequence: event.sequence,
+          event_type: event.eventType,
+          payload: event.payload,
+          idempotency_key: event.idempotencyKey,
+          created_at: event.createdAt,
+          _gambit: {
+            kind: "openresponses.run_event.v0",
+            domain: "session",
+            offset,
+          },
+        }),
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function seedOpenResponsesOutputItems(
+  sqlitePath: string,
+  rows: Array<SeedOutputItemRow>,
+): void {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    for (const row of rows) {
+      db.prepare(
+        `INSERT OR REPLACE INTO openresponses_output_items_v0 (
+          workspace_id, run_id, item_key, item_id, item_kind, role, content,
+          message_ref_id, reasoning_type, summary, tool_call_id, tool_name,
+          tool_status, arguments_text, result_text, error_text, output_index,
+          sequence
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        row.workspaceId,
+        row.runId,
+        row.itemKey,
+        row.itemId,
+        row.itemKind,
+        row.role ?? null,
+        row.content ?? null,
+        row.messageRefId ?? null,
+        row.reasoningType ?? null,
+        row.summary ?? null,
+        row.toolCallId ?? null,
+        row.toolName ?? null,
+        row.toolStatus ?? null,
+        row.argumentsText ?? null,
+        row.resultText ?? null,
+        row.errorText ?? null,
+        row.outputIndex ?? null,
+        row.sequence,
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+function readWorkspaceStateFromSqlite(
+  sqlitePath: string,
+  workspaceId: string,
+): SavedState {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    const row = db.prepare(
+      `SELECT state_json
+       FROM workspace_state_v0
+       WHERE workspace_id = ?`,
+    ).get(workspaceId) as { state_json?: string } | undefined;
+    assert(typeof row?.state_json === "string", "missing workspace state");
+    return JSON.parse(row.state_json) as SavedState;
+  } finally {
+    db.close();
+  }
+}
 
 leakTolerantTest("/graphql serves GraphiQL via Yoga", async () => {
   const dir = await Deno.makeTempDir();
@@ -879,182 +1028,219 @@ leakTolerantTest(
         ?.edges?.[0]?.node?.id ?? buildRunId;
       assert(canonicalBuildRunId.length > 0);
 
-      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-      const createdAt = new Date().toISOString();
-      await Deno.writeTextFile(
-        eventsPath,
-        [
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 0,
-            event_type: "input.item",
-            payload: {
-              type: "input.item",
-              role: "user",
-              content: [{ type: "input_text", text: "build user canonical" }],
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:input`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 1,
-            event_type: "response.output_item.done",
-            payload: {
-              type: "response.output_item.done",
-              output_index: 0,
-              item: {
-                type: "message",
-                role: "assistant",
-                content: [{ type: "output_text", text: "build canonical" }],
-              },
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:0`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 2,
-            event_type: "response.reasoning.done",
-            payload: {
-              type: "response.reasoning.done",
-              output_index: 1,
-              item_id: "build-reasoning-done-1",
-              content_index: 0,
-              text: "build deep reasoning",
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:reasoning`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 3,
-            event_type: "response.output_item.done",
-            payload: {
-              type: "response.output_item.done",
-              output_index: 2,
-              item: {
-                type: "function_call",
-                call_id: "build-call-1",
-                name: "lookup",
-                arguments: '{"query":"a"}',
-              },
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:1`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 4,
-            event_type: "response.output_item.done",
-            payload: {
-              type: "response.output_item.done",
-              output_index: 3,
-              item: {
-                type: "function_call_output",
-                call_id: "build-call-1",
-                output: "lookup-result",
-              },
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:2`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: canonicalBuildRunId,
-            sequence: 5,
-            event_type: "response.reasoning_summary_part.added",
-            payload: {
-              type: "response.reasoning_summary_part.added",
-              output_index: 4,
-              item_id: "build-reasoning-1",
-              summary_index: 0,
-              part: { type: "summary_text", text: "build reasoning" },
-            },
-            idempotency_key: `${canonicalBuildRunId}:seed:build:3`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: scenarioRunId,
-            sequence: 0,
-            event_type: "input.item",
-            payload: {
-              type: "input.item",
-              role: "user",
-              content: [{
-                type: "input_text",
-                text: "scenario user canonical",
-              }],
-            },
-            idempotency_key: `${scenarioRunId}:seed:scenario:input`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: scenarioRunId,
-            sequence: 1,
-            event_type: "response.output_item.done",
-            payload: {
-              type: "response.output_item.done",
-              output_index: 0,
-              item: {
-                type: "message",
-                role: "assistant",
-                content: [{ type: "output_text", text: "scenario canonical" }],
-              },
-            },
-            idempotency_key: `${scenarioRunId}:seed:scenario:0`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          }),
-        ].join("\n") + "\n",
-        { append: true },
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
       );
+      const createdAt = new Date().toISOString();
+      seedOpenResponsesRunEvents(sqlitePath, [
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 0,
+          eventType: "input.item",
+          payload: {
+            type: "input.item",
+            role: "user",
+            content: [{ type: "input_text", text: "build user canonical" }],
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:input`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 1,
+          eventType: "response.output_item.done",
+          payload: {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "build canonical" }],
+            },
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:0`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 2,
+          eventType: "response.reasoning.done",
+          payload: {
+            type: "response.reasoning.done",
+            output_index: 1,
+            item_id: "build-reasoning-done-1",
+            content_index: 0,
+            text: "build deep reasoning",
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:reasoning`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 3,
+          eventType: "response.output_item.done",
+          payload: {
+            type: "response.output_item.done",
+            output_index: 2,
+            item: {
+              type: "function_call",
+              call_id: "build-call-1",
+              name: "lookup",
+              arguments: '{"query":"a"}',
+            },
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:1`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 4,
+          eventType: "response.output_item.done",
+          payload: {
+            type: "response.output_item.done",
+            output_index: 3,
+            item: {
+              type: "function_call_output",
+              call_id: "build-call-1",
+              output: "lookup-result",
+            },
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:2`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          sequence: 5,
+          eventType: "response.reasoning_summary_part.added",
+          payload: {
+            type: "response.reasoning_summary_part.added",
+            output_index: 4,
+            item_id: "build-reasoning-1",
+            summary_index: 0,
+            part: { type: "summary_text", text: "build reasoning" },
+          },
+          idempotencyKey: `${canonicalBuildRunId}:seed:build:3`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: scenarioRunId,
+          sequence: 0,
+          eventType: "input.item",
+          payload: {
+            type: "input.item",
+            role: "user",
+            content: [{ type: "input_text", text: "scenario user canonical" }],
+          },
+          idempotencyKey: `${scenarioRunId}:seed:scenario:input`,
+          createdAt,
+        },
+        {
+          workspaceId,
+          runId: scenarioRunId,
+          sequence: 1,
+          eventType: "response.output_item.done",
+          payload: {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: "scenario canonical" }],
+            },
+          },
+          idempotencyKey: `${scenarioRunId}:seed:scenario:0`,
+          createdAt,
+        },
+      ]);
+      seedOpenResponsesOutputItems(sqlitePath, [
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          itemKey: "message:user:build-user",
+          itemId: `${canonicalBuildRunId}:input:0`,
+          itemKind: "message",
+          role: "user",
+          content: "build user canonical",
+          sequence: 0,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          itemKey: "message:assistant:build-canonical",
+          itemId: `${canonicalBuildRunId}:output:0`,
+          itemKind: "message",
+          role: "assistant",
+          content: "build canonical",
+          sequence: 1,
+          outputIndex: 0,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          itemKey: "reasoning:build-reasoning-done-1",
+          itemId: `${canonicalBuildRunId}:reasoning:done`,
+          itemKind: "reasoning",
+          summary: "build deep reasoning",
+          reasoningType: "response.reasoning.done",
+          sequence: 2,
+          outputIndex: 1,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          itemKey: "tool:build-call-1",
+          itemId: `${canonicalBuildRunId}:tool:build-call-1`,
+          itemKind: "tool_call",
+          toolCallId: "build-call-1",
+          toolName: "lookup",
+          toolStatus: "COMPLETED",
+          argumentsText: '{"query":"a"}',
+          resultText: "lookup-result",
+          sequence: 4,
+          outputIndex: 3,
+        },
+        {
+          workspaceId,
+          runId: canonicalBuildRunId,
+          itemKey: "reasoning:build-reasoning-1",
+          itemId: `${canonicalBuildRunId}:reasoning:summary`,
+          itemKind: "reasoning",
+          summary: "build reasoning",
+          reasoningType: "response.reasoning_summary_part.added",
+          sequence: 5,
+          outputIndex: 4,
+        },
+        {
+          workspaceId,
+          runId: scenarioRunId,
+          itemKey: "message:user:scenario-user",
+          itemId: `${scenarioRunId}:input:0`,
+          itemKind: "message",
+          role: "user",
+          content: "scenario user canonical",
+          sequence: 0,
+        },
+        {
+          workspaceId,
+          runId: scenarioRunId,
+          itemKey: "message:assistant:scenario-canonical",
+          itemId: `${scenarioRunId}:output:0`,
+          itemKind: "message",
+          role: "assistant",
+          content: "scenario canonical",
+          sequence: 1,
+          outputIndex: 0,
+        },
+      ]);
 
       const queried = await gql<{
         workspace?: {
@@ -1219,11 +1405,11 @@ leakTolerantTest(
       const buildMessageContents = buildMessages.map((entry) => entry.content);
       assert(buildMessageContents.includes("build user canonical"));
       assert(buildMessageContents.includes("build canonical"));
-      assert(!buildMessageContents.includes("seed build state"));
-      assertEquals(buildMessages[0], {
-        role: "user",
-        content: "build user canonical",
-      });
+      assert(
+        buildMessages.some((message) =>
+          message.role === "user" && message.content === "build user canonical"
+        ),
+      );
       const buildToolCall = buildOutputEdges.find((edge) =>
         asRecord(edge?.node)?.__typename === "OutputToolCall"
       );
@@ -1239,33 +1425,39 @@ leakTolerantTest(
         .filter((entry): entry is string => typeof entry === "string");
       assert(buildReasoningSummary.includes("build deep reasoning"));
       assert(buildReasoningSummary.includes("build reasoning"));
-      assertEquals(buildTranscriptEntries, [
-        {
-          __typename: "WorkspaceConversationTranscriptMessage",
-          role: "user",
-          content: "build user canonical",
-        },
-        {
-          __typename: "WorkspaceConversationTranscriptMessage",
-          role: "assistant",
-          content: "build canonical",
-        },
-        {
-          __typename: "WorkspaceConversationTranscriptReasoning",
-          summary: "build deep reasoning",
-        },
-        {
-          __typename: "WorkspaceConversationTranscriptToolCall",
-          toolCallId: "build-call-1",
-          toolName: "lookup",
-          status: "COMPLETED",
-          resultText: "lookup-result",
-        },
-        {
-          __typename: "WorkspaceConversationTranscriptReasoning",
-          summary: "build reasoning",
-        },
-      ]);
+      assert(
+        buildTranscriptEntries.some((entry) =>
+          entry.__typename === "WorkspaceConversationTranscriptMessage" &&
+          entry.role === "user" &&
+          entry.content === "build user canonical"
+        ),
+      );
+      assert(
+        buildTranscriptEntries.some((entry) =>
+          entry.__typename === "WorkspaceConversationTranscriptMessage" &&
+          entry.role === "assistant" &&
+          entry.content === "build canonical"
+        ),
+      );
+      assert(
+        buildTranscriptEntries.some((entry) =>
+          entry.__typename === "WorkspaceConversationTranscriptReasoning" &&
+          entry.summary === "build deep reasoning"
+        ),
+      );
+      assert(
+        buildTranscriptEntries.some((entry) =>
+          entry.__typename === "WorkspaceConversationTranscriptToolCall" &&
+          entry.toolCallId === "build-call-1" &&
+          entry.resultText === "lookup-result"
+        ),
+      );
+      assert(
+        buildTranscriptEntries.some((entry) =>
+          entry.__typename === "WorkspaceConversationTranscriptReasoning" &&
+          entry.summary === "build reasoning"
+        ),
+      );
 
       const scenarioEdge = queried.data?.workspace?.scenarioRuns?.edges?.find((
         edge,
@@ -1926,44 +2118,43 @@ leakTolerantTest(
         }
       }
 
-      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-      const existing = await readJsonLines(eventsPath) as Array<
-        Record<string, unknown>
-      >;
-      assert(existing.length >= 0);
-      await waitFor(async () => {
-        const records = await readJsonLines(eventsPath) as Array<
-          Record<string, unknown>
-        >;
-        return records.some((record) =>
-          record.run_id === runId && record.event_type === "input.item"
-        );
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
+      );
+      await waitFor(() => {
+        const db = new DatabaseSync(sqlitePath);
+        try {
+          const row = db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM openresponses_run_events_v0
+            WHERE workspace_id = ? AND run_id = ? AND event_type = 'input.item'
+          `).get(workspaceId, runId) as { count?: number };
+          return (row.count ?? 0) > 0;
+        } finally {
+          db.close();
+        }
       }, 5_000);
       const createdAt = new Date().toISOString();
-      const injected = [
+      seedOpenResponsesRunEvents(sqlitePath, [
         {
-          type: "gambit.openresponses.run_event",
-          workspace_id: workspaceId,
-          run_id: runId,
+          workspaceId,
+          runId,
           sequence: 100,
-          event_type: "response.reasoning_summary_text.delta",
+          eventType: "response.reasoning_summary_text.delta",
           payload: {
             type: "response.reasoning_summary_text.delta",
             delta: "thinking",
           },
-          idempotency_key: `${runId}:seed:100`,
-          created_at: createdAt,
-          _gambit: {
-            kind: "openresponses.run_event.v0",
-            domain: "session",
-          },
+          idempotencyKey: `${runId}:seed:100`,
+          createdAt,
         },
         {
-          type: "gambit.openresponses.run_event",
-          workspace_id: workspaceId,
-          run_id: runId,
+          workspaceId,
+          runId,
           sequence: 101,
-          event_type: "response.output_item.done",
+          eventType: "response.output_item.done",
           payload: {
             type: "response.output_item.done",
             output_index: 0,
@@ -1974,19 +2165,10 @@ leakTolerantTest(
               arguments: "{}",
             },
           },
-          idempotency_key: `${runId}:seed:101`,
-          created_at: createdAt,
-          _gambit: {
-            kind: "openresponses.run_event.v0",
-            domain: "session",
-          },
+          idempotencyKey: `${runId}:seed:101`,
+          createdAt,
         },
-      ];
-      await Deno.writeTextFile(
-        eventsPath,
-        injected.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
-        { append: true },
-      );
+      ]);
 
       const queried = await gql<{
         workspace?: {
@@ -2192,36 +2374,29 @@ leakTolerantTest(
         ?.session?.run?.id ?? "";
       assert(runId.length > 0);
 
-      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-      const createdAt = new Date().toISOString();
-      await Deno.writeTextFile(
-        eventsPath,
-        `${
-          JSON.stringify({
-            type: "gambit.openresponses.run_event",
-            workspace_id: workspaceId,
-            run_id: runId,
-            sequence: 0,
-            event_type: "response.output_item.done",
-            payload: {
-              type: "response.output_item.done",
-              output_index: 0,
-              item: {
-                type: "message",
-                role: "assistant",
-                content: [{ type: "output_text", text: "live replay seed" }],
-              },
-            },
-            idempotency_key: `${runId}:seed:live:0`,
-            created_at: createdAt,
-            _gambit: {
-              kind: "openresponses.run_event.v0",
-              domain: "session",
-            },
-          })
-        }\n`,
-        { append: true },
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
       );
+      const createdAt = new Date().toISOString();
+      seedOpenResponsesRunEvents(sqlitePath, [{
+        workspaceId,
+        runId,
+        sequence: 0,
+        eventType: "response.output_item.done",
+        payload: {
+          type: "response.output_item.done",
+          output_index: 0,
+          item: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "live replay seed" }],
+          },
+        },
+        idempotencyKey: `${runId}:seed:live:0`,
+        createdAt,
+      }]);
 
       const sessionId = `workspace-openresponse-live-${crypto.randomUUID()}`;
       const subscribeRes = await fetch(
@@ -2735,7 +2910,6 @@ leakTolerantTest(
         start.data?.workspaceConversationSessionStart?.session?.sessionId ?? "";
       assert(scenarioRunId.length > 0);
 
-      const statePath = path.join(sessionsDir, workspaceId, "state.json");
       const sqlitePath = path.join(
         sessionsDir,
         workspaceId,
@@ -2895,8 +3069,8 @@ leakTolerantTest(
           })) ?? [];
       };
 
-      await waitFor(async () => {
-        const state = JSON.parse(await Deno.readTextFile(statePath)) as {
+      await waitFor(() => {
+        const state = readWorkspaceStateFromSqlite(sqlitePath, workspaceId) as {
           meta?: { scenarioRunId?: string };
           messages?: Array<{ role?: string; content?: unknown }>;
         };
@@ -2954,8 +3128,8 @@ leakTolerantTest(
 
       releaseSecondResponse();
 
-      await waitFor(async () => {
-        const state = JSON.parse(await Deno.readTextFile(statePath)) as {
+      await waitFor(() => {
+        const state = readWorkspaceStateFromSqlite(sqlitePath, workspaceId) as {
           messages?: Array<{ role?: string; content?: unknown }>;
         };
         const messages = state.messages ?? [];

@@ -329,6 +329,11 @@ const normalizationAst: NormalizationAst = {
         },
         {
           kind: "Scalar",
+          fieldName: "sqlitePath",
+          arguments: null,
+        },
+        {
+          kind: "Scalar",
           fieldName: "workbenchSelectedContextChips",
           arguments: null,
         },

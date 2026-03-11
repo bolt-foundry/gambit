@@ -1,5 +1,5 @@
 export type Mutation__GambitWorkspaceFeedbackSave__raw_response_type = {
-  workspaceFeedbackSave____input___v_input: {
+  workspaceFeedbackSave____input___v_input?: ({
     deleted: boolean,
     feedback?: ({
       id: string,
@@ -92,6 +92,6 @@ export type Mutation__GambitWorkspaceFeedbackSave__raw_response_type = {
         }>,
       },
     },
-  },
+  } | null),
 }
 

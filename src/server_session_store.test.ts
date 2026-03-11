@@ -4,13 +4,13 @@ import { DatabaseSync } from "node:sqlite";
 import { startWebSocketSimulator } from "./server.ts";
 import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
 import { createSessionStore } from "./server_session_store.ts";
+import { saveCanonicalWorkspaceState } from "./workspace_sqlite.ts";
 import {
   createBuildRun,
   createWorkspace,
   gql,
   modImportPath,
   parseGraphqlEnvelope,
-  readJsonLines,
   runSimulator,
 } from "./server_test_utils.ts";
 
@@ -29,6 +29,52 @@ async function waitFor(
   throw new Error("Timed out waiting for predicate");
 }
 
+function readWorkspaceStateFromSqlite(
+  sqlitePath: string,
+  workspaceId: string,
+): Record<string, unknown> {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    const row = db.prepare(
+      `SELECT state_json
+       FROM workspace_state_v0
+       WHERE workspace_id = ?`,
+    ).get(workspaceId) as { state_json?: string } | undefined;
+    assert(typeof row?.state_json === "string", "missing workspace state row");
+    return JSON.parse(row.state_json) as Record<string, unknown>;
+  } finally {
+    db.close();
+  }
+}
+
+function readWorkspaceEventsFromSqlite(
+  sqlitePath: string,
+  workspaceId: string,
+): Array<Record<string, unknown> & { offset: number }> {
+  const db = new DatabaseSync(sqlitePath);
+  try {
+    const rows = db.prepare(
+      `SELECT offset, payload_json
+       FROM workspace_events_v0
+       WHERE workspace_id = ?
+       ORDER BY offset ASC`,
+    ).all(workspaceId) as Array<{ offset?: number; payload_json?: string }>;
+    return rows.flatMap((row) => {
+      if (
+        typeof row.offset !== "number" || typeof row.payload_json !== "string"
+      ) {
+        return [];
+      }
+      return [{
+        ...(JSON.parse(row.payload_json) as Record<string, unknown>),
+        offset: row.offset,
+      }];
+    });
+  } finally {
+    db.close();
+  }
+}
+
 leakTolerantTest(
   "openresponses run-event store validates append payload, replays from sequence, supports idempotency, and streams live updates",
   async () => {
@@ -36,8 +82,6 @@ leakTolerantTest(
     const sessionsRoot = path.join(dir, "sessions");
     const workspaceId = "workspace-run-events";
     const sessionDir = path.join(sessionsRoot, workspaceId);
-    const statePath = path.join(sessionDir, "state.json");
-    const eventsPath = path.join(sessionDir, "events.jsonl");
     const store = createSessionStore({
       sessionsRoot,
       randomId: (prefix: string) => `${prefix}-${crypto.randomUUID()}`,
@@ -53,12 +97,9 @@ leakTolerantTest(
         meta.sessionDir = typeof meta.sessionDir === "string"
           ? meta.sessionDir
           : sessionDir;
-        meta.sessionStatePath = typeof meta.sessionStatePath === "string"
-          ? meta.sessionStatePath
-          : statePath;
-        meta.sessionEventsPath = typeof meta.sessionEventsPath === "string"
-          ? meta.sessionEventsPath
-          : eventsPath;
+        meta.sessionSqlitePath = typeof meta.sessionSqlitePath === "string"
+          ? meta.sessionSqlitePath
+          : path.join(sessionDir, "workspace.sqlite");
         meta.workspaceSchemaVersion = "workspace-state.v1";
         return {
           state: { ...state, meta },
@@ -74,8 +115,7 @@ leakTolerantTest(
       messages: [],
       meta: { workspaceId, sessionId: workspaceId },
     });
-    assert(initialState.meta?.sessionStatePath);
-    assert(initialState.meta?.sessionEventsPath);
+    assert(initialState.meta?.sessionSqlitePath);
     let validationError: Error | null = null;
     try {
       await store.appendOpenResponsesRunEvent(initialState, {
@@ -209,7 +249,7 @@ leakTolerantTest(
     const schemaVersionRow = db.prepare("PRAGMA user_version;").get() as {
       user_version?: number;
     };
-    assertEquals(schemaVersionRow.user_version, 4);
+    assertEquals(schemaVersionRow.user_version, 7);
     const sqliteRows = db.prepare(`
       SELECT workspace_id, run_id, sequence, event_type
       FROM openresponses_run_events_v0
@@ -389,39 +429,11 @@ leakTolerantTest(
       ),
     );
 
-    const legacyInjectedWithoutOffset = {
-      type: "gambit.openresponses.run_event",
-      workspace_id: workspaceId,
-      run_id: "run-1",
-      sequence: 5,
-      event_type: "response.reasoning_summary_text.delta",
-      payload: {
-        type: "response.reasoning_summary_text.delta",
-        delta: "from-jsonl",
-      },
-      idempotency_key: "run-1:legacy-jsonl:5",
-      created_at: new Date().toISOString(),
-      _gambit: {
-        kind: "openresponses.run_event.v0",
-        domain: "session",
-      },
-    };
-    await Deno.writeTextFile(
-      eventsPath,
-      `${JSON.stringify(legacyInjectedWithoutOffset)}\n`,
-      { append: true },
-    );
-    await waitFor(() =>
-      store.listOpenResponsesRunEvents({
-        workspaceId,
-        runId: "run-1",
-      }).length === 8
-    );
-    const replayAfterLegacyBackfill = store.listOpenResponsesRunEvents({
+    const replayAfterWrites = store.listOpenResponsesRunEvents({
       workspaceId,
       runId: "run-1",
     });
-    assertEquals(replayAfterLegacyBackfill.map((entry) => entry.sequence), [
+    assertEquals(replayAfterWrites.map((entry) => entry.sequence), [
       0,
       1,
       2,
@@ -440,8 +452,6 @@ leakTolerantTest(
     const sessionsRoot = path.join(dir, "sessions");
     const workspaceId = "workspace-committed-sequence";
     const sessionDir = path.join(sessionsRoot, workspaceId);
-    const statePath = path.join(sessionDir, "state.json");
-    const eventsPath = path.join(sessionDir, "events.jsonl");
     const store = createSessionStore({
       sessionsRoot,
       randomId: (prefix: string) => `${prefix}-${crypto.randomUUID()}`,
@@ -451,8 +461,7 @@ leakTolerantTest(
         meta.sessionId = workspaceId;
         meta.workspaceId = workspaceId;
         meta.sessionDir = sessionDir;
-        meta.sessionStatePath = statePath;
-        meta.sessionEventsPath = eventsPath;
+        meta.sessionSqlitePath = path.join(sessionDir, "workspace.sqlite");
         meta.workspaceSchemaVersion = "workspace-state.v1";
         return { state: { ...state, meta }, dir: sessionDir };
       },
@@ -572,23 +581,22 @@ leakTolerantTest(
     assert(result.workspaceId, "missing workspaceId");
 
     const sessionDir = path.join(sessionsDir, result.workspaceId!);
-    const statePath = path.join(sessionDir, "state.json");
-    const eventsPath = path.join(sessionDir, "events.jsonl");
-
-    const state = JSON.parse(await Deno.readTextFile(statePath)) as Record<
-      string,
-      unknown
-    >;
-    assert(!("traces" in state), "state.json should exclude traces");
-    const meta = state.meta as Record<string, unknown>;
-    assertEquals(meta.sessionEventsPath, eventsPath);
-    assertEquals(
-      meta.sessionBuildStatePath,
-      path.join(sessionDir, "build_state.json"),
+    const sqlitePath = path.join(sessionDir, "workspace.sqlite");
+    const state = readWorkspaceStateFromSqlite(
+      sqlitePath,
+      result.workspaceId!,
     );
-
-    const events = await readJsonLines(eventsPath);
-    assert(events.length > 0, "events.jsonl should have entries");
+    assert(!("traces" in state), "sqlite snapshot should exclude traces");
+    const meta = state.meta as Record<string, unknown>;
+    assertEquals(
+      meta.sessionSqlitePath,
+      sqlitePath,
+    );
+    const events = readWorkspaceEventsFromSqlite(
+      sqlitePath,
+      result.workspaceId!,
+    );
+    assert(events.length > 0, "expected persisted workspace events");
     assert(
       events.some((event) =>
         (event as { type?: string }).type ===
@@ -625,92 +633,6 @@ leakTolerantTest(
   },
 );
 leakTolerantTest(
-  "simulator run fails when provided workspace state has unsupported schema",
-  async () => {
-    const dir = await Deno.makeTempDir();
-    const sessionsDir = path.join(dir, "sessions");
-    const modHref = modImportPath();
-
-    const deckPath = path.join(dir, "schema-mismatch.deck.ts");
-    await Deno.writeTextFile(
-      deckPath,
-      `
-    import { defineDeck } from "${modHref}";
-    import { z } from "zod";
-    export default defineDeck({
-      inputSchema: z.string().optional(),
-      outputSchema: z.string().optional(),
-      modelParams: { model: "dummy-model" },
-    });
-    `,
-    );
-
-    const provider: ModelProvider = {
-      chat() {
-        return Promise.resolve({
-          message: { role: "assistant", content: "ok" },
-          finishReason: "stop",
-        });
-      },
-    };
-
-    const server = startWebSocketSimulator({
-      deckPath,
-      modelProvider: provider,
-      port: 0,
-      sessionDir: sessionsDir,
-    });
-
-    const port = (server.addr as Deno.NetAddr).port;
-
-    const legacyWorkspaceId = "legacy-workspace";
-    const legacyWorkspaceDir = path.join(sessionsDir, legacyWorkspaceId);
-    await Deno.mkdir(legacyWorkspaceDir, { recursive: true });
-    await Deno.writeTextFile(
-      path.join(legacyWorkspaceDir, "state.json"),
-      JSON.stringify({
-        runId: legacyWorkspaceId,
-        messages: [],
-        meta: {
-          workspaceSchemaVersion: "workspace-state.v0",
-        },
-      }),
-    );
-
-    const response = await gql<{
-      workspaceConversationSessionStart?: {
-        session?: { sessionId?: string };
-      };
-    }>(
-      port,
-      `
-        mutation StartScenario($input: WorkspaceConversationSessionStartInput!) {
-          workspaceConversationSessionStart(input: $input) {
-            session {
-              sessionId
-            }
-          }
-        }
-      `,
-      {
-        input: {
-          workspaceId: legacyWorkspaceId,
-          kind: "scenario",
-        },
-      },
-    );
-    // The invalid legacy state is rejected before a scenario session can start.
-    assertEquals(
-      response.data?.workspaceConversationSessionStart?.session?.sessionId ??
-        "",
-      "",
-    );
-
-    await server.shutdown();
-    await server.finished;
-  },
-);
-leakTolerantTest(
   "session delete requires explicit workspaceId when active workspace exists",
   async () => {
     const dir = await Deno.makeTempDir();
@@ -734,7 +656,6 @@ leakTolerantTest(
 
     const activeWorkspaceDir = path.join(sessionsDir, activeWorkspaceId);
     await Deno.mkdir(activeWorkspaceDir, { recursive: true });
-    await Deno.writeTextFile(path.join(activeWorkspaceDir, "state.json"), "{}");
 
     const provider: ModelProvider = {
       chat() {
@@ -869,11 +790,8 @@ leakTolerantTest(
     });
 
     const workspaceId = first.workspaceId!;
-    const statePath = path.join(sessionsDir, workspaceId, "state.json");
-    const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-    const events = await readJsonLines(eventsPath) as Array<
-      { offset?: number }
-    >;
+    const sqlitePath = path.join(sessionsDir, workspaceId, "workspace.sqlite");
+    const events = readWorkspaceEventsFromSqlite(sqlitePath, workspaceId);
     const offsets = events.map((event) => event.offset).filter((
       value,
     ): value is number => typeof value === "number");
@@ -882,7 +800,7 @@ leakTolerantTest(
       assertEquals(offsets[i], offsets[i - 1] + 1);
     }
     const maxOffset = Math.max(...offsets);
-    const state = JSON.parse(await Deno.readTextFile(statePath)) as {
+    const state = readWorkspaceStateFromSqlite(sqlitePath, workspaceId) as {
       meta?: { lastAppliedOffset?: number };
     };
     assert(typeof state.meta?.lastAppliedOffset === "number");
@@ -932,18 +850,22 @@ leakTolerantTest(
 
     const first = await runSimulator(port, { input: "one", stream: false });
     const workspaceId = first.workspaceId!;
-    const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-    const rows = await readJsonLines(eventsPath) as Array<
-      Record<string, unknown>
-    >;
+    const sqlitePath = path.join(sessionsDir, workspaceId, "workspace.sqlite");
+    const db = new DatabaseSync(sqlitePath);
+    const rows = db.prepare(
+      `SELECT offset, payload_json
+       FROM workspace_events_v0
+       WHERE workspace_id = ?
+       ORDER BY offset ASC`,
+    ).all(workspaceId) as Array<{ offset?: number; payload_json?: string }>;
     assert(rows.length >= 2, "expected at least two events");
     const secondOffset = rows[1].offset;
     assert(typeof secondOffset === "number");
-    rows[1].offset = secondOffset + 1;
-    await Deno.writeTextFile(
-      eventsPath,
-      rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
-    );
+    db.prepare(
+      `DELETE FROM workspace_events_v0
+       WHERE workspace_id = ? AND offset = ?`,
+    ).run(workspaceId, secondOffset);
+    db.close();
 
     const sessionRes = await fetch(
       `http://127.0.0.1:${port}/api/workspaces/${
@@ -959,7 +881,7 @@ leakTolerantTest(
   },
 );
 leakTolerantTest(
-  "session offsets remain monotonic when snapshot state write fails",
+  "runtime state stays sqlite-authoritative without sidecar artifacts",
   async () => {
     const dir = await Deno.makeTempDir();
     const sessionsDir = path.join(dir, "sessions");
@@ -999,14 +921,7 @@ leakTolerantTest(
     const first = await runSimulator(port, { input: "one", stream: false });
     const workspaceId = first.workspaceId!;
     const workspaceDir = path.join(sessionsDir, workspaceId);
-    const statePath = path.join(workspaceDir, "state.json");
-    const eventsPath = path.join(workspaceDir, "events.jsonl");
-
-    const state = JSON.parse(await Deno.readTextFile(statePath)) as {
-      meta?: Record<string, unknown>;
-    };
-    state.meta = { ...(state.meta ?? {}), sessionStatePath: workspaceDir };
-    await Deno.writeTextFile(statePath, JSON.stringify(state, null, 2) + "\n");
+    const sqlitePath = path.join(workspaceDir, "workspace.sqlite");
 
     await runSimulator(port, {
       input: "two",
@@ -1019,9 +934,7 @@ leakTolerantTest(
       workspaceId,
     });
 
-    const events = await readJsonLines(eventsPath) as Array<
-      { offset?: number }
-    >;
+    const events = readWorkspaceEventsFromSqlite(sqlitePath, workspaceId);
     const offsets = events.map((event) => event.offset).filter((
       value,
     ): value is number => typeof value === "number");
@@ -1029,7 +942,6 @@ leakTolerantTest(
     for (let i = 1; i < offsets.length; i += 1) {
       assertEquals(offsets[i], offsets[i - 1] + 1);
     }
-
     await server.shutdown();
     await server.finished;
   },
@@ -1070,9 +982,9 @@ leakTolerantTest(
     const workspaceId = "workspace-summary";
     const workspaceDir = path.join(sessionsDir, workspaceId);
     await Deno.mkdir(workspaceDir, { recursive: true });
-    await Deno.writeTextFile(
-      path.join(workspaceDir, "state.json"),
-      JSON.stringify({
+    saveCanonicalWorkspaceState(
+      path.join(workspaceDir, "workspace.sqlite"),
+      {
         runId: "legacy-run",
         messages: [{ role: "assistant", content: "hi" }],
         messageRefs: [{ id: "msg-1", role: "assistant" }],
@@ -1097,7 +1009,7 @@ leakTolerantTest(
             },
           ],
         },
-      }),
+      },
     );
 
     const server = startWebSocketSimulator({
@@ -1118,13 +1030,23 @@ leakTolerantTest(
       test?: { run?: { id?: string } };
     };
     assertEquals(body.test?.run?.id, "run-a");
+    const sqliteState = readWorkspaceStateFromSqlite(
+      path.join(workspaceDir, "workspace.sqlite"),
+      workspaceId,
+    ) as {
+      meta?: { scenarioRunSummaries?: Array<{ scenarioRunId?: string }> };
+    };
+    assertEquals(
+      Array.isArray(sqliteState.meta?.scenarioRunSummaries),
+      true,
+    );
 
     await server.shutdown();
     await server.finished;
   },
 );
 leakTolerantTest(
-  "workspace endpoint returns projection-backed build + session payload and writes build_state.json",
+  "workspace endpoint returns projection-backed build + session payload from sqlite-backed projections",
   async () => {
     const dir = await Deno.makeTempDir();
     const sessionsDir = path.join(dir, "sessions");
@@ -1165,17 +1087,6 @@ leakTolerantTest(
 
     const workspaceId = await createWorkspace(port);
     await createBuildRun({ port, workspaceId, message: "hello" });
-
-    // Wait for build projection write.
-    for (let i = 0; i < 30; i += 1) {
-      const exists = await Deno.stat(
-        path.join(sessionsDir, workspaceId, "build_state.json"),
-      )
-        .then(() => true)
-        .catch(() => false);
-      if (exists) break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
 
     const workspaceRes = await fetch(
       `http://127.0.0.1:${port}/api/workspaces/${

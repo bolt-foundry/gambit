@@ -643,30 +643,31 @@ async function main(): Promise<void> {
           ids.workspaceId,
           "workspace.sqlite",
         );
-        const statePath = path.join(
-          serveRoot,
-          ".gambit",
-          "workspaces",
-          ids.workspaceId,
-          "state.json",
-        );
-
-        const state = JSON.parse(await Deno.readTextFile(statePath)) as {
-          meta?: { scenarioRunId?: string };
-          messages?: Array<{ role?: string; content?: unknown }>;
-        };
-        if (state.meta?.scenarioRunId !== ids.runId) {
-          throw new Error(
-            `Expected state scenarioRunId ${ids.runId}, got ${state.meta?.scenarioRunId}.`,
-          );
-        }
-
         const db = new DatabaseSync(sqlitePath);
         let runEventCount = 0;
+        let stateMessageCount = 0;
         let sqliteMessages: Array<
           { role: string | null; content: string | null }
         > = [];
         try {
+          const stateRow = db.prepare(`
+            SELECT state_json
+            FROM workspace_state_v0
+            WHERE workspace_id = ?
+          `).get(ids.workspaceId) as { state_json?: string } | undefined;
+          if (typeof stateRow?.state_json !== "string") {
+            throw new Error("Expected workspace state row in sqlite.");
+          }
+          const state = JSON.parse(stateRow.state_json) as {
+            meta?: { scenarioRunId?: string };
+            messages?: Array<unknown>;
+          };
+          if (state.meta?.scenarioRunId !== ids.runId) {
+            throw new Error(
+              `Expected state scenarioRunId ${ids.runId}, got ${state.meta?.scenarioRunId}.`,
+            );
+          }
+          stateMessageCount = state.messages?.length ?? 0;
           const eventRow = db.prepare(`
             SELECT COUNT(*) AS count
             FROM openresponses_run_events_v0
@@ -879,7 +880,7 @@ async function main(): Promise<void> {
         logTestTabDemo("demo-complete", {
           workspaceId: ids.workspaceId,
           runId: ids.runId,
-          stateMessageCount: state.messages?.length ?? 0,
+          stateMessageCount,
           sqliteRunEventCount: runEventCount,
           graphqlMessageCount: graphqlMessages.length,
           feedbackScore,

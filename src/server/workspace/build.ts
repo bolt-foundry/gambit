@@ -92,9 +92,6 @@ export const createWorkspaceBuildService = (deps: {
       const key of [
         "sessionId",
         "sessionDir",
-        "sessionStatePath",
-        "sessionEventsPath",
-        "sessionBuildStatePath",
         "sessionSqlitePath",
         "workspaceSchemaVersion",
       ]

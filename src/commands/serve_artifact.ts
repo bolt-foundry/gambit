@@ -1,6 +1,12 @@
 import * as path from "@std/path";
 import { copy, ensureDir, existsSync } from "@std/fs";
 import { UntarStream } from "@std/tar";
+import {
+  readWorkspaceStateFromSqlite,
+  rewriteWorkspaceDeckRootInSqlite,
+  rewriteWorkspaceStateMetaInSqlite,
+  WORKSPACE_SQLITE_FILENAME,
+} from "../workspace_sqlite.ts";
 
 type RestoreServeArtifactArgs = {
   artifactPath: string;
@@ -146,14 +152,14 @@ export async function restoreServeArtifactBundle(
     }
 
     const manifestPath = path.join(stagingDir, "manifest.json");
-    const sessionStatePath = path.join(stagingDir, "session", "state.json");
-    const sessionEventsPath = path.join(stagingDir, "session", "events.jsonl");
-    if (
-      !existsSync(manifestPath) || !existsSync(sessionStatePath) ||
-      !existsSync(sessionEventsPath)
-    ) {
+    const sessionSqlitePath = path.join(
+      stagingDir,
+      "session",
+      WORKSPACE_SQLITE_FILENAME,
+    );
+    if (!existsSync(manifestPath) || !existsSync(sessionSqlitePath)) {
       throw new Error(
-        "Artifact is missing required files (manifest.json, session/state.json, session/events.jsonl).",
+        "Artifact is missing required files (manifest.json, session/workspace.sqlite).",
       );
     }
 
@@ -174,13 +180,18 @@ export async function restoreServeArtifactBundle(
       );
     }
 
-    const rawState = JSON.parse(await Deno.readTextFile(sessionStatePath)) as {
-      meta?: Record<string, unknown>;
-    };
-    const rawSessionId = typeof rawState.meta?.workspaceId === "string"
-      ? rawState.meta.workspaceId
-      : typeof rawState.meta?.sessionId === "string"
-      ? rawState.meta.sessionId
+    const canonical = readWorkspaceStateFromSqlite(sessionSqlitePath);
+    if (!canonical) {
+      throw new Error("Artifact workspace.sqlite is missing canonical state.");
+    }
+    const rawState = canonical.state;
+    const rawMeta = rawState.meta && typeof rawState.meta === "object"
+      ? rawState.meta as Record<string, unknown>
+      : {};
+    const rawSessionId = typeof rawMeta.workspaceId === "string"
+      ? rawMeta.workspaceId
+      : typeof rawMeta.sessionId === "string"
+      ? rawMeta.sessionId
       : `artifact-${fingerprint.slice(0, 12)}`;
     const sessionId = assertSafeSessionId(rawSessionId);
 
@@ -189,8 +200,7 @@ export async function restoreServeArtifactBundle(
     const fingerprintPath = path.join(sessionDir, ".artifact.sha256");
     const rootDeckPath = resolveWithin(sessionDir, entryFile);
     const deckRoot = path.join(sessionDir, "deck");
-    const stateTargetPath = path.join(sessionDir, "state.json");
-    const eventsTargetPath = path.join(sessionDir, "events.jsonl");
+    const sqliteTargetPath = path.join(sessionDir, WORKSPACE_SQLITE_FILENAME);
 
     if (existsSync(fingerprintPath)) {
       const existing = (await Deno.readTextFile(fingerprintPath)).trim();
@@ -209,8 +219,7 @@ export async function restoreServeArtifactBundle(
 
     if (
       existsSync(sessionDir) &&
-      (existsSync(stateTargetPath) || existsSync(eventsTargetPath) ||
-        existsSync(deckRoot))
+      (existsSync(sqliteTargetPath) || existsSync(deckRoot))
     ) {
       throw new Error(
         `Workspace ${sessionId} already exists and cannot be overwritten safely.`,
@@ -219,27 +228,29 @@ export async function restoreServeArtifactBundle(
 
     await ensureDir(sessionDir);
     await copy(path.join(stagingDir, "deck"), deckRoot, { overwrite: true });
-    await Deno.copyFile(sessionEventsPath, eventsTargetPath);
-
-    const nextMeta = {
-      ...(rawState.meta ?? {}),
-      sessionId,
-      workspaceId: sessionId,
-      deck: rootDeckPath,
-      workspaceRootDeckPath: rootDeckPath,
-      workspaceRootDir: deckRoot,
-      sessionDir,
-      sessionStatePath: stateTargetPath,
-      sessionEventsPath: eventsTargetPath,
-    };
-    const nextState = {
-      ...(rawState as Record<string, unknown>),
-      meta: nextMeta,
-    };
-    await Deno.writeTextFile(
-      stateTargetPath,
-      `${JSON.stringify(nextState, null, 2)}\n`,
-    );
+    await Deno.copyFile(sessionSqlitePath, sqliteTargetPath);
+    rewriteWorkspaceStateMetaInSqlite({
+      sqlitePath: sqliteTargetPath,
+      workspaceId: canonical.workspaceId,
+      mutate: (state) => ({
+        ...state,
+        meta: {
+          ...(state.meta ?? {}),
+          sessionId,
+          workspaceId: sessionId,
+          deck: rootDeckPath,
+          workspaceRootDeckPath: rootDeckPath,
+          workspaceRootDir: deckRoot,
+          sessionDir,
+          sessionSqlitePath: sqliteTargetPath,
+        },
+      }),
+    });
+    rewriteWorkspaceDeckRootInSqlite({
+      sqlitePath: sqliteTargetPath,
+      workspaceId: canonical.workspaceId,
+      rootDeckPath,
+    });
     await Deno.writeTextFile(fingerprintPath, `${fingerprint}\n`);
 
     return {

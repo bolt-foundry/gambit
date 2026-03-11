@@ -39,9 +39,8 @@ export type {
   DefaultedRuntime,
   DefaultedRuntimeRunOptions,
   RunDeckWithDefaultsOptions,
+  SessionArtifactsConfig,
 } from "./src/default_runtime.ts";
-/** Session artifact persistence config for default runtime runs. */
-export type { SessionArtifactsConfig } from "./src/session_artifacts.ts";
 /** Run a deck with default provider/model/runtime behavior. */
 export { runDeck } from "./src/default_runtime.ts";
 /** Run a deck directly through gambit-core without gambit defaults. */

@@ -7,7 +7,7 @@ export default 'query EntrypointSimulatorWorkspaceShell($workspaceId: ID!) {\
         deck,\
         deckSlug,\
         sessionDir,\
-        statePath,\
+        sqlitePath,\
         testBotName,\
       },\
     },\

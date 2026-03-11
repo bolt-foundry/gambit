@@ -112,7 +112,7 @@ export type SessionMeta = {
   createdAt?: string;
   gradingRuns?: Array<GradingRunRecord>;
   sessionDir?: string;
-  statePath?: string;
+  sqlitePath?: string;
 };
 
 export type OutgoingMessage =

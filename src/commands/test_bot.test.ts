@@ -1,9 +1,12 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
-import { loadState } from "@bolt-foundry/gambit-core";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import { runTestBotLoop } from "./test_bot.ts";
 import { modImportPath } from "../server_test_utils.ts";
+import {
+  loadCanonicalWorkspaceState,
+  saveCanonicalWorkspaceState,
+} from "../workspace_sqlite.ts";
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });
@@ -15,7 +18,7 @@ leakTolerantTest(
     const modHref = modImportPath();
     const rootDeckPath = path.join(dir, "root.deck.ts");
     const scenarioDeckPath = path.join(dir, "scenario-persona.deck.ts");
-    const statePath = path.join(dir, "state.json");
+    const statePath = path.join(dir, "workspace.sqlite");
 
     const deckSource = `
     import { defineDeck } from "${modHref}";
@@ -49,7 +52,7 @@ leakTolerantTest(
       statePath,
     });
 
-    const state = loadState(statePath);
+    const state = loadCanonicalWorkspaceState(statePath).state;
     assert(state, "expected persisted state");
     assertEquals(state.meta?.scenarioRunId, state.runId);
     assertEquals(state.meta?.scenarioConfigPath, scenarioDeckPath);
@@ -75,7 +78,7 @@ leakTolerantTest(
     const modHref = modImportPath();
     const rootDeckPath = path.join(dir, "root.deck.ts");
     const scenarioDeckPath = path.join(dir, "scenario-persona.deck.ts");
-    const statePath = path.join(dir, "state.json");
+    const statePath = path.join(dir, "workspace.sqlite");
 
     const deckSource = `
     import { defineDeck } from "${modHref}";
@@ -88,21 +91,18 @@ leakTolerantTest(
   `;
     await Deno.writeTextFile(rootDeckPath, deckSource);
     await Deno.writeTextFile(scenarioDeckPath, deckSource);
-    await Deno.writeTextFile(
-      statePath,
-      JSON.stringify({
-        runId: "run-existing",
-        messages: [
-          { role: "user", content: "legacy user turn" },
-          { role: "assistant", content: "legacy response" },
-        ],
-        messageRefs: [
-          { id: "msg-user", role: "user" },
-          { id: "msg-assistant", role: "assistant" },
-        ],
-        meta: {},
-      }),
-    );
+    saveCanonicalWorkspaceState(statePath, {
+      runId: "run-existing",
+      messages: [
+        { role: "user", content: "legacy user turn" },
+        { role: "assistant", content: "legacy response" },
+      ],
+      messageRefs: [
+        { id: "msg-user", role: "user" },
+        { id: "msg-assistant", role: "assistant" },
+      ],
+      meta: {},
+    });
 
     const provider: ModelProvider = {
       chat() {
@@ -122,7 +122,7 @@ leakTolerantTest(
       statePath,
     });
 
-    const state = loadState(statePath);
+    const state = loadCanonicalWorkspaceState(statePath).state;
     assert(state, "expected persisted state");
     assertEquals(state.meta?.scenarioRunId, "run-existing");
     assertEquals(state.meta?.scenarioConfigPath, scenarioDeckPath);
@@ -138,7 +138,7 @@ leakTolerantTest(
     const modHref = modImportPath();
     const rootDeckPath = path.join(dir, "root.deck.ts");
     const scenarioDeckPath = path.join(dir, "scenario-persona.deck.ts");
-    const statePath = path.join(dir, "state.json");
+    const statePath = path.join(dir, "workspace.sqlite");
 
     const deckSource = `
     import { defineDeck } from "${modHref}";

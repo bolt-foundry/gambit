@@ -7,6 +7,7 @@ export type Workspace__TestTab__param = {
 Client-exclusive ephemeral workbench chip selection. This field exists for Isograph-owned simulator state until durable persistence is needed.
     */
     readonly workbenchSelectedContextChips: string,
+    readonly sqlitePath: (string | null),
     readonly scenarioDecks: ReadonlyArray<{
       readonly id: string,
       readonly label: string,
@@ -85,6 +86,7 @@ A client pointer for the WorkspaceConversationTranscriptToolCall type.
 Client-exclusive ephemeral workbench chip selection. This field exists for Isograph-owned simulator state until durable persistence is needed.
     */
     workbenchSelectedContextChips: string,
+    readonly sqlitePath: (string | null),
     readonly scenarioDecks: ReadonlyArray<{
       readonly id: string,
       readonly label: string,

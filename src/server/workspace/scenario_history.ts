@@ -3,8 +3,12 @@ import type {
   SavedState,
   TraceEvent,
 } from "@bolt-foundry/gambit-core";
+import * as path from "@std/path";
+import { DatabaseSync } from "node:sqlite";
 import type { TestBotRunStatus } from "./types.ts";
 import { summarizeRespondCall, syncTestBotRunFromState } from "./helpers.ts";
+
+const WORKSPACE_EVENTS_SQLITE_TABLE = "workspace_events_v0";
 
 const extractPersistedWorkspacePayload = (
   record: Record<string, unknown>,
@@ -83,18 +87,25 @@ export const readPersistedTestRunStatusById = (
   workspaceId: string,
   requestedRunId: string,
 ): TestBotRunStatus | null => {
-  const eventsPath = typeof sessionState.meta?.sessionEventsPath === "string"
-    ? sessionState.meta.sessionEventsPath
+  const sqlitePath = typeof sessionState.meta?.sessionSqlitePath === "string"
+    ? sessionState.meta.sessionSqlitePath
+    : typeof sessionState.meta?.sessionDir === "string"
+    ? path.join(sessionState.meta.sessionDir, "workspace.sqlite")
     : undefined;
-  if (!eventsPath) return null;
+  if (!sqlitePath) return null;
   try {
-    const text = Deno.readTextFileSync(eventsPath);
+    const db = new DatabaseSync(sqlitePath);
     let latest: TestBotRunStatus | null = null;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
+    const rows = db.prepare(
+      `SELECT payload_json
+       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+       WHERE workspace_id = ? AND domain = 'test'
+       ORDER BY offset ASC`,
+    ).all(workspaceId) as Array<{ payload_json?: string }>;
+    for (const row of rows) {
       let parsed: Record<string, unknown> | null = null;
       try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
+        parsed = JSON.parse(row.payload_json ?? "") as Record<string, unknown>;
       } catch {
         continue;
       }
@@ -121,18 +132,25 @@ export const listPersistedTestRunStatuses = (
   sessionState: SavedState,
   workspaceId: string,
 ): Array<TestBotRunStatus> => {
-  const eventsPath = typeof sessionState.meta?.sessionEventsPath === "string"
-    ? sessionState.meta.sessionEventsPath
+  const sqlitePath = typeof sessionState.meta?.sessionSqlitePath === "string"
+    ? sessionState.meta.sessionSqlitePath
+    : typeof sessionState.meta?.sessionDir === "string"
+    ? path.join(sessionState.meta.sessionDir, "workspace.sqlite")
     : undefined;
-  if (!eventsPath) return [];
+  if (!sqlitePath) return [];
   try {
-    const text = Deno.readTextFileSync(eventsPath);
+    const db = new DatabaseSync(sqlitePath);
     const latestByRunId = new Map<string, TestBotRunStatus>();
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
+    const rows = db.prepare(
+      `SELECT payload_json
+       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+       WHERE workspace_id = ? AND domain = 'test'
+       ORDER BY offset ASC`,
+    ).all(workspaceId) as Array<{ payload_json?: string }>;
+    for (const row of rows) {
       let parsed: Record<string, unknown> | null = null;
       try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
+        parsed = JSON.parse(row.payload_json ?? "") as Record<string, unknown>;
       } catch {
         continue;
       }
@@ -263,17 +281,26 @@ export const isFeedbackEligiblePersistedTestRunMessageRef = (
   runId: string,
   messageRefId: string,
 ): boolean => {
-  const eventsPath = typeof state.meta?.sessionEventsPath === "string"
-    ? state.meta.sessionEventsPath
+  const sqlitePath = typeof state.meta?.sessionSqlitePath === "string"
+    ? state.meta.sessionSqlitePath
+    : typeof state.meta?.sessionDir === "string"
+    ? path.join(state.meta.sessionDir, "workspace.sqlite")
     : undefined;
-  if (!eventsPath) return false;
+  if (!sqlitePath) return false;
   try {
-    const text = Deno.readTextFileSync(eventsPath);
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
+    const db = new DatabaseSync(sqlitePath);
+    const rows = db.prepare(
+      `SELECT payload_json
+       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+       WHERE workspace_id = ? AND domain = 'test'
+       ORDER BY offset ASC`,
+    ).all(
+      typeof state.meta?.workspaceId === "string" ? state.meta.workspaceId : "",
+    ) as Array<{ payload_json?: string }>;
+    for (const row of rows) {
       let parsed: Record<string, unknown> | null = null;
       try {
-        parsed = JSON.parse(line) as Record<string, unknown>;
+        parsed = JSON.parse(row.payload_json ?? "") as Record<string, unknown>;
       } catch {
         continue;
       }

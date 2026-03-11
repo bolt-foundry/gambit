@@ -7,9 +7,12 @@ import {
   createWorkspace,
   gql,
   modImportPath,
-  readJsonLines,
   runSimulator,
 } from "./server_test_utils.ts";
+import {
+  exportWorkspaceEventsJsonlFromSqlite,
+  loadCanonicalWorkspaceState,
+} from "./workspace_sqlite.ts";
 
 async function readWorkspaceBuildState(port: number, workspaceId: string) {
   const response = await gql<{
@@ -256,8 +259,18 @@ leakTolerantTest(
       });
       assert(run.runId.length > 0, "missing build run id");
 
-      const eventsPath = path.join(sessionsDir, workspaceId, "events.jsonl");
-      const events = await readJsonLines(eventsPath);
+      const sqlitePath = path.join(
+        sessionsDir,
+        workspaceId,
+        "workspace.sqlite",
+      );
+      const events = exportWorkspaceEventsJsonlFromSqlite(
+        sqlitePath,
+        workspaceId,
+      )
+        .split("\n")
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line));
       assert(events.length > 0, "events.jsonl should have entries");
     } finally {
       await server.shutdown();
@@ -745,11 +758,9 @@ leakTolerantTest("simulator emits state updates for download", async () => {
     stream: false,
   });
   assert(result.workspaceId, "missing workspaceId");
-  const state = JSON.parse(
-    await Deno.readTextFile(
-      path.join(sessionsDir, result.workspaceId!, "state.json"),
-    ),
-  ) as {
+  const state = loadCanonicalWorkspaceState(
+    path.join(sessionsDir, result.workspaceId!, "workspace.sqlite"),
+  ).state as {
     messages?: Array<unknown>;
     meta?: { note?: string };
     runId?: string;

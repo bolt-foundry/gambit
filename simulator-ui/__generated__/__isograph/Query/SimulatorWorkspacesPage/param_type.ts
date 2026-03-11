@@ -10,7 +10,7 @@ export type Query__SimulatorWorkspacesPage__param = {
           readonly testBotName: (string | null),
           readonly createdAt: (string | null),
           readonly sessionDir: (string | null),
-          readonly statePath: (string | null),
+          readonly sqlitePath: (string | null),
         },
       }>,
     },

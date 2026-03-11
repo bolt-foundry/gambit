@@ -7,7 +7,7 @@ export type Query__EntrypointSimulatorWorkspaces__raw_response_type = {
         deck?: (string | null),
         deckSlug?: (string | null),
         sessionDir?: (string | null),
-        statePath?: (string | null),
+        sqlitePath?: (string | null),
         testBotName?: (string | null),
       },
     }>,

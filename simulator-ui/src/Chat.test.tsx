@@ -64,6 +64,7 @@ const {
   deriveBuildChatActivityState,
   encodeWorkbenchMessageWithErrorContext,
   formatElapsedDuration,
+  synthesizeWorkbenchMessageBody,
 } = await import("./Chat.tsx");
 const { globalStyles } = await import("./styles.ts");
 type BuildDisplayMessage = import("./utils.ts").BuildDisplayMessage;
@@ -886,7 +887,10 @@ Deno.test("ChatView sends chip-only message when Error chip is on and draft is e
     const decoded = decodeWorkbenchMessageWithErrorContext(sentMessage);
     assert(decoded);
     assertEquals(decoded.context.error, "Scenario failed");
-    assertEquals(decoded.body, "");
+    assertEquals(
+      decoded.body,
+      "I saw there was some context from a simulator run. Can you help me investigate it and update the bot if needed?",
+    );
   } finally {
     if (renderer) {
       await act(async () => {
@@ -894,6 +898,22 @@ Deno.test("ChatView sends chip-only message when Error chip is on and draft is e
       });
     }
   }
+});
+
+Deno.test("synthesizeWorkbenchMessageBody uses prompt-feedback fallback for rating chips", () => {
+  assertEquals(
+    synthesizeWorkbenchMessageBody([{
+      source: "message_rating",
+      workspaceId: "ws-1",
+      runId: "run-1",
+      capturedAt: "2026-03-10T00:00:00.000Z",
+      messageRefId: "msg-1",
+      sqlitePath: "/tmp/ws-1/workspace.sqlite",
+      score: -3,
+      reason: "too nice",
+    }]),
+    "I saw there was feedback on our prompt. Can you help me investigate it and update the bot if needed?",
+  );
 });
 
 Deno.test("formatElapsedDuration renders mm:ss", () => {
