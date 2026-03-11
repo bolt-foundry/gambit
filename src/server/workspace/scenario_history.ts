@@ -95,34 +95,41 @@ export const readPersistedTestRunStatusById = (
   if (!sqlitePath) return null;
   try {
     const db = new DatabaseSync(sqlitePath);
-    let latest: TestBotRunStatus | null = null;
-    const rows = db.prepare(
-      `SELECT payload_json
-       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
-       WHERE workspace_id = ? AND domain = 'test'
-       ORDER BY offset ASC`,
-    ).all(workspaceId) as Array<{ payload_json?: string }>;
-    for (const row of rows) {
-      let parsed: Record<string, unknown> | null = null;
-      try {
-        parsed = JSON.parse(row.payload_json ?? "") as Record<string, unknown>;
-      } catch {
-        continue;
+    try {
+      let latest: TestBotRunStatus | null = null;
+      const rows = db.prepare(
+        `SELECT payload_json
+         FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+         WHERE workspace_id = ? AND domain = 'test'
+         ORDER BY offset ASC`,
+      ).all(workspaceId) as Array<{ payload_json?: string }>;
+      for (const row of rows) {
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = JSON.parse(row.payload_json ?? "") as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+        const payload = extractPersistedWorkspacePayload(parsed);
+        if (
+          payload.type !== "testBotStatus" &&
+          payload.type !== "gambit.test.status"
+        ) continue;
+        const normalized = normalizePersistedTestRunStatus(
+          payload.run,
+          workspaceId,
+        );
+        if (!normalized || normalized.id !== requestedRunId) continue;
+        latest = normalized;
       }
-      if (!parsed || typeof parsed !== "object") continue;
-      const payload = extractPersistedWorkspacePayload(parsed);
-      if (
-        payload.type !== "testBotStatus" &&
-        payload.type !== "gambit.test.status"
-      ) continue;
-      const normalized = normalizePersistedTestRunStatus(
-        payload.run,
-        workspaceId,
-      );
-      if (!normalized || normalized.id !== requestedRunId) continue;
-      latest = normalized;
+      return latest;
+    } finally {
+      db.close();
     }
-    return latest;
   } catch {
     return null;
   }
@@ -140,34 +147,41 @@ export const listPersistedTestRunStatuses = (
   if (!sqlitePath) return [];
   try {
     const db = new DatabaseSync(sqlitePath);
-    const latestByRunId = new Map<string, TestBotRunStatus>();
-    const rows = db.prepare(
-      `SELECT payload_json
-       FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
-       WHERE workspace_id = ? AND domain = 'test'
-       ORDER BY offset ASC`,
-    ).all(workspaceId) as Array<{ payload_json?: string }>;
-    for (const row of rows) {
-      let parsed: Record<string, unknown> | null = null;
-      try {
-        parsed = JSON.parse(row.payload_json ?? "") as Record<string, unknown>;
-      } catch {
-        continue;
+    try {
+      const latestByRunId = new Map<string, TestBotRunStatus>();
+      const rows = db.prepare(
+        `SELECT payload_json
+         FROM ${WORKSPACE_EVENTS_SQLITE_TABLE}
+         WHERE workspace_id = ? AND domain = 'test'
+         ORDER BY offset ASC`,
+      ).all(workspaceId) as Array<{ payload_json?: string }>;
+      for (const row of rows) {
+        let parsed: Record<string, unknown> | null = null;
+        try {
+          parsed = JSON.parse(row.payload_json ?? "") as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          continue;
+        }
+        if (!parsed || typeof parsed !== "object") continue;
+        const payload = extractPersistedWorkspacePayload(parsed);
+        if (
+          payload.type !== "testBotStatus" &&
+          payload.type !== "gambit.test.status"
+        ) continue;
+        const normalized = normalizePersistedTestRunStatus(
+          payload.run,
+          workspaceId,
+        );
+        if (!normalized || !normalized.id) continue;
+        latestByRunId.set(normalized.id, normalized);
       }
-      if (!parsed || typeof parsed !== "object") continue;
-      const payload = extractPersistedWorkspacePayload(parsed);
-      if (
-        payload.type !== "testBotStatus" &&
-        payload.type !== "gambit.test.status"
-      ) continue;
-      const normalized = normalizePersistedTestRunStatus(
-        payload.run,
-        workspaceId,
-      );
-      if (!normalized || !normalized.id) continue;
-      latestByRunId.set(normalized.id, normalized);
+      return [...latestByRunId.values()];
+    } finally {
+      db.close();
     }
-    return [...latestByRunId.values()];
   } catch {
     return [];
   }
