@@ -188,12 +188,12 @@ export const createWorkspaceScenarioService = (deps: {
   const startTestBotRun = (runOpts: {
     runId?: string;
     maxTurnsOverride?: number;
-    deckInput?: unknown;
-    botInput?: unknown;
+    assistantInit?: unknown;
+    scenarioInput?: unknown;
     initialUserMessage?: string;
-    botDeckPath?: string;
-    botDeckId?: string;
-    botDeckLabel?: string;
+    scenarioDeckPath?: string;
+    scenarioDeckId?: string;
+    scenarioDeckLabel?: string;
     initFill?: TestBotInitFill;
     initFillTrace?: {
       args: Record<string, unknown>;
@@ -203,10 +203,10 @@ export const createWorkspaceScenarioService = (deps: {
     workspaceRecord?: { id: string; rootDir: string; rootDeckPath: string };
     baseMeta?: Record<string, unknown>;
   } = {}): TestBotRunStatus => {
-    const botDeckPath = typeof runOpts.botDeckPath === "string"
-      ? runOpts.botDeckPath
+    const scenarioDeckPath = typeof runOpts.scenarioDeckPath === "string"
+      ? runOpts.scenarioDeckPath
       : undefined;
-    if (!botDeckPath) {
+    if (!scenarioDeckPath) {
       throw new Error("Missing scenario deck path");
     }
     const defaultMaxTurns = 12;
@@ -217,19 +217,19 @@ export const createWorkspaceScenarioService = (deps: {
         { min: 1, max: 200 },
       ),
     );
-    const deckInput = runOpts.deckInput;
-    const hasDeckInput = deckInput !== undefined;
-    const botInput: unknown = runOpts.botInput;
+    const assistantInit = runOpts.assistantInit;
+    const hasAssistantInit = assistantInit !== undefined;
+    const scenarioInput: unknown = runOpts.scenarioInput;
     const initialUserMessage = typeof runOpts.initialUserMessage === "string"
       ? runOpts.initialUserMessage.trim()
       : "";
-    const botConfigPath = botDeckPath;
-    const testBotName = path.basename(botConfigPath).replace(
+    const scenarioConfigPath = scenarioDeckPath;
+    const testBotName = path.basename(scenarioConfigPath).replace(
       /\.deck\.(md|ts)$/i,
       "",
     );
-    const selectedScenarioDeckId = runOpts.botDeckId ?? testBotName;
-    const selectedScenarioDeckLabel = runOpts.botDeckLabel ?? testBotName;
+    const selectedScenarioDeckId = runOpts.scenarioDeckId ?? testBotName;
+    const selectedScenarioDeckLabel = runOpts.scenarioDeckLabel ?? testBotName;
     const runId = typeof runOpts.runId === "string" &&
         runOpts.runId.trim().length > 0
       ? runOpts.runId.trim()
@@ -376,9 +376,9 @@ export const createWorkspaceScenarioService = (deps: {
         : undefined;
       if (!assistantMessage && !seedPrompt) return "";
       const result = await runDeckWithFallback({
-        path: botDeckPath,
-        input: botInput,
-        inputProvided: botInput !== undefined,
+        path: scenarioDeckPath,
+        input: scenarioInput,
+        inputProvided: scenarioInput !== undefined,
         modelProvider: deps.modelProvider,
         state: deckBotState,
         allowRootStringInput: true,
@@ -408,8 +408,8 @@ export const createWorkspaceScenarioService = (deps: {
         if (!controller.signal.aborted && shouldRunInitial) {
           const initialResult = await runDeck({
             path: deps.getResolvedDeckPath(),
-            input: deckInput,
-            inputProvided: hasDeckInput,
+            input: assistantInit,
+            inputProvided: hasAssistantInit,
             modelProvider: deps.modelProvider,
             defaultModel: deps.model,
             modelOverride: deps.modelForce,
@@ -435,12 +435,12 @@ export const createWorkspaceScenarioService = (deps: {
                 ...(nextStateWithSource.meta ?? {}),
                 testBot: true,
                 testBotRunId: runId,
-                testBotConfigPath: botConfigPath,
+                testBotConfigPath: scenarioConfigPath,
                 testBotName,
                 scenarioRunId: runId,
                 selectedScenarioDeckId,
                 selectedScenarioDeckLabel,
-                scenarioConfigPath: botConfigPath,
+                scenarioConfigPath,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
                 ...(runOpts.workspaceId
                   ? { workspaceId: runOpts.workspaceId }
@@ -490,8 +490,8 @@ export const createWorkspaceScenarioService = (deps: {
           if (!userMessage) break;
           const rootResult = await runDeck({
             path: deps.getResolvedDeckPath(),
-            input: deckInput,
-            inputProvided: hasDeckInput,
+            input: assistantInit,
+            inputProvided: hasAssistantInit,
             modelProvider: deps.modelProvider,
             defaultModel: deps.model,
             modelOverride: deps.modelForce,
@@ -517,12 +517,12 @@ export const createWorkspaceScenarioService = (deps: {
                 ...(nextStateWithSource.meta ?? {}),
                 testBot: true,
                 testBotRunId: runId,
-                testBotConfigPath: botConfigPath,
+                testBotConfigPath: scenarioConfigPath,
                 testBotName,
                 scenarioRunId: runId,
                 selectedScenarioDeckId,
                 selectedScenarioDeckLabel,
-                scenarioConfigPath: botConfigPath,
+                scenarioConfigPath,
                 ...(run.initFill ? { testBotInitFill: run.initFill } : {}),
                 ...(runOpts.workspaceId
                   ? { workspaceId: runOpts.workspaceId }
@@ -575,7 +575,7 @@ export const createWorkspaceScenarioService = (deps: {
           deps.logger.error(
             `[sim] scenario run failed runId=${runId} workspaceId=${
               run.workspaceId ?? runOpts.workspaceId ?? "unknown"
-            } rootDeck=${deps.getResolvedDeckPath()} scenarioDeck=${botDeckPath} error=${run.error}${
+            } rootDeck=${deps.getResolvedDeckPath()} scenarioDeck=${scenarioDeckPath} error=${run.error}${
               stack ? `\n${stack}` : ""
             }`,
           );
@@ -768,12 +768,12 @@ export const createWorkspaceScenarioService = (deps: {
       runId: args.runId,
       workspaceId: args.workspaceId,
       workspaceRecord,
-      botDeckPath: scenarioDeck.path,
-      botDeckId: scenarioDeck.id,
-      botDeckLabel: scenarioDeck.label,
+      scenarioDeckPath: scenarioDeck.path,
+      scenarioDeckId: scenarioDeck.id,
+      scenarioDeckLabel: scenarioDeck.label,
       maxTurnsOverride: scenarioDeck.maxTurns,
-      botInput: parsedScenarioInput,
-      deckInput: assistantInit,
+      scenarioInput: parsedScenarioInput,
+      assistantInit,
       baseMeta: {
         scenarioRunMode: "scenario",
       },

@@ -9,11 +9,23 @@ export type TestTabDemoFixture = {
 
 type TestTabDemoFixtureOptions = {
   includeBrokenScenario?: boolean;
+  useDistinctInputSchemas?: boolean;
 };
 
 const ROOT_PROMPT_HEADER = `+++
 label = "Test Tab Demo Root"
 description = "Fixture root deck for test-tab demo."
+
+[modelParams]
+model = ["openrouter/openai/gpt-5.1-chat"]
+`;
+
+const ROOT_PROMPT_HEADER_WITH_ASSISTANT_SCHEMA = `+++
+label = "Test Tab Demo Root"
+description = "Fixture root deck for test-tab demo."
+startMode = "assistant"
+contextSchema = "./schemas/assistant_init.zod.ts"
+responseSchema = "gambit://schemas/scenarios/plain_chat_output.zod.ts"
 
 [modelParams]
 model = ["openrouter/openai/gpt-5.1-chat"]
@@ -76,6 +88,21 @@ model = ["openrouter/openai/gpt-5.1-chat"]
 Ask for a quick project status update.
 `;
 
+const SCENARIO_ALPHA_PROMPT_WITH_DISTINCT_SCHEMA = `+++
+label = "Alpha scenario"
+description = "Fixture scenario alpha."
+contextSchema = "../../schemas/scenario_input.zod.ts"
+responseSchema = "gambit://schemas/scenarios/plain_chat_output.zod.ts"
+
+[modelParams]
+model = ["openrouter/openai/gpt-5.1-chat"]
++++
+
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
+Use the scenarioToken field to ask for a project status update.
+`;
+
 const SCENARIO_BETA_PROMPT = `+++
 label = "Beta scenario"
 description = "Fixture scenario beta."
@@ -89,6 +116,21 @@ model = ["openrouter/openai/gpt-5.1-chat"]
 ![scenario-participant](gambit://snippets/scenario-participant.md)
 
 Ask for a short summary of completed tasks.
+`;
+
+const SCENARIO_BETA_PROMPT_WITH_DISTINCT_SCHEMA = `+++
+label = "Beta scenario"
+description = "Fixture scenario beta."
+contextSchema = "../../schemas/scenario_input.zod.ts"
+responseSchema = "gambit://schemas/scenarios/plain_chat_output.zod.ts"
+
+[modelParams]
+model = ["openrouter/openai/gpt-5.1-chat"]
++++
+
+![scenario-participant](gambit://snippets/scenario-participant.md)
+
+Use the scenarioToken field to ask for a short summary of completed tasks.
 `;
 
 const SCENARIO_BROKEN_PROMPT = `+++
@@ -127,11 +169,15 @@ export async function createTestTabDemoFixture(
   options: TestTabDemoFixtureOptions = {},
 ): Promise<TestTabDemoFixture> {
   const includeBrokenScenario = options.includeBrokenScenario ?? true;
+  const useDistinctInputSchemas = options.useDistinctInputSchemas ?? false;
   const rootDeckPath = path.join(serveRoot, "PROMPT.md");
   const alphaPath = path.join(serveRoot, "scenarios", "alpha", "PROMPT.md");
   const betaPath = path.join(serveRoot, "scenarios", "beta", "PROMPT.md");
   const brokenPath = path.join(serveRoot, "scenarios", "broken", "PROMPT.md");
   const graderPath = path.join(serveRoot, "graders", "default", "PROMPT.md");
+  const schemaDir = path.join(serveRoot, "schemas");
+  const assistantSchemaPath = path.join(schemaDir, "assistant_init.zod.ts");
+  const scenarioSchemaPath = path.join(schemaDir, "scenario_input.zod.ts");
 
   await ensureDir(path.dirname(alphaPath));
   await ensureDir(path.dirname(betaPath));
@@ -139,16 +185,54 @@ export async function createTestTabDemoFixture(
     await ensureDir(path.dirname(brokenPath));
   }
   await ensureDir(path.dirname(graderPath));
+  if (useDistinctInputSchemas) {
+    await ensureDir(schemaDir);
+  }
   await Deno.writeTextFile(
     rootDeckPath,
-    buildRootPrompt(includeBrokenScenario),
+    useDistinctInputSchemas
+      ? buildRootPrompt(includeBrokenScenario).replace(
+        ROOT_PROMPT_HEADER.trimEnd(),
+        ROOT_PROMPT_HEADER_WITH_ASSISTANT_SCHEMA.trimEnd(),
+      )
+      : buildRootPrompt(includeBrokenScenario),
   );
-  await Deno.writeTextFile(alphaPath, SCENARIO_ALPHA_PROMPT);
-  await Deno.writeTextFile(betaPath, SCENARIO_BETA_PROMPT);
+  await Deno.writeTextFile(
+    alphaPath,
+    useDistinctInputSchemas
+      ? SCENARIO_ALPHA_PROMPT_WITH_DISTINCT_SCHEMA
+      : SCENARIO_ALPHA_PROMPT,
+  );
+  await Deno.writeTextFile(
+    betaPath,
+    useDistinctInputSchemas
+      ? SCENARIO_BETA_PROMPT_WITH_DISTINCT_SCHEMA
+      : SCENARIO_BETA_PROMPT,
+  );
   if (includeBrokenScenario) {
     await Deno.writeTextFile(brokenPath, SCENARIO_BROKEN_PROMPT);
   }
   await Deno.writeTextFile(graderPath, DEFAULT_GRADER_PROMPT);
+  if (useDistinctInputSchemas) {
+    await Deno.writeTextFile(
+      assistantSchemaPath,
+      `import { z } from "zod";
+
+export default z.object({
+  assistantToken: z.string().trim().min(1),
+}).strict();
+`,
+    );
+    await Deno.writeTextFile(
+      scenarioSchemaPath,
+      `import { z } from "zod";
+
+export default z.object({
+  scenarioToken: z.string().trim().min(1),
+}).strict();
+`,
+    );
+  }
 
   return {
     rootDeckPath,

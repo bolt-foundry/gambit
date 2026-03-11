@@ -15,6 +15,10 @@ import Panel from "./gds/Panel.tsx";
 import Button from "./gds/Button.tsx";
 import Badge from "./gds/Badge.tsx";
 import Callout from "./gds/Callout.tsx";
+import {
+  buildAssistantInitFillMessage,
+  buildTestTabBlockingMessage,
+} from "./testTabValidation.ts";
 
 type Props = {
   run: TestBotRun;
@@ -26,12 +30,12 @@ type Props = {
   activeWorkspaceId: string | null;
   requestedRunNotFound: boolean;
   canStart: boolean;
-  canRunPersona: boolean;
-  hasPersonaSelection: boolean;
-  botJsonErrorCount: number;
-  deckJsonErrorCount: number;
-  missingBotInput: Array<string>;
-  missingDeckInit: Array<string>;
+  hasScenarioDecks: boolean;
+  hasScenarioSelection: boolean;
+  scenarioJsonErrorCount: number;
+  assistantInitJsonErrorCount: number;
+  missingScenarioFields: Array<string>;
+  missingAssistantInitFields: Array<string>;
   lastInitFill: TestBotRun["initFill"] | null;
   isUserStart: boolean;
   showStartOverlay: boolean;
@@ -85,12 +89,12 @@ export default function TestBotChatPanel(props: Props) {
     activeWorkspaceId,
     requestedRunNotFound,
     canStart,
-    canRunPersona,
-    hasPersonaSelection,
-    botJsonErrorCount,
-    deckJsonErrorCount,
-    missingBotInput,
-    missingDeckInit,
+    hasScenarioDecks,
+    hasScenarioSelection,
+    scenarioJsonErrorCount,
+    assistantInitJsonErrorCount,
+    missingScenarioFields,
+    missingAssistantInitFields,
     lastInitFill,
     isUserStart,
     showStartOverlay,
@@ -221,28 +225,20 @@ export default function TestBotChatPanel(props: Props) {
           )}
         </div>
       )}
-      {!canStart && canRunPersona && (
+      {!canStart && hasScenarioDecks && (
         <div className="error">
-          {!hasPersonaSelection
-            ? "Select a persona deck to run."
-            : botJsonErrorCount > 0 || deckJsonErrorCount > 0
-            ? "Fix invalid JSON fields to run."
-            : missingBotInput.length > 0
-            ? `Missing required bot inputs: ${
-              missingBotInput.slice(0, 6).join(", ")
-            }${missingBotInput.length > 6 ? "…" : ""}`
-            : missingDeckInit.length > 0
-            ? `Missing required init fields: ${
-              missingDeckInit.slice(0, 6).join(", ")
-            }${missingDeckInit.length > 6 ? "…" : ""}`
-            : ""}
+          {buildTestTabBlockingMessage({
+            hasScenarioSelection,
+            scenarioJsonErrorCount,
+            assistantInitJsonErrorCount,
+            missingScenarioFields,
+            missingAssistantInitFields,
+          })}
         </div>
       )}
-      {canStart && missingDeckInit.length > 0 && (
+      {canStart && missingAssistantInitFields.length > 0 && (
         <Callout>
-          Missing required init fields will be requested from the persona:{" "}
-          {missingDeckInit.slice(0, 6).join(", ")}
-          {missingDeckInit.length > 6 ? "…" : ""}
+          {buildAssistantInitFillMessage(missingAssistantInitFields)}
         </Callout>
       )}
       <div className="test-bot-thread">
