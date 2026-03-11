@@ -1,4 +1,4 @@
-import { waitForPath } from "../../../../demo-runner/src/e2e/utils.ts";
+import { waitForPath } from "@bolt-foundry/demo-runner";
 
 type WaitFn = (ms: number) => Promise<void>;
 

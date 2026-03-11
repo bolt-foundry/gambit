@@ -4,10 +4,10 @@
 import * as path from "@std/path";
 import {
   currentPath,
+  DemoServerError,
   runE2e,
   waitForPath,
-} from "../../../demo-runner/src/e2e/utils.ts";
-import { DemoServerError } from "../../../demo-runner/src/runner.ts";
+} from "@bolt-foundry/demo-runner";
 import { createTestTabDemoFixture } from "./fixtures/test-tab-fixture.ts";
 import {
   ensureWorkspaceBuildPath,
