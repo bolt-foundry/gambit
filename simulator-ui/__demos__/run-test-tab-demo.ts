@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// Shortcut: `bft gambit-demo:test-tab`
+// Canonical command: `bft browser demo gambit-test-tab`
 
 import * as path from "@std/path";
 import { DatabaseSync } from "node:sqlite";

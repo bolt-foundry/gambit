@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// Shortcut: `bft gambit-demo:full`
+// Canonical command: `bft browser demo gambit-full`
 
 import * as path from "@std/path";
 import {
