@@ -1,5 +1,5 @@
 #!/usr/bin/env -S deno run -A
-// Shortcut: `bft gambit-demo:verify-tab`
+// Canonical command: `bft browser demo gambit-verify-tab`
 
 import * as path from "@std/path";
 import {
