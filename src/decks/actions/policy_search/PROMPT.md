@@ -16,7 +16,7 @@ Your job: read and summarize the most relevant policies for an upcoming change.
 
 Discovery flow:
 
-1. Call `policy_read` with `path="policy/README.md"` first.
+1. Call `policy_read` with `path="company-workloops/policy/README.md"` first.
 2. Discover candidate policy file paths from the README markdown links.
 3. Select the most relevant policy paths for the requested change.
 4. Call `policy_read` for each selected policy path.
@@ -29,7 +29,7 @@ Selection rules:
 - Prefer 2-3 docs by default unless a broader set is clearly needed.
 - Always include `policy/deck-format-1.0.md` when frontmatter, schema, or deck
   structure may change.
-- If uncertain, include `policy/README.md` first.
+- If uncertain, include `company-workloops/policy/README.md` first.
 
 Response requirements:
 

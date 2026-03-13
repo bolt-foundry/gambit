@@ -32,6 +32,38 @@ async function writeTempDeck(dir: string, filename: string, contents: string) {
   return target;
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function waitForWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutId: number | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 Deno.test("deck loads contextSchema/responseSchema aliases", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -7259,7 +7291,7 @@ Deno.test("orchestration worker serial scheduler runs one child tool invocation 
       outputSchema: z.string(),
       run: async (ctx) => {
         await Deno.writeTextFile(ctx.input.path, "start" + ctx.input.id + "\\n", { append: true });
-        await new Promise((resolve) => setTimeout(resolve, 60));
+        await new Promise((resolve) => setTimeout(resolve, 10));
         await Deno.writeTextFile(ctx.input.path, "end" + ctx.input.id + "\\n", { append: true });
         return "ok-" + ctx.input.id;
       },
@@ -8266,6 +8298,8 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
   let childSawSignal = false;
   let childAborted = false;
   let childResolved = false;
+  const childStarted = createDeferred<void>();
+  const childAbortedSignal = createDeferred<void>();
   const provider: ModelProvider = {
     chat(input) {
       const system = String(input.messages[0]?.content ?? "");
@@ -8282,26 +8316,18 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
             }],
           });
         }
-        return new Promise((resolve) => {
-          const startedAt = Date.now();
-          const waitForChildStart = () => {
-            if (childProviderCalled || Date.now() - startedAt > 3000) {
-              resolve({
-                message: { role: "assistant", content: "parent done" },
-                finishReason: "stop",
-              });
-              return;
-            }
-            setTimeout(waitForChildStart, 5);
-          };
-          waitForChildStart();
-        });
+        return waitForWithTimeout(childStarted.promise, 500, "child start")
+          .then(() => ({
+            message: { role: "assistant", content: "parent done" },
+            finishReason: "stop" as const,
+          }));
       }
       if (!system.includes("ASYNC-CANCEL-CHILD-WORKER")) {
         throw new Error("unexpected provider call");
       }
       childProviderCalled = true;
       childSawSignal = Boolean(input.signal);
+      childStarted.resolve();
       return new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           childResolved = true;
@@ -8315,6 +8341,7 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
           () => {
             childAborted = true;
             clearTimeout(timeoutId);
+            childAbortedSignal.resolve();
             reject(new DOMException("Run canceled", "AbortError"));
           },
           { once: true },
@@ -8340,7 +8367,7 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
   });
 
   assertEquals(result, "parent done");
-  await new Promise((resolve) => setTimeout(resolve, 250));
+  await waitForWithTimeout(childAbortedSignal.promise, 500, "child abort");
   assertEquals(childProviderCalled, true);
   assertEquals(childSawSignal, true);
   assertEquals(childAborted, true);
