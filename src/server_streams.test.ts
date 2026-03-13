@@ -533,8 +533,10 @@ leakTolerantTest(
     import { z } from "zod";
     export default defineDeck({
       inputSchema: z.string().optional(),
-      outputSchema: z.string().optional(),
-      modelParams: { model: "dummy-model" },
+      outputSchema: z.string(),
+      run() {
+        return "";
+      },
     });
     `,
     );
@@ -546,8 +548,10 @@ leakTolerantTest(
     import { z } from "zod";
     export default defineDeck({
       inputSchema: z.string().optional(),
-      outputSchema: z.string().optional(),
-      modelParams: { model: "dummy-model" },
+      outputSchema: z.string(),
+      run() {
+        return "";
+      },
     });
     `,
     );
@@ -605,30 +609,46 @@ leakTolerantTest(
         workspaceId,
         scenarioDeckId: "low-max-turns",
       });
-      const lowStatusRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspaces/${
-          encodeURIComponent(workspaceId)
-        }/test/${encodeURIComponent(lowRun.runId)}`,
-      );
-      const lowRunBody = await lowStatusRes.json() as {
-        test?: { run?: { maxTurns?: number } };
-      };
-      assertEquals(lowRunBody.test?.run?.maxTurns, 1);
+      try {
+        const lowStatusRes = await fetch(
+          `http://127.0.0.1:${port}/api/workspaces/${
+            encodeURIComponent(workspaceId)
+          }/test/${encodeURIComponent(lowRun.runId)}`,
+        );
+        const lowRunBody = await lowStatusRes.json() as {
+          test?: { run?: { maxTurns?: number } };
+        };
+        assertEquals(lowRunBody.test?.run?.maxTurns, 1);
+      } finally {
+        await stopScenarioSession({
+          port,
+          workspaceId,
+          sessionId: lowRun.sessionId,
+        });
+      }
 
       const highRun = await startScenarioSession({
         port,
         workspaceId,
         scenarioDeckId: "high-max-turns",
       });
-      const highStatusRes = await fetch(
-        `http://127.0.0.1:${port}/api/workspaces/${
-          encodeURIComponent(workspaceId)
-        }/test/${encodeURIComponent(highRun.runId)}`,
-      );
-      const highRunBody = await highStatusRes.json() as {
-        test?: { run?: { maxTurns?: number } };
-      };
-      assertEquals(highRunBody.test?.run?.maxTurns, 200);
+      try {
+        const highStatusRes = await fetch(
+          `http://127.0.0.1:${port}/api/workspaces/${
+            encodeURIComponent(workspaceId)
+          }/test/${encodeURIComponent(highRun.runId)}`,
+        );
+        const highRunBody = await highStatusRes.json() as {
+          test?: { run?: { maxTurns?: number } };
+        };
+        assertEquals(highRunBody.test?.run?.maxTurns, 200);
+      } finally {
+        await stopScenarioSession({
+          port,
+          workspaceId,
+          sessionId: highRun.sessionId,
+        });
+      }
     } finally {
       await server.shutdown();
       await server.finished;
