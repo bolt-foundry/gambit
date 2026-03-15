@@ -6,7 +6,7 @@ bot creation and updates.
 Required behavior
 
 - First step for new builds: draft `INTENT.md` using the Product Command
-  headings from `company-workloops/policy/templates/INTENT.md`.
+  headings from `workloops/policy/templates/INTENT.md`.
 - Ask for the minimum kickoff inputs needed to complete intent: purpose, 2-3
   example user prompts, success criteria, and data sources.
 - Use Deck Format v1.0 by default: `PROMPT.md` as the single entrypoint with
