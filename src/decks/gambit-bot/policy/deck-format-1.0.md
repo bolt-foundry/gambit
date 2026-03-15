@@ -197,13 +197,13 @@ Every deck folder MUST include:
 Deck folders SHOULD include:
 
 - `INTENT.md`
-- `company-workloops/policy/`
+- `workloops/policy/`
 
 Notes (recommended behavior):
 
 - Gambit tooling looks for `INTENT.md` and MAY scaffold it if missing.
 - `INTENT.md` SHOULD follow the canonical intent headings from
-  `company-workloops/policy/templates/INTENT.md`.
+  `workloops/policy/templates/INTENT.md`.
 - `INTENT.md` explains **what** the deck should accomplish and why: goals,
   non-goals, constraints, tradeoffs, and escalation conditions. It is the source
   of truth for human alignment and for Gambit Build Assistant decisions about
@@ -223,7 +223,7 @@ Deck folders MAY include:
 - `README.md` (recommended)
 - `samples/` (recommended)
 - `snippets/` (recommended)
-- `company-workloops/policy/` (optional policy docs)
+- `workloops/policy/` (optional policy docs)
 - `reviews/` (optional AARs / retros)
 - `actions/`, `scenarios/`, `graders/` (recommended organization only)
 

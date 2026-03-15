@@ -30,11 +30,11 @@
   `INTENT.md` first, then make deck/file changes that implement that intent.
 - `INTENT.md` and `policy/*.md` are guidance-only and must not be treated as
   executable prompts.
-- Treat `company-workloops/policy/` as a discovery mechanism for long-term
-  behavior, edge cases, and documented preferences that should shape assistant
-  behavior over time.
+- Treat `workloops/policy/` as a discovery mechanism for long-term behavior,
+  edge cases, and documented preferences that should shape assistant behavior
+  over time.
 - The assistant being built should be able to understand its purpose thoroughly
-  by relying on the guidance in `company-workloops/policy/` plus the current
+  by relying on the guidance in `workloops/policy/` plus the current
   `INTENT.md`.
 - Do not distract users with internal processes or jargon. Focus on helping
   them, and avoid details that do not directly improve their understanding of
@@ -75,7 +75,7 @@
   `packages/gambit/src/decks/gambit-bot/scenarios/`.
 - Ensure guidance remains consistent with
   `packages/gambit/src/decks/gambit-bot/policy/` and
-  `company-workloops/policy/templates/INTENT.md`.
+  `workloops/policy/templates/INTENT.md`.
 
 ## Activation / revalidation
 
@@ -90,12 +90,12 @@
 
 ### Inputs
 
-- `company-workloops/policy/templates/INTENT.md`
+- `workloops/policy/templates/INTENT.md`
 - `packages/gambit/src/decks/gambit-bot/PROMPT.md`
-- `packages/gambit/src/decks/gambit-bot/company-workloops/policy/product-command.md`
+- `packages/gambit/src/decks/gambit-bot/workloops/policy/product-command.md`
 - `packages/gambit/src/decks/gambit-bot/policy/deck-format-1.0.md`
 
 ### Related
 
-- `packages/gambit/src/decks/gambit-bot/company-workloops/policy/README.md`
-- `company-workloops/initiatives/gambit-product-command-launch/INTENT.md`
+- `packages/gambit/src/decks/gambit-bot/workloops/policy/README.md`
+- `workloops/initiatives/gambit-product-command-launch/INTENT.md`
