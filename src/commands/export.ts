@@ -83,6 +83,18 @@ function normalizeTarPath(relPath: string): string {
   return relPath.replace(/\\/g, "/");
 }
 
+async function externalDeckBundlePath(filePath: string): Promise<string> {
+  const ext = path.extname(filePath);
+  const baseName = path.basename(filePath, ext)
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24) || "file";
+  const hash = (await sha256Hex(filePath)).slice(0, 16);
+  return normalizeTarPath(
+    path.join("deck", "external", `${baseName}_${hash}${ext}`),
+  );
+}
+
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const hash = await crypto.subtle.digest("SHA-256", data);
@@ -418,13 +430,7 @@ export async function exportBundle(
       const rel = path.relative(workspaceRoot, filePath);
       let bundlePath: string;
       if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
-        const safe = filePath.replace(/[^a-zA-Z0-9]+/g, "_").replace(
-          /^_+|_+$/g,
-          "",
-        );
-        bundlePath = normalizeTarPath(
-          path.join("deck", "external", safe || path.basename(filePath)),
-        );
+        bundlePath = await externalDeckBundlePath(filePath);
       } else {
         bundlePath = normalizeTarPath(path.join("deck", rel));
       }

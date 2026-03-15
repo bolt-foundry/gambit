@@ -151,7 +151,11 @@ for (const [spec] of Object.entries(currentImports)) {
   }
 }
 
-const dntImportMapPath = join(packageRoot, "deno.dnt.json");
+const dntImportMapPath = await Deno.makeTempFile({
+  dir: packageRoot,
+  prefix: "deno.dnt.",
+  suffix: ".json",
+});
 const mergedImports = { ...currentImports, ...importsOverrides };
 await Deno.writeTextFile(
   dntImportMapPath,
