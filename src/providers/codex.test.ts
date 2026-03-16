@@ -235,6 +235,112 @@ Deno.test("codex provider responses forwards abort signal to command runner", as
   assertEquals(seenSignal, controller.signal);
 });
 
+Deno.test("codex provider streams assistant text deltas from agent_message events", async () => {
+  const streamEvents: Array<{ type?: string; delta?: string; text?: string }> =
+    [];
+  const streamedText: Array<string> = [];
+  const provider = createCodexProvider({
+    runCommand: ({ onStdoutLine }) => {
+      const lines = [
+        JSON.stringify({
+          type: "item.delta",
+          item: { id: "msg_1", type: "agent_message", text: "hello " },
+        }),
+        JSON.stringify({
+          type: "item.delta",
+          item: { id: "msg_1", type: "agent_message", text: "world" },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "msg_1", type: "agent_message", text: "hello world" },
+        }),
+      ];
+      lines.forEach((line) => onStdoutLine?.(line));
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(lines.join("\n")),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "codex-cli/default",
+      stream: true,
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+    },
+    onStreamEvent: (event) => {
+      streamEvents.push(
+        event as { type?: string; delta?: string; text?: string },
+      );
+    },
+  });
+
+  assertEquals(result?.output[0]?.type, "message");
+  const firstOutput = result?.output[0];
+  assertEquals(
+    firstOutput && firstOutput.type === "message"
+      ? firstOutput.content[0]?.text
+      : undefined,
+    "hello world",
+  );
+  assertEquals(
+    streamEvents.filter((event) => event.type === "response.output_text.delta")
+      .map((event) => event.delta),
+    ["hello ", "world"],
+  );
+  assertEquals(
+    streamEvents.filter((event) => event.type === "response.output_text.done")
+      .map((event) => event.text),
+    ["hello world"],
+  );
+
+  await provider.chat({
+    model: "codex-cli/default",
+    stream: true,
+    messages: [{ role: "user", content: "hi" }],
+    onStreamText: (text) => streamedText.push(text),
+  });
+
+  assertEquals(streamedText, ["hello ", "world"]);
+});
+
+Deno.test("codex provider streams completed-only assistant text once", async () => {
+  const streamedText: Array<string> = [];
+  const provider = createCodexProvider({
+    runCommand: ({ onStdoutLine }) => {
+      const lines = [
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "msg_1", type: "agent_message", text: "hello world" },
+        }),
+      ];
+      lines.forEach((line) => onStdoutLine?.(line));
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(lines.join("\n")),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  await provider.chat({
+    model: "codex-cli/default",
+    stream: true,
+    messages: [{ role: "user", content: "hi" }],
+    onStreamText: (text) => streamedText.push(text),
+  });
+
+  assertEquals(streamedText, ["hello world"]);
+});
+
 Deno.test("codex provider emits tool traces for mcp tool events", async () => {
   const traces: Array<ProviderTraceEvent> = [];
   const provider = createCodexProvider({
@@ -385,6 +491,83 @@ Deno.test("codex provider emits tool traces for command execution events", async
       exit_code: 0,
     },
   );
+});
+
+Deno.test("codex provider emits in-progress tool results for command execution deltas", async () => {
+  const traces: Array<ProviderTraceEvent> = [];
+  const provider = createCodexProvider({
+    runCommand: ({ onStdoutLine }) => {
+      const lines = [
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "item_progress",
+            type: "command_execution",
+            command: "/bin/bash -lc ls",
+            aggregated_output: "",
+            exit_code: null,
+            status: "in_progress",
+          },
+        }),
+        JSON.stringify({
+          type: "item.delta",
+          item: {
+            id: "item_progress",
+            type: "command_execution",
+            command: "/bin/bash -lc ls",
+            aggregated_output: "apps\n",
+            exit_code: null,
+            status: "in_progress",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "item_progress",
+            type: "command_execution",
+            command: "/bin/bash -lc ls",
+            aggregated_output: "apps\npackages\n",
+            exit_code: 0,
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "done" },
+        }),
+      ];
+      lines.forEach((line) => onStdoutLine?.(line));
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(lines.join("\n")),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  await provider.chat({
+    model: "codex-cli/default",
+    messages: [{ role: "user", content: "hello" }],
+    onTraceEvent: (event) => traces.push(event),
+  });
+
+  const toolResults = traces.filter((event) =>
+    event.type === "tool.result"
+  ) as Array<Extract<ProviderTraceEvent, { type: "tool.result" }>>;
+  assertEquals(toolResults.length, 2);
+  assertEquals(toolResults[0]?.result, {
+    command: "/bin/bash -lc ls",
+    status: "in_progress",
+    output: "apps\n",
+    exit_code: null,
+  });
+  assertEquals(toolResults[1]?.result, {
+    command: "/bin/bash -lc ls",
+    status: "completed",
+    output: "apps\npackages\n",
+    exit_code: 0,
+  });
 });
 
 Deno.test("codex provider emits tool traces for file change events", async () => {

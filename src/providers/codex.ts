@@ -276,12 +276,42 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function codexToolResultForItem(
+  itemType: string,
+  record: Record<string, JSONValue>,
+): JSONValue {
+  if (itemType === "mcp_tool_call") {
+    return {
+      server: record.server ?? "",
+      status: record.status ?? "",
+      result: record.result ?? null,
+      error: record.error ?? null,
+    };
+  }
+  if (itemType === "command_execution") {
+    return {
+      command: record.command ?? "",
+      status: record.status ?? "",
+      output: record.aggregated_output ?? "",
+      exit_code: record.exit_code ?? null,
+    };
+  }
+  if (itemType === "file_change") {
+    return {
+      status: record.status ?? "",
+      changes: record.changes ?? [],
+    };
+  }
+  return record ?? null;
+}
+
 function emitCodexToolEvents(input: {
   event: Record<string, JSONValue>;
   emit: (event: Record<string, JSONValue>) => void;
   toolNames: Map<string, string>;
   emittedCalls: Set<string>;
-  emittedResults: Set<string>;
+  emittedTerminalResults: Set<string>;
+  lastResultFingerprintByCallId: Map<string, string>;
   toolOutputIndexByCallId: Map<string, number>;
   nextOutputIndexRef: { value: number };
 }): void {
@@ -354,44 +384,28 @@ function emitCodexToolEvents(input: {
     });
   }
 
-  if (input.emittedResults.has(callId)) return;
   if (!resolvedName) return;
   const isTerminal = payloadType === "item.completed" ||
     payloadType === "item.done";
-  if (!isTerminal) return;
-  input.emittedResults.add(callId);
-  const result: JSONValue = (() => {
-    if (itemType === "mcp_tool_call") {
-      return {
-        server: record.server ?? "",
-        status: record.status ?? "",
-        result: record.result ?? null,
-        error: record.error ?? null,
-      };
-    }
-    if (itemType === "command_execution") {
-      return {
-        command: record.command ?? "",
-        status: record.status ?? "",
-        output: record.aggregated_output ?? "",
-        exit_code: record.exit_code ?? null,
-      };
-    }
-    if (itemType === "file_change") {
-      return {
-        status: record.status ?? "",
-        changes: record.changes ?? [],
-      };
-    }
-    return record ?? null;
-  })();
-  input.emit({
-    type: "tool.result",
-    actionCallId: callId,
-    name: resolvedName,
-    result,
-    toolKind: "mcp_bridge",
-  });
+  const result = codexToolResultForItem(itemType, record);
+  const resultFingerprint = stringifyJsonValue(result);
+  const priorResultFingerprint = input.lastResultFingerprintByCallId.get(
+    callId,
+  );
+  const shouldEmitProgressResult = payloadType !== "item.started" &&
+    resultFingerprint !== priorResultFingerprint;
+  if (shouldEmitProgressResult) {
+    input.lastResultFingerprintByCallId.set(callId, resultFingerprint);
+    input.emit({
+      type: "tool.result",
+      actionCallId: callId,
+      name: resolvedName,
+      result,
+      toolKind: "mcp_bridge",
+    });
+  }
+  if (!isTerminal || input.emittedTerminalResults.has(callId)) return;
+  input.emittedTerminalResults.add(callId);
   input.emit({
     type: "response.output_item.done",
     output_index: outputIndex,
@@ -414,6 +428,63 @@ function extractTextParts(value: JSONValue | undefined): Array<string> {
     if (typeof record.text === "string") parts.push(record.text);
   }
   return parts;
+}
+
+function extractCodexItemText(record: Record<string, JSONValue>): string {
+  return typeof record.text === "string"
+    ? record.text
+    : extractTextParts(record.content).join("");
+}
+
+type CodexAssistantStreamState = {
+  streamedText: string;
+  sawAssistantTextStream: boolean;
+};
+
+function emitCodexAssistantTextEvents(input: {
+  event: Record<string, JSONValue>;
+  emit: (event: Record<string, JSONValue>) => void;
+  emitText?: (text: string) => void;
+  assistantState: CodexAssistantStreamState;
+}): void {
+  const payloadType = typeof input.event.type === "string"
+    ? input.event.type
+    : "";
+  if (!payloadType.startsWith("item.")) return;
+  const item = input.event.item;
+  if (!item || typeof item !== "object" || Array.isArray(item)) return;
+  const record = item as Record<string, JSONValue>;
+  if (record.type !== "agent_message") return;
+
+  const outputIndex = 0;
+  const text = extractCodexItemText(record);
+  if (!text) return;
+
+  if (payloadType === "item.delta") {
+    input.assistantState.sawAssistantTextStream = true;
+    input.assistantState.streamedText += text;
+    input.emit({
+      type: "response.output_text.delta",
+      output_index: outputIndex,
+      delta: text,
+    });
+    input.emitText?.(text);
+    return;
+  }
+
+  if (payloadType === "item.completed" || payloadType === "item.done") {
+    const hadPriorAssistantDelta = input.assistantState.sawAssistantTextStream;
+    input.assistantState.sawAssistantTextStream = true;
+    input.assistantState.streamedText = text;
+    input.emit({
+      type: "response.output_text.done",
+      output_index: outputIndex,
+      text,
+    });
+    if (!hadPriorAssistantDelta) {
+      input.emitText?.(text);
+    }
+  }
 }
 
 function emitCodexReasoningEvents(input: {
@@ -649,8 +720,18 @@ function parseCodexStdout(stdout: string): {
       const item = parsed.item as Record<string, unknown> | undefined;
       if (!item || typeof item !== "object") continue;
       if (item.type !== "agent_message") continue;
-      if (typeof item.text !== "string") continue;
-      const content = item.text.trim();
+      const content = typeof item.text === "string"
+        ? item.text.trim()
+        : Array.isArray(item.content)
+        ? item.content
+          .filter((entry) => entry && typeof entry === "object")
+          .map((entry) => {
+            const record = entry as Record<string, unknown>;
+            return typeof record.text === "string" ? record.text : "";
+          })
+          .join("")
+          .trim()
+        : "";
       if (content) assistantText = content;
       continue;
     }
@@ -771,13 +852,22 @@ function defaultCommandRunner(input: {
 function buildCodexStreamHandler(input: {
   emitRaw: (event: Record<string, JSONValue>) => void;
   emitTool: (event: Record<string, JSONValue>) => void;
+  emitText?: (text: string) => void;
+  assistantState: CodexAssistantStreamState;
 }): (event: Record<string, JSONValue>) => void {
   const toolNames = new Map<string, string>();
   const emittedCalls = new Set<string>();
-  const emittedResults = new Set<string>();
+  const emittedTerminalResults = new Set<string>();
+  const lastResultFingerprintByCallId = new Map<string, string>();
   const toolOutputIndexByCallId = new Map<string, number>();
   const nextOutputIndexRef = { value: 0 };
   return (event) => {
+    emitCodexAssistantTextEvents({
+      event,
+      emit: input.emitTool,
+      emitText: input.emitText,
+      assistantState: input.assistantState,
+    });
     emitCodexReasoningEvents({
       event,
       emit: input.emitTool,
@@ -787,7 +877,8 @@ function buildCodexStreamHandler(input: {
       emit: input.emitTool,
       toolNames,
       emittedCalls,
-      emittedResults,
+      emittedTerminalResults,
+      lastResultFingerprintByCallId,
       toolOutputIndexByCallId,
       nextOutputIndexRef,
     });
@@ -803,7 +894,12 @@ export function createCodexProvider(opts?: {
     if (input.signal?.aborted) {
       throw new DOMException("Run canceled", "AbortError");
     }
-    const streamHandler = (input.onStreamEvent || input.onTraceEvent)
+    const assistantState: CodexAssistantStreamState = {
+      streamedText: "",
+      sawAssistantTextStream: false,
+    };
+    const streamHandler = (input.onStreamEvent || input.onTraceEvent ||
+        (input.stream && input.onStreamText))
       ? buildCodexStreamHandler({
         emitRaw: (event) => input.onStreamEvent?.(event),
         emitTool: (event) => {
@@ -813,6 +909,10 @@ export function createCodexProvider(opts?: {
             event as unknown as import("@bolt-foundry/gambit-core").ProviderTraceEvent,
           );
         },
+        emitText: input.stream
+          ? (text) => input.onStreamText?.(text)
+          : undefined,
+        assistantState,
       })
       : undefined;
     const priorThreadIdRaw = input.state?.meta?.[CODEX_THREAD_META_KEY];
@@ -883,7 +983,10 @@ export function createCodexProvider(opts?: {
     }
     const parsed = parseCodexStdout(stdout);
     const threadId = parsed.threadId ?? priorThreadId;
-    if (input.stream && input.onStreamText && parsed.assistantText) {
+    if (
+      input.stream && input.onStreamText && parsed.assistantText &&
+      !assistantState.sawAssistantTextStream
+    ) {
       input.onStreamText(parsed.assistantText);
     }
     const updatedState = buildUpdatedState({
@@ -910,19 +1013,29 @@ export function createCodexProvider(opts?: {
       onStreamEvent?: (event: ResponseEvent) => void;
     }): Promise<CreateResponseResponse> {
       const streamHandler = input.onStreamEvent
-        ? buildCodexStreamHandler({
-          emitRaw: (event) => {
-            input.onStreamEvent?.({
-              type: "codex.event",
-              payload: event,
-              // this predates the lint rule
-            } as unknown as ResponseEvent);
-          },
-          emitTool: (event) => {
-            // this predates the lint rule
-            input.onStreamEvent?.(event as unknown as ResponseEvent);
-          },
-        })
+        ? (() => {
+          const assistantState: CodexAssistantStreamState = {
+            streamedText: "",
+            sawAssistantTextStream: false,
+          };
+          return {
+            assistantState,
+            handle: buildCodexStreamHandler({
+              emitRaw: (event) => {
+                input.onStreamEvent?.({
+                  type: "codex.event",
+                  payload: event,
+                  // this predates the lint rule
+                } as unknown as ResponseEvent);
+              },
+              emitTool: (event) => {
+                // this predates the lint rule
+                input.onStreamEvent?.(event as unknown as ResponseEvent);
+              },
+              assistantState,
+            }),
+          };
+        })()
         : undefined;
       const result = await runChat({
         model: input.request.model,
@@ -935,7 +1048,7 @@ export function createCodexProvider(opts?: {
         state: input.state,
         deckPath: input.deckPath,
         signal: input.signal,
-        onStreamEvent: streamHandler,
+        onStreamEvent: streamHandler?.handle,
       });
 
       const output = responseItemsFromAssistantMessage(result.message);
@@ -957,7 +1070,9 @@ export function createCodexProvider(opts?: {
           },
         });
         if (
-          typeof result.message.content === "string" && result.message.content
+          typeof result.message.content === "string" &&
+          result.message.content &&
+          !streamHandler?.assistantState.sawAssistantTextStream
         ) {
           input.onStreamEvent?.({
             type: "response.output_text.delta",
