@@ -311,6 +311,103 @@ Deno.test("codex provider streams assistant text deltas from agent_message event
   assertEquals(streamedText, ["hello ", "world"]);
 });
 
+Deno.test("codex provider preserves multiple assistant message items in order", async () => {
+  const streamEvents: Array<
+    {
+      type?: string;
+      item_id?: string;
+      output_index?: number;
+      item?: { id?: string; type?: string };
+    }
+  > = [];
+  const provider = createCodexProvider({
+    runCommand: ({ onStdoutLine }) => {
+      const lines = [
+        JSON.stringify({
+          type: "item.delta",
+          item: { id: "msg_1", type: "agent_message", text: "first " },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "msg_1", type: "agent_message", text: "first reply" },
+        }),
+        JSON.stringify({
+          type: "item.delta",
+          item: { id: "msg_2", type: "agent_message", text: "second " },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "msg_2", type: "agent_message", text: "second reply" },
+        }),
+      ];
+      lines.forEach((line) => onStdoutLine?.(line));
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(lines.join("\n")),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "codex-cli/default",
+      stream: true,
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      }],
+    },
+    onStreamEvent: (event) => {
+      streamEvents.push(
+        event as {
+          type?: string;
+          item_id?: string;
+          output_index?: number;
+          item?: { id?: string; type?: string };
+        },
+      );
+    },
+  });
+
+  assertEquals(
+    result?.output
+      .filter((item) => item.type === "message")
+      .map((item) =>
+        item.type === "message"
+          ? {
+            id: item.id,
+            text: item.content.map((part) => part.text).join(""),
+          }
+          : null
+      ),
+    [
+      { id: "msg_1", text: "first reply" },
+      { id: "msg_2", text: "second reply" },
+    ],
+  );
+  assertEquals(
+    streamEvents
+      .filter((event) => event.type === "response.output_text.delta")
+      .map((event) => ({
+        item_id: event.item_id,
+        output_index: event.output_index,
+      })),
+    [
+      { item_id: "msg_1", output_index: 0 },
+      { item_id: "msg_2", output_index: 1 },
+    ],
+  );
+  assertEquals(
+    streamEvents
+      .filter((event) => event.type === "response.output_item.done")
+      .map((event) => event.item?.id),
+    ["msg_1", "msg_2"],
+  );
+});
+
 Deno.test("codex provider streams completed-only assistant text once", async () => {
   const streamedText: Array<string> = [];
   const provider = createCodexProvider({
