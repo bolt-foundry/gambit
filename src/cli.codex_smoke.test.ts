@@ -97,7 +97,7 @@ if [ -z "\${CODEX_ARGS_LOG:-}" ]; then
 fi
 printf '%s\n' "$@" > "$CODEX_ARGS_LOG"
 echo '{"type":"thread.started","thread_id":"thread-smoke"}'
-echo '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+echo '{"type":"item.completed","item":{"id":"msg_1","type":"agent_message","text":"ok"}}'
 echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}'
 `;
   await Deno.writeTextFile(binPath, script);

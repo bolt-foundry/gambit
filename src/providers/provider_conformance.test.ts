@@ -170,7 +170,7 @@ Deno.test("provider conformance: codex responses forwards abort signal", async (
             JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
             JSON.stringify({
               type: "item.completed",
-              item: { type: "agent_message", text: "ok" },
+              item: { id: "msg_1", type: "agent_message", text: "ok" },
             }),
           ].join("\n"),
         ),

@@ -448,6 +448,53 @@ type CodexAssistantStreamState = {
   emittedTerminalAssistantItemIds: Set<string>;
 };
 
+function requireCodexAssistantItemId(input: {
+  payloadType: string;
+  record: Record<string, JSONValue>;
+}): string {
+  const itemId = typeof input.record.id === "string"
+    ? input.record.id.trim()
+    : "";
+  if (itemId) return itemId;
+  throw new Error(
+    `Codex ${input.payloadType} agent_message is missing required item.id.`,
+  );
+}
+
+function resolveCodexAssistantItemIdentity(input: {
+  payloadType: string;
+  record: Record<string, JSONValue>;
+  assistantState: Pick<
+    CodexAssistantStreamState,
+    "assistantOutputIndexByItemId"
+  >;
+  nextOutputIndexRef: { value: number };
+}): {
+  itemId: string;
+  outputIndex: number;
+} {
+  const itemId = requireCodexAssistantItemId({
+    payloadType: input.payloadType,
+    record: input.record,
+  });
+  const existing = input.assistantState.assistantOutputIndexByItemId.get(
+    itemId,
+  );
+  if (typeof existing === "number") {
+    return {
+      itemId,
+      outputIndex: existing,
+    };
+  }
+  const next = input.nextOutputIndexRef.value;
+  input.nextOutputIndexRef.value += 1;
+  input.assistantState.assistantOutputIndexByItemId.set(itemId, next);
+  return {
+    itemId,
+    outputIndex: next,
+  };
+}
+
 function emitCodexAssistantTextEvents(input: {
   event: Record<string, JSONValue>;
   emit: (event: Record<string, JSONValue>) => void;
@@ -464,19 +511,12 @@ function emitCodexAssistantTextEvents(input: {
   const record = item as Record<string, JSONValue>;
   if (record.type !== "agent_message") return;
 
-  const itemId = typeof record.id === "string" && record.id.trim().length > 0
-    ? record.id.trim()
-    : `assistant_${input.nextOutputIndexRef.value}`;
-  const outputIndex = (() => {
-    const existing = input.assistantState.assistantOutputIndexByItemId.get(
-      itemId,
-    );
-    if (typeof existing === "number") return existing;
-    const next = input.nextOutputIndexRef.value;
-    input.nextOutputIndexRef.value += 1;
-    input.assistantState.assistantOutputIndexByItemId.set(itemId, next);
-    return next;
-  })();
+  const { itemId, outputIndex } = resolveCodexAssistantItemIdentity({
+    payloadType,
+    record,
+    assistantState: input.assistantState,
+    nextOutputIndexRef: input.nextOutputIndexRef,
+  });
   const text = extractCodexItemText(record);
   if (!text) return;
 
@@ -748,6 +788,13 @@ function parseCodexStdout(stdout: string): {
     completionTokens: number;
     totalTokens: number;
   } | undefined;
+  const assistantState: CodexAssistantStreamState = {
+    streamedText: "",
+    sawAssistantTextStream: false,
+    assistantOutputIndexByItemId: new Map<string, number>(),
+    emittedTerminalAssistantItemIds: new Set<string>(),
+  };
+  const nextOutputIndexRef = { value: 0 };
 
   for (const line of stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -767,10 +814,20 @@ function parseCodexStdout(stdout: string): {
       continue;
     }
 
-    if (parsed.type === "item.completed" || parsed.type === "item.done") {
+    if (
+      parsed.type === "item.delta" || parsed.type === "item.completed" ||
+      parsed.type === "item.done"
+    ) {
       const item = parsed.item as Record<string, unknown> | undefined;
       if (!item || typeof item !== "object") continue;
       if (item.type !== "agent_message") continue;
+      const { itemId } = resolveCodexAssistantItemIdentity({
+        payloadType: parsed.type,
+        record: item as Record<string, JSONValue>,
+        assistantState,
+        nextOutputIndexRef,
+      });
+      if (parsed.type === "item.delta") continue;
       const content = typeof item.text === "string"
         ? item.text.trim()
         : Array.isArray(item.content)
@@ -785,9 +842,7 @@ function parseCodexStdout(stdout: string): {
         : "";
       if (content) {
         assistantMessages.push({
-          itemId: typeof item.id === "string" && item.id.trim().length > 0
-            ? item.id.trim()
-            : null,
+          itemId,
           text: content,
         });
       }

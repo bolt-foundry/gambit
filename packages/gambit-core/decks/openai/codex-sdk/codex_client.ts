@@ -13,7 +13,7 @@ type CodexEvent =
   | { type: "thread.started"; thread_id?: unknown }
   | {
     type: "item.completed";
-    item?: { type?: unknown; text?: unknown };
+    item?: { id?: unknown; type?: unknown; text?: unknown };
   }
   | { type: string; [key: string]: unknown };
 
@@ -53,6 +53,9 @@ function parseCodexEvents(stdout: string): {
       if (!item || typeof item !== "object") continue;
       const rec = item as Record<string, unknown>;
       if (rec.type !== "agent_message") continue;
+      if (typeof rec.id !== "string" || !rec.id.trim()) {
+        throw new Error("codex exec emitted agent_message without item.id");
+      }
       if (typeof rec.text !== "string") continue;
       const next = rec.text.trim();
       if (next) assistantText = next;
