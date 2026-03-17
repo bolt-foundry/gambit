@@ -1,4 +1,4 @@
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { createCodexProvider, parseCodexArgsForTest } from "./codex.ts";
 import type { ProviderTraceEvent, SavedState } from "@bolt-foundry/gambit-core";
 
@@ -15,7 +15,7 @@ Deno.test("codex provider starts thread and resumes with saved thread id", async
         ? [
           JSON.stringify({
             type: "item.completed",
-            item: { type: "agent_message", text: "second reply" },
+            item: { id: "msg_2", type: "agent_message", text: "second reply" },
           }),
           JSON.stringify({
             type: "turn.completed",
@@ -26,7 +26,7 @@ Deno.test("codex provider starts thread and resumes with saved thread id", async
           JSON.stringify({ type: "thread.started", thread_id: threadId }),
           JSON.stringify({
             type: "item.completed",
-            item: { type: "agent_message", text: "first reply" },
+            item: { id: "msg_1", type: "agent_message", text: "first reply" },
           }),
           JSON.stringify({
             type: "turn.completed",
@@ -101,7 +101,11 @@ Deno.test("codex provider responses returns updatedState with thread metadata", 
             JSON.stringify({ type: "thread.started", thread_id: "thread-rsp" }),
             JSON.stringify({
               type: "item.completed",
-              item: { type: "agent_message", text: "response mode reply" },
+              item: {
+                id: "msg_1",
+                type: "agent_message",
+                text: "response mode reply",
+              },
             }),
           ].join("\n"),
         ),
@@ -135,7 +139,11 @@ Deno.test("codex provider updatedState does not carry prior traces", async () =>
             JSON.stringify({ type: "thread.started", thread_id: "thread-rsp" }),
             JSON.stringify({
               type: "item.completed",
-              item: { type: "agent_message", text: "response mode reply" },
+              item: {
+                id: "msg_1",
+                type: "agent_message",
+                text: "response mode reply",
+              },
             }),
           ].join("\n"),
         ),
@@ -172,7 +180,11 @@ Deno.test("codex provider responses forwards request.params to codex args", asyn
             JSON.stringify({ type: "thread.started", thread_id: "thread-rsp" }),
             JSON.stringify({
               type: "item.completed",
-              item: { type: "agent_message", text: "response mode reply" },
+              item: {
+                id: "msg_1",
+                type: "agent_message",
+                text: "response mode reply",
+              },
             }),
           ].join("\n"),
         ),
@@ -210,7 +222,11 @@ Deno.test("codex provider responses forwards abort signal to command runner", as
             JSON.stringify({ type: "thread.started", thread_id: "thread-rsp" }),
             JSON.stringify({
               type: "item.completed",
-              item: { type: "agent_message", text: "response mode reply" },
+              item: {
+                id: "msg_1",
+                type: "agent_message",
+                text: "response mode reply",
+              },
             }),
           ].join("\n"),
         ),
@@ -408,6 +424,52 @@ Deno.test("codex provider preserves multiple assistant message items in order", 
   );
 });
 
+Deno.test("codex provider requires assistant item ids from codex", async () => {
+  const provider = createCodexProvider({
+    runCommand: ({ onStdoutLine }) => {
+      const lines = [
+        JSON.stringify({
+          type: "item.delta",
+          item: { type: "agent_message", text: "draft " },
+        }),
+        JSON.stringify({
+          type: "item.delta",
+          item: { type: "agent_message", text: "reply" },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { type: "agent_message", text: "draft reply" },
+        }),
+      ];
+      lines.forEach((line) => onStdoutLine?.(line));
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(lines.join("\n")),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  await assertRejects(
+    async () => {
+      await provider.responses?.({
+        request: {
+          model: "codex-cli/default",
+          stream: true,
+          input: [{
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "hi" }],
+          }],
+        },
+      });
+    },
+    Error,
+    "missing required item.id",
+  );
+});
+
 Deno.test("codex provider streams completed-only assistant text once", async () => {
   const streamedText: Array<string> = [];
   const provider = createCodexProvider({
@@ -471,7 +533,7 @@ Deno.test("codex provider emits tool traces for mcp tool events", async () => {
         }),
         JSON.stringify({
           type: "item.completed",
-          item: { type: "agent_message", text: "done" },
+          item: { id: "msg_done", type: "agent_message", text: "done" },
         }),
       ];
       lines.forEach((line) => onStdoutLine?.(line));
@@ -544,7 +606,7 @@ Deno.test("codex provider emits tool traces for command execution events", async
         }),
         JSON.stringify({
           type: "item.completed",
-          item: { type: "agent_message", text: "done" },
+          item: { id: "msg_done", type: "agent_message", text: "done" },
         }),
       ];
       lines.forEach((line) => onStdoutLine?.(line));
@@ -630,7 +692,7 @@ Deno.test("codex provider emits in-progress tool results for command execution d
         }),
         JSON.stringify({
           type: "item.completed",
-          item: { type: "agent_message", text: "done" },
+          item: { id: "msg_done", type: "agent_message", text: "done" },
         }),
       ];
       lines.forEach((line) => onStdoutLine?.(line));
@@ -686,7 +748,7 @@ Deno.test("codex provider emits tool traces for file change events", async () =>
         }),
         JSON.stringify({
           type: "item.completed",
-          item: { type: "agent_message", text: "done" },
+          item: { id: "msg_done", type: "agent_message", text: "done" },
         }),
       ];
       lines.forEach((line) => onStdoutLine?.(line));
