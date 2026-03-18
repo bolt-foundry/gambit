@@ -1017,8 +1017,12 @@ function toProviderParams(
     max_tokens,
     verbosity,
     reasoning,
+    additionalParams,
   } = params;
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = additionalParams &&
+      typeof additionalParams === "object" && !Array.isArray(additionalParams)
+    ? { ...additionalParams }
+    : {};
   if (temperature !== undefined) out.temperature = temperature;
   if (top_p !== undefined) out.top_p = top_p;
   if (frequency_penalty !== undefined) {

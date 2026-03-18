@@ -67,9 +67,12 @@ async function writeDeck(
   dir: string,
   model: string,
   verbosity?: "low" | "medium" | "high",
+  body = "Smoke deck.",
+  extraFrontmatter = "",
 ): Promise<string> {
   const deckPath = path.join(dir, "root.deck.md");
   const verbosityLine = verbosity ? `verbosity = "${verbosity}"\n` : "";
+  const frontmatterSuffix = extraFrontmatter ? `${extraFrontmatter}\n` : "";
   const contents = `+++
 label = "codex smoke"
 
@@ -77,9 +80,13 @@ label = "codex smoke"
 model = "${model}"
 ${verbosityLine}+++
 
-Smoke deck.
+${body}
 `;
-  await Deno.writeTextFile(deckPath, contents);
+  const finalContents = contents.replace(
+    `${verbosityLine}+++\n\n`,
+    `${verbosityLine}${frontmatterSuffix}+++\n\n`,
+  );
+  await Deno.writeTextFile(deckPath, finalContents);
   return deckPath;
 }
 
@@ -324,6 +331,13 @@ Deno.test({
     );
     assertEquals(defaultRun.argsLog.includes("\n-m\n"), false);
     assertEquals(defaultRun.argsLog.includes('model_verbosity="high"'), true);
+    assertEquals(defaultRun.argsLog.includes("project_doc_max_bytes="), false);
+    assertEquals(
+      defaultRun.argsLog.includes('instructions="Smoke deck."'),
+      true,
+    );
+    assertEquals(defaultRun.argsLog.includes("SYSTEM:\n"), false);
+    assertEquals(defaultRun.argsLog.endsWith("\nhi\n"), true);
 
     const passthroughDeck = await writeDeck(
       dir,
@@ -347,6 +361,32 @@ Deno.test({
     );
     assertEquals(
       passthroughRun.argsLog.includes('model_verbosity="high"'),
+      true,
+    );
+
+    const projectDocDeck = await writeDeck(
+      dir,
+      "codex-cli/default",
+      undefined,
+      "Smoke deck.",
+      "additionalParams = { codex = { project_doc_max_bytes = 0 } }",
+    );
+    const projectDocRun = await runDeck({
+      deckPath: projectDocDeck,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      cwd: dir,
+    });
+    assertEquals(
+      projectDocRun.code,
+      0,
+      formatCommandDiagnostics(
+        "run codex-cli/default project docs",
+        projectDocRun,
+      ),
+    );
+    assertEquals(
+      projectDocRun.argsLog.includes("project_doc_max_bytes=0"),
       true,
     );
   } finally {
