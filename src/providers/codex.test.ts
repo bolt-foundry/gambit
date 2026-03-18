@@ -90,6 +90,39 @@ Deno.test("codex provider resume does not replay transcript when no new user mes
   assertEquals(args[args.length - 1], "");
 });
 
+Deno.test("codex provider uses codex instructions config for fresh system prompts", () => {
+  const args = parseCodexArgsForTest({
+    model: "codex-cli/default",
+    messages: [
+      { role: "system", content: "deck system prompt" },
+      { role: "user", content: "hello" },
+    ],
+  });
+  const joined = args.join(" ");
+  assertEquals(joined.includes('instructions="deck system prompt"'), true);
+  assertEquals(joined.includes("SYSTEM:\\n"), false);
+  assertEquals(args[args.length - 1], "hello");
+});
+
+Deno.test("codex provider fresh prompt keeps non-system continuation payloads only", () => {
+  const args = parseCodexArgsForTest({
+    model: "codex-cli/default",
+    messages: [
+      { role: "system", content: "deck system prompt" },
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi there" },
+      { role: "user", content: "follow up" },
+    ],
+  });
+  const joined = args.join(" ");
+  assertEquals(joined.includes('instructions="deck system prompt"'), true);
+  assertEquals(joined.includes("SYSTEM:\\n"), false);
+  assertEquals(
+    args[args.length - 1],
+    "USER:\nhello\n\nASSISTANT:\nhi there\n\nUSER:\nfollow up",
+  );
+});
+
 Deno.test("codex provider responses returns updatedState with thread metadata", async () => {
   const provider = createCodexProvider({
     runCommand: () =>
@@ -837,11 +870,30 @@ Deno.test("codex provider configures workspace-write sandbox automatically", () 
   });
   const joined = args.join(" ");
   assertEquals(joined.includes('approval_policy="never"'), true);
+  assertEquals(joined.includes("project_doc_max_bytes="), false);
   assertEquals(joined.includes('sandbox_mode="workspace-write"'), true);
   assertEquals(
     joined.includes('sandbox_workspace_write.writable_roots=["/tmp/test-cwd"]'),
     true,
   );
+});
+
+Deno.test("codex provider forwards additionalParams.codex config entries", () => {
+  const args = parseCodexArgsForTest({
+    model: "codex-cli/default",
+    messages: [{ role: "user", content: "hi" }],
+    params: {
+      codex: {
+        project_doc_max_bytes: 0,
+        profile: { name: "gambit" },
+        project_root_markers: [".git", ".hg"],
+      },
+    },
+  });
+  const joined = args.join(" ");
+  assertEquals(joined.includes("project_doc_max_bytes=0"), true);
+  assertEquals(joined.includes('profile.name="gambit"'), true);
+  assertEquals(joined.includes('project_root_markers=[".git", ".hg"]'), true);
 });
 
 Deno.test("codex provider skips sandbox config when yolo env is enabled", () => {
@@ -1010,6 +1062,78 @@ Deno.test("codex provider forwards codex-cli/<model> through -m", () => {
   const modelArgIndex = args.findIndex((entry) => entry === "-m");
   assertEquals(modelArgIndex >= 0, true);
   assertEquals(args[modelArgIndex + 1], "gpt-5.2-codex");
+});
+
+Deno.test("codex provider keeps saved-state threads isolated across runs", async () => {
+  const calls: Array<Array<string>> = [];
+  const provider = createCodexProvider({
+    runCommand: ({ args }) => {
+      calls.push(args);
+      const threadId = args.includes("thread-a")
+        ? "thread-a"
+        : args.includes("thread-b")
+        ? "thread-b"
+        : "thread-new";
+      return Promise.resolve({
+        success: true,
+        code: 0,
+        stdout: enc.encode(
+          [
+            JSON.stringify({
+              type: "item.completed",
+              item: {
+                id: `msg-${threadId}`,
+                type: "agent_message",
+                text: `reply-${threadId}`,
+              },
+            }),
+          ].join("\n"),
+        ),
+        stderr: new Uint8Array(),
+      });
+    },
+  });
+
+  const [a, b] = await Promise.all([
+    provider.chat({
+      model: "codex-cli/default",
+      messages: [
+        { role: "system", content: "system-a" },
+        { role: "user", content: "follow up a" },
+      ],
+      state: {
+        runId: "run-a",
+        messages: [],
+        meta: { "codex.threadId": "thread-a" },
+      } as SavedState,
+    }),
+    provider.chat({
+      model: "codex-cli/default",
+      messages: [
+        { role: "system", content: "system-b" },
+        { role: "user", content: "follow up b" },
+      ],
+      state: {
+        runId: "run-b",
+        messages: [],
+        meta: { "codex.threadId": "thread-b" },
+      } as SavedState,
+    }),
+  ]);
+
+  assertEquals(a.updatedState?.meta?.["codex.threadId"], "thread-a");
+  assertEquals(b.updatedState?.meta?.["codex.threadId"], "thread-b");
+  assertEquals(calls.length, 2);
+  assertEquals(calls[0].includes("thread-a"), true);
+  assertEquals(calls[0].includes("thread-b"), false);
+  assertEquals(calls[1].includes("thread-b"), true);
+  assertEquals(calls[1].includes("thread-a"), false);
+  assertEquals(calls[0].join(" ").includes('instructions="system-a"'), true);
+  assertEquals(calls[0].join(" ").includes('instructions="system-b"'), false);
+  assertEquals(calls[1].join(" ").includes('instructions="system-b"'), true);
+  assertEquals(calls[1].join(" ").includes('instructions="system-a"'), false);
+  assertEquals(calls[0][calls[0].length - 1], "follow up a");
+  assertEquals(calls[1][calls[1].length - 1], "follow up b");
 });
 
 Deno.test("codex provider rejects legacy codex prefix", () => {

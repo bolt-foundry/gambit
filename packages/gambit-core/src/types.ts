@@ -36,6 +36,7 @@ export type ModelParams = {
     effort?: "none" | "low" | "medium" | "high" | "xhigh";
     summary?: "concise" | "detailed" | "auto";
   };
+  additionalParams?: Record<string, JSONValue>;
 };
 
 export type Guardrails = {

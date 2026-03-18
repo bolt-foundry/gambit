@@ -132,12 +132,78 @@ function tomlStringArray(values: Array<string>): string {
   return `[${values.map(tomlString).join(",")}]`;
 }
 
+function tomlKeySegment(value: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(value) ? value : tomlString(value);
+}
+
+function tomlValue(value: unknown): string {
+  if (typeof value === "string") return tomlString(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`Invalid Codex config number: ${value}`);
+    }
+    return String(value);
+  }
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => tomlValue(entry)).join(", ")}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return `{ ${
+      entries
+        .map(([key, entry]) => `${tomlKeySegment(key)} = ${tomlValue(entry)}`)
+        .join(", ")
+    } }`;
+  }
+  throw new Error(
+    `Unsupported Codex config value type: ${typeof value}.`,
+  );
+}
+
+function codexAdditionalConfigArgs(
+  params?: Record<string, unknown>,
+): Array<string> {
+  const codex = params?.codex;
+  if (!codex || typeof codex !== "object" || Array.isArray(codex)) return [];
+  const args: Array<string> = [];
+  const visit = (prefix: Array<string>, value: unknown) => {
+    if (value === undefined) return;
+    if (
+      value && typeof value === "object" && !Array.isArray(value)
+    ) {
+      const entries = Object.entries(value).sort(([a], [b]) =>
+        a.localeCompare(b)
+      );
+      for (const [key, entry] of entries) {
+        visit([...prefix, key], entry);
+      }
+      return;
+    }
+    const dottedKey = prefix.map(tomlKeySegment).join(".");
+    args.push("-c", `${dottedKey}=${tomlValue(value)}`);
+  };
+  for (
+    const [key, value] of Object.entries(codex).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+  ) {
+    visit([key], value);
+  }
+  return args;
+}
+
 function codexConfigArgs(input: {
   cwd: string;
   deckPath?: string;
   params?: Record<string, unknown>;
+  instructions?: string;
 }): Array<string> {
   const args: Array<string> = [];
+  args.push(...codexAdditionalConfigArgs(input.params));
   args.push("-c", `approval_policy=${tomlString("never")}`);
   if (!shouldSkipCodexSandboxConfig(input.params)) {
     args.push("-c", `sandbox_mode=${tomlString("workspace-write")}`);
@@ -177,6 +243,9 @@ function codexConfigArgs(input: {
     : Deno.env.get(CODEX_VERBOSITY_ENV);
   if (typeof verbosity === "string" && verbosity.trim()) {
     args.push("-c", `model_verbosity=${tomlString(verbosity.trim())}`);
+  }
+  if (typeof input.instructions === "string" && input.instructions.trim()) {
+    args.push("-c", `instructions=${tomlString(input.instructions.trim())}`);
   }
 
   if (shouldEnableMcpBridge() && MCP_SERVER_PATH) {
@@ -735,8 +804,19 @@ function stringContent(content: ModelMessage["content"]): string {
   return "";
 }
 
-function renderMessagesForPrompt(messages: Array<ModelMessage>): string {
+function codexInstructionsForMessages(messages: Array<ModelMessage>): string {
   return messages
+    .filter((message) => message.role === "system")
+    .map((message) => stringContent(message.content))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function renderNonSystemMessagesForPrompt(
+  messages: Array<ModelMessage>,
+): string {
+  return messages
+    .filter((message) => message.role !== "system")
     .map((message) => {
       const content = stringContent(message.content);
       if (!content) return "";
@@ -764,7 +844,17 @@ function promptForCodexTurn(input: {
     // Thread resume should be incremental: only send the newest user turn.
     return latestUserPrompt(input.messages);
   }
-  return renderMessagesForPrompt(input.messages);
+  const nonSystemMessages = input.messages.filter((message) =>
+    message.role !== "system"
+  );
+  const latestUser = latestUserPrompt(nonSystemMessages);
+  if (
+    nonSystemMessages.length <= 1 &&
+    nonSystemMessages.every((message) => message.role === "user")
+  ) {
+    return latestUser;
+  }
+  return renderNonSystemMessagesForPrompt(nonSystemMessages);
 }
 
 function parseNumber(input: unknown): number {
@@ -1058,6 +1148,7 @@ export function createCodexProvider(opts?: {
       ? priorThreadIdRaw.trim()
       : undefined;
     const model = normalizeCodexModel(input.model);
+    const instructions = codexInstructionsForMessages(input.messages);
     const prompt = promptForCodexTurn({
       messages: input.messages,
       priorThreadId,
@@ -1076,6 +1167,7 @@ export function createCodexProvider(opts?: {
         cwd,
         deckPath: input.deckPath,
         params: input.params,
+        instructions,
       }),
     );
     if (model && model !== "default") {
@@ -1313,6 +1405,7 @@ export function parseCodexArgsForTest(input: {
     ? priorThreadIdRaw.trim()
     : undefined;
   const model = normalizeCodexModel(input.model);
+  const instructions = codexInstructionsForMessages(input.messages);
   const prompt = promptForCodexTurn({
     messages: input.messages,
     priorThreadId,
@@ -1325,6 +1418,7 @@ export function parseCodexArgsForTest(input: {
       cwd: input.cwd ?? runCwd(),
       deckPath: input.deckPath,
       params: input.params,
+      instructions,
     }),
   );
   if (model && model !== "default") {

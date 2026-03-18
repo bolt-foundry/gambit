@@ -5646,6 +5646,79 @@ Deck.
   assertEquals(seenParams?.verbosity, "high");
 });
 
+Deno.test("modelParams.additionalParams passes through to provider params", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "root.deck.md",
+    `
++++
+modelParams = { model = "dummy-model", additionalParams = { codex = { project_doc_max_bytes = 0, profile = { name = "gambit" } } } }
++++
+
+Deck.
+`.trim(),
+  );
+
+  let seenParams: Record<string, unknown> | undefined;
+  const provider: ModelProvider = {
+    chat: (input) => {
+      seenParams = input.params;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(seenParams?.codex, {
+    project_doc_max_bytes: 0,
+    profile: { name: "gambit" },
+  });
+});
+
+Deno.test("modelParams supported fields override additionalParams duplicates", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeTempDeck(
+    dir,
+    "root.deck.md",
+    `
++++
+modelParams = { model = "dummy-model", verbosity = "high", additionalParams = { verbosity = "low" } }
++++
+
+Deck.
+`.trim(),
+  );
+
+  let seenParams: Record<string, unknown> | undefined;
+  const provider: ModelProvider = {
+    chat: (input) => {
+      seenParams = input.params;
+      return Promise.resolve({
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      });
+    },
+  };
+
+  await runDeck({
+    path: deckPath,
+    input: "hi",
+    modelProvider: provider,
+    isRoot: true,
+  });
+
+  assertEquals(seenParams?.verbosity, "high");
+});
+
 Deno.test("worker sandbox denies write when write permission is absent", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
