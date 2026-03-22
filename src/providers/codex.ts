@@ -120,6 +120,11 @@ function shouldSkipCodexSandboxConfig(
 ): boolean {
   const yolo = params?.gambitYolo;
   if (typeof yolo === "boolean") return yolo;
+  const codex = asRecord(params?.codex);
+  const codexSkipSandboxConfig = codex.skip_sandbox_config;
+  if (typeof codexSkipSandboxConfig === "boolean") {
+    return codexSkipSandboxConfig;
+  }
   const envRaw = Deno.env.get(CODEX_SKIP_SANDBOX_CONFIG_ENV);
   return Boolean(envRaw && parseTruthy(envRaw));
 }
@@ -1154,6 +1159,7 @@ export function createCodexProvider(opts?: {
       priorThreadId,
     });
     const cwd = runCwd();
+    const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
     const args = priorThreadId
       ? [
         "exec",
@@ -1162,6 +1168,9 @@ export function createCodexProvider(opts?: {
         "--json",
       ]
       : ["exec", "--skip-git-repo-check", "--json"];
+    if (skipSandboxConfig) {
+      args.push("--yolo");
+    }
     args.push(
       ...codexConfigArgs({
         cwd,
@@ -1410,9 +1419,13 @@ export function parseCodexArgsForTest(input: {
     messages: input.messages,
     priorThreadId,
   });
+  const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
   const args = priorThreadId
     ? ["exec", "resume", "--skip-git-repo-check", "--json"]
     : ["exec", "--skip-git-repo-check", "--json"];
+  if (skipSandboxConfig) {
+    args.push("--yolo");
+  }
   args.push(
     ...codexConfigArgs({
       cwd: input.cwd ?? runCwd(),
