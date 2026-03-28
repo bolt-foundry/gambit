@@ -1,0 +1,6 @@
+version = "provider-manifest-v1"
+
+[provider]
+key = "google"
+entrypoint = "../google.ts"
+routingPrefix = "google/"

@@ -1,0 +1,389 @@
+import { parse as parseManifestToml } from "@std/toml";
+import type { ProviderKey } from "./router.ts";
+
+export type ProviderSecretRequirement = {
+  secretId: string;
+  envName: string;
+};
+
+export type ProviderAuthCommand = {
+  command: Array<string>;
+};
+
+export type ProviderDestinationRequirement = {
+  url: string;
+};
+
+export type ProviderStorageAuthority = "bfdesktop";
+
+export type ProviderAttachmentAuthority =
+  | "bfdesktop-mitm"
+  | "runtime-env-placeholder";
+
+export type ProviderDestinationScope = "declared-destinations";
+
+type BaseProviderAuthRequirements = {
+  attachmentAuthority: ProviderAttachmentAuthority;
+  destinationScope: ProviderDestinationScope;
+  storageAuthority: ProviderStorageAuthority;
+};
+
+export type SecretProviderAuthRequirements = BaseProviderAuthRequirements & {
+  mode: "secret";
+  secrets: Array<ProviderSecretRequirement>;
+};
+
+export type CliBootstrapProviderAuthRequirements =
+  & BaseProviderAuthRequirements
+  & {
+    mode: "cli-bootstrap";
+    check: ProviderAuthCommand;
+    probe: ProviderAuthCommand;
+    login: ProviderAuthCommand;
+    loginFallback?: ProviderAuthCommand;
+    importedSecretId: string;
+  };
+
+export type ProviderAuthRequirements =
+  | SecretProviderAuthRequirements
+  | CliBootstrapProviderAuthRequirements;
+
+export type ProviderRegistryEntry = {
+  key: ProviderKey;
+  entrypoint: string;
+  routingPrefix: string;
+  bareAlias?: string;
+};
+
+export type ProviderManifest = {
+  version: string;
+  provider: ProviderRegistryEntry;
+  auth?: ProviderAuthRequirements;
+  destinations: Array<ProviderDestinationRequirement>;
+};
+
+type RawProviderManifest = {
+  version?: unknown;
+  provider?: {
+    key?: unknown;
+    entrypoint?: unknown;
+    routingPrefix?: unknown;
+    bareAlias?: unknown;
+  };
+  auth?: {
+    attachmentAuthority?: unknown;
+    destinationScope?: unknown;
+    storageAuthority?: unknown;
+    mode?: unknown;
+    secrets?: Array<{
+      envName?: unknown;
+      secretId?: unknown;
+    }>;
+    check?: { command?: Array<unknown> };
+    probe?: { command?: Array<unknown> };
+    login?: { command?: Array<unknown> };
+    loginFallback?: { command?: Array<unknown> };
+    importedSecretId?: unknown;
+  };
+  destinations?: Array<{ url?: unknown }>;
+};
+
+const PROVIDER_MANIFEST_TEXT: Record<ProviderKey, string> = {
+  "claude-code-cli": `version = "provider-manifest-v1"
+
+[provider]
+key = "claude-code-cli"
+entrypoint = "../claude_code.ts"
+routingPrefix = "claude-code-cli/"
+bareAlias = "claude-code-cli"
+`,
+  "codex-cli": `version = "provider-manifest-v1"
+
+[provider]
+key = "codex-cli"
+entrypoint = "../codex.ts"
+routingPrefix = "codex-cli/"
+bareAlias = "codex-cli"
+
+[auth]
+mode = "cli-bootstrap"
+storageAuthority = "bfdesktop"
+attachmentAuthority = "bfdesktop-mitm"
+destinationScope = "declared-destinations"
+importedSecretId = "openai-access-token"
+
+[auth.check]
+command = ["codex", "login", "status"]
+
+[auth.probe]
+command = ["codex", "exec", "hi"]
+
+[auth.login]
+command = ["codex", "login"]
+
+[auth.loginFallback]
+command = ["codex", "login", "--device-auth"]
+
+[[destinations]]
+url = "https://chatgpt.com/backend-api/codex/"
+`,
+  google: `version = "provider-manifest-v1"
+
+[provider]
+key = "google"
+entrypoint = "../google.ts"
+routingPrefix = "google/"
+`,
+  ollama: `version = "provider-manifest-v1"
+
+[provider]
+key = "ollama"
+entrypoint = "../ollama.ts"
+routingPrefix = "ollama/"
+`,
+  openrouter: `version = "provider-manifest-v1"
+
+[provider]
+key = "openrouter"
+entrypoint = "../openrouter.ts"
+routingPrefix = "openrouter/"
+
+[auth]
+mode = "secret"
+storageAuthority = "bfdesktop"
+attachmentAuthority = "runtime-env-placeholder"
+destinationScope = "declared-destinations"
+
+[[auth.secrets]]
+secretId = "openrouter-api-key"
+envName = "OPENROUTER_API_KEY"
+
+[[destinations]]
+url = "https://openrouter.ai/api/v1/"
+`,
+};
+
+function isSupportedProviderKey(value: string): value is ProviderKey {
+  return value === "openrouter" || value === "ollama" || value === "google" ||
+    value === "codex-cli" || value === "claude-code-cli";
+}
+
+function isSupportedStorageAuthority(
+  value: string,
+): value is ProviderStorageAuthority {
+  return value === "bfdesktop";
+}
+
+function isSupportedAttachmentAuthority(
+  value: string,
+): value is ProviderAttachmentAuthority {
+  return value === "bfdesktop-mitm" || value === "runtime-env-placeholder";
+}
+
+function isSupportedDestinationScope(
+  value: string,
+): value is ProviderDestinationScope {
+  return value === "declared-destinations";
+}
+
+function normalizeSecretRequirement(input: {
+  envName?: unknown;
+  secretId?: unknown;
+}): ProviderSecretRequirement {
+  const envName = typeof input.envName === "string" ? input.envName.trim() : "";
+  const secretId = typeof input.secretId === "string"
+    ? input.secretId.trim()
+    : "";
+  if (!envName || !secretId) {
+    throw new Error(
+      "Provider secret requirements must declare secretId and envName.",
+    );
+  }
+  return { envName, secretId };
+}
+
+function normalizeAuthCommand(
+  input: { command?: Array<unknown> } | null | undefined,
+  field: string,
+): ProviderAuthCommand {
+  const command = Array.isArray(input?.command)
+    ? input.command.flatMap((value) =>
+      typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []
+    )
+    : [];
+  if (command.length === 0) {
+    throw new Error(`Provider auth ${field} must declare a non-empty command.`);
+  }
+  return { command };
+}
+
+function normalizeProviderAuthRequirements(
+  input: RawProviderManifest["auth"],
+): ProviderAuthRequirements | undefined {
+  if (!input) {
+    return undefined;
+  }
+  const storageAuthority = typeof input.storageAuthority === "string"
+    ? input.storageAuthority.trim()
+    : "";
+  if (!storageAuthority || !isSupportedStorageAuthority(storageAuthority)) {
+    throw new Error(
+      `Unsupported provider auth storageAuthority "${input.storageAuthority}".`,
+    );
+  }
+  const attachmentAuthority = typeof input.attachmentAuthority === "string"
+    ? input.attachmentAuthority.trim()
+    : "";
+  if (
+    !attachmentAuthority ||
+    !isSupportedAttachmentAuthority(attachmentAuthority)
+  ) {
+    throw new Error(
+      `Unsupported provider auth attachmentAuthority "${input.attachmentAuthority}".`,
+    );
+  }
+  const destinationScope = typeof input.destinationScope === "string"
+    ? input.destinationScope.trim()
+    : "";
+  if (!destinationScope || !isSupportedDestinationScope(destinationScope)) {
+    throw new Error(
+      `Unsupported provider auth destinationScope "${input.destinationScope}".`,
+    );
+  }
+
+  if (input.mode === "secret") {
+    return {
+      mode: "secret",
+      storageAuthority,
+      attachmentAuthority,
+      destinationScope,
+      secrets: (input.secrets ?? []).map(normalizeSecretRequirement),
+    };
+  }
+
+  if (input.mode === "cli-bootstrap") {
+    const importedSecretId = typeof input.importedSecretId === "string"
+      ? input.importedSecretId.trim()
+      : "";
+    if (!importedSecretId) {
+      throw new Error(
+        "Provider auth cli-bootstrap mode must declare importedSecretId.",
+      );
+    }
+    return {
+      mode: "cli-bootstrap",
+      storageAuthority,
+      attachmentAuthority,
+      destinationScope,
+      importedSecretId,
+      check: normalizeAuthCommand(input.check, "check"),
+      probe: normalizeAuthCommand(input.probe, "probe"),
+      login: normalizeAuthCommand(input.login, "login"),
+      loginFallback: input.loginFallback
+        ? normalizeAuthCommand(input.loginFallback, "loginFallback")
+        : undefined,
+    };
+  }
+
+  throw new Error(`Unsupported provider auth mode "${input.mode}".`);
+}
+
+function normalizeProviderRegistryEntry(
+  input: RawProviderManifest["provider"],
+  expectedKey: ProviderKey,
+): ProviderRegistryEntry {
+  const key = typeof input?.key === "string" ? input.key.trim() : "";
+  if (!key || !isSupportedProviderKey(key)) {
+    throw new Error(`Unsupported provider manifest key "${input?.key}".`);
+  }
+  if (key !== expectedKey) {
+    throw new Error(
+      `Provider manifest key "${key}" does not match expected provider "${expectedKey}".`,
+    );
+  }
+  const entrypoint = typeof input?.entrypoint === "string"
+    ? input.entrypoint.trim()
+    : "";
+  if (!entrypoint) {
+    throw new Error(`Provider manifest "${key}" must declare an entrypoint.`);
+  }
+  const routingPrefix = typeof input?.routingPrefix === "string"
+    ? input.routingPrefix.trim()
+    : "";
+  if (!routingPrefix) {
+    throw new Error(
+      `Provider manifest "${key}" must declare a routingPrefix.`,
+    );
+  }
+  const bareAlias = typeof input?.bareAlias === "string"
+    ? input.bareAlias.trim()
+    : "";
+  const entry: ProviderRegistryEntry = {
+    key,
+    entrypoint,
+    routingPrefix,
+  };
+  if (bareAlias) {
+    entry.bareAlias = bareAlias;
+  }
+  return entry;
+}
+
+function normalizeDestinations(
+  input: RawProviderManifest["destinations"],
+): Array<ProviderDestinationRequirement> {
+  return (input ?? []).map((destination) => {
+    const url = typeof destination.url === "string"
+      ? destination.url.trim()
+      : "";
+    if (!url) {
+      throw new Error(
+        "Provider destinations must declare a non-empty URL.",
+      );
+    }
+    return { url };
+  });
+}
+
+function normalizeManifest(
+  input: RawProviderManifest,
+  expectedKey: ProviderKey,
+): ProviderManifest {
+  const version = typeof input.version === "string" ? input.version.trim() : "";
+  if (!version) {
+    throw new Error(
+      `Provider manifest "${expectedKey}" must declare a version.`,
+    );
+  }
+  return {
+    version,
+    provider: normalizeProviderRegistryEntry(input.provider, expectedKey),
+    auth: normalizeProviderAuthRequirements(input.auth),
+    destinations: normalizeDestinations(input.destinations),
+  };
+}
+
+const loadedProviderManifests = Object.entries(PROVIDER_MANIFEST_TEXT).map(
+  ([providerKey, manifestToml]) => {
+    const parsed = parseManifestToml(manifestToml) as RawProviderManifest;
+    return normalizeManifest(parsed, providerKey as ProviderKey);
+  },
+);
+
+const providerManifestByKey = new Map(
+  loadedProviderManifests.map((manifest) => [manifest.provider.key, manifest]),
+);
+
+export function getProviderManifests(): Array<ProviderManifest> {
+  return [...loadedProviderManifests];
+}
+
+export function getProviderManifest(
+  provider: ProviderKey,
+): ProviderManifest | null {
+  return providerManifestByKey.get(provider) ?? null;
+}
+
+export function getProviderRegistryEntries(): Array<ProviderRegistryEntry> {
+  return loadedProviderManifests.map((manifest) => manifest.provider);
+}

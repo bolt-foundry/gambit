@@ -1,0 +1,29 @@
+version = "provider-manifest-v1"
+
+[provider]
+key = "codex-cli"
+entrypoint = "../codex.ts"
+routingPrefix = "codex-cli/"
+bareAlias = "codex-cli"
+
+[auth]
+mode = "cli-bootstrap"
+storageAuthority = "bfdesktop"
+attachmentAuthority = "bfdesktop-mitm"
+destinationScope = "declared-destinations"
+importedSecretId = "openai-access-token"
+
+[auth.check]
+command = ["codex", "login", "status"]
+
+[auth.probe]
+command = ["codex", "exec", "hi"]
+
+[auth.login]
+command = ["codex", "login"]
+
+[auth.loginFallback]
+command = ["codex", "login", "--device-auth"]
+
+[[destinations]]
+url = "https://chatgpt.com/backend-api/codex/"

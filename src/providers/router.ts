@@ -15,6 +15,20 @@ export type ProviderRouter = {
   };
 };
 
+export type ParsedProviderModel = {
+  providerKey?: ProviderKey;
+  strippedModel: string;
+  rawModel: string;
+  legacyCodex?: boolean;
+};
+
+export type ResolvedProviderIdentity = {
+  providerKey: ProviderKey;
+  model: string;
+  rawModel: string;
+  wasExplicit: boolean;
+};
+
 type ProviderSet = Partial<Record<ProviderKey, ModelProvider | null>>;
 
 const PROVIDER_PREFIXES: Record<ProviderKey, string> = {
@@ -25,12 +39,7 @@ const PROVIDER_PREFIXES: Record<ProviderKey, string> = {
   "claude-code-cli": "claude-code-cli/",
 };
 
-function parsePrefixedModel(model: string): {
-  providerKey?: ProviderKey;
-  strippedModel: string;
-  rawModel: string;
-  legacyCodex?: boolean;
-} {
+function parsePrefixedModel(model: string): ParsedProviderModel {
   if (model.trim() === "codex-cli") {
     return {
       providerKey: "codex-cli",
@@ -64,6 +73,41 @@ function parsePrefixedModel(model: string): {
   return { strippedModel: model, rawModel: model };
 }
 
+export function resolveProviderIdentity(input: {
+  model: string;
+  defaultProvider?: ProviderKey | null;
+}): ResolvedProviderIdentity {
+  const defaultProvider = input.defaultProvider === undefined
+    ? "openrouter"
+    : input.defaultProvider;
+  const { providerKey, strippedModel, rawModel, legacyCodex } =
+    parsePrefixedModel(input.model);
+  if (legacyCodex) {
+    throw new Error(
+      'Legacy Codex model prefix "codex" is no longer supported. Use "codex-cli/default" or "codex-cli/<model>".',
+    );
+  }
+  if (providerKey) {
+    return {
+      providerKey,
+      model: strippedModel,
+      rawModel,
+      wasExplicit: true,
+    };
+  }
+  if (defaultProvider === null) {
+    throw new Error(
+      "No fallback provider configured. Use a provider prefix or set providers.fallback in gambit.toml.",
+    );
+  }
+  return {
+    providerKey: defaultProvider,
+    model: input.model,
+    rawModel,
+    wasExplicit: false,
+  };
+}
+
 function missingProviderMessage(providerKey: ProviderKey): string {
   switch (providerKey) {
     case "openrouter":
@@ -92,16 +136,10 @@ export function createProviderRouter(opts: {
   );
   return {
     resolve({ model }) {
-      const { providerKey, strippedModel, rawModel, legacyCodex } =
-        parsePrefixedModel(
-          model,
-        );
-      if (legacyCodex) {
-        throw new Error(
-          'Legacy Codex model prefix "codex" is no longer supported. Use "codex-cli/default" or "codex-cli/<model>".',
-        );
-      }
-      if (providerKey) {
+      const identity = resolveProviderIdentity({ model, defaultProvider });
+      const { providerKey, model: strippedModel, rawModel, wasExplicit } =
+        identity;
+      if (wasExplicit) {
         const provider = opts.providers[providerKey];
         if (!provider) {
           if (
@@ -109,10 +147,11 @@ export function createProviderRouter(opts: {
             defaultProvider !== null &&
             defaultProvider !== providerKey
           ) {
-            const fallbackProvider = opts.providers[defaultProvider];
+            const fallbackProviderKey = defaultProvider as ProviderKey;
+            const fallbackProvider = opts.providers[fallbackProviderKey];
             if (fallbackProvider) {
               return {
-                providerKey: defaultProvider,
+                providerKey: fallbackProviderKey,
                 provider: fallbackProvider,
                 model: rawModel,
               };
@@ -132,14 +171,15 @@ export function createProviderRouter(opts: {
           "No fallback provider configured. Use a provider prefix or set providers.fallback in gambit.toml.",
         );
       }
-      const provider = opts.providers[defaultProvider];
+      const fallbackProviderKey = defaultProvider as ProviderKey;
+      const provider = opts.providers[fallbackProviderKey];
       if (!provider) {
         throw new Error(
           "OPENROUTER_API_KEY is required when no provider prefix is specified.",
         );
       }
       return {
-        providerKey: defaultProvider,
+        providerKey: fallbackProviderKey,
         provider,
         model,
       };

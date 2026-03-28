@@ -67,5 +67,29 @@ export { createOllamaProvider } from "./src/providers/ollama.ts";
 export { createGoogleProvider } from "./src/providers/google.ts";
 /** Provider factory for Claude Code CLI-backed model calls. */
 export { createClaudeCodeProvider } from "./src/providers/claude_code.ts";
+/** Read provider-declared auth/env/network requirements. */
+export {
+  getProviderRequirements,
+  resolveProviderRequirements,
+} from "./src/providers/requirements.ts";
+/** Read provider-local provider manifests and registry metadata. */
+export {
+  getProviderManifest,
+  getProviderManifests,
+  getProviderRegistryEntries,
+} from "./src/providers/manifest.ts";
+/** Provider auth/env/network requirement types. */
+export type {
+  ProviderAuthRequirements,
+  ProviderDestinationRequirement,
+  ProviderRequirements,
+  ProviderSecretRequirement,
+  ResolvedProviderRequirements,
+} from "./src/providers/requirements.ts";
+/** Provider manifest and registry types. */
+export type {
+  ProviderManifest,
+  ProviderRegistryEntry,
+} from "./src/providers/manifest.ts";
 /** Start the WebSocket simulator server for the Gambit UI. */
 export { startWebSocketSimulator } from "./src/server.ts";
