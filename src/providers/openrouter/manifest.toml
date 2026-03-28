@@ -1,0 +1,19 @@
+version = "provider-manifest-v1"
+
+[provider]
+key = "openrouter"
+entrypoint = "../openrouter.ts"
+routingPrefix = "openrouter/"
+
+[auth]
+mode = "secret"
+storageAuthority = "bfdesktop"
+attachmentAuthority = "runtime-env-placeholder"
+destinationScope = "declared-destinations"
+
+[[auth.secrets]]
+secretId = "openrouter-api-key"
+envName = "OPENROUTER_API_KEY"
+
+[[destinations]]
+url = "https://openrouter.ai/api/v1/"

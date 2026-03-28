@@ -1,0 +1,7 @@
+version = "provider-manifest-v1"
+
+[provider]
+key = "claude-code-cli"
+entrypoint = "../claude_code.ts"
+routingPrefix = "claude-code-cli/"
+bareAlias = "claude-code-cli"

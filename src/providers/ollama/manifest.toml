@@ -1,0 +1,6 @@
+version = "provider-manifest-v1"
+
+[provider]
+key = "ollama"
+entrypoint = "../ollama.ts"
+routingPrefix = "ollama/"
