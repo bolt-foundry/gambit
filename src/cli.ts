@@ -12,7 +12,6 @@ import { startTui } from "./tui.ts";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { handleCheckCommand } from "./commands/check.ts";
 import { handleRunCommand } from "./commands/run.ts";
-import { handleServeCommand } from "./commands/serve.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
 import { runGraderAgainstState } from "./commands/grade.ts";
 import { exportBundle } from "./commands/export.ts";
@@ -42,7 +41,18 @@ function printInitRemovedGuidance() {
   logger.error(
     "The `gambit init` command has been removed and is no longer supported.",
   );
-  logger.error("Use `gambit serve <deck>` as the onboarding path.");
+  logger.error(
+    "Use `gambit-simulator serve <deck>` or `npx @bolt-foundry/gambit-simulator serve <deck>` as the simulator onboarding path.",
+  );
+}
+
+function printServeMovedGuidance() {
+  logger.error(
+    "The simulator moved out of @bolt-foundry/gambit into @bolt-foundry/gambit-simulator.",
+  );
+  logger.error(
+    "Run `gambit-simulator serve <deck>` or `npx @bolt-foundry/gambit-simulator serve <deck>` instead.",
+  );
 }
 
 function resolveSessionPermissionsFromArgs(args: {
@@ -463,25 +473,8 @@ async function main() {
         );
         Deno.exit(1);
       }
-      await handleServeCommand({
-        deckPath: deckPath || undefined,
-        artifactPath: args.artifactPath,
-        buildAssistantProvider: args.buildAssistantProvider,
-        model: args.model,
-        modelForce: args.modelForce,
-        modelProvider: provider,
-        context: parseContext(args.context),
-        contextProvided: args.contextProvided,
-        port: args.port,
-        verbose: args.verbose,
-        watch: args.watch,
-        bundle: args.bundle,
-        sourcemap: args.sourcemap,
-        platform: args.platform,
-        responsesMode,
-        workerSandbox,
-      });
-      return;
+      printServeMovedGuidance();
+      Deno.exit(1);
     }
 
     if (args.cmd === "scenario") {

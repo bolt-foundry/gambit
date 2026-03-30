@@ -23,7 +23,6 @@ const denoConfigPath = await (async () => {
   );
 })();
 const distDir = join(packageRoot, "dist", "npm");
-const bundleDir = join(packageRoot, "simulator-ui", "dist");
 const denoConfig = parse(await Deno.readTextFile(denoConfigPath)) as {
   name?: string;
   version?: string;
@@ -63,7 +62,6 @@ const run = async (cmd: string) => {
   }
 };
 
-await run("deno task bundle:sim:web:sourcemap");
 await emptyDir(distDir);
 
 const coreDirCandidates = [
@@ -261,39 +259,11 @@ try {
     filterDiagnostic: (diagnostic) => {
       if (diagnostic.code === 2339) return false;
       const fileName = diagnostic.file?.fileName?.replaceAll("\\", "/") ?? "";
-      if (
-        diagnostic.code === 2307 &&
-        fileName.includes("/simulator-ui/__generated__/builtRoutes.ts")
-      ) {
-        const text = typeof diagnostic.messageText === "string"
-          ? diagnostic.messageText
-          : diagnostic.messageText.messageText;
-        if (text.includes("@iso-gambit-sim")) {
-          return false;
-        }
-      }
       if (diagnostic.code === 2307) {
         const text = typeof diagnostic.messageText === "string"
           ? diagnostic.messageText
           : diagnostic.messageText.messageText;
         if (text.includes("'node:sqlite'")) {
-          return false;
-        }
-      }
-      if (
-        diagnostic.code === 2686 &&
-        fileName.includes("/simulator-ui/")
-      ) {
-        return false;
-      }
-      if (
-        diagnostic.code === 2552 &&
-        fileName.endsWith("/simulator-ui/src/routing.ts")
-      ) {
-        const text = typeof diagnostic.messageText === "string"
-          ? diagnostic.messageText
-          : diagnostic.messageText.messageText;
-        if (text.includes("URLPattern")) {
           return false;
         }
       }
@@ -341,28 +311,6 @@ for (const rel of ["node_modules", "package-lock.json"]) {
 
 const gitkeep = join(distDir, ".gitkeep");
 await Deno.writeTextFile(gitkeep, "");
-
-const copyRecursive = async (src: string, dest: string) => {
-  for await (const entry of Deno.readDir(src)) {
-    const from = join(src, entry.name);
-    const to = join(dest, entry.name);
-    if (entry.isDirectory) {
-      await Deno.mkdir(to, { recursive: true });
-      await copyRecursive(from, to);
-    } else if (entry.isFile) {
-      await Deno.copyFile(from, to);
-    }
-  }
-};
-
-const npmStaticDirs = [
-  join(distDir, "esm", "gambit", "simulator-ui", "dist"),
-  join(distDir, "script", "gambit", "simulator-ui", "dist"),
-];
-for (const npmStaticDir of npmStaticDirs) {
-  await Deno.mkdir(npmStaticDir, { recursive: true });
-  await copyRecursive(bundleDir, npmStaticDir);
-}
 
 for (const filename of ["README.md", "LICENSE", "CHANGELOG.md"]) {
   const src = join(packageRoot, filename);

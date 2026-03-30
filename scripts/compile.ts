@@ -69,7 +69,6 @@ const includePaths = [
   coreRuntimeOrchestrationWorker,
   "src/decks",
   "scaffolds",
-  "simulator-ui/dist",
 ];
 
 const baseArgs = includePaths.flatMap((includePath) => [

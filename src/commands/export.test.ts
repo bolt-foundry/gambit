@@ -2,9 +2,12 @@ import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { UntarStream } from "@std/tar";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
+import {
+  modImportPath,
+  runSimulator,
+} from "@bolt-foundry/gambit-simulator/src/server_test_utils.ts";
+import { startWebSocketSimulator } from "@bolt-foundry/gambit-simulator";
 import { exportBundle } from "./export.ts";
-import { startWebSocketSimulator } from "../server.ts";
-import { modImportPath, runSimulator } from "../server_test_utils.ts";
 
 async function readTarGzEntries(
   archivePath: string,

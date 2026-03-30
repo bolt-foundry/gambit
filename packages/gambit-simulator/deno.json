@@ -1,0 +1,130 @@
+{
+  "name": "@bolt-foundry/gambit-simulator",
+  "version": "0.8.6-rc.7",
+  "description": "Simulator app and local debug UI for Gambit.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bolt-foundry/gambit.git"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./cli": "./src/cli.ts"
+  },
+  "tasks": {
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "test": "deno test --allow-all",
+    "ci": "deno fmt --check && deno lint && deno test --allow-all",
+    "bundle:sim": "deno run -A scripts/bundle_simulator_ui.ts",
+    "bundle:sim:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --sourcemap=external",
+    "bundle:sim:web": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser",
+    "bundle:sim:web:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser --sourcemap=external",
+    "verify:seed-fixture": "deno run -A scripts/seed_verify_fixture.ts",
+    "serve:bot": "mkdir -p /tmp/gambit-bot-root && GAMBIT_SIMULATOR_BUILD_BOT_ROOT=/tmp/gambit-bot-root GAMBIT_BOT_ROOT=/tmp/gambit-bot-root deno run -A src/cli.ts serve ../../src/decks/gambit-bot/PROMPT.md --bundle --port 8000"
+  },
+  "lint": {
+    "include": [
+      "src",
+      "simulator-ui/src"
+    ],
+    "plugins": [
+      "../../scripts/lint/examples_remote_imports.ts"
+    ],
+    "rules": {
+      "tags": [
+        "recommended"
+      ],
+      "exclude": [
+        "bolt-foundry/no-parent-directory-traversal",
+        "no-external-import",
+        "no-unversioned-import",
+        "verbatim-module-syntax"
+      ],
+      "include": [
+        "gambit/init/examples-remote-imports",
+        "gambit/use-maybe-type",
+        "gambit/no-unexplained-as-unknown",
+        "gambit/no-useeffect-setstate"
+      ]
+    }
+  },
+  "fmt": {
+    "lineWidth": 80,
+    "exclude": [
+      "simulator-ui/__generated__",
+      "simulator-ui/subscriptions/__generated__"
+    ]
+  },
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "npm:react@19.2.4",
+    "jsxImportSourceTypes": "npm:@types/react@^19",
+    "skipLibCheck": true,
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "webworker.importscripts",
+      "webworker.iterable",
+      "deno.ns",
+      "deno.unstable"
+    ]
+  },
+  "imports": {
+    "@isograph/babel-plugin": "npm:@isograph/babel-plugin@0.5.2",
+    "@isograph/compiler": "npm:@isograph/compiler@0.5.2",
+    "@isograph/react": "npm:@isograph/react@0.5.2",
+    "@iso-gambit-sim": "./simulator-ui/__generated__/__isograph/iso.ts",
+    "@iso-gambit-sim/": "./simulator-ui/__generated__/__isograph/",
+    "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
+    "@std/fs": "jsr:@std/fs@^1.0.20",
+    "@std/jsonc": "jsr:@std/jsonc@^1.0.2",
+    "@std/path": "jsr:@std/path@^1.0.6",
+    "@std/cli": "jsr:@std/cli@^1.0.7",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.5",
+    "@std/assert": "jsr:@std/assert@^1.0.6",
+    "@std/streams": "jsr:@std/streams@^1.0.10",
+    "@std/testing": "jsr:@std/testing@^1.0.17",
+    "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
+    "@std/tar": "jsr:@std/tar@^0.1.9",
+    "@std/toml": "jsr:@std/toml@^1.0.9",
+    "@bolt-foundry/gambit-core": "../gambit-core/mod.ts",
+    "@bolt-foundry/gambit/src/claude_code_preflight.ts": "../../src/claude_code_preflight.ts",
+    "@bolt-foundry/gambit/src/cli_args.ts": "../../src/cli_args.ts",
+    "@bolt-foundry/gambit/src/cli_utils.ts": "../../src/cli_utils.ts",
+    "@bolt-foundry/gambit/src/codex_preflight.ts": "../../src/codex_preflight.ts",
+    "@bolt-foundry/gambit/src/commands/check.ts": "../../src/commands/check.ts",
+    "@bolt-foundry/gambit/src/default_runtime.ts": "../../src/default_runtime.ts",
+    "@bolt-foundry/gambit/src/durable_streams.ts": "../../src/durable_streams.ts",
+    "@bolt-foundry/gambit/src/gambit_id.ts": "../../src/gambit_id.ts",
+    "@bolt-foundry/gambit/src/gambit_path.ts": "../../src/gambit_path.ts",
+    "@bolt-foundry/gambit/src/gambit_time.ts": "../../src/gambit_time.ts",
+    "@bolt-foundry/gambit/src/project_config.ts": "../../src/project_config.ts",
+    "@bolt-foundry/gambit/src/test_bot.ts": "../../src/test_bot.ts",
+    "@bolt-foundry/gambit/src/trace.ts": "../../src/trace.ts",
+    "@bolt-foundry/gambit/src/utility_types.ts": "../../src/utility_types.ts",
+    "@bolt-foundry/gambit/src/workspace_sqlite.ts": "../../src/workspace_sqlite.ts",
+    "playwright-core": "npm:playwright-core@^1.57.0",
+    "zod": "npm:zod@^3.23.8",
+    "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",
+    "@pothos/core": "npm:@pothos/core@^4.7.3",
+    "@pothos/plugin-relay": "npm:@pothos/plugin-relay@^4.4.2",
+    "graphql": "npm:graphql@^16.11.0",
+    "graphql-yoga": "npm:graphql-yoga@^5.14.0",
+    "@openai/openai": "npm:openai@^4.78.1",
+    "react": "npm:react@19.2.4",
+    "react/jsx-runtime": "npm:react@19.2.4/jsx-runtime",
+    "react-dom": "npm:react-dom@19.2.4"
+  },
+  "publish": {
+    "include": [
+      "src",
+      "simulator-ui",
+      "mod.ts",
+      "deno.json",
+      "README.md",
+      "simulator-ui/dist"
+    ]
+  }
+}

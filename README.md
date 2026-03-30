@@ -25,7 +25,7 @@ environment variables.
 To start onboarding with the simulator, run:
 
 ```
-npx @bolt-foundry/gambit serve gambit/hello.deck.md
+npx @bolt-foundry/gambit-simulator serve gambit/hello.deck.md
 open http://localhost:8000/debug
 ```
 
@@ -39,10 +39,10 @@ npx @bolt-foundry/gambit repl gambit/hello.deck.md
 
 This example just says "hello" and repeats your message back to you.
 
-Run an example in the browser (`serve`):
+Run an example in the browser (`serve` via the simulator package):
 
 ```
-npx @bolt-foundry/gambit serve gambit/hello.deck.md
+npx @bolt-foundry/gambit-simulator serve gambit/hello.deck.md
 open http://localhost:8000/debug
 ```
 
@@ -111,10 +111,10 @@ Grade a saved session:
 npx @bolt-foundry/gambit grade <grader-deck> --state <file>
 ```
 
-Start the Debug UI server:
+Start the Debug UI server with the simulator package:
 
 ```
-npx @bolt-foundry/gambit serve <deck> --port 8000
+npx @bolt-foundry/gambit-simulator serve <deck> --port 8000
 ```
 
 Tracing and state: 
@@ -142,18 +142,19 @@ your platform, so these defaults and flags apply there as well.
 
 ## Using the Simulator
 
-The simulator is the local Debug UI that streams runs and renders traces.
+The simulator is the local Debug UI that streams runs and renders traces. It now
+lives in `@bolt-foundry/gambit-simulator`, not the framework package.
 
 Run with npx (no install):
 
 ```
-npx @bolt-foundry/gambit <command>
+npx @bolt-foundry/gambit-simulator <command>
 ```
 
 Start it:
 
 ```
-npx @bolt-foundry/gambit serve <deck> --port 8000
+npx @bolt-foundry/gambit-simulator serve <deck> --port 8000
 ```
 
 Then open:
@@ -362,7 +363,7 @@ schema-valid assistant output directly instead of calling `gambit_respond`.
 
 ```
 cd packages/gambit
-npx @bolt-foundry/gambit serve ./examples/respond_flow/decks/root.deck.ts --port 8000
+npx @bolt-foundry/gambit-simulator serve ./examples/respond_flow/decks/root.deck.ts --port 8000
 ```
 
 Then:
@@ -395,5 +396,5 @@ deno run -A jsr:@bolt-foundry/gambit/cli run <deck> --context <json|string> --me
 Start the Debug UI:
 
 ```
-deno run -A jsr:@bolt-foundry/gambit/cli serve <deck> --port 8000
+deno run -A jsr:@bolt-foundry/gambit-simulator/cli serve <deck> --port 8000
 ```

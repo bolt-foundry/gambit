@@ -55,6 +55,13 @@ deno eval --ext=ts -q '
     ],
     "gambit-core deno.json",
   );
+  const simulatorPath = await findPath(
+    [
+      "packages/gambit-simulator/deno.json",
+      "packages/gambit/packages/gambit-simulator/deno.json",
+    ],
+    "gambit-simulator deno.json",
+  );
   const gambit = parse(await Deno.readTextFile(gambitPath));
   const core = parse(await Deno.readTextFile(corePath));
   const unstable = new Set(Array.isArray(gambit.unstable) ? gambit.unstable : []);
@@ -82,6 +89,13 @@ deno eval --ext=ts -q '
     const rel = value.startsWith("./") ? value.slice(2) : value;
     localImports[spec] = `./${coreDir}/${rel}`;
   }
+  const simulatorDir = simulatorPath.includes("/")
+    ? simulatorPath.slice(0, simulatorPath.lastIndexOf("/"))
+    : ".";
+  localImports["@bolt-foundry/gambit-simulator"] =
+    `./${simulatorDir}/mod.ts`;
+  localImports["@bolt-foundry/gambit-simulator/"] =
+    `./${simulatorDir}/`;
   gambit.imports = { ...(gambit.imports ?? {}), ...localImports };
   await Deno.writeTextFile(
     "deno.ci.json",

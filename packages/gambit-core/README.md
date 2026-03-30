@@ -200,7 +200,7 @@ actionDecks:
 testDecks:
   - path: ./personas/test_bot.deck.md
 ---
-![](gambit://cards/context.card.md)
+![](gambit://snippets/context.md)
 
 You are the front door for support tickets. Summarize the ticket and ask
 clarifying questions before choosing an action.

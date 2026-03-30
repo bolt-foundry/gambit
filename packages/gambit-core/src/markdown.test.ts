@@ -5,7 +5,6 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import * as path from "@std/path";
-import { loadDeck } from "./loader.ts";
 import { loadMarkdownDeck } from "./markdown.ts";
 
 async function writeTempDeck(dir: string, filename: string, contents: string) {
@@ -13,26 +12,6 @@ async function writeTempDeck(dir: string, filename: string, contents: string) {
   await Deno.writeTextFile(target, contents);
   return target;
 }
-
-Deno.test("markdown deck resolves gambit://cards embeds", async () => {
-  const dir = await Deno.makeTempDir();
-
-  const deckPath = await writeTempDeck(
-    dir,
-    "builtin-cards.deck.md",
-    `+++
-label = "builtin-cards"
-+++
-
-![](gambit://cards/respond.card.md)
-`,
-  );
-
-  const deck = await loadMarkdownDeck(deckPath);
-
-  assertEquals(deck.respond, true);
-  assertStringIncludes(deck.body ?? "", "gambit_respond");
-});
 
 Deno.test("markdown deck resolves gambit://snippets embeds", async () => {
   const dir = await Deno.makeTempDir();
@@ -623,13 +602,6 @@ Root deck.
   const parsedOutput = deck.actionDecks[0].responseSchema?.parse({ total: 3 });
   assertEquals(parsedInput, { count: 2 });
   assertEquals(parsedOutput, { total: 3 });
-});
-
-Deno.test("loadDeck resolves gambit://decks PROMPT.md", async () => {
-  const deck = await loadDeck(
-    "gambit://decks/openai/codex-sdk/PROMPT.md",
-  );
-  assertEquals(deck.label, "Codex SDK bridge");
 });
 
 Deno.test("markdown deck rejects unsupported mcpServers declarations", async () => {

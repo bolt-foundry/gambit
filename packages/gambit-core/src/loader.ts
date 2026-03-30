@@ -16,11 +16,7 @@ import {
   loadMarkdownCard,
   loadMarkdownDeck,
 } from "./markdown.ts";
-import {
-  resolveBuiltinCardPath,
-  resolveBuiltinDeckPath,
-  resolveBuiltinSnippetPath,
-} from "./builtins.ts";
+import { resolveBuiltinSnippetPath } from "./builtins.ts";
 import type {
   ActionDeckDefinition,
   CardDefinition,
@@ -402,9 +398,8 @@ export async function loadCard(
   parentPath?: string,
   stack: Array<string> = [],
 ): Promise<LoadedCard> {
-  const builtinPath = resolveBuiltinCardPath(cardPath);
   const snippetPath = resolveBuiltinSnippetPath(cardPath);
-  const normalizedPath = snippetPath ?? builtinPath ?? cardPath;
+  const normalizedPath = snippetPath ?? cardPath;
   if (isMarkdownFile(normalizedPath)) {
     return await loadMarkdownCard(normalizedPath, parentPath, stack);
   }
@@ -415,9 +410,8 @@ export async function loadDeck(
   deckPath: string,
   parentPath?: string,
 ): Promise<LoadedDeck> {
-  const builtinDeck = resolveBuiltinDeckPath(deckPath);
-  const normalizedDeckPath = builtinDeck ?? deckPath;
-  const markdownParent = builtinDeck ? undefined : parentPath;
+  const normalizedDeckPath = deckPath;
+  const markdownParent = parentPath;
   if (isMarkdownFile(normalizedDeckPath)) {
     return await loadMarkdownDeck(normalizedDeckPath, markdownParent);
   }

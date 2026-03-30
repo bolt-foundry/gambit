@@ -1,6 +1,6 @@
 import { assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
-import { createWorkspaceScaffoldAtRoot } from "./workspace.ts";
+import { createWorkspaceScaffoldAtRoot } from "@bolt-foundry/gambit-simulator/src/workspace.ts";
 
 Deno.test("workspace scaffold default scenario uses scenario participant snippet", async () => {
   const dir = await Deno.makeTempDir();
