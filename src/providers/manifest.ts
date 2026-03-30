@@ -14,6 +14,17 @@ export type ProviderDestinationRequirement = {
   url: string;
 };
 
+export type ProviderImportedSecretSource = {
+  jsonPath: string;
+  kind: "json-file";
+  path: string;
+};
+
+export type ProviderRuntimeAuthStateSource = {
+  kind: "json-file";
+  path: string;
+};
+
 export type ProviderStorageAuthority = "bfdesktop";
 
 export type ProviderAttachmentAuthority =
@@ -33,20 +44,20 @@ export type SecretProviderAuthRequirements = BaseProviderAuthRequirements & {
   secrets: Array<ProviderSecretRequirement>;
 };
 
-export type CliBootstrapProviderAuthRequirements =
+export type RuntimeAuthStateProviderAuthRequirements =
   & BaseProviderAuthRequirements
   & {
-    mode: "cli-bootstrap";
-    check: ProviderAuthCommand;
-    probe: ProviderAuthCommand;
-    login: ProviderAuthCommand;
-    loginFallback?: ProviderAuthCommand;
-    importedSecretId: string;
+    mode: "runtime-auth-state";
+    runtimeAuthState: {
+      runtimeHomeEnv?: string;
+      runtimePath: string;
+      source: ProviderRuntimeAuthStateSource;
+    };
   };
 
 export type ProviderAuthRequirements =
   | SecretProviderAuthRequirements
-  | CliBootstrapProviderAuthRequirements;
+  | RuntimeAuthStateProviderAuthRequirements;
 
 export type ProviderRegistryEntry = {
   key: ProviderKey;
@@ -79,11 +90,14 @@ type RawProviderManifest = {
       envName?: unknown;
       secretId?: unknown;
     }>;
-    check?: { command?: Array<unknown> };
-    probe?: { command?: Array<unknown> };
-    login?: { command?: Array<unknown> };
-    loginFallback?: { command?: Array<unknown> };
-    importedSecretId?: unknown;
+    runtimeAuthState?: {
+      runtimeHomeEnv?: unknown;
+      runtimePath?: unknown;
+      source?: {
+        kind?: unknown;
+        path?: unknown;
+      };
+    };
   };
   destinations?: Array<{ url?: unknown }>;
 };
@@ -106,23 +120,21 @@ routingPrefix = "codex-cli/"
 bareAlias = "codex-cli"
 
 [auth]
-mode = "cli-bootstrap"
+mode = "runtime-auth-state"
 storageAuthority = "bfdesktop"
 attachmentAuthority = "bfdesktop-mitm"
 destinationScope = "declared-destinations"
-importedSecretId = "openai-access-token"
 
-[auth.check]
-command = ["codex", "login", "status"]
+[auth.runtimeAuthState]
+runtimeHomeEnv = "CODEX_HOME"
+runtimePath = "codex/auth.json"
 
-[auth.probe]
-command = ["codex", "exec", "hi"]
+[auth.runtimeAuthState.source]
+kind = "json-file"
+path = "$CODEX_HOME/auth.json"
 
-[auth.login]
-command = ["codex", "login"]
-
-[auth.loginFallback]
-command = ["codex", "login", "--device-auth"]
+[[destinations]]
+url = "https://api.openai.com/v1/responses"
 
 [[destinations]]
 url = "https://chatgpt.com/backend-api/codex/"
@@ -202,19 +214,24 @@ function normalizeSecretRequirement(input: {
   return { envName, secretId };
 }
 
-function normalizeAuthCommand(
-  input: { command?: Array<unknown> } | null | undefined,
-  field: string,
-): ProviderAuthCommand {
-  const command = Array.isArray(input?.command)
-    ? input.command.flatMap((value) =>
-      typeof value === "string" && value.trim().length > 0 ? [value.trim()] : []
-    )
-    : [];
-  if (command.length === 0) {
-    throw new Error(`Provider auth ${field} must declare a non-empty command.`);
+function normalizeRuntimeAuthStateSource(
+  input: NonNullable<
+    NonNullable<RawProviderManifest["auth"]>["runtimeAuthState"]
+  >["source"],
+): ProviderRuntimeAuthStateSource {
+  const kind = typeof input?.kind === "string" ? input.kind.trim() : "";
+  if (kind !== "json-file") {
+    throw new Error(
+      `Unsupported provider runtimeAuthState source kind "${input?.kind}".`,
+    );
   }
-  return { command };
+  const path = typeof input?.path === "string" ? input.path.trim() : "";
+  if (!path) {
+    throw new Error(
+      "Provider auth runtimeAuthState source must declare a non-empty path.",
+    );
+  }
+  return { kind, path };
 }
 
 function normalizeProviderAuthRequirements(
@@ -261,27 +278,28 @@ function normalizeProviderAuthRequirements(
     };
   }
 
-  if (input.mode === "cli-bootstrap") {
-    const importedSecretId = typeof input.importedSecretId === "string"
-      ? input.importedSecretId.trim()
+  if (input.mode === "runtime-auth-state") {
+    const runtimePath = typeof input.runtimeAuthState?.runtimePath === "string"
+      ? input.runtimeAuthState.runtimePath.trim()
       : "";
-    if (!importedSecretId) {
+    if (!runtimePath) {
       throw new Error(
-        "Provider auth cli-bootstrap mode must declare importedSecretId.",
+        "Provider auth runtime-auth-state mode must declare runtimeAuthState.runtimePath.",
       );
     }
     return {
-      mode: "cli-bootstrap",
+      mode: "runtime-auth-state",
       storageAuthority,
       attachmentAuthority,
       destinationScope,
-      importedSecretId,
-      check: normalizeAuthCommand(input.check, "check"),
-      probe: normalizeAuthCommand(input.probe, "probe"),
-      login: normalizeAuthCommand(input.login, "login"),
-      loginFallback: input.loginFallback
-        ? normalizeAuthCommand(input.loginFallback, "loginFallback")
-        : undefined,
+      runtimeAuthState: {
+        runtimeHomeEnv: typeof input.runtimeAuthState?.runtimeHomeEnv ===
+            "string"
+          ? input.runtimeAuthState.runtimeHomeEnv.trim() || undefined
+          : undefined,
+        runtimePath,
+        source: normalizeRuntimeAuthStateSource(input.runtimeAuthState?.source),
+      },
     };
   }
 
