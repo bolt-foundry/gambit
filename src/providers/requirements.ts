@@ -10,14 +10,14 @@ import {
 } from "./router.ts";
 
 export type {
-  CliBootstrapProviderAuthRequirements,
   ProviderAttachmentAuthority,
-  ProviderAuthCommand,
   ProviderAuthRequirements,
   ProviderDestinationRequirement,
   ProviderDestinationScope,
+  ProviderRuntimeAuthStateSource,
   ProviderSecretRequirement,
   ProviderStorageAuthority,
+  RuntimeAuthStateProviderAuthRequirements,
   SecretProviderAuthRequirements,
 } from "./manifest.ts";
 
