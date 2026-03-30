@@ -10,7 +10,22 @@
   },
   "exports": {
     ".": "./mod.ts",
-    "./cli": "./src/cli.ts"
+    "./cli": "./src/cli.ts",
+    "./src/claude_code_preflight.ts": "./src/claude_code_preflight.ts",
+    "./src/cli_args.ts": "./src/cli_args.ts",
+    "./src/cli_utils.ts": "./src/cli_utils.ts",
+    "./src/codex_preflight.ts": "./src/codex_preflight.ts",
+    "./src/commands/check.ts": "./src/commands/check.ts",
+    "./src/default_runtime.ts": "./src/default_runtime.ts",
+    "./src/durable_streams.ts": "./src/durable_streams.ts",
+    "./src/gambit_id.ts": "./src/gambit_id.ts",
+    "./src/gambit_path.ts": "./src/gambit_path.ts",
+    "./src/gambit_time.ts": "./src/gambit_time.ts",
+    "./src/project_config.ts": "./src/project_config.ts",
+    "./src/test_bot.ts": "./src/test_bot.ts",
+    "./src/trace.ts": "./src/trace.ts",
+    "./src/utility_types.ts": "./src/utility_types.ts",
+    "./src/workspace_sqlite.ts": "./src/workspace_sqlite.ts"
   },
   "tasks": {
     "fmt": "deno fmt",
@@ -21,12 +36,12 @@
     "fix": "deno fmt && deno lint --fix && deno test --allow-all",
     "compile": "deno run -A scripts/compile.ts",
     "precommit": "deno fmt && deno lint && deno task guard:bfmono-imports && deno check && deno test -A",
-    "bundle:sim": "deno run -A scripts/bundle_simulator_ui.ts",
-    "bundle:sim:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --sourcemap=external",
-    "bundle:sim:web": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser",
-    "bundle:sim:web:sourcemap": "deno run -A scripts/bundle_simulator_ui.ts --platform=browser --sourcemap=external",
-    "verify:seed-fixture": "deno run -A scripts/seed_verify_fixture.ts",
-    "serve:bot": "mkdir -p /tmp/gambit-bot-root && GAMBIT_SIMULATOR_BUILD_BOT_ROOT=/tmp/gambit-bot-root GAMBIT_BOT_ROOT=/tmp/gambit-bot-root deno run -A src/cli.ts serve src/decks/gambit-bot/PROMPT.md --bundle --port 8000",
+    "bundle:sim": "deno task --cwd packages/gambit-simulator bundle:sim",
+    "bundle:sim:sourcemap": "deno task --cwd packages/gambit-simulator bundle:sim:sourcemap",
+    "bundle:sim:web": "deno task --cwd packages/gambit-simulator bundle:sim:web",
+    "bundle:sim:web:sourcemap": "deno task --cwd packages/gambit-simulator bundle:sim:web:sourcemap",
+    "verify:seed-fixture": "deno task --cwd packages/gambit-simulator verify:seed-fixture",
+    "serve:bot": "deno task --cwd packages/gambit-simulator serve:bot",
     "serve:bot:sandbox": "deno run -A scripts/serve_bot_sandbox.ts",
     "build_npm": "deno run -A scripts/build_npm.ts",
     "ci:gambit-core:npm-compat": "deno task --cwd packages/gambit-core build_npm"
@@ -34,7 +49,7 @@
   "lint": {
     "include": [
       "src",
-      "simulator-ui/src"
+      "packages/gambit-simulator/src"
     ],
     "plugins": [
       "./scripts/lint/examples_remote_imports.ts"
@@ -60,8 +75,8 @@
   "fmt": {
     "lineWidth": 80,
     "exclude": [
-      "simulator-ui/__generated__",
-      "simulator-ui/subscriptions/__generated__"
+      "packages/gambit-simulator/simulator-ui/__generated__",
+      "packages/gambit-simulator/simulator-ui/subscriptions/__generated__"
     ]
   },
   "compilerOptions": {
@@ -83,8 +98,8 @@
     "@isograph/babel-plugin": "npm:@isograph/babel-plugin@0.5.2",
     "@isograph/compiler": "npm:@isograph/compiler@0.5.2",
     "@isograph/react": "npm:@isograph/react@0.5.2",
-    "@iso-gambit-sim": "./simulator-ui/__generated__/__isograph/iso.ts",
-    "@iso-gambit-sim/": "./simulator-ui/__generated__/__isograph/",
+    "@iso-gambit-sim": "./packages/gambit-simulator/simulator-ui/__generated__/__isograph/iso.ts",
+    "@iso-gambit-sim/": "./packages/gambit-simulator/simulator-ui/__generated__/__isograph/",
     "@deno/dnt": "jsr:@deno/dnt@^0.42.3", // dev
     "@std/front-matter": "jsr:@std/front-matter@^1.0.9",
     "@std/fs": "jsr:@std/fs@^1.0.20",
@@ -114,15 +129,13 @@
   "publish": {
     "include": [
       "src",
-      "simulator-ui",
       "scaffolds",
       "docs",
       "mod.ts",
       "deno.jsonc",
       "README.md",
       "CHANGELOG.md",
-      "LICENSE",
-      "simulator-ui/dist"
+      "LICENSE"
     ]
   },
   "deploy": {

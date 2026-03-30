@@ -38,7 +38,6 @@ Status: RFC (pre-1.0) Owner: Engineering (incl. Gambit-core engineering)
 - Tool declaration: A model-callable external tool declaration under `[[tools]]`
   that Gambit routes through runtime hook handling.
 - Snippet: A reusable embed unit (what we previously called card embeds).
-- Stdlib deck: A built-in deck resolved by Gambit from its stdlib deck bundle.
 
 ## Deck roles
 
@@ -149,7 +148,7 @@ Local snippet expansion rules:
 - Gambit resolves the path relative to the Markdown file that contains the embed
   (for example, `PROMPT.md` or another snippet).
 - The referenced file is loaded as text and its body is inlined where the embed
-  appeared (same behavior as legacy card embeds).
+  appeared.
 - Cycles are errors (a snippet cannot embed itself directly or indirectly).
 
 ## Schemas (built-in Gambit namespace)
@@ -170,19 +169,6 @@ Built-in schemas (v1.0):
 | `gambit://schemas/graders/contexts/conversation_tools.zod.ts` | Conversation-level grader context including assistant `tool_calls`. |
 | `gambit://schemas/graders/contexts/conversation.zod.ts`       | Schema for full-conversation grader context.                        |
 | `gambit://schemas/scenarios/plain_chat_output.zod.ts`         | Canonical string output for plain-chat scenario/scenario decks.     |
-
-## Stdlib decks (built-in Gambit namespace)
-
-Stdlib decks are referenced by URI and resolved by Gambit from its built-in deck
-bundle (not from your repo). They exist to make it easy to connect external
-agent runtimes/builders to Gambit decks.
-
-Built-in stdlib decks (v1.0):
-
-| URI                                            | Purpose                                                             |
-| ---------------------------------------------- | ------------------------------------------------------------------- |
-| `gambit://decks/openai/codex-sdk/PROMPT.md`    | Codex SDK bridge deck (link Codex to Gambit decks).                 |
-| `gambit://decks/anthropic/agent-sdk/PROMPT.md` | Anthropic agent SDK bridge deck (link Claude Code to Gambit decks). |
 
 ## Deck folder contract
 
@@ -441,7 +427,6 @@ Reserved (future, not currently executable):
 - `[[tools]].inputSchema` is resolved relative to the referencing `PROMPT.md`.
 - Relative file paths are resolved relative to the referencing deck’s
   `PROMPT.md`.
-- Stdlib deck paths use `gambit://decks/.../PROMPT.md`.
 
 ### Simulator surfaces (Build/Test/Grade)
 
@@ -471,13 +456,10 @@ sync, so in practice the enforcement boundary is the same.
   `[[graders]]`, and `[[tools]]`.
 - `[[mcpServers]]` is reserved in v1.0 and MUST error as unsupported in the
   current runtime phase.
-- Legacy built-in card/snippet URIs (`gambit://cards/*.card.md`) and legacy
-  markers (`gambit://init`, `gambit://respond`, `gambit://end`) are deprecated.
-  Use canonical `gambit://snippets/*.md` URIs, and treat
+- Legacy markers (`gambit://init`, `gambit://respond`, `gambit://end`) are
+  deprecated. Use canonical `gambit://snippets/*.md` URIs, and treat
   `gambit://snippets/respond.md` / `gambit://snippets/end.md` as migration-only
   markers to remove.
 - Legacy schema URIs ending in `.ts` (for example
   `gambit://schemas/graders/respond.ts`) are deprecated; use `.zod.ts` (for
   example `gambit://schemas/graders/respond.zod.ts`).
-- Stdlib deck URIs that omit the `PROMPT.md` suffix are non-canonical; use the
-  `.../PROMPT.md` form.

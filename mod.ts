@@ -91,5 +91,3 @@ export type {
   ProviderManifest,
   ProviderRegistryEntry,
 } from "./src/providers/manifest.ts";
-/** Start the WebSocket simulator server for the Gambit UI. */
-export { startWebSocketSimulator } from "./src/server.ts";

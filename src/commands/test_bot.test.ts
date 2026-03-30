@@ -2,7 +2,7 @@ import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import { runTestBotLoop } from "./test_bot.ts";
-import { modImportPath } from "../server_test_utils.ts";
+import { modImportPath } from "@bolt-foundry/gambit-simulator/src/server_test_utils.ts";
 import {
   loadCanonicalWorkspaceState,
   saveCanonicalWorkspaceState,

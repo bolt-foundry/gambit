@@ -95,7 +95,7 @@ for (const filename of ["README.md", "LICENSE"]) {
   await Deno.copyFile(src, dest);
 }
 
-const builtinAssetDirs = ["cards", "snippets", "schemas", "decks"] as const;
+const builtinAssetDirs = ["snippets", "schemas"] as const;
 const distAssetRoots = ["", "esm", "script"] as const;
 
 for (const assetDir of builtinAssetDirs) {
@@ -118,10 +118,6 @@ for (const assetDir of builtinAssetDirs) {
 const requiredBuiltins = [
   "esm/snippets/context.md",
   "script/snippets/context.md",
-  "esm/cards/respond.card.md",
-  "script/cards/respond.card.md",
-  "esm/decks/openai/codex-sdk/PROMPT.md",
-  "script/decks/openai/codex-sdk/PROMPT.md",
 ] as const;
 for (const rel of requiredBuiltins) {
   try {

@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { DatabaseSync } from "node:sqlite";
 import type { SavedState } from "@bolt-foundry/gambit-core";
-import { createSessionStore } from "./server_session_store.ts";
+import { createSessionStore } from "@bolt-foundry/gambit-simulator/src/server_session_store.ts";
 
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });

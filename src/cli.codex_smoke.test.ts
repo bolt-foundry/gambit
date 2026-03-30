@@ -265,7 +265,7 @@ Deno.test({
   assertEquals(result.code, 1, formatCommandDiagnostics("init", result));
   const combined = `${result.stdout}\n${result.stderr}`;
   assertEquals(combined.includes("gambit init"), true);
-  assertEquals(combined.includes("gambit serve"), true);
+  assertEquals(combined.includes("gambit-simulator serve"), true);
 });
 
 Deno.test({

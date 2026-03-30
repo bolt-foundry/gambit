@@ -1,7 +1,7 @@
 +++
 command = "serve"
 summary = "Run the debug UI server"
-usage = "gambit serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--build-assistant-provider <id>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec] [--yolo]"
+usage = "gambit-simulator serve [<deck.(ts|md)> | --artifact <bundle.tar.gz>] [--build-assistant-provider <id>] [--model <id>] [--model-force <id>] [--port <n>] [--responses] [--verbose] [--watch] [--no-bundle] [--no-sourcemap] [--worker-sandbox|--no-worker-sandbox|--legacy-exec] [--yolo]"
 flags = [
   "--artifact <bundle.tar.gz> Serve from a restored artifact bundle (mutually exclusive with <deck>)",
   "--build-assistant-provider <id> Build chat provider default: codex-cli or claude-code-cli",
@@ -25,7 +25,11 @@ flags = [
 ]
 +++
 
-Starts the debug UI server (default at `http://localhost:8000/`).
+Starts the debug UI server (default at `http://localhost:8000/`) from
+`@bolt-foundry/gambit-simulator`.
 
-If no deck path is provided, Gambit uses `./PROMPT.md`. If `./PROMPT.md` does
-not exist, Gambit creates a minimal `PROMPT.md` and serves it.
+If no deck path is provided, Gambit Simulator uses `./PROMPT.md`. If
+`./PROMPT.md` does not exist, it creates a minimal `PROMPT.md` and serves it.
+
+`@bolt-foundry/gambit` no longer owns `serve`; its CLI prints migration guidance
+and exits.

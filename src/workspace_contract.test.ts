@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import {
   buildWorkspacePath,
   parseWorkspaceRoute,
-} from "./workspace_contract.ts";
+} from "@bolt-foundry/gambit-simulator/src/workspace_contract.ts";
 
 Deno.test("buildWorkspacePath supports run-addressed test and grade routes", () => {
   assertEquals(
