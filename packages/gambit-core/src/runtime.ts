@@ -3557,14 +3557,16 @@ async function runLlmDeckInWorker(
       reject(err);
     };
 
-    const remainingMs = Math.max(
-      0,
-      Math.floor(ctx.runDeadlineMs - performance.now()),
-    );
-    timeoutId = setTimeout(() => {
-      finishReject(new Error(WORKER_TIMEOUT_MESSAGE));
-      clearAndTerminate();
-    }, remainingMs) as unknown as number;
+    if (Number.isFinite(ctx.runDeadlineMs)) {
+      const remainingMs = Math.max(
+        0,
+        Math.floor(ctx.runDeadlineMs - performance.now()),
+      );
+      timeoutId = setTimeout(() => {
+        finishReject(new Error(WORKER_TIMEOUT_MESSAGE));
+        clearAndTerminate();
+      }, remainingMs) as unknown as number;
+    }
 
     worker.addEventListener("error", (event: WorkerBridgeEvent) => {
       event.preventDefault?.();
@@ -3880,14 +3882,16 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
       reject(err);
     };
-    const remainingMs = Math.max(
-      0,
-      Math.floor(ctx.runDeadlineMs - performance.now()),
-    );
-    timeoutId = setTimeout(() => {
-      finishReject(new Error(WORKER_TIMEOUT_MESSAGE));
-      clearAndTerminate();
-    }, remainingMs) as unknown as number;
+    if (Number.isFinite(ctx.runDeadlineMs)) {
+      const remainingMs = Math.max(
+        0,
+        Math.floor(ctx.runDeadlineMs - performance.now()),
+      );
+      timeoutId = setTimeout(() => {
+        finishReject(new Error(WORKER_TIMEOUT_MESSAGE));
+        clearAndTerminate();
+      }, remainingMs) as unknown as number;
+    }
 
     worker.addEventListener("error", (event: WorkerBridgeEvent) => {
       event.preventDefault?.();

@@ -2914,6 +2914,47 @@ Deno.test("child deck timeoutMs=0 still respects inherited deadline", async () =
   }
 });
 
+Deno.test("root llm deck timeoutMs=0 works with worker sandbox enabled", async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = path.join(dir, "root-timeout-zero.deck.md");
+  await Deno.writeTextFile(
+    deckPath,
+    `+++
+label = "root-timeout-zero"
+
+[modelParams]
+model = "dummy-model"
+
+[guardrails]
+timeoutMs = 0
++++
+
+Reply briefly.
+`,
+  );
+
+  const delayedProvider: ModelProvider = {
+    async chat() {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return {
+        message: { role: "assistant", content: "ok" },
+        finishReason: "stop",
+      };
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: "",
+    initialUserMessage: "Hi",
+    modelProvider: delayedProvider,
+    isRoot: true,
+    workerSandbox: true,
+  });
+
+  assertEquals(result, "ok");
+});
+
 Deno.test("worker sandbox flag defaults false when env access is denied", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

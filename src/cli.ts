@@ -444,6 +444,36 @@ async function main() {
     }
 
     if (args.cmd === "repl") {
+      if (!Deno.stdin.isTerminal()) {
+        if (args.message === undefined) {
+          logger.error(
+            "gambit repl requires an interactive TTY unless --message is provided for a headless one-shot run.",
+          );
+          logger.error(
+            "Use `gambit run <deck> --message <json|string>` for explicit non-interactive execution.",
+          );
+          Deno.exit(1);
+        }
+        await handleRunCommand({
+          deckPath,
+          context: parseContext(args.context),
+          contextProvided: args.contextProvided,
+          message: parseMessage(args.message),
+          modelProvider: provider,
+          model: args.model,
+          modelForce: args.modelForce,
+          trace: tracer,
+          stream: args.stream,
+          statePath: args.statePath,
+          responsesMode,
+          workspacePermissions,
+          workspacePermissionsBaseDir: projectConfig?.root,
+          sessionPermissions,
+          sessionPermissionsBaseDir,
+          workerSandbox,
+        });
+        return;
+      }
       await startTui({
         deckPath,
         model: args.model,

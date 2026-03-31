@@ -4,7 +4,7 @@ summary = "Start an interactive REPL"
 usage = "gambit repl <deck.(ts|md)> [--context <json|string>] [--message <json|string>] [--model <id>] [--model-force <id>] [--responses] [--verbose] [-A|--allow-all|--allow-<kind>] [--worker-sandbox|--no-worker-sandbox|--legacy-exec]"
 flags = [
   "--context <json|string> Context payload (seeds gambit_context; legacy --init still works)",
-  "--message <json|string> Initial user message (sent before assistant speaks)",
+  "--message <json|string> Initial user message (sent before assistant speaks; also enables headless one-shot mode without a TTY)",
   "--model <id>            Default model id",
   "--model-force <id>      Override model id",
   "--responses             Run runtime/state in Responses mode",
@@ -24,3 +24,7 @@ flags = [
 +++
 
 Starts an interactive REPL. Provide a deck path to load.
+
+If stdin is not an interactive TTY, `gambit repl` requires `--message` and will
+run a single headless turn before exiting. Without `--message`, the command
+fails fast with guidance to use `gambit run`.
