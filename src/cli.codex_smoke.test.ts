@@ -188,13 +188,21 @@ async function runDeck(input: {
   codexBinPath: string;
   argsLogPath: string;
   cwd?: string;
+  command?: "run" | "repl";
+  extraArgs?: Array<string>;
 }): Promise<{
   code: number;
   stdout: string;
   stderr: string;
   argsLog: string;
 }> {
-  const args = await denoRunArgs(["run", input.deckPath, "--message", "hi"]);
+  const args = await denoRunArgs([
+    input.command ?? "run",
+    input.deckPath,
+    "--message",
+    "hi",
+    ...(input.extraArgs ?? []),
+  ]);
   const command = new Deno.Command(Deno.execPath(), {
     args,
     cwd: input.cwd,
@@ -395,4 +403,65 @@ Deno.test({
       throw err;
     });
   }
+});
+
+Deno.test({
+  name:
+    "cli smoke: repl falls back to headless one-shot without a TTY when --message is provided",
+  permissions: { read: true, write: true, run: true, env: true },
+}, async () => {
+  const rootTmpDir = path.join(Deno.cwd(), "tmp");
+  await Deno.mkdir(rootTmpDir, { recursive: true });
+  const dir = await Deno.makeTempDir({ dir: rootTmpDir });
+
+  try {
+    const mock = await writeMockCodexBin(dir);
+    const deckPath = await writeDeck(dir, "codex-cli/default", "high");
+    const replRun = await runDeck({
+      command: "repl",
+      deckPath,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      cwd: dir,
+    });
+    assertEquals(
+      replRun.code,
+      0,
+      formatCommandDiagnostics("repl headless one-shot", replRun),
+    );
+    assertEquals(replRun.stdout.trim(), "ok");
+  } finally {
+    await Deno.remove(dir, { recursive: true }).catch((err) => {
+      if (err instanceof Deno.errors.NotFound) return;
+      throw err;
+    });
+  }
+});
+
+Deno.test({
+  name: "cli smoke: repl without tty and without --message fails with guidance",
+  permissions: { read: true, write: true, run: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "codex-cli/default");
+  const args = await denoRunArgs(["repl", deckPath]);
+  const command = new Deno.Command(Deno.execPath(), {
+    args,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const out = await command.output();
+  const result = {
+    code: out.code,
+    stdout: new TextDecoder().decode(out.stdout),
+    stderr: new TextDecoder().decode(out.stderr),
+  };
+  assertEquals(
+    result.code,
+    1,
+    formatCommandDiagnostics("repl without tty", result),
+  );
+  const combined = `${result.stdout}\n${result.stderr}`;
+  assertEquals(combined.includes("requires an interactive TTY"), true);
+  assertEquals(combined.includes("Use `gambit run"), true);
 });
