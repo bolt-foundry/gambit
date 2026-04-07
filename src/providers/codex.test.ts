@@ -1,4 +1,5 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
+import { join } from "@std/path";
 import { createCodexProvider, parseCodexArgsForTest } from "./codex.ts";
 import type { ProviderTraceEvent, SavedState } from "@bolt-foundry/gambit-core";
 
@@ -68,6 +69,87 @@ Deno.test("codex provider starts thread and resumes with saved thread id", async
   assertEquals(calls[1][1], "resume");
   assertEquals(calls[1].includes("thread-123"), true);
   assertEquals(calls[1][calls[1].length - 1], "follow up");
+});
+
+Deno.test("codex provider can use app-server transport and resume saved thread ids", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  try {
+    const calls: Array<{ prompt: string; priorThreadId?: string }> = [];
+    const provider = createCodexProvider({
+      runCommand: () => {
+        throw new Error(
+          "exec path should not run when app-server transport is enabled",
+        );
+      },
+      runAppServerTurn: (input) => {
+        calls.push({
+          prompt: input.prompt,
+          priorThreadId: input.priorThreadId,
+        });
+        input.onStreamEvent?.({
+          type: "item.delta",
+          item: { id: "msg_app", type: "agent_message", text: "hello " },
+        });
+        input.onStreamEvent?.({
+          type: "item.completed",
+          item: {
+            id: "msg_app",
+            type: "agent_message",
+            text: "hello world",
+          },
+        });
+        return Promise.resolve({
+          threadId: input.priorThreadId ?? "thread-app-server",
+          assistantMessages: [{
+            itemId: "msg_app",
+            text: "hello world",
+          }],
+          usage: {
+            promptTokens: 5,
+            completionTokens: 2,
+            totalTokens: 7,
+          },
+        });
+      },
+    });
+
+    const chunks: Array<string> = [];
+    const first = await provider.chat({
+      model: "codex-cli/default",
+      stream: true,
+      messages: [{ role: "user", content: "hello" }],
+      onStreamText: (chunk) => chunks.push(chunk),
+    });
+    assertEquals(first.message.content, "hello world");
+    assertEquals(
+      first.updatedState?.meta?.["codex.threadId"],
+      "thread-app-server",
+    );
+    assertEquals(chunks, ["hello "]);
+    assertEquals(calls[0], { prompt: "hello", priorThreadId: undefined });
+
+    const second = await provider.chat({
+      model: "codex-cli/default",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hello world" },
+        { role: "user", content: "follow up" },
+      ],
+      state: first.updatedState as SavedState,
+    });
+    assertEquals(second.message.content, "hello world");
+    assertEquals(calls[1], {
+      prompt: "follow up",
+      priorThreadId: "thread-app-server",
+    });
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+  }
 });
 
 Deno.test("codex provider resume does not replay transcript when no new user message", () => {
@@ -358,6 +440,326 @@ Deno.test("codex provider streams assistant text deltas from agent_message event
   });
 
   assertEquals(streamedText, ["hello ", "world"]);
+});
+
+Deno.test("codex provider responses streams via app-server transport", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  try {
+    const streamEvents: Array<
+      { type?: string; delta?: string; text?: string }
+    > = [];
+    const provider = createCodexProvider({
+      runAppServerTurn: (input) => {
+        input.onStreamEvent?.({
+          type: "item.delta",
+          item: { id: "msg_rsp", type: "agent_message", text: "one " },
+        });
+        input.onStreamEvent?.({
+          type: "item.delta",
+          item: { id: "msg_rsp", type: "agent_message", text: "two" },
+        });
+        input.onStreamEvent?.({
+          type: "item.completed",
+          item: {
+            id: "msg_rsp",
+            type: "agent_message",
+            text: "one two",
+          },
+        });
+        return Promise.resolve({
+          threadId: "thread-rsp-app",
+          assistantMessages: [{ itemId: "msg_rsp", text: "one two" }],
+          usage: {
+            promptTokens: 4,
+            completionTokens: 2,
+            totalTokens: 6,
+          },
+        });
+      },
+    });
+
+    const result = await provider.responses?.({
+      request: {
+        model: "codex-cli/default",
+        stream: true,
+        input: [{
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "hi" }],
+        }],
+      },
+      onStreamEvent: (event) => {
+        streamEvents.push(
+          event as { type?: string; delta?: string; text?: string },
+        );
+      },
+    });
+
+    assertEquals(
+      result?.updatedState?.meta?.["codex.threadId"],
+      "thread-rsp-app",
+    );
+    assertEquals(
+      streamEvents.filter((event) =>
+        event.type === "response.output_text.delta"
+      )
+        .map((event) => event.delta),
+      ["one ", "two"],
+    );
+    assertEquals(
+      streamEvents.filter((event) => event.type === "response.output_text.done")
+        .map((event) => event.text),
+      ["one two"],
+    );
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+  }
+});
+
+Deno.test("codex provider app-server fails fast when the child exits before turn completion", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-exit-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-exit"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-exit","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf 'protocol failure\\n' >&2
+      exit 17
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      provider.chat({
+        model: "codex-cli/default",
+        messages: [{ role: "user", content: "hello" }],
+      }).then(
+        () => ({ kind: "resolved" as const }),
+        (error) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) =>
+        timeoutId = setTimeout(() => resolve({ kind: "timeout" }), 500)
+      ),
+    ]);
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+
+    assert(result.kind !== "timeout", "provider hung after app-server exit");
+    if (result.kind !== "rejected") {
+      throw new Error("provider unexpectedly resolved after app-server exit");
+    }
+    const error = result.error;
+    assertEquals(
+      error instanceof Error ? error.message : String(error),
+      "codex app-server failed: protocol failure",
+    );
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server fails fast when the child exits before initialize completes", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-init-exit-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+printf 'startup failure\\n' >&2
+exit 23
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      provider.chat({
+        model: "codex-cli/default",
+        messages: [{ role: "user", content: "hello" }],
+      }).then(
+        () => ({ kind: "resolved" as const }),
+        (error) => ({ kind: "rejected" as const, error }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) =>
+        timeoutId = setTimeout(() => resolve({ kind: "timeout" }), 500)
+      ),
+    ]);
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+
+    assert(
+      result.kind !== "timeout",
+      "provider hung after app-server init exit",
+    );
+    if (result.kind !== "rejected") {
+      throw new Error(
+        "provider unexpectedly resolved after app-server init exit",
+      );
+    }
+    const error = result.error;
+    assertEquals(
+      error instanceof Error ? error.message : String(error),
+      "codex app-server failed: startup failure",
+    );
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server sends initialized with empty params", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-initialized-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      printf '%s\\n' "$line" | grep '"params":{}' >/dev/null 2>&1 || {
+        printf 'initialized missing params\\n' >&2
+        exit 31
+      }
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-init-ok"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-init-ok","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-init-ok","turnId":"turn-app-server-init-ok","item":{"type":"agentMessage","id":"msg-init-ok","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-init-ok","turn":{"id":"turn-app-server-init-ok","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
 });
 
 Deno.test("codex provider preserves multiple assistant message items in order", async () => {

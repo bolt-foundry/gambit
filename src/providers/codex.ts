@@ -21,6 +21,7 @@ const CODEX_REASONING_SUMMARY_ENV = "GAMBIT_CODEX_REASONING_SUMMARY";
 const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
+const CODEX_TRANSPORT_ENV = "GAMBIT_CODEX_TRANSPORT";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const MCP_SERVER_PATH = (() => {
   try {
@@ -60,6 +61,11 @@ type CommandOutput = {
   stderr: Uint8Array;
 };
 
+type CommandStatusLike = {
+  success: boolean;
+  code: number;
+};
+
 type CodexAssistantMessage = {
   itemId: string | null;
   text: string;
@@ -71,6 +77,36 @@ type CommandRunner = (input: {
   signal?: AbortSignal;
   onStdoutLine?: (line: string) => void;
 }) => Promise<CommandOutput>;
+
+type CodexTransport = "exec" | "app-server";
+
+type AppServerTurnRunnerInput = {
+  model: string;
+  messages: Array<ModelMessage>;
+  state?: SavedState;
+  params?: Record<string, unknown>;
+  deckPath?: string;
+  signal?: AbortSignal;
+  onStreamEvent?: (event: Record<string, JSONValue>) => void;
+  instructions?: string;
+  prompt: string;
+  cwd: string;
+  priorThreadId?: string;
+};
+
+type AppServerTurnRunnerOutput = {
+  threadId?: string;
+  assistantMessages: Array<CodexAssistantMessage>;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+};
+
+type AppServerTurnRunner = (
+  input: AppServerTurnRunnerInput,
+) => Promise<AppServerTurnRunnerOutput>;
 
 const REASONING_EFFORT_VALUES = new Set([
   "none",
@@ -91,6 +127,12 @@ const VERBOSITY_VALUES = new Set([
   "medium",
   "high",
 ]);
+
+function codexTransport(): CodexTransport {
+  const raw = Deno.env.get(CODEX_TRANSPORT_ENV)?.trim().toLowerCase();
+  if (raw === "app-server" || raw === "app_server") return "app-server";
+  return "exec";
+}
 
 function runCwd(): string {
   const botRoot = Deno.env.get(BOT_ROOT_ENV);
@@ -282,6 +324,18 @@ function codexConfigArgs(input: {
   return args;
 }
 
+function codexGlobalConfigArgs(configArgs: Array<string>): Array<string> {
+  const args: Array<string> = [];
+  for (let idx = 0; idx < configArgs.length; idx += 2) {
+    if (configArgs[idx] !== "-c") continue;
+    const value = configArgs[idx + 1];
+    if (typeof value === "string" && value.length > 0) {
+      args.push("--config", value);
+    }
+  }
+  return args;
+}
+
 function normalizeCodexModel(model: string): string {
   const trimmed = model.trim();
   if (!trimmed) return "";
@@ -353,6 +407,501 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function parseUsageBreakdown(value: unknown): {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+} | undefined {
+  const record = asRecord(value);
+  const inputTokens = record.inputTokens;
+  const outputTokens = record.outputTokens;
+  const totalTokens = record.totalTokens;
+  if (
+    typeof inputTokens !== "number" || !Number.isFinite(inputTokens) ||
+    typeof outputTokens !== "number" || !Number.isFinite(outputTokens) ||
+    typeof totalTokens !== "number" || !Number.isFinite(totalTokens)
+  ) {
+    return undefined;
+  }
+  return {
+    promptTokens: inputTokens,
+    completionTokens: outputTokens,
+    totalTokens,
+  };
+}
+
+function normalizeAppServerToolStatus(status: unknown): string {
+  if (typeof status !== "string") return "";
+  if (status === "inProgress") return "in_progress";
+  return status;
+}
+
+function appServerThreadItemToCodexItem(
+  item: Record<string, unknown>,
+): Record<string, JSONValue> | null {
+  const type = typeof item.type === "string" ? item.type : "";
+  const id = typeof item.id === "string" ? item.id : "";
+  if (!type || !id) return null;
+  if (type === "agentMessage") {
+    return {
+      id,
+      type: "agent_message",
+      text: typeof item.text === "string" ? item.text : "",
+    };
+  }
+  if (type === "reasoning") {
+    return {
+      id,
+      type: "reasoning",
+      summary: (Array.isArray(item.summary) ? item.summary : []) as JSONValue,
+      content: (Array.isArray(item.content) ? item.content : []) as JSONValue,
+    };
+  }
+  if (type === "mcpToolCall") {
+    return {
+      id,
+      type: "mcp_tool_call",
+      tool: typeof item.tool === "string" ? item.tool : "",
+      server: typeof item.server === "string" ? item.server : "",
+      status: normalizeAppServerToolStatus(item.status),
+      arguments: (item.arguments ?? {}) as JSONValue,
+      result: (item.result ?? null) as JSONValue,
+      error: (item.error ?? null) as JSONValue,
+    };
+  }
+  if (type === "commandExecution") {
+    return {
+      id,
+      type: "command_execution",
+      command: (item.command ?? "") as JSONValue,
+      status: normalizeAppServerToolStatus(item.status),
+      aggregated_output: typeof item.aggregatedOutput === "string"
+        ? item.aggregatedOutput
+        : "",
+      exit_code: (item.exitCode ?? null) as JSONValue,
+    };
+  }
+  if (type === "fileChange") {
+    return {
+      id,
+      type: "file_change",
+      status: normalizeAppServerToolStatus(item.status),
+      changes: (Array.isArray(item.changes) ? item.changes : []) as JSONValue,
+    };
+  }
+  return null;
+}
+
+function appServerNotificationToCodexEvent(
+  method: string,
+  params: Record<string, unknown>,
+): Record<string, JSONValue> | null {
+  if (method === "item/agentMessage/delta") {
+    return {
+      type: "item.delta",
+      item: {
+        id: typeof params.itemId === "string" ? params.itemId : "",
+        type: "agent_message",
+        text: typeof params.delta === "string" ? params.delta : "",
+      },
+    };
+  }
+
+  if (
+    method === "item/reasoning/textDelta" ||
+    method === "item/reasoning/summaryTextDelta"
+  ) {
+    return {
+      type: "item.delta",
+      item: {
+        id: typeof params.itemId === "string" ? params.itemId : "reasoning",
+        type: "reasoning",
+        text: typeof params.delta === "string" ? params.delta : "",
+      },
+    };
+  }
+
+  if (
+    method === "item/commandExecution/outputDelta" ||
+    method === "item/fileChange/outputDelta"
+  ) {
+    const itemType = method === "item/commandExecution/outputDelta"
+      ? "command_execution"
+      : "file_change";
+    return {
+      type: "item.delta",
+      item: {
+        id: typeof params.itemId === "string" ? params.itemId : "",
+        type: itemType,
+        status: "in_progress",
+        ...(itemType === "command_execution"
+          ? {
+            aggregated_output: typeof params.delta === "string"
+              ? params.delta
+              : "",
+          }
+          : { changes: [] }),
+      },
+    };
+  }
+
+  if (method === "item/mcpToolCall/progress") {
+    return {
+      type: "item.delta",
+      item: {
+        id: typeof params.itemId === "string" ? params.itemId : "",
+        type: "mcp_tool_call",
+        status: "in_progress",
+        result: typeof params.message === "string" ? params.message : "",
+      },
+    };
+  }
+
+  if (method === "item/started" || method === "item/completed") {
+    const item = asRecord(params.item);
+    const mapped = appServerThreadItemToCodexItem(item);
+    if (!mapped) return null;
+    return {
+      type: method === "item/started" ? "item.started" : "item.completed",
+      item: mapped,
+    };
+  }
+
+  return null;
+}
+
+async function defaultAppServerTurnRunner(
+  input: AppServerTurnRunnerInput,
+): Promise<AppServerTurnRunnerOutput> {
+  const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
+  const spawnArgs = [
+    ...codexGlobalConfigArgs(codexConfigArgs({
+      cwd: input.cwd,
+      deckPath: input.deckPath,
+      params: input.params,
+      instructions: input.instructions,
+    })),
+    "app-server",
+  ];
+  const child = new Deno.Command(codexBin, {
+    args: spawnArgs,
+    cwd: input.cwd,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+
+  const abort = () => {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // ignore
+    }
+  };
+  if (input.signal?.aborted) {
+    abort();
+  } else if (input.signal) {
+    input.signal.addEventListener("abort", abort, { once: true });
+  }
+
+  const encoder = new TextEncoder();
+  const stdoutReader = child.stdout.getReader();
+  const stderrReader = child.stderr.getReader();
+  const stdinWriter = child.stdin.getWriter();
+  let childExitStatus: CommandStatusLike | null = null;
+  const pending = new Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+    }
+  >();
+  const stderrChunks: Array<string> = [];
+  const assistantMessages: Array<CodexAssistantMessage> = [];
+  const assistantIndexById = new Map<string, number>();
+  const turnState: {
+    id?: string;
+    completed: boolean;
+    error?: Error;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+    };
+  } = { completed: false };
+  let nextRequestId = 1;
+  let cleanupError: Error | null = null;
+  let output: AppServerTurnRunnerOutput | null = null;
+  const childStatus = child.status.then((status) => {
+    childExitStatus = status;
+    return status;
+  });
+
+  const appServerClosedError = () => {
+    const stderr = stderrChunks.join("").trim();
+    if (stderr) {
+      return new Error(`codex app-server failed: ${stderr}`);
+    }
+    const detail = childExitStatus
+      ? childExitStatus.code === 0
+        ? "exited successfully"
+        : `exited with code ${childExitStatus.code}`
+      : "closed unexpectedly";
+    return new Error(
+      `Codex app-server exited before the request completed (${detail}).`,
+    );
+  };
+
+  const writeMessage = async (message: Record<string, unknown>) => {
+    await stdinWriter.write(encoder.encode(`${JSON.stringify(message)}\n`));
+  };
+
+  const request = (method: string, params: Record<string, unknown>) => {
+    const id = String(nextRequestId++);
+    const promise = new Promise<unknown>((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+    });
+    const requestPromise = promise.finally(() => {
+      pending.delete(id);
+    });
+    const exitPromise = childStatus.then(() => {
+      if (pending.has(id)) {
+        pending.delete(id);
+        throw appServerClosedError();
+      }
+      return requestPromise;
+    });
+    return writeMessage({ id, method, params })
+      .catch((error) => {
+        pending.delete(id);
+        throw error;
+      })
+      .then(() => Promise.race([requestPromise, exitPromise]));
+  };
+
+  const readLoop = async () => {
+    const decoder = new TextDecoder();
+    let buffered = "";
+    while (true) {
+      const { value, done } = await stdoutReader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      const parts = buffered.split(/\r?\n/);
+      buffered = parts.pop() ?? "";
+      for (const line of parts) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("{")) continue;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(trimmed) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        const method = typeof parsed.method === "string" ? parsed.method : "";
+        if (method) {
+          if (Object.prototype.hasOwnProperty.call(parsed, "id")) {
+            const requestId = String(parsed.id);
+            await writeMessage({
+              id: requestId,
+              error: {
+                code: -32601,
+                message: `Unsupported app-server request: ${method}`,
+              },
+            });
+            continue;
+          }
+          const params = asRecord(parsed.params);
+          const pseudoEvent = appServerNotificationToCodexEvent(method, params);
+          if (pseudoEvent) {
+            input.onStreamEvent?.(pseudoEvent);
+          }
+          if (method === "item/completed") {
+            const item = asRecord(params.item);
+            if (item.type === "agentMessage" && typeof item.id === "string") {
+              const entry: CodexAssistantMessage = {
+                itemId: item.id,
+                text: typeof item.text === "string" ? item.text : "",
+              };
+              const existing = assistantIndexById.get(item.id);
+              if (typeof existing === "number") {
+                assistantMessages[existing] = entry;
+              } else {
+                assistantIndexById.set(item.id, assistantMessages.length);
+                assistantMessages.push(entry);
+              }
+            }
+          } else if (method === "thread/tokenUsage/updated") {
+            if (
+              typeof params.turnId === "string" &&
+              (!turnState.id || params.turnId === turnState.id)
+            ) {
+              turnState.usage = parseUsageBreakdown(
+                asRecord(params.tokenUsage).last,
+              );
+            }
+          } else if (method === "turn/started") {
+            const turn = asRecord(params.turn);
+            if (typeof turn.id === "string") {
+              turnState.id = turn.id;
+            }
+          } else if (method === "turn/completed") {
+            const turn = asRecord(params.turn);
+            if (typeof turn.id === "string") {
+              turnState.id = turn.id;
+            }
+            if (turn.status === "failed") {
+              const error = asRecord(turn.error);
+              const message = typeof error.message === "string" && error.message
+                ? error.message
+                : "Codex app-server turn failed";
+              turnState.error = new Error(message);
+            } else if (turn.status === "interrupted") {
+              turnState.error = new DOMException("Run canceled", "AbortError");
+            }
+            turnState.completed = true;
+          }
+          continue;
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(parsed, "id")) continue;
+        const responseId = String(parsed.id);
+        const resolver = pending.get(responseId);
+        if (!resolver) continue;
+        pending.delete(responseId);
+        if (parsed.error) {
+          const error = asRecord(parsed.error);
+          const message = typeof error.message === "string" && error.message
+            ? error.message
+            : "Codex app-server request failed";
+          resolver.reject(new Error(message));
+          continue;
+        }
+        resolver.resolve(parsed.result);
+      }
+    }
+  };
+
+  const stderrLoop = (async () => {
+    const decoder = new TextDecoder();
+    while (true) {
+      const { value, done } = await stderrReader.read();
+      if (done) break;
+      stderrChunks.push(decoder.decode(value, { stream: true }));
+    }
+  })();
+
+  const stdoutLoop = readLoop();
+
+  try {
+    await request("initialize", {
+      clientInfo: {
+        name: "gambit",
+        title: "Gambit",
+        version: "0.0.0",
+      },
+      capabilities: {
+        experimentalApi: true,
+      },
+    });
+    await writeMessage({ method: "initialized", params: {} });
+
+    const model = normalizeCodexModel(input.model);
+    const threadResult = input.priorThreadId
+      ? await request("thread/resume", {
+        threadId: input.priorThreadId,
+        model: model && model !== "default" ? model : null,
+        cwd: input.cwd,
+        approvalPolicy: "never",
+        persistExtendedHistory: false,
+      }) as Record<string, unknown>
+      : await request("thread/start", {
+        model: model && model !== "default" ? model : null,
+        cwd: input.cwd,
+        approvalPolicy: "never",
+        ephemeral: false,
+        experimentalRawEvents: false,
+        persistExtendedHistory: false,
+      }) as Record<string, unknown>;
+
+    const thread = asRecord(threadResult.thread);
+    const threadId = typeof thread.id === "string"
+      ? thread.id
+      : input.priorThreadId;
+    if (!threadId) {
+      throw new Error("Codex app-server did not return a thread id.");
+    }
+
+    await request("turn/start", {
+      threadId,
+      input: [{ type: "text", text: input.prompt }],
+      cwd: input.cwd,
+      approvalPolicy: "never",
+      model: model && model !== "default" ? model : null,
+    });
+
+    while (!turnState.completed) {
+      if (input.signal?.aborted) {
+        throw new DOMException("Run canceled", "AbortError");
+      }
+      if (childExitStatus) {
+        await Promise.allSettled([stdoutLoop, stderrLoop]);
+        if (!turnState.completed && !turnState.error) {
+          turnState.error = appServerClosedError();
+        }
+        break;
+      }
+      let pollTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        childStatus.then(() => undefined),
+        new Promise((resolve) => {
+          pollTimer = setTimeout(resolve, 10);
+        }),
+      ]);
+      if (pollTimer !== undefined) {
+        clearTimeout(pollTimer);
+      }
+    }
+
+    if (turnState.error) throw turnState.error;
+
+    output = {
+      threadId,
+      assistantMessages,
+      usage: turnState.usage,
+    };
+  } finally {
+    for (const { reject } of pending.values()) {
+      reject(new Error("Codex app-server session closed"));
+    }
+    pending.clear();
+    try {
+      await stdinWriter.close();
+    } catch {
+      // ignore
+    }
+    await Promise.allSettled([stdoutLoop, stderrLoop, childStatus]);
+    if (input.signal) {
+      input.signal.removeEventListener("abort", abort);
+    }
+    if (
+      input.signal?.aborted ||
+      turnState.error instanceof DOMException &&
+        turnState.error.name === "AbortError"
+    ) {
+      cleanupError = new DOMException("Run canceled", "AbortError");
+    } else if (!turnState.completed && !turnState.error) {
+      cleanupError = appServerClosedError();
+    }
+  }
+  if (cleanupError) {
+    throw cleanupError;
+  }
+  if (!output) {
+    throw new Error("Codex app-server turn runner completed without a result.");
+  }
+  return output;
 }
 
 function codexToolResultForItem(
@@ -1112,8 +1661,10 @@ function buildCodexStreamHandler(input: {
 
 export function createCodexProvider(opts?: {
   runCommand?: CommandRunner;
+  runAppServerTurn?: AppServerTurnRunner;
 }): ModelProvider {
   const runCommand = opts?.runCommand ?? defaultCommandRunner;
+  const runAppServerTurn = opts?.runAppServerTurn ?? defaultAppServerTurnRunner;
   const runCodexTurn = async (
     input: Parameters<NonNullable<ModelProvider["chat"]>>[0],
   ): Promise<
@@ -1159,6 +1710,45 @@ export function createCodexProvider(opts?: {
       priorThreadId,
     });
     const cwd = runCwd();
+    if (codexTransport() === "app-server") {
+      const result = await runAppServerTurn({
+        model: input.model,
+        messages: input.messages,
+        state: input.state,
+        params: input.params,
+        deckPath: input.deckPath,
+        signal: input.signal,
+        onStreamEvent: streamHandler,
+        instructions,
+        prompt,
+        cwd,
+        priorThreadId,
+      });
+      const assistantText = result.assistantMessages.map((message) =>
+        message.text
+      )
+        .join("");
+      if (
+        input.stream && input.onStreamText && assistantText &&
+        !assistantState.sawAssistantTextStream
+      ) {
+        input.onStreamText(assistantText);
+      }
+      const updatedState = buildUpdatedState({
+        priorState: input.state,
+        messages: input.messages,
+        assistantText,
+        assistantMessages: result.assistantMessages,
+        threadId: result.threadId ?? priorThreadId,
+      });
+      return {
+        message: { role: "assistant", content: assistantText },
+        finishReason: "stop" as const,
+        updatedState,
+        usage: result.usage,
+        assistantMessages: result.assistantMessages,
+      };
+    }
     const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
     const args = priorThreadId
       ? [

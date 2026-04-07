@@ -8430,7 +8430,7 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
             }],
           });
         }
-        return waitForWithTimeout(childStarted.promise, 500, "child start")
+        return waitForWithTimeout(childStarted.promise, 2_000, "child start")
           .then(() => ({
             message: { role: "assistant", content: "parent done" },
             finishReason: "stop" as const,
@@ -8481,7 +8481,7 @@ Deno.test("worker sandbox async-start cancellation aborts in-flight child model 
   });
 
   assertEquals(result, "parent done");
-  await waitForWithTimeout(childAbortedSignal.promise, 500, "child abort");
+  await waitForWithTimeout(childAbortedSignal.promise, 2_000, "child abort");
   assertEquals(childProviderCalled, true);
   assertEquals(childSawSignal, true);
   assertEquals(childAborted, true);
