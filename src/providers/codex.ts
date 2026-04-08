@@ -292,7 +292,10 @@ function codexConfigArgs(input: {
     args.push("-c", `model_verbosity=${tomlString(verbosity.trim())}`);
   }
   if (typeof input.instructions === "string" && input.instructions.trim()) {
-    args.push("-c", `instructions=${tomlString(input.instructions.trim())}`);
+    args.push(
+      "-c",
+      `developer_instructions=${tomlString(input.instructions.trim())}`,
+    );
   }
 
   if (shouldEnableMcpBridge() && MCP_SERVER_PATH) {
