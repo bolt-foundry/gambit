@@ -21,6 +21,8 @@ const CODEX_REASONING_SUMMARY_ENV = "GAMBIT_CODEX_REASONING_SUMMARY";
 const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
+const CODEX_DANGEROUS_BYPASS_ENV =
+  "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX";
 const CODEX_TRANSPORT_ENV = "GAMBIT_CODEX_TRANSPORT";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const MCP_SERVER_PATH = (() => {
@@ -157,9 +159,26 @@ function parseTruthy(value: string): boolean {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
+function shouldDangerouslyBypassCodexApprovalsAndSandbox(
+  params?: Record<string, unknown>,
+): boolean {
+  const dangerousBypass = params?.gambitDangerouslyBypassApprovalsAndSandbox;
+  if (typeof dangerousBypass === "boolean") return dangerousBypass;
+  const codex = asRecord(params?.codex);
+  const codexDangerousBypass = codex.dangerously_bypass_approvals_and_sandbox;
+  if (typeof codexDangerousBypass === "boolean") {
+    return codexDangerousBypass;
+  }
+  const envRaw = Deno.env.get(CODEX_DANGEROUS_BYPASS_ENV);
+  return Boolean(envRaw && parseTruthy(envRaw));
+}
+
 function shouldSkipCodexSandboxConfig(
   params?: Record<string, unknown>,
 ): boolean {
+  if (shouldDangerouslyBypassCodexApprovalsAndSandbox(params)) {
+    return true;
+  }
   const yolo = params?.gambitYolo;
   if (typeof yolo === "boolean") return yolo;
   const codex = asRecord(params?.codex);
@@ -325,6 +344,27 @@ function codexConfigArgs(input: {
     args.push("-c", "mcp_servers.gambit.tool_timeout_sec=30");
   }
   return args;
+}
+
+function appServerThreadSandbox(
+  params?: Record<string, unknown>,
+): "workspace-write" | "danger-full-access" {
+  return shouldSkipCodexSandboxConfig(params)
+    ? "danger-full-access"
+    : "workspace-write";
+}
+
+function appServerTurnSandboxPolicy(input: {
+  cwd: string;
+  params?: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (shouldSkipCodexSandboxConfig(input.params)) {
+    return { type: "dangerFullAccess" };
+  }
+  return {
+    type: "workspaceWrite",
+    writableRoots: [input.cwd],
+  };
 }
 
 function codexGlobalConfigArgs(configArgs: Array<string>): Array<string> {
@@ -579,6 +619,10 @@ async function defaultAppServerTurnRunner(
   input: AppServerTurnRunnerInput,
 ): Promise<AppServerTurnRunnerOutput> {
   const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
+  const dangerousBypass = shouldDangerouslyBypassCodexApprovalsAndSandbox(
+    input.params,
+  );
+  const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
   const spawnArgs = [
     ...codexGlobalConfigArgs(codexConfigArgs({
       cwd: input.cwd,
@@ -586,6 +630,11 @@ async function defaultAppServerTurnRunner(
       params: input.params,
       instructions: input.instructions,
     })),
+    ...(dangerousBypass
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : skipSandboxConfig
+      ? ["--yolo"]
+      : []),
     "app-server",
   ];
   const child = new Deno.Command(codexBin, {
@@ -817,12 +866,14 @@ async function defaultAppServerTurnRunner(
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
+        sandbox: appServerThreadSandbox(input.params),
         persistExtendedHistory: false,
       }) as Record<string, unknown>
       : await request("thread/start", {
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
+        sandbox: appServerThreadSandbox(input.params),
         ephemeral: false,
         experimentalRawEvents: false,
         persistExtendedHistory: false,
@@ -841,6 +892,10 @@ async function defaultAppServerTurnRunner(
       input: [{ type: "text", text: input.prompt }],
       cwd: input.cwd,
       approvalPolicy: "never",
+      sandboxPolicy: appServerTurnSandboxPolicy({
+        cwd: input.cwd,
+        params: input.params,
+      }),
       model: model && model !== "default" ? model : null,
     });
 
@@ -1753,6 +1808,9 @@ export function createCodexProvider(opts?: {
       };
     }
     const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
+    const dangerousBypass = shouldDangerouslyBypassCodexApprovalsAndSandbox(
+      input.params,
+    );
     const args = priorThreadId
       ? [
         "exec",
@@ -1761,7 +1819,9 @@ export function createCodexProvider(opts?: {
         "--json",
       ]
       : ["exec", "--skip-git-repo-check", "--json"];
-    if (skipSandboxConfig) {
+    if (dangerousBypass) {
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    } else if (skipSandboxConfig) {
       args.push("--yolo");
     }
     args.push(
@@ -2012,11 +2072,16 @@ export function parseCodexArgsForTest(input: {
     messages: input.messages,
     priorThreadId,
   });
+  const dangerousBypass = shouldDangerouslyBypassCodexApprovalsAndSandbox(
+    input.params,
+  );
   const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
   const args = priorThreadId
     ? ["exec", "resume", "--skip-git-repo-check", "--json"]
     : ["exec", "--skip-git-repo-check", "--json"];
-  if (skipSandboxConfig) {
+  if (dangerousBypass) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else if (skipSandboxConfig) {
     args.push("--yolo");
   }
   args.push(
