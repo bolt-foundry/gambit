@@ -1359,6 +1359,308 @@ Deno.test("codex provider adds mcp config args by default", () => {
   }
 });
 
+Deno.test("codex provider app-server adds --yolo when sandbox config is skipped", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const priorSkip = Deno.env.get("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-yolo-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+require_substring() {
+  line="$1"
+  needle="$2"
+  if ! printf '%s' "$line" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf 'missing substring: %s\\nline: %s\\n' "$needle" "$line" >&2
+    exit 44
+  fi
+}
+
+mode=""
+saw_yolo="0"
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+  if [ "$arg" = "--yolo" ]; then
+    saw_yolo="1"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+[ "$saw_yolo" = "1" ] || {
+  printf 'spawn args missing --yolo\\n' >&2
+  exit 42
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      require_substring "$line" '"sandbox":"danger-full-access"'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-yolo"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      require_substring "$line" '"sandboxPolicy":{"type":"dangerFullAccess"}'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-yolo","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-yolo","turnId":"turn-app-server-yolo","item":{"type":"agentMessage","id":"msg-app-server-yolo","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-yolo","turn":{"id":"turn-app-server-yolo","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG", "1");
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    if (priorSkip === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_SKIP_SANDBOX_CONFIG", priorSkip);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server adds dangerous bypass when configured", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const priorBypass = Deno.env.get(
+    "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+  );
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-dangerous-bypass-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+require_substring() {
+  line="$1"
+  needle="$2"
+  if ! printf '%s' "$line" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf 'missing substring: %s\\nline: %s\\n' "$needle" "$line" >&2
+    exit 45
+  fi
+}
+
+mode=""
+saw_bypass="0"
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+  if [ "$arg" = "--dangerously-bypass-approvals-and-sandbox" ]; then
+    saw_bypass="1"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+[ "$saw_bypass" = "1" ] || {
+  printf 'spawn args missing dangerous bypass flag\\n' >&2
+  exit 43
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      require_substring "$line" '"sandbox":"danger-full-access"'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-dangerous-bypass"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      require_substring "$line" '"sandboxPolicy":{"type":"dangerFullAccess"}'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-dangerous-bypass","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-dangerous-bypass","turnId":"turn-app-server-dangerous-bypass","item":{"type":"agentMessage","id":"msg-app-server-dangerous-bypass","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-dangerous-bypass","turn":{"id":"turn-app-server-dangerous-bypass","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set(
+    "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+    "1",
+  );
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    if (priorBypass === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX");
+    } else {
+      Deno.env.set(
+        "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+        priorBypass,
+      );
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server requests workspace-write sandbox by default", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const priorBotRoot = Deno.env.get("GAMBIT_BOT_ROOT");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-workspace-write-",
+  });
+  const workspaceRoot = join(root, "workspace");
+  await Deno.mkdir(workspaceRoot, { recursive: true });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+require_substring() {
+  line="$1"
+  needle="$2"
+  if ! printf '%s' "$line" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf 'missing substring: %s\\nline: %s\\n' "$needle" "$line" >&2
+    exit 46
+  fi
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      require_substring "$line" '"sandbox":"workspace-write"'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-workspace-write"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      require_substring "$line" '"sandboxPolicy":{"type":"workspaceWrite","writableRoots":["${workspaceRoot}"]}'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-workspace-write","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-workspace-write","turnId":"turn-app-server-workspace-write","item":{"type":"agentMessage","id":"msg-app-server-workspace-write","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-workspace-write","turn":{"id":"turn-app-server-workspace-write","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set("GAMBIT_BOT_ROOT", workspaceRoot);
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    if (priorBotRoot === undefined) {
+      Deno.env.delete("GAMBIT_BOT_ROOT");
+    } else {
+      Deno.env.set("GAMBIT_BOT_ROOT", priorBotRoot);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
 Deno.test("codex provider configures workspace-write sandbox automatically", () => {
   const args = parseCodexArgsForTest({
     model: "codex-cli/default",
@@ -1373,6 +1675,40 @@ Deno.test("codex provider configures workspace-write sandbox automatically", () 
     joined.includes('sandbox_workspace_write.writable_roots=["/tmp/test-cwd"]'),
     true,
   );
+});
+
+Deno.test("codex provider uses dangerous bypass instead of yolo when configured", () => {
+  const previous = Deno.env.get(
+    "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+  );
+  Deno.env.set(
+    "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+    "1",
+  );
+  try {
+    const args = parseCodexArgsForTest({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hi" }],
+      cwd: "/tmp/test-cwd",
+    });
+    const joined = args.join(" ");
+    assertEquals(
+      joined.includes("--dangerously-bypass-approvals-and-sandbox"),
+      true,
+    );
+    assertEquals(joined.includes("--yolo"), false);
+    assertEquals(joined.includes('approval_policy="never"'), true);
+    assertEquals(joined.includes('sandbox_mode="workspace-write"'), false);
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX");
+    } else {
+      Deno.env.set(
+        "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX",
+        previous,
+      );
+    }
+  }
 });
 
 Deno.test("codex provider forwards additionalParams.codex config entries", () => {
