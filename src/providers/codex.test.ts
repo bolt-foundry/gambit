@@ -172,7 +172,7 @@ Deno.test("codex provider resume does not replay transcript when no new user mes
   assertEquals(args[args.length - 1], "");
 });
 
-Deno.test("codex provider uses codex instructions config for fresh system prompts", () => {
+Deno.test("codex provider uses codex developer instructions config for fresh system prompts", () => {
   const args = parseCodexArgsForTest({
     model: "codex-cli/default",
     messages: [
@@ -181,7 +181,11 @@ Deno.test("codex provider uses codex instructions config for fresh system prompt
     ],
   });
   const joined = args.join(" ");
-  assertEquals(joined.includes('instructions="deck system prompt"'), true);
+  assertEquals(
+    args.includes('developer_instructions="deck system prompt"'),
+    true,
+  );
+  assertEquals(args.includes('instructions="deck system prompt"'), false);
   assertEquals(joined.includes("SYSTEM:\\n"), false);
   assertEquals(args[args.length - 1], "hello");
 });
@@ -197,7 +201,11 @@ Deno.test("codex provider fresh prompt keeps non-system continuation payloads on
     ],
   });
   const joined = args.join(" ");
-  assertEquals(joined.includes('instructions="deck system prompt"'), true);
+  assertEquals(
+    args.includes('developer_instructions="deck system prompt"'),
+    true,
+  );
+  assertEquals(args.includes('instructions="deck system prompt"'), false);
   assertEquals(joined.includes("SYSTEM:\\n"), false);
   assertEquals(
     args[args.length - 1],
@@ -745,6 +753,93 @@ done
     const result = await provider.chat({
       model: "codex-cli/default",
       messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server forwards fresh system prompt as spawn-time developer instructions", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-developer-instructions-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+saw_developer_instructions="0"
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+  case "$arg" in
+    *'developer_instructions="deck system prompt"'*)
+      saw_developer_instructions="1"
+      ;;
+  esac
+done
+
+[ "$mode" = "app-server" ] || exit 64
+[ "$saw_developer_instructions" = "1" ] || {
+  printf 'spawn args missing deck system prompt developer instructions\\n' >&2
+  exit 41
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-developer-instructions"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-developer-instructions","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-developer-instructions","turnId":"turn-app-server-developer-instructions","item":{"type":"agentMessage","id":"msg-developer-instructions","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-developer-instructions","turn":{"id":"turn-app-server-developer-instructions","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [
+        { role: "system", content: "deck system prompt" },
+        { role: "user", content: "hello" },
+      ],
     });
     assertEquals(result.message.content, "hello world");
   } finally {
@@ -1552,10 +1647,24 @@ Deno.test("codex provider keeps saved-state threads isolated across runs", async
   assertEquals(calls[0].includes("thread-b"), false);
   assertEquals(calls[1].includes("thread-b"), true);
   assertEquals(calls[1].includes("thread-a"), false);
-  assertEquals(calls[0].join(" ").includes('instructions="system-a"'), true);
-  assertEquals(calls[0].join(" ").includes('instructions="system-b"'), false);
-  assertEquals(calls[1].join(" ").includes('instructions="system-b"'), true);
-  assertEquals(calls[1].join(" ").includes('instructions="system-a"'), false);
+  assertEquals(
+    calls[0].includes('developer_instructions="system-a"'),
+    true,
+  );
+  assertEquals(
+    calls[0].includes('developer_instructions="system-b"'),
+    false,
+  );
+  assertEquals(
+    calls[1].includes('developer_instructions="system-b"'),
+    true,
+  );
+  assertEquals(
+    calls[1].includes('developer_instructions="system-a"'),
+    false,
+  );
+  assertEquals(calls[0].includes('instructions="system-a"'), false);
+  assertEquals(calls[1].includes('instructions="system-b"'), false);
   assertEquals(calls[0][calls[0].length - 1], "follow up a");
   assertEquals(calls[1][calls[1].length - 1], "follow up b");
 });
