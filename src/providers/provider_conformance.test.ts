@@ -160,21 +160,11 @@ Deno.test("provider conformance: ollama responses forwards abort signal", async 
 Deno.test("provider conformance: codex responses forwards abort signal", async () => {
   let seenSignal: AbortSignal | undefined;
   const provider = createCodexProvider({
-    runCommand: ({ signal }) => {
+    runAppServerTurn: ({ signal }) => {
       seenSignal = signal;
       return Promise.resolve({
-        success: true,
-        code: 0,
-        stdout: new TextEncoder().encode(
-          [
-            JSON.stringify({ type: "thread.started", thread_id: "thread-1" }),
-            JSON.stringify({
-              type: "item.completed",
-              item: { id: "msg_1", type: "agent_message", text: "ok" },
-            }),
-          ].join("\n"),
-        ),
-        stderr: new Uint8Array(),
+        threadId: "thread-1",
+        assistantMessages: [{ itemId: "msg_1", text: "ok" }],
       });
     },
   });

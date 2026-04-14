@@ -38,12 +38,35 @@ type McpTool = {
 const encoder = new TextEncoder();
 const MCP_ALLOW_MODELS_ENV = "GAMBIT_MCP_ALLOW_MODELS";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([
+  "2025-06-18",
+  "2024-11-05",
+]);
+const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 
 type ToolCatalog = {
   tools: Array<McpTool>;
   actionToDeck: Map<string, string>;
   externalToolNames: Set<string>;
 };
+
+async function resolveActionInputSchema(action: {
+  path: string;
+  contextSchema?: unknown;
+}): Promise<Record<string, JSONValue>> {
+  if (action.contextSchema) {
+    return toJsonSchema(action.contextSchema as never);
+  }
+  const child = await loadDeck(action.path);
+  const contextSchema = child.contextSchema ?? child.inputSchema;
+  if (!contextSchema) {
+    return {
+      type: "object",
+      additionalProperties: true,
+    };
+  }
+  return toJsonSchema(contextSchema);
+}
 
 async function resolveToolCatalog(): Promise<ToolCatalog> {
   const rootDeckPath = Deno.env.get(MCP_ROOT_DECK_PATH_ENV)?.trim();
@@ -64,10 +87,7 @@ async function resolveToolCatalog(): Promise<ToolCatalog> {
       name: action.name,
       description: action.description ??
         `Run action deck "${action.name}" from the root deck.`,
-      inputSchema: {
-        type: "object",
-        additionalProperties: true,
-      },
+      inputSchema: await resolveActionInputSchema(action),
     });
   }
 
@@ -125,6 +145,16 @@ function asRecord(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function resolveProtocolVersion(params: Record<string, unknown>): string {
+  const requested = typeof params.protocolVersion === "string"
+    ? params.protocolVersion.trim()
+    : "";
+  if (requested && SUPPORTED_PROTOCOL_VERSIONS.has(requested)) {
+    return requested;
+  }
+  return DEFAULT_PROTOCOL_VERSION;
 }
 
 function shouldAllowModelBackedDecks(): boolean {
@@ -290,7 +320,7 @@ export async function handleMcpRequest(
   if (method === "initialize") {
     if (request.id === undefined) return null;
     return toRpcResult(id, {
-      protocolVersion: "2024-11-05",
+      protocolVersion: resolveProtocolVersion(params),
       capabilities: {
         tools: {},
       },

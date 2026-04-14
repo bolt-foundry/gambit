@@ -10,6 +10,7 @@ import type {
   ResponseMessageItem,
   SavedState,
 } from "@bolt-foundry/gambit-core";
+import { loadDeck } from "@bolt-foundry/gambit-core";
 
 export const CODEX_PREFIX = "codex-cli/";
 const CODEX_THREAD_META_KEY = "codex.threadId";
@@ -23,7 +24,6 @@ const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
 const CODEX_DANGEROUS_BYPASS_ENV =
   "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX";
-const CODEX_TRANSPORT_ENV = "GAMBIT_CODEX_TRANSPORT";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const MCP_SERVER_PATH = (() => {
   try {
@@ -38,31 +38,6 @@ const MCP_SERVER_PATH = (() => {
   }
 })();
 
-type CodexTurnUsage = {
-  input_tokens?: unknown;
-  output_tokens?: unknown;
-  total_tokens?: unknown;
-};
-
-type CodexEvent =
-  | { type: "thread.started"; thread_id?: unknown }
-  | {
-    type: "item.completed";
-    item?: {
-      type?: unknown;
-      text?: unknown;
-    };
-  }
-  | { type: "turn.completed"; usage?: CodexTurnUsage }
-  | { type: string; [key: string]: unknown };
-
-type CommandOutput = {
-  success: boolean;
-  code: number;
-  stdout: Uint8Array;
-  stderr: Uint8Array;
-};
-
 type CommandStatusLike = {
   success: boolean;
   code: number;
@@ -72,15 +47,6 @@ type CodexAssistantMessage = {
   itemId: string | null;
   text: string;
 };
-
-type CommandRunner = (input: {
-  args: Array<string>;
-  cwd: string;
-  signal?: AbortSignal;
-  onStdoutLine?: (line: string) => void;
-}) => Promise<CommandOutput>;
-
-type CodexTransport = "exec" | "app-server";
 
 type AppServerTurnRunnerInput = {
   model: string;
@@ -124,17 +90,7 @@ const REASONING_SUMMARY_VALUES = new Set([
   "concise",
   "detailed",
 ]);
-const VERBOSITY_VALUES = new Set([
-  "low",
-  "medium",
-  "high",
-]);
-
-function codexTransport(): CodexTransport {
-  const raw = Deno.env.get(CODEX_TRANSPORT_ENV)?.trim().toLowerCase();
-  if (raw === "app-server" || raw === "app_server") return "app-server";
-  return "exec";
-}
+const VERBOSITY_VALUES = new Set(["low", "medium", "high"]);
 
 function runCwd(): string {
   const botRoot = Deno.env.get(BOT_ROOT_ENV);
@@ -142,6 +98,22 @@ function runCwd(): string {
     return botRoot.trim();
   }
   return Deno.cwd();
+}
+
+function codexDeckDir(deckPath?: string): string | undefined {
+  const trimmed = deckPath?.trim();
+  if (!trimmed) return undefined;
+  return path.dirname(
+    path.isAbsolute(trimmed) ? trimmed : path.resolve(runCwd(), trimmed),
+  );
+}
+
+function codexRunCwd(input: { cwd?: string; deckPath?: string }): string {
+  const explicitCwd = input.cwd?.trim();
+  if (explicitCwd) return explicitCwd;
+  const deckDir = codexDeckDir(input.deckPath);
+  if (deckDir) return deckDir;
+  return runCwd();
 }
 
 function shouldEnableMcpBridge(): boolean {
@@ -346,6 +318,61 @@ function codexConfigArgs(input: {
   return args;
 }
 
+async function prepareCodexMcpRootDeck(input: {
+  deckPath?: string;
+}): Promise<{
+  deckPath?: string;
+  cleanup?: () => Promise<void>;
+}> {
+  const rootDeckPath = input.deckPath?.trim();
+  if (!rootDeckPath || !shouldEnableMcpBridge()) {
+    return {};
+  }
+  const deck = await loadDeck(rootDeckPath);
+  if (deck.actionDecks.length === 0) {
+    return { deckPath: rootDeckPath };
+  }
+  const tempDir = await Deno.makeTempDir({ prefix: "gambit-codex-mcp-root-" });
+  const tempDeckPath = path.join(tempDir, "PROMPT.md");
+  const frontmatter = [
+    "+++",
+    'label = "codex_mcp_tool_surface"',
+    "",
+  ];
+  for (const action of deck.actionDecks) {
+    frontmatter.push("[[actions]]");
+    frontmatter.push(`name = ${tomlString(action.name)}`);
+    frontmatter.push(`path = ${tomlString(action.path)}`);
+    if (typeof action.description === "string" && action.description.trim()) {
+      frontmatter.push(
+        `description = ${tomlString(action.description.trim())}`,
+      );
+    }
+    frontmatter.push("");
+  }
+  for (const externalTool of deck.tools) {
+    frontmatter.push("[[tools]]");
+    frontmatter.push(`name = ${tomlString(externalTool.name)}`);
+    if (
+      typeof externalTool.description === "string" &&
+      externalTool.description.trim()
+    ) {
+      frontmatter.push(
+        `description = ${tomlString(externalTool.description.trim())}`,
+      );
+    }
+    frontmatter.push("");
+  }
+  frontmatter.push("+++", "", "Codex MCP tool surface.");
+  await Deno.writeTextFile(tempDeckPath, frontmatter.join("\n"));
+  return {
+    deckPath: tempDeckPath,
+    cleanup: async () => {
+      await Deno.remove(tempDir, { recursive: true }).catch(() => undefined);
+    },
+  };
+}
+
 function appServerThreadSandbox(
   params?: Record<string, unknown>,
 ): "workspace-write" | "danger-full-access" {
@@ -364,6 +391,37 @@ function appServerTurnSandboxPolicy(input: {
   return {
     type: "workspaceWrite",
     writableRoots: [input.cwd],
+  };
+}
+
+function appServerRequestResult(input: {
+  method: string;
+  params: Record<string, unknown>;
+}): {
+  result?: Record<string, JSONValue>;
+  error?: {
+    code: number;
+    message: string;
+  };
+} {
+  if (input.method === "mcpServer/elicitation/request") {
+    const mode = typeof input.params.mode === "string" ? input.params.mode : "";
+    const requestedSchema = asRecord(input.params.requestedSchema);
+    const properties = asRecord(requestedSchema.properties);
+    if (mode === "form" && Object.keys(properties).length === 0) {
+      return {
+        result: {
+          action: "accept",
+          content: {},
+        },
+      };
+    }
+  }
+  return {
+    error: {
+      code: -32601,
+      message: `Unsupported app-server request: ${input.method}`,
+    },
   };
 }
 
@@ -426,6 +484,16 @@ function safeJsonObject(
     // ignore parse failure
   }
   return {};
+}
+
+function safeJsonObjectFromRecord(
+  value: Record<string, unknown>,
+): Record<string, JSONValue> {
+  try {
+    return safeJsonObject(JSON.stringify(value));
+  } catch {
+    return {};
+  }
 }
 
 function parseJsonValue(text: string): JSONValue {
@@ -752,19 +820,27 @@ async function defaultAppServerTurnRunner(
           continue;
         }
         const method = typeof parsed.method === "string" ? parsed.method : "";
+        const params = asRecord(parsed.params);
         if (method) {
           if (Object.prototype.hasOwnProperty.call(parsed, "id")) {
-            const requestId = String(parsed.id);
+            const requestId = typeof parsed.id === "string" ||
+                typeof parsed.id === "number" || parsed.id === null
+              ? parsed.id
+              : null;
+            input.onStreamEvent?.({
+              type: "app_server.request",
+              requestId: requestId === null ? "null" : String(requestId),
+              method,
+              params: safeJsonObjectFromRecord(params),
+            });
+            const response = appServerRequestResult({ method, params });
             await writeMessage({
               id: requestId,
-              error: {
-                code: -32601,
-                message: `Unsupported app-server request: ${method}`,
-              },
+              ...(response.result ? { result: response.result } : {}),
+              ...(response.error ? { error: response.error } : {}),
             });
             continue;
           }
-          const params = asRecord(parsed.params);
           const pseudoEvent = appServerNotificationToCodexEvent(method, params);
           if (pseudoEvent) {
             input.onStreamEvent?.(pseudoEvent);
@@ -1469,107 +1545,6 @@ function promptForCodexTurn(input: {
   return renderNonSystemMessagesForPrompt(nonSystemMessages);
 }
 
-function parseNumber(input: unknown): number {
-  return typeof input === "number" && Number.isFinite(input) ? input : 0;
-}
-
-function parseCodexStdout(stdout: string): {
-  threadId?: string;
-  assistantText: string;
-  assistantMessages: Array<CodexAssistantMessage>;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-} {
-  let threadId: string | undefined;
-  const assistantMessages: Array<CodexAssistantMessage> = [];
-  let usage: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  } | undefined;
-  const assistantState: CodexAssistantStreamState = {
-    streamedText: "",
-    sawAssistantTextStream: false,
-    assistantOutputIndexByItemId: new Map<string, number>(),
-    emittedTerminalAssistantItemIds: new Set<string>(),
-  };
-  const nextOutputIndexRef = { value: 0 };
-
-  for (const line of stdout.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) continue;
-    let parsed: CodexEvent | null = null;
-    try {
-      parsed = JSON.parse(trimmed) as CodexEvent;
-    } catch {
-      continue;
-    }
-    if (!parsed || typeof parsed !== "object") continue;
-
-    if (parsed.type === "thread.started") {
-      if (typeof parsed.thread_id === "string" && parsed.thread_id.trim()) {
-        threadId = parsed.thread_id.trim();
-      }
-      continue;
-    }
-
-    if (
-      parsed.type === "item.delta" || parsed.type === "item.completed" ||
-      parsed.type === "item.done"
-    ) {
-      const item = parsed.item as Record<string, unknown> | undefined;
-      if (!item || typeof item !== "object") continue;
-      if (item.type !== "agent_message") continue;
-      const { itemId } = resolveCodexAssistantItemIdentity({
-        payloadType: parsed.type,
-        record: item as Record<string, JSONValue>,
-        assistantState,
-        nextOutputIndexRef,
-      });
-      if (parsed.type === "item.delta") continue;
-      const content = typeof item.text === "string"
-        ? item.text.trim()
-        : Array.isArray(item.content)
-        ? item.content
-          .filter((entry) => entry && typeof entry === "object")
-          .map((entry) => {
-            const record = entry as Record<string, unknown>;
-            return typeof record.text === "string" ? record.text : "";
-          })
-          .join("")
-          .trim()
-        : "";
-      if (content) {
-        assistantMessages.push({
-          itemId,
-          text: content,
-        });
-      }
-      continue;
-    }
-
-    if (parsed.type === "turn.completed") {
-      const rawUsage = parsed.usage as Record<string, unknown> | undefined;
-      if (!rawUsage || typeof rawUsage !== "object") continue;
-      usage = {
-        promptTokens: parseNumber(rawUsage.input_tokens),
-        completionTokens: parseNumber(rawUsage.output_tokens),
-        totalTokens: parseNumber(rawUsage.total_tokens),
-      };
-    }
-  }
-
-  return {
-    threadId,
-    assistantText: assistantMessages.map((message) => message.text).join(""),
-    assistantMessages,
-    usage,
-  };
-}
-
 function buildUpdatedState(input: {
   priorState?: SavedState;
   messages: Array<ModelMessage>;
@@ -1604,79 +1579,6 @@ function buildUpdatedState(input: {
     notes: priorState?.notes,
     conversationScore: priorState?.conversationScore,
   };
-}
-
-function defaultCommandRunner(input: {
-  args: Array<string>;
-  cwd: string;
-  signal?: AbortSignal;
-  onStdoutLine?: (line: string) => void;
-}): Promise<CommandOutput> {
-  const codexBin = Deno.env.get(CODEX_BIN_ENV)?.trim() || "codex";
-  const child = new Deno.Command(codexBin, {
-    args: input.args,
-    cwd: input.cwd,
-    stdout: "piped",
-    stderr: "piped",
-  }).spawn();
-  const abort = () => {
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // ignore
-    }
-  };
-  if (input.signal?.aborted) {
-    abort();
-  } else if (input.signal) {
-    input.signal.addEventListener("abort", abort, { once: true });
-  }
-  const readStream = async (
-    stream: ReadableStream<Uint8Array> | null,
-    onLine?: (line: string) => void,
-  ): Promise<Uint8Array> => {
-    if (!stream) return new Uint8Array();
-    const reader = stream.getReader();
-    const decoder = new TextDecoder();
-    const chunks: Array<Uint8Array> = [];
-    let buffered = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        chunks.push(value);
-        if (onLine) {
-          buffered += decoder.decode(value, { stream: true });
-          const parts = buffered.split(/\r?\n/);
-          buffered = parts.pop() ?? "";
-          for (const line of parts) onLine(line);
-        }
-      }
-    }
-    if (onLine && buffered.trim()) onLine(buffered);
-    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return out;
-  };
-  return Promise.all([
-    child.status,
-    readStream(child.stdout, input.onStdoutLine),
-    readStream(child.stderr),
-  ]).then(([status, stdout, stderr]) => ({
-    success: status.success,
-    code: status.code,
-    stdout,
-    stderr,
-  })).finally(() => {
-    if (input.signal) {
-      input.signal.removeEventListener("abort", abort);
-    }
-  });
 }
 
 function buildCodexStreamHandler(input: {
@@ -1718,10 +1620,8 @@ function buildCodexStreamHandler(input: {
 }
 
 export function createCodexProvider(opts?: {
-  runCommand?: CommandRunner;
   runAppServerTurn?: AppServerTurnRunner;
 }): ModelProvider {
-  const runCommand = opts?.runCommand ?? defaultCommandRunner;
   const runAppServerTurn = opts?.runAppServerTurn ?? defaultAppServerTurnRunner;
   const runCodexTurn = async (
     input: Parameters<NonNullable<ModelProvider["chat"]>>[0],
@@ -1761,20 +1661,22 @@ export function createCodexProvider(opts?: {
         priorThreadIdRaw.trim().length > 0
       ? priorThreadIdRaw.trim()
       : undefined;
-    const model = normalizeCodexModel(input.model);
     const instructions = codexInstructionsForMessages(input.messages);
     const prompt = promptForCodexTurn({
       messages: input.messages,
       priorThreadId,
     });
-    const cwd = runCwd();
-    if (codexTransport() === "app-server") {
+    const cwd = codexRunCwd({ deckPath: input.deckPath });
+    const preparedMcpRoot = await prepareCodexMcpRootDeck({
+      deckPath: input.deckPath,
+    });
+    try {
       const result = await runAppServerTurn({
         model: input.model,
         messages: input.messages,
         state: input.state,
         params: input.params,
-        deckPath: input.deckPath,
+        deckPath: preparedMcpRoot.deckPath ?? input.deckPath,
         signal: input.signal,
         onStreamEvent: streamHandler,
         instructions,
@@ -1784,8 +1686,7 @@ export function createCodexProvider(opts?: {
       });
       const assistantText = result.assistantMessages.map((message) =>
         message.text
-      )
-        .join("");
+      ).join("");
       if (
         input.stream && input.onStreamText && assistantText &&
         !assistantState.sawAssistantTextStream
@@ -1799,6 +1700,7 @@ export function createCodexProvider(opts?: {
         assistantMessages: result.assistantMessages,
         threadId: result.threadId ?? priorThreadId,
       });
+
       return {
         message: { role: "assistant", content: assistantText },
         finishReason: "stop" as const,
@@ -1806,95 +1708,9 @@ export function createCodexProvider(opts?: {
         usage: result.usage,
         assistantMessages: result.assistantMessages,
       };
+    } finally {
+      await preparedMcpRoot.cleanup?.();
     }
-    const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
-    const dangerousBypass = shouldDangerouslyBypassCodexApprovalsAndSandbox(
-      input.params,
-    );
-    const args = priorThreadId
-      ? [
-        "exec",
-        "resume",
-        "--skip-git-repo-check",
-        "--json",
-      ]
-      : ["exec", "--skip-git-repo-check", "--json"];
-    if (dangerousBypass) {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
-    } else if (skipSandboxConfig) {
-      args.push("--yolo");
-    }
-    args.push(
-      ...codexConfigArgs({
-        cwd,
-        deckPath: input.deckPath,
-        params: input.params,
-        instructions,
-      }),
-    );
-    if (model && model !== "default") {
-      args.push("-m", model);
-    }
-    if (priorThreadId) {
-      args.push(priorThreadId);
-    }
-    args.push(prompt);
-    const handleStdoutLine = (line: string) => {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("{")) return;
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (
-          parsed && typeof parsed === "object" && !Array.isArray(parsed) &&
-          streamHandler
-        ) {
-          streamHandler(parsed as Record<string, JSONValue>);
-        }
-      } catch {
-        // ignore malformed/non-json lines
-      }
-    };
-    const out = await runCommand({
-      args,
-      cwd,
-      signal: input.signal,
-      onStdoutLine: streamHandler ? handleStdoutLine : undefined,
-    });
-    if (input.signal?.aborted) {
-      throw new DOMException("Run canceled", "AbortError");
-    }
-    const stdout = new TextDecoder().decode(out.stdout);
-    const stderr = new TextDecoder().decode(out.stderr);
-    if (!out.success) {
-      throw new Error(
-        `codex exec failed (exit ${out.code}): ${
-          stderr.trim() || stdout.trim()
-        }`,
-      );
-    }
-    const parsed = parseCodexStdout(stdout);
-    const threadId = parsed.threadId ?? priorThreadId;
-    if (
-      input.stream && input.onStreamText && parsed.assistantText &&
-      !assistantState.sawAssistantTextStream
-    ) {
-      input.onStreamText(parsed.assistantText);
-    }
-    const updatedState = buildUpdatedState({
-      priorState: input.state,
-      messages: input.messages,
-      assistantText: parsed.assistantText,
-      assistantMessages: parsed.assistantMessages,
-      threadId,
-    });
-
-    return {
-      message: { role: "assistant", content: parsed.assistantText },
-      finishReason: "stop" as const,
-      updatedState,
-      usage: parsed.usage,
-      assistantMessages: parsed.assistantMessages,
-    };
   };
   const runChat: ModelProvider["chat"] = async (input) => {
     const result = await runCodexTurn(input);
@@ -2053,63 +1869,30 @@ export function createCodexProvider(opts?: {
   };
 }
 
-export function parseCodexArgsForTest(input: {
-  model: string;
-  state?: SavedState;
-  messages: Array<ModelMessage>;
-  params?: Record<string, unknown>;
-  cwd?: string;
-  deckPath?: string;
-}): Array<string> {
-  const priorThreadIdRaw = input.state?.meta?.[CODEX_THREAD_META_KEY];
-  const priorThreadId = typeof priorThreadIdRaw === "string" &&
-      priorThreadIdRaw.trim().length > 0
-    ? priorThreadIdRaw.trim()
-    : undefined;
-  const model = normalizeCodexModel(input.model);
-  const instructions = codexInstructionsForMessages(input.messages);
-  const prompt = promptForCodexTurn({
-    messages: input.messages,
-    priorThreadId,
-  });
-  const dangerousBypass = shouldDangerouslyBypassCodexApprovalsAndSandbox(
-    input.params,
-  );
-  const skipSandboxConfig = shouldSkipCodexSandboxConfig(input.params);
-  const args = priorThreadId
-    ? ["exec", "resume", "--skip-git-repo-check", "--json"]
-    : ["exec", "--skip-git-repo-check", "--json"];
-  if (dangerousBypass) {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else if (skipSandboxConfig) {
-    args.push("--yolo");
-  }
-  args.push(
-    ...codexConfigArgs({
-      cwd: input.cwd ?? runCwd(),
-      deckPath: input.deckPath,
-      params: input.params,
-      instructions,
-    }),
-  );
-  if (model && model !== "default") {
-    args.push("-m", model);
-  }
-  if (priorThreadId) args.push(priorThreadId);
-  args.push(prompt);
-  return args;
+export function normalizeCodexModelForTest(model: string): string {
+  return normalizeCodexModel(model);
 }
 
-export function parseCodexStdoutForTest(stdout: string): {
-  threadId?: string;
-  assistantText: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-} {
-  return parseCodexStdout(stdout);
+export function codexInstructionsForMessagesForTest(
+  messages: Array<ModelMessage>,
+): string {
+  return codexInstructionsForMessages(messages);
+}
+
+export function promptForCodexTurnForTest(input: {
+  messages: Array<ModelMessage>;
+  priorThreadId?: string;
+}): string {
+  return promptForCodexTurn(input);
+}
+
+export function codexConfigArgsForTest(input: {
+  cwd: string;
+  deckPath?: string;
+  params?: Record<string, unknown>;
+  instructions?: string;
+}): Array<string> {
+  return codexConfigArgs(input);
 }
 
 export function safeJsonForTest(text: string): Record<string, JSONValue> {

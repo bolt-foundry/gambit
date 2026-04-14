@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
 import { handleMcpRequest } from "./mcp_server.ts";
 
@@ -90,6 +90,26 @@ async function withMcpEnvLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 leakTolerantTest(
+  "mcp server negotiates initialize protocol version",
+  async () => {
+    const response = await handleMcpRequest({
+      jsonrpc: "2.0",
+      id: 0,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+      },
+    });
+    const result = (response as {
+      result?: {
+        protocolVersion?: string;
+      };
+    }).result;
+    assertEquals(result?.protocolVersion, "2025-06-18");
+  },
+);
+
+leakTolerantTest(
   "mcp server errors tools/list when root deck env is missing",
   async () => {
     const previous = Deno.env.get("GAMBIT_MCP_ROOT_DECK_PATH");
@@ -132,11 +152,24 @@ leakTolerantTest(
       });
       const payload = (response as {
         result?: {
-          tools?: Array<{ name: string }>;
+          tools?: Array<{
+            name: string;
+            inputSchema?: {
+              type?: string;
+              properties?: Record<string, { type?: string }>;
+            };
+          }>;
         };
       }).result;
       const names = (payload?.tools ?? []).map((tool) => tool.name).sort();
       assertEquals(names, ["external_only", "lookup"]);
+      const lookup = (payload?.tools ?? []).find((tool) =>
+        tool.name === "lookup"
+      );
+      assert(lookup);
+      assert(lookup.inputSchema);
+      assertEquals(lookup.inputSchema.type, "object");
+      assertEquals(lookup.inputSchema.properties?.query?.type, "string");
     } finally {
       if (previous === undefined) {
         Deno.env.delete("GAMBIT_MCP_ROOT_DECK_PATH");

@@ -1064,6 +1064,12 @@ async function resolveModelChoice(args: {
   return { model: args.model, params: args.params };
 }
 
+function shouldExposeProviderToolArray(model: string): boolean {
+  const normalized = model.trim().toLowerCase();
+  if (!normalized) return true;
+  return normalized !== "codex-cli" && !normalized.startsWith("codex-cli/");
+}
+
 function resolveContextSchema(deck: LoadedDeck) {
   return deck.contextSchema ?? deck.inputSchema;
 }
@@ -4530,6 +4536,10 @@ async function runLlmDeck(
       });
       const model = resolved.model;
       const providerParams = resolved.params;
+      const providerTools = shouldExposeProviderToolArray(model) ? tools : [];
+      const providerResponseTools = providerTools.length > 0
+        ? providerTools as Array<ResponseToolDefinition>
+        : undefined;
 
       const stateMessages = ctx.state?.messages?.length;
       ctx.trace?.({
@@ -4540,9 +4550,9 @@ async function runLlmDeck(
         model,
         stream: ctx.stream,
         messageCount: messages.length,
-        toolCount: tools.length,
+        toolCount: providerTools.length,
         messages: messages.map(sanitizeMessage),
-        tools,
+        tools: providerTools,
         stateMessages,
         mode: useResponses ? "responses" : "chat",
         responseItems: useResponses
@@ -4566,7 +4576,7 @@ async function runLlmDeck(
             request: {
               model,
               input: responseItems,
-              tools: tools as Array<ResponseToolDefinition>,
+              tools: providerResponseTools,
               text: responseTextConfig,
               stream: ctx.stream,
               params: providerParams,

@@ -93,23 +93,54 @@ ${body}
 async function writeMockCodexBin(dir: string): Promise<{
   binPath: string;
   argsLogPath: string;
+  requestLogPath: string;
 }> {
   const binPath = path.join(dir, "mock-codex.sh");
   const argsLogPath = path.join(dir, "codex-args.log");
+  const requestLogPath = path.join(dir, "codex-requests.log");
   const script = `#!/usr/bin/env bash
 set -euo pipefail
 if [ -z "\${CODEX_ARGS_LOG:-}" ]; then
   echo "missing CODEX_ARGS_LOG" >&2
   exit 1
 fi
+if [ -z "\${CODEX_REQUESTS_LOG:-}" ]; then
+  echo "missing CODEX_REQUESTS_LOG" >&2
+  exit 1
+fi
 printf '%s\n' "$@" > "$CODEX_ARGS_LOG"
-echo '{"type":"thread.started","thread_id":"thread-smoke"}'
-echo '{"type":"item.completed","item":{"id":"msg_1","type":"agent_message","text":"ok"}}'
-echo '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}'
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":\\("[^"]*"\\|[0-9][0-9]*\\).*/\\1/p'
+}
+while IFS= read -r line; do
+  printf '%s\\n' "$line" >> "$CODEX_REQUESTS_LOG"
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":%s,"result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":%s,"result":{"thread":{"id":"thread-smoke"}}}\\n' "$id"
+      ;;
+    *'"method":"thread/resume"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":%s,"result":{"thread":{"id":"thread-smoke"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":%s,"result":{"turn":{"id":"turn-smoke","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-smoke","turnId":"turn-smoke","item":{"type":"agentMessage","id":"msg_1","text":"ok","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-smoke","turn":{"id":"turn-smoke","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
 `;
   await Deno.writeTextFile(binPath, script);
   await Deno.chmod(binPath, 0o755);
-  return { binPath, argsLogPath };
+  return { binPath, argsLogPath, requestLogPath };
 }
 
 async function runCheck(
@@ -187,6 +218,7 @@ async function runDeck(input: {
   deckPath: string;
   codexBinPath: string;
   argsLogPath: string;
+  requestLogPath: string;
   cwd?: string;
   command?: "run" | "repl";
   extraArgs?: Array<string>;
@@ -195,6 +227,7 @@ async function runDeck(input: {
   stdout: string;
   stderr: string;
   argsLog: string;
+  requestLog: string;
 }> {
   const args = await denoRunArgs([
     input.command ?? "run",
@@ -210,14 +243,21 @@ async function runDeck(input: {
       GAMBIT_CODEX_BIN: input.codexBinPath,
       GAMBIT_CODEX_DISABLE_MCP: "1",
       CODEX_ARGS_LOG: input.argsLogPath,
+      CODEX_REQUESTS_LOG: input.requestLogPath,
     },
     stdout: "piped",
     stderr: "piped",
   });
   const out = await command.output();
   let argsLog = "";
+  let requestLog = "";
   try {
     argsLog = await Deno.readTextFile(input.argsLogPath);
+  } catch {
+    // no-op for failure assertions
+  }
+  try {
+    requestLog = await Deno.readTextFile(input.requestLogPath);
   } catch {
     // no-op for failure assertions
   }
@@ -226,6 +266,7 @@ async function runDeck(input: {
     stdout: new TextDecoder().decode(out.stdout),
     stderr: new TextDecoder().decode(out.stderr),
     argsLog,
+    requestLog,
   };
 }
 
@@ -330,6 +371,7 @@ Deno.test({
       deckPath: defaultDeck,
       codexBinPath: mock.binPath,
       argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
       cwd: dir,
     });
     assertEquals(
@@ -337,15 +379,25 @@ Deno.test({
       0,
       formatCommandDiagnostics("run codex-cli/default", defaultRun),
     );
-    assertEquals(defaultRun.argsLog.includes("\n-m\n"), false);
+    assertEquals(defaultRun.argsLog.endsWith("\napp-server\n"), true);
     assertEquals(defaultRun.argsLog.includes('model_verbosity="high"'), true);
     assertEquals(defaultRun.argsLog.includes("project_doc_max_bytes="), false);
     assertEquals(
-      defaultRun.argsLog.includes('instructions="Smoke deck."'),
+      defaultRun.argsLog.includes('developer_instructions="Smoke deck."'),
       true,
     );
     assertEquals(defaultRun.argsLog.includes("SYSTEM:\n"), false);
-    assertEquals(defaultRun.argsLog.endsWith("\nhi\n"), true);
+    assertEquals(
+      defaultRun.requestLog.includes('"method":"thread/start"'),
+      true,
+    );
+    assertEquals(defaultRun.requestLog.includes('"model":null'), true);
+    assertEquals(
+      defaultRun.requestLog.includes(
+        '"input":[{"type":"text","text":"hi"}]',
+      ),
+      true,
+    );
 
     const passthroughDeck = await writeDeck(
       dir,
@@ -356,6 +408,7 @@ Deno.test({
       deckPath: passthroughDeck,
       codexBinPath: mock.binPath,
       argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
       cwd: dir,
     });
     assertEquals(
@@ -364,11 +417,15 @@ Deno.test({
       formatCommandDiagnostics("run codex-cli/gpt-5.2-codex", passthroughRun),
     );
     assertEquals(
-      passthroughRun.argsLog.includes("\n-m\ngpt-5.2-codex\n"),
+      passthroughRun.argsLog.includes('model_verbosity="high"'),
       true,
     );
     assertEquals(
-      passthroughRun.argsLog.includes('model_verbosity="high"'),
+      passthroughRun.requestLog.includes('"method":"thread/start"'),
+      true,
+    );
+    assertEquals(
+      passthroughRun.requestLog.includes('"model":"gpt-5.2-codex"'),
       true,
     );
 
@@ -383,6 +440,7 @@ Deno.test({
       deckPath: projectDocDeck,
       codexBinPath: mock.binPath,
       argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
       cwd: dir,
     });
     assertEquals(
@@ -422,6 +480,7 @@ Deno.test({
       deckPath,
       codexBinPath: mock.binPath,
       argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
       cwd: dir,
     });
     assertEquals(
