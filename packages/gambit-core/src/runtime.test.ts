@@ -3333,6 +3333,81 @@ Deno.test("responses mode stores response items and calls responses()", async ()
   assert((updatedState?.messages?.length ?? 0) > 0);
 });
 
+Deno.test("responses mode omits plain request.tools for codex-cli decks", async () => {
+  const dir = await Deno.makeTempDir();
+  const modHref = modImportPath();
+
+  const childPath = await writeTempDeck(
+    dir,
+    "codex_action_child.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.object({ label: z.string() }),
+      responseSchema: z.object({ ok: z.boolean() }),
+      run: () => ({ ok: true }),
+    });
+    `,
+  );
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "codex_actions_root.deck.ts",
+    `
+    import { defineDeck } from "${modHref}";
+    import { z } from "zod";
+    export default defineDeck({
+      contextSchema: z.string(),
+      responseSchema: z.string(),
+      modelParams: { model: "codex-cli/default" },
+      actionDecks: [{ name: "draft_assistant_task", path: "${childPath}" }],
+    });
+    `,
+  );
+
+  let capturedTools: unknown;
+  const traces: Array<TraceEvent> = [];
+  const provider: ModelProvider = {
+    responses({ request }) {
+      capturedTools = request.tools;
+      return Promise.resolve({
+        id: "resp_codex_tools",
+        object: "response",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "ok" }],
+        }],
+      });
+    },
+    chat() {
+      throw new Error("chat should not be called in responses mode");
+    },
+  };
+
+  const result = await runDeck({
+    path: deckPath,
+    input: undefined,
+    inputProvided: false,
+    initialUserMessage: "draft something",
+    modelProvider: provider,
+    isRoot: true,
+    responsesMode: true,
+    trace: (event) => traces.push(event),
+  });
+
+  assertEquals(result, "ok");
+  assertEquals(capturedTools, undefined);
+  const modelCall = traces.find((event) => event.type === "model.call") as
+    | Extract<TraceEvent, { type: "model.call" }>
+    | undefined;
+  assert(modelCall);
+  assertEquals(modelCall.model, "codex-cli/default");
+  assertEquals(modelCall.toolCount, 0);
+  assertEquals(modelCall.tools, []);
+});
+
 Deno.test(
   "responses mode validates and deterministically canonicalizes declared extension items",
   async () => {
