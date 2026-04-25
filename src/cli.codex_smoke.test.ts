@@ -110,7 +110,7 @@ if [ -z "\${CODEX_REQUESTS_LOG:-}" ]; then
 fi
 printf '%s\n' "$@" > "$CODEX_ARGS_LOG"
 extract_id() {
-  printf '%s\\n' "$1" | sed -n 's/.*"id":\\("[^"]*"\\|[0-9][0-9]*\\).*/\\1/p'
+  printf '%s\\n' "$1" | sed -nE 's/.*"id":("[^"]*"|[0-9]+).*/\\1/p'
 }
 while IFS= read -r line; do
   printf '%s\\n' "$line" >> "$CODEX_REQUESTS_LOG"

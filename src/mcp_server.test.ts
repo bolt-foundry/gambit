@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import * as path from "@std/path";
+import { TextLineStream } from "@std/streams/text-line-stream";
 import { handleMcpRequest } from "./mcp_server.ts";
 
 async function createRootDeckFixture(): Promise<{
@@ -139,6 +140,61 @@ leakTolerantTest(
 );
 
 leakTolerantTest(
+  "mcp server writes debug tool catalog log when enabled",
+  async () => {
+    const fixture = await createRootDeckFixture();
+    const logPath = path.join(fixture.dir, "gambit-mcp-debug.log");
+    const previousRootDeck = Deno.env.get("GAMBIT_MCP_ROOT_DECK_PATH");
+    const previousDebug = Deno.env.get(
+      "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP",
+    );
+    const previousLogPath = Deno.env.get("GAMBIT_MCP_DEBUG_LOG_PATH");
+    Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", fixture.rootDeckPath);
+    Deno.env.set("BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP", "1");
+    Deno.env.set("GAMBIT_MCP_DEBUG_LOG_PATH", logPath);
+    try {
+      const response = await handleMcpRequest({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+      });
+      const result =
+        (response as { result?: { tools?: Array<{ name: string }> } })
+          .result;
+      assert(result);
+      assertEquals(
+        result?.tools?.map((tool) => tool.name),
+        ["lookup", "external_only"],
+      );
+      const logText = await Deno.readTextFile(logPath);
+      assert(logText.includes('"event":"tools/list"'));
+      assert(logText.includes('"lookup"'));
+      assert(logText.includes('"external_only"'));
+    } finally {
+      if (previousRootDeck === undefined) {
+        Deno.env.delete("GAMBIT_MCP_ROOT_DECK_PATH");
+      } else {
+        Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", previousRootDeck);
+      }
+      if (previousDebug === undefined) {
+        Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP");
+      } else {
+        Deno.env.set(
+          "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP",
+          previousDebug,
+        );
+      }
+      if (previousLogPath === undefined) {
+        Deno.env.delete("GAMBIT_MCP_DEBUG_LOG_PATH");
+      } else {
+        Deno.env.set("GAMBIT_MCP_DEBUG_LOG_PATH", previousLogPath);
+      }
+      await Deno.remove(fixture.dir, { recursive: true }).catch(() => {});
+    }
+  },
+);
+
+leakTolerantTest(
   "mcp server derives tool surface from configured root deck",
   async () => {
     const { dir, rootDeckPath } = await createRootDeckFixture();
@@ -250,6 +306,103 @@ leakTolerantTest(
         Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", previous);
       }
       await Deno.remove(dir, { recursive: true });
+    }
+  },
+);
+
+leakTolerantTest(
+  "mcp server forwards external-only tool through configured bridge",
+  async () => {
+    const { dir, rootDeckPath } = await createRootDeckFixture();
+    const socketDir = await Deno.makeTempDir();
+    const socketPath = path.join(socketDir, "external-tool.sock");
+    const listener = Deno.listen({ transport: "unix", path: socketPath });
+    let closed = false;
+    const acceptLoop = (async () => {
+      while (!closed) {
+        let conn: Deno.Conn | null = null;
+        try {
+          conn = await listener.accept();
+          const reader = conn.readable
+            .pipeThrough(new TextDecoderStream())
+            .pipeThrough(new TextLineStream())
+            .getReader();
+          const { value } = await reader.read();
+          reader.releaseLock();
+          const request = JSON.parse(value ?? "{}") as {
+            args?: { query?: string };
+            name?: string;
+          };
+          const writer = conn.writable.getWriter();
+          await writer.write(
+            new TextEncoder().encode(
+              `${
+                JSON.stringify({
+                  isError: false,
+                  text: JSON.stringify({
+                    status: 200,
+                    payload: {
+                      name: request.name,
+                      query: request.args?.query ?? null,
+                    },
+                  }),
+                })
+              }\n`,
+            ),
+          );
+          await writer.close();
+        } catch {
+          if (!closed) throw new Error("external tool bridge failed");
+        } finally {
+          try {
+            conn?.close();
+          } catch {
+            // ignore close failure
+          }
+        }
+      }
+    })();
+    const previousRootDeck = Deno.env.get("GAMBIT_MCP_ROOT_DECK_PATH");
+    const previousBridge = Deno.env.get("GAMBIT_EXTERNAL_TOOL_BRIDGE");
+    try {
+      Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", rootDeckPath);
+      Deno.env.set("GAMBIT_EXTERNAL_TOOL_BRIDGE", socketPath);
+      const response = await handleMcpRequest({
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "external_only",
+          arguments: { query: "hello" },
+        },
+      });
+      const result = (response as {
+        result?: {
+          isError?: boolean;
+          content?: Array<{ text?: string }>;
+        };
+      }).result;
+      assertEquals(result?.isError, false);
+      const text = result?.content?.[0]?.text ?? "";
+      assertEquals(text.includes('"status":200'), true);
+      assertEquals(text.includes('"name":"external_only"'), true);
+      assertEquals(text.includes('"query":"hello"'), true);
+    } finally {
+      if (previousRootDeck === undefined) {
+        Deno.env.delete("GAMBIT_MCP_ROOT_DECK_PATH");
+      } else {
+        Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", previousRootDeck);
+      }
+      if (previousBridge === undefined) {
+        Deno.env.delete("GAMBIT_EXTERNAL_TOOL_BRIDGE");
+      } else {
+        Deno.env.set("GAMBIT_EXTERNAL_TOOL_BRIDGE", previousBridge);
+      }
+      closed = true;
+      listener.close();
+      await acceptLoop.catch(() => undefined);
+      await Deno.remove(dir, { recursive: true });
+      await Deno.remove(socketDir, { recursive: true });
     }
   },
 );

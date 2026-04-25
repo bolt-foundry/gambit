@@ -6773,6 +6773,132 @@ Deno.test(
   },
 );
 
+Deno.test(
+  "responses mode carries updated session meta into same-turn tool continuation passes",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const modHref = modImportPath();
+    const childPath = await writeTempDeck(
+      dir,
+      "codex-meta-child.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.object({}),
+        responseSchema: z.string(),
+        run: () => "child-complete",
+      });
+      `,
+    );
+    const deckPath = await writeTempDeck(
+      dir,
+      "codex-meta-root.deck.ts",
+      `
+      import { defineDeck } from "${modHref}";
+      import { z } from "zod";
+      export default defineDeck({
+        contextSchema: z.string(),
+        responseSchema: z.string(),
+        modelParams: { model: "codex-cli/default" },
+        actionDecks: [{ name: "child", path: "${childPath}" }],
+        run: () => "root-complete",
+      });
+      `,
+    );
+
+    const seenThreadIds: Array<string | null> = [];
+    const stateUpdates: Array<string | undefined> = [];
+    let pass = 0;
+    const provider: ModelProvider = {
+      responses({ state }) {
+        const threadId = typeof state?.meta?.["codex.threadId"] === "string"
+          ? state.meta["codex.threadId"] as string
+          : null;
+        seenThreadIds.push(threadId);
+        if (pass === 0) {
+          pass += 1;
+          return Promise.resolve({
+            id: "resp_1",
+            object: "response",
+            output: [{
+              type: "function_call",
+              call_id: "call-child",
+              name: "child",
+              arguments: "{}",
+            }],
+            updatedState: {
+              runId: "run_1",
+              format: "responses",
+              messages: [{ role: "user", content: "hello" }],
+              items: [{
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "hello" }],
+              }],
+              meta: { "codex.threadId": "thread-responses-pass-1" },
+            },
+          });
+        }
+        return Promise.resolve({
+          id: "resp_2",
+          object: "response",
+          output: [{
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done" }],
+          }],
+          updatedState: {
+            runId: "run_1",
+            format: "responses",
+            messages: [
+              { role: "user", content: "hello" },
+              { role: "assistant", content: "done" },
+            ],
+            items: [
+              {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "hello" }],
+              },
+              {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "done" }],
+              },
+            ],
+            meta: { "codex.threadId": threadId ?? "missing-thread-id" },
+          },
+        });
+      },
+      chat() {
+        throw new Error("chat should not be called in responses mode");
+      },
+    };
+
+    const result = await runDeck({
+      path: deckPath,
+      input: "",
+      inputProvided: true,
+      initialUserMessage: "hello",
+      modelProvider: provider,
+      isRoot: true,
+      responsesMode: true,
+      onStateUpdate: (state) => {
+        stateUpdates.push(
+          typeof state.meta?.["codex.threadId"] === "string"
+            ? state.meta["codex.threadId"] as string
+            : undefined,
+        );
+      },
+    });
+
+    assertEquals(result, "done");
+    assertEquals(seenThreadIds, [null, "thread-responses-pass-1"]);
+    assertEquals(stateUpdates.includes("thread-responses-pass-1"), true);
+  },
+);
+
 Deno.test("orchestration worker preserves serial LLM trace ordering and correlation ids", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();

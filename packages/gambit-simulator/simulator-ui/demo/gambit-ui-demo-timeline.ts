@@ -1,15 +1,15 @@
 /**
- * Gambit UI demo timeline used by the demo-runner automation inside bfmono.
+ * Gambit UI demo timeline used by the browser-runtime automation inside bfmono.
  *
  * How to run:
- * - From repo root: `deno task demo:ui-video` with `cwd=packages/demo-runner`.
- * - This is executed by `packages/demo-runner/src/run-gambit-demo.ts`, which loads `demoTimeline`.
+ * - From repo root: `deno task demo:ui-video` with `cwd=packages/gambit/packages/browser-runtime`.
+ * - This is executed by `packages/gambit/packages/browser-runtime/src/run-gambit-demo.ts`, which loads `demoTimeline`.
  *
  * Outputs:
  * - Artifacts are written to `../shared/bft-e2e/gambit-ui-demo/__latest__` by default.
  *
  * Controls:
- * - Most knobs are environment variables defined in `packages/demo-runner/src/config.ts`
+ * - Most knobs are environment variables defined in `packages/gambit/packages/browser-runtime/src/config.ts`
  *   (e.g., host bridge, ports, viewport/content sizing, recording flags).
  *
  * Authoring tips:

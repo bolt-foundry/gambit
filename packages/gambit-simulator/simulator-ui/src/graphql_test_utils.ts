@@ -1,2 +1,2 @@
-export type { MockApiRequest } from "@bolt-foundry/demo-runner";
-export { createGraphqlAwareFetch } from "@bolt-foundry/demo-runner";
+export type { MockApiRequest } from "@bolt-foundry/browser-runtime";
+export { createGraphqlAwareFetch } from "@bolt-foundry/browser-runtime";

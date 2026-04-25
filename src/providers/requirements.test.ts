@@ -34,21 +34,14 @@ Deno.test("provider requirements expose codex auth contract", () => {
   assertExists(requirements);
   assertEquals(requirements.provider, "codex-cli");
   assertEquals(requirements.auth, {
-    mode: "runtime-auth-state",
+    mode: "chatgpt-auth-tokens",
     storageAuthority: "bfdesktop",
     attachmentAuthority: "bfdesktop-mitm",
     destinationScope: "declared-destinations",
-    runtimeAuthState: {
-      runtimeHomeEnv: "CODEX_HOME",
-      runtimePath: "codex/auth.json",
-      source: {
-        kind: "json-file",
-        path: "$CODEX_HOME/auth.json",
-      },
-    },
   });
   assertEquals(requirements.destinations, [
     { url: "https://api.openai.com/v1/responses" },
+    { url: "https://auth.openai.com/oauth/token" },
     { url: "https://chatgpt.com/backend-api/codex/" },
   ]);
   assertEquals(providerAuthUsesMitmRequestTimeAttachment(requirements), true);

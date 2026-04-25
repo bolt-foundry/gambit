@@ -351,11 +351,16 @@ function toStrictResponseItem(
       encrypted_content: item.encrypted_content ?? null,
     };
   }
+  const itemRecord = Object.fromEntries(
+    Object.entries(item).map(([key, value]) => [key, asJsonValue(value)]),
+  );
   return {
+    ...itemRecord,
     type: item.type,
-    id: item.id ?? `ext_${index + 1}`,
-    data: item.data,
-    status: "completed",
+    id: typeof itemRecord.id === "string" ? itemRecord.id : `ext_${index + 1}`,
+    status: typeof itemRecord.status === "string"
+      ? itemRecord.status
+      : "completed",
   };
 }
 

@@ -7,7 +7,7 @@ import {
   DemoServerError,
   runE2e,
   waitForPath,
-} from "@bolt-foundry/demo-runner";
+} from "@bolt-foundry/browser-runtime";
 import { createTestTabDemoFixture } from "./fixtures/test-tab-fixture.ts";
 
 async function runWithTempServeRoot(

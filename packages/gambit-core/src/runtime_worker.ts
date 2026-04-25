@@ -200,6 +200,16 @@ const CORE_RESPONSE_ITEM_TYPES = new Set([
   "function_call",
   "function_call_output",
   "reasoning",
+  "local_shell_call",
+  "tool_search_call",
+  "custom_tool_call",
+  "custom_tool_call_output",
+  "tool_search_output",
+  "web_search_call",
+  "image_generation_call",
+  "ghost_snapshot",
+  "compaction",
+  "other",
 ]);
 
 function isCoreResponseItemType(type: string): boolean {

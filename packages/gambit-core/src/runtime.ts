@@ -33,6 +33,7 @@ import type {
   CreateResponseRequest,
   CreateResponseResponse,
   ExecutionContext,
+  ExternalToolDefinition,
   Guardrails,
   JSONValue,
   LoadedDeck,
@@ -255,6 +256,7 @@ export type RunOptions = {
     parentActionCallId?: string;
     deckPath: string;
   }) => unknown | Promise<unknown>;
+  runtimeTools?: ReadonlyArray<ExternalToolDefinition>;
 };
 
 const WORKER_SANDBOX_ENV = "GAMBIT_DECK_WORKER_SANDBOX";
@@ -806,7 +808,13 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       }
     }
 
-    const deck = await loadDeck(opts.path);
+    const loadedDeck = await loadDeck(opts.path);
+    const deck = opts.runtimeTools?.length
+      ? {
+        ...loadedDeck,
+        tools: [...loadedDeck.tools, ...opts.runtimeTools],
+      }
+      : loadedDeck;
     const permissions = resolveEffectivePermissions({
       baseDir: path.dirname(deck.path),
       parent: opts.parentPermissions,
@@ -1368,6 +1376,16 @@ const CORE_RESPONSE_ITEM_TYPES = new Set([
   "function_call",
   "function_call_output",
   "reasoning",
+  "local_shell_call",
+  "tool_search_call",
+  "custom_tool_call",
+  "custom_tool_call_output",
+  "tool_search_output",
+  "web_search_call",
+  "image_generation_call",
+  "ghost_snapshot",
+  "compaction",
+  "other",
 ]);
 
 function isCoreResponseItemType(type: string): boolean {
@@ -4918,9 +4936,10 @@ async function runLlmDeck(
           messages.push(...appendedMessages.map(sanitizeMessage));
           idleController.touch();
         }
+        ensureRunActive(ctx.runDeadlineMs, ctx.signal);
+        const state = computeState(result.updatedState);
+        ctx.state = state;
         if (ctx.onStateUpdate) {
-          ensureRunActive(ctx.runDeadlineMs, ctx.signal);
-          const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
         }
         continue;
@@ -4948,8 +4967,9 @@ async function runLlmDeck(
       if (message.content !== null && message.content !== undefined) {
         messages.push(sanitizeMessage(message));
         ensureRunActive(ctx.runDeadlineMs, ctx.signal);
+        const state = computeState(result.updatedState);
+        ctx.state = state;
         if (ctx.onStateUpdate) {
-          const state = computeState(result.updatedState);
           ctx.onStateUpdate(state);
         }
         if (

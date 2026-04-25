@@ -17,6 +17,8 @@ export type { DeckDefinition } from "./src/types.ts";
 export type { DeckReferenceDefinition } from "./src/types.ts";
 /** Execution context passed to decks. */
 export type { ExecutionContext } from "./src/types.ts";
+/** External runtime tool definition shape. */
+export type { ExternalToolDefinition } from "./src/types.ts";
 /** Grader deck definition shape. */
 export type { GraderDeckDefinition } from "./src/types.ts";
 /** Guardrails definition and hooks. */
