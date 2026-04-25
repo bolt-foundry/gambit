@@ -10,14 +10,13 @@ import {
 } from "./router.ts";
 
 export type {
+  ChatgptAuthTokensProviderAuthRequirements,
   ProviderAttachmentAuthority,
   ProviderAuthRequirements,
   ProviderDestinationRequirement,
   ProviderDestinationScope,
-  ProviderRuntimeAuthStateSource,
   ProviderSecretRequirement,
   ProviderStorageAuthority,
-  RuntimeAuthStateProviderAuthRequirements,
   SecretProviderAuthRequirements,
 } from "./manifest.ts";
 

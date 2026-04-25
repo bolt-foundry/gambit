@@ -44,20 +44,15 @@ export type SecretProviderAuthRequirements = BaseProviderAuthRequirements & {
   secrets: Array<ProviderSecretRequirement>;
 };
 
-export type RuntimeAuthStateProviderAuthRequirements =
+export type ChatgptAuthTokensProviderAuthRequirements =
   & BaseProviderAuthRequirements
   & {
-    mode: "runtime-auth-state";
-    runtimeAuthState: {
-      runtimeHomeEnv?: string;
-      runtimePath: string;
-      source: ProviderRuntimeAuthStateSource;
-    };
+    mode: "chatgpt-auth-tokens";
   };
 
 export type ProviderAuthRequirements =
   | SecretProviderAuthRequirements
-  | RuntimeAuthStateProviderAuthRequirements;
+  | ChatgptAuthTokensProviderAuthRequirements;
 
 export type ProviderRegistryEntry = {
   key: ProviderKey;
@@ -90,14 +85,6 @@ type RawProviderManifest = {
       envName?: unknown;
       secretId?: unknown;
     }>;
-    runtimeAuthState?: {
-      runtimeHomeEnv?: unknown;
-      runtimePath?: unknown;
-      source?: {
-        kind?: unknown;
-        path?: unknown;
-      };
-    };
   };
   destinations?: Array<{ url?: unknown }>;
 };
@@ -120,21 +107,16 @@ routingPrefix = "codex-cli/"
 bareAlias = "codex-cli"
 
 [auth]
-mode = "runtime-auth-state"
+mode = "chatgpt-auth-tokens"
 storageAuthority = "bfdesktop"
 attachmentAuthority = "bfdesktop-mitm"
 destinationScope = "declared-destinations"
 
-[auth.runtimeAuthState]
-runtimeHomeEnv = "CODEX_HOME"
-runtimePath = "codex/auth.json"
-
-[auth.runtimeAuthState.source]
-kind = "json-file"
-path = "$CODEX_HOME/auth.json"
-
 [[destinations]]
 url = "https://api.openai.com/v1/responses"
+
+[[destinations]]
+url = "https://auth.openai.com/oauth/token"
 
 [[destinations]]
 url = "https://chatgpt.com/backend-api/codex/"
@@ -214,26 +196,6 @@ function normalizeSecretRequirement(input: {
   return { envName, secretId };
 }
 
-function normalizeRuntimeAuthStateSource(
-  input: NonNullable<
-    NonNullable<RawProviderManifest["auth"]>["runtimeAuthState"]
-  >["source"],
-): ProviderRuntimeAuthStateSource {
-  const kind = typeof input?.kind === "string" ? input.kind.trim() : "";
-  if (kind !== "json-file") {
-    throw new Error(
-      `Unsupported provider runtimeAuthState source kind "${input?.kind}".`,
-    );
-  }
-  const path = typeof input?.path === "string" ? input.path.trim() : "";
-  if (!path) {
-    throw new Error(
-      "Provider auth runtimeAuthState source must declare a non-empty path.",
-    );
-  }
-  return { kind, path };
-}
-
 function normalizeProviderAuthRequirements(
   input: RawProviderManifest["auth"],
 ): ProviderAuthRequirements | undefined {
@@ -278,28 +240,12 @@ function normalizeProviderAuthRequirements(
     };
   }
 
-  if (input.mode === "runtime-auth-state") {
-    const runtimePath = typeof input.runtimeAuthState?.runtimePath === "string"
-      ? input.runtimeAuthState.runtimePath.trim()
-      : "";
-    if (!runtimePath) {
-      throw new Error(
-        "Provider auth runtime-auth-state mode must declare runtimeAuthState.runtimePath.",
-      );
-    }
+  if (input.mode === "chatgpt-auth-tokens") {
     return {
-      mode: "runtime-auth-state",
+      mode: "chatgpt-auth-tokens",
       storageAuthority,
       attachmentAuthority,
       destinationScope,
-      runtimeAuthState: {
-        runtimeHomeEnv: typeof input.runtimeAuthState?.runtimeHomeEnv ===
-            "string"
-          ? input.runtimeAuthState.runtimeHomeEnv.trim() || undefined
-          : undefined,
-        runtimePath,
-        source: normalizeRuntimeAuthStateSource(input.runtimeAuthState?.source),
-      },
     };
   }
 

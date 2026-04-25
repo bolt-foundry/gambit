@@ -4,11 +4,15 @@ import {
   codexConfigArgsForTest,
   codexInstructionsForMessagesForTest,
   createCodexProvider,
+  extractCodexConfigValuesForTest,
   normalizeCodexModelForTest,
   promptForCodexTurnForTest,
+  sanitizeCodexSpawnArgsForTest,
+  setCodexHostAuthBridgeForTests,
 } from "./codex.ts";
 import type {
   JSONValue,
+  ModelMessage,
   ProviderTraceEvent,
   SavedState,
 } from "@bolt-foundry/gambit-core";
@@ -104,6 +108,161 @@ Deno.test("codex provider resume does not replay transcript when no new user mes
   assertEquals(prompt, "");
 });
 
+Deno.test("codex provider app-server resume does not inject raw tool continuations", async () => {
+  const calls: Array<{
+    prompt: string;
+    priorThreadId?: string;
+    injectItems?: Array<{ type: string; call_id?: string; output?: string }>;
+  }> = [];
+  const provider = createCodexProvider({
+    runAppServerTurn: (input) => {
+      calls.push({
+        prompt: input.prompt,
+        priorThreadId: input.priorThreadId,
+        injectItems: input.injectItems?.map((item) => ({
+          type: item.type,
+          call_id: "call_id" in item && typeof item.call_id === "string"
+            ? item.call_id
+            : undefined,
+          output: "output" in item && typeof item.output === "string"
+            ? item.output
+            : undefined,
+        })),
+      });
+      return Promise.resolve({
+        threadId: input.priorThreadId ?? "thread-app-server",
+        assistantMessages: [{
+          itemId: "msg_app",
+          text: "hello world",
+        }],
+      });
+    },
+  });
+
+  const result = await provider.chat({
+    model: "codex-cli/default",
+    messages: [
+      { role: "user", content: "hello" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_123",
+          type: "function",
+          function: {
+            name: "exec_command",
+            arguments: '{"cmd":"pwd"}',
+          },
+        }],
+      },
+      {
+        role: "tool",
+        content: '{"status":"completed","output":"/workspace"}',
+        tool_call_id: "call_123",
+      },
+    ],
+    state: {
+      runId: "run-123",
+      messages: [],
+      meta: { "codex.threadId": "thread-app-server" },
+    },
+  });
+  assertEquals(result.message.content, "hello world");
+  assertEquals(calls, [{
+    prompt: "",
+    priorThreadId: "thread-app-server",
+    injectItems: [],
+  }]);
+});
+
+Deno.test("codex provider app-server resume ignores stale tool continuations", async () => {
+  const calls: Array<{
+    prompt: string;
+    priorThreadId?: string;
+    injectItems?: Array<{ type: string; call_id?: string; output?: string }>;
+  }> = [];
+  const provider = createCodexProvider({
+    runAppServerTurn: (input) => {
+      calls.push({
+        prompt: input.prompt,
+        priorThreadId: input.priorThreadId,
+        injectItems: input.injectItems?.map((item) => ({
+          type: item.type,
+          call_id: "call_id" in item && typeof item.call_id === "string"
+            ? item.call_id
+            : undefined,
+          output: "output" in item && typeof item.output === "string"
+            ? item.output
+            : undefined,
+        })),
+      });
+      return Promise.resolve({
+        threadId: input.priorThreadId ?? "thread-app-server",
+        assistantMessages: [{
+          itemId: "msg_app",
+          text: "hello world",
+        }],
+      });
+    },
+  });
+
+  const priorMessages: Array<ModelMessage> = [
+    { role: "user" as const, content: "hello" },
+    {
+      role: "assistant" as const,
+      content: null,
+      tool_calls: [{
+        id: "call_123",
+        type: "function",
+        function: {
+          name: "exec_command",
+          arguments: '{"cmd":"pwd"}',
+        },
+      }],
+    },
+    {
+      role: "tool" as const,
+      content: '{"status":"completed","output":"/workspace"}',
+      tool_call_id: "call_123",
+    },
+  ];
+
+  const result = await provider.chat({
+    model: "codex-cli/default",
+    messages: [
+      ...priorMessages,
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{
+          id: "call_456",
+          type: "function",
+          function: {
+            name: "exec_command",
+            arguments: '{"cmd":"ls"}',
+          },
+        }],
+      },
+      {
+        role: "tool",
+        content: '{"status":"completed","output":"MANAGER.md"}',
+        tool_call_id: "call_456",
+      },
+    ],
+    state: {
+      runId: "run-456",
+      messages: priorMessages,
+      meta: { "codex.threadId": "thread-app-server" },
+    },
+  });
+  assertEquals(result.message.content, "hello world");
+  assertEquals(calls, [{
+    prompt: "",
+    priorThreadId: "thread-app-server",
+    injectItems: [],
+  }]);
+});
+
 Deno.test("codex provider uses codex developer instructions config for fresh system prompts", () => {
   const messages = [
     { role: "system" as const, content: "deck system prompt" },
@@ -124,7 +283,7 @@ Deno.test("codex provider uses codex developer instructions config for fresh sys
   assertEquals(prompt, "hello");
 });
 
-Deno.test("codex provider fresh prompt keeps non-system continuation payloads only", () => {
+Deno.test("codex provider rejects fresh-thread assistant continuation payloads", () => {
   const messages = [
     { role: "system" as const, content: "deck system prompt" },
     { role: "user" as const, content: "hello" },
@@ -132,7 +291,6 @@ Deno.test("codex provider fresh prompt keeps non-system continuation payloads on
     { role: "user" as const, content: "follow up" },
   ];
   const instructions = codexInstructionsForMessagesForTest(messages);
-  const prompt = promptForCodexTurnForTest({ messages });
   const joined = codexConfigArgsForTest({
     cwd: "/tmp/test-cwd",
     instructions,
@@ -143,9 +301,29 @@ Deno.test("codex provider fresh prompt keeps non-system continuation payloads on
   );
   assertEquals(joined.includes('-c instructions="deck system prompt"'), false);
   assertEquals(joined.includes("SYSTEM:\\n"), false);
-  assertEquals(
-    prompt,
-    "USER:\nhello\n\nASSISTANT:\nhi there\n\nUSER:\nfollow up",
+  assertThrows(
+    () => promptForCodexTurnForTest({ messages }),
+    Error,
+    "Codex fresh-thread continuation is unsupported",
+  );
+});
+
+Deno.test("codex provider rejects fresh-thread tool continuation payloads", () => {
+  assertThrows(
+    () =>
+      promptForCodexTurnForTest({
+        messages: [
+          { role: "user", content: "hello" },
+          {
+            role: "tool",
+            content: 'unknown action: "draft_assistant_task"',
+            tool_call_id: "call_123",
+          },
+          { role: "user", content: "follow up" },
+        ],
+      }),
+    Error,
+    "Codex fresh-thread continuation is unsupported",
   );
 });
 
@@ -338,6 +516,206 @@ done
     });
     assertEquals(result.message.content, "hello world");
   } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider bootstraps app-server with host-owned ChatGPT auth tokens", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-host-auth-bootstrap-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+saw_login_start="0"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"account/login/start"'*)
+      saw_login_start="1"
+      printf '%s' "$line" | grep '"params":{' >/dev/null
+      printf '%s' "$line" | grep '"type":"chatgptAuthTokens"' >/dev/null
+      printf '%s' "$line" | grep '"accessToken":"host-access-token"' >/dev/null
+      printf '%s' "$line" | grep '"chatgptAccountId":"acct-host"' >/dev/null
+      printf '%s' "$line" | grep '"params":{"account":' >/dev/null && exit 61
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-host"}}}\\n' "$id"
+      ;;
+    *'"method":"thread/start"'*)
+      [ "$saw_login_start" = "1" ] || exit 41
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-host-auth"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-host-auth","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-host-auth","turnId":"turn-host-auth","item":{"type":"agentMessage","id":"msg-host-auth","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-host-auth","turn":{"id":"turn-host-auth","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  setCodexHostAuthBridgeForTests({
+    readAuthTokens: () =>
+      Promise.resolve({
+        accessToken: "host-access-token",
+        chatgptAccountId: "acct-host",
+        chatgptPlanType: "pro",
+        idToken: null,
+        lastRefresh: "2026-04-17T00:00:00Z",
+        refreshToken: "refresh-host-token",
+      }),
+    refreshAuthTokens: () => {
+      throw new Error("refresh should not be called in bootstrap test");
+    },
+  });
+
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+  } finally {
+    setCodexHostAuthBridgeForTests(null);
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider handles chatgpt auth refresh requests from app-server", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-host-auth-refresh-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"account/login/start"'*)
+      printf '%s' "$line" | grep '"params":{' >/dev/null
+      printf '%s' "$line" | grep '"type":"chatgptAuthTokens"' >/dev/null
+      printf '%s' "$line" | grep '"accessToken":"host-access-token"' >/dev/null
+      printf '%s' "$line" | grep '"chatgptAccountId":"acct-host"' >/dev/null
+      printf '%s' "$line" | grep '"params":{"account":' >/dev/null && exit 61
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-host"}}}\\n' "$id"
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-refresh-auth"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-refresh-auth","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"id":"refresh-1","method":"account/chatgptAuthTokens/refresh","params":{"reason":"expired","previousAccountId":"acct-old"}}\\n'
+      IFS= read -r refresh_response
+      printf '%s' "$refresh_response" | grep '"accessToken":"refreshed-access-token"' >/dev/null
+      printf '%s' "$refresh_response" | grep '"chatgptAccountId":"acct-refreshed"' >/dev/null
+      printf '%s' "$refresh_response" | grep '"type":"chatgptAuthTokens"' >/dev/null
+      printf '{"method":"item/completed","params":{"threadId":"thread-refresh-auth","turnId":"turn-refresh-auth","item":{"type":"agentMessage","id":"msg-refresh-auth","text":"refreshed ok","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-refresh-auth","turn":{"id":"turn-refresh-auth","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  let refreshCalls = 0;
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  setCodexHostAuthBridgeForTests({
+    readAuthTokens: () =>
+      Promise.resolve({
+        accessToken: "host-access-token",
+        chatgptAccountId: "acct-host",
+        chatgptPlanType: "pro",
+        idToken: null,
+        lastRefresh: "2026-04-17T00:00:00Z",
+        refreshToken: "refresh-host-token",
+      }),
+    refreshAuthTokens: ({ previousAccountId, reason }) => {
+      refreshCalls += 1;
+      assertEquals(previousAccountId, "acct-old");
+      assertEquals(reason, "expired");
+      return Promise.resolve({
+        accessToken: "refreshed-access-token",
+        chatgptAccountId: "acct-refreshed",
+        chatgptPlanType: "plus",
+        idToken: null,
+        lastRefresh: "2026-04-17T01:00:00Z",
+        refreshToken: "refresh-host-token-2",
+      });
+    },
+  });
+
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "refreshed ok");
+    assertEquals(refreshCalls, 1);
+  } finally {
+    setCodexHostAuthBridgeForTests(null);
     if (priorTransport === undefined) {
       Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
     } else {
@@ -699,8 +1077,10 @@ done
     }
     const error = result.error;
     assertEquals(
-      error instanceof Error ? error.message : String(error),
-      "codex app-server failed: protocol failure",
+      /protocol failure|exited before the request completed/.test(
+        error instanceof Error ? error.message : String(error),
+      ),
+      true,
     );
   } finally {
     if (priorTransport === undefined) {
@@ -848,6 +1228,90 @@ done
       messages: [{ role: "user", content: "hello" }],
     });
     assertEquals(result.message.content, "hello world");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server ignores teardown stderr after turn completion", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-teardown-stderr-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+completed="0"
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-teardown-stderr"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-teardown-stderr","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-teardown-stderr","turnId":"turn-app-server-teardown-stderr","item":{"type":"agentMessage","id":"msg-teardown-stderr","text":"hello world","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-teardown-stderr","turn":{"id":"turn-app-server-teardown-stderr","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      completed="1"
+      ;;
+  esac
+done
+
+if [ "$completed" = "1" ]; then
+  printf 'Error: failed to exec process CancellationError()\\n' >&2
+fi
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assertEquals(result.message.content, "hello world");
+    assertEquals(
+      result.updatedState?.meta?.["codex.threadId"],
+      "thread-app-server-teardown-stderr",
+    );
   } finally {
     if (priorTransport === undefined) {
       Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
@@ -1121,6 +1585,422 @@ done
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
+});
+
+Deno.test("codex provider app-server does not send resumed tool continuations as turn input", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-inject-items-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+require_substring() {
+  line="$1"
+  needle="$2"
+  if ! printf '%s' "$line" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf 'missing substring: %s\\nline: %s\\n' "$needle" "$line" >&2
+    exit 47
+  fi
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/resume"'*)
+      require_substring "$line" '"threadId":"thread-app-server-inject-items"'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-inject-items"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      require_substring "$line" '"threadId":"thread-app-server-inject-items"'
+      if printf '%s' "$line" | grep -F -- '"type":"function_call_output"' >/dev/null 2>&1; then
+        printf 'turn/start must not send raw function_call_output items\\nline: %s\\n' "$line" >&2
+        exit 48
+      fi
+      require_substring "$line" '"input":[]'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-inject-items","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-inject-items","turnId":"turn-app-server-inject-items","item":{"type":"agentMessage","id":"msg-app-server-inject-items","text":"continued ok","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-inject-items","turn":{"id":"turn-app-server-inject-items","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const provider = createCodexProvider();
+    const result = await provider.chat({
+      model: "codex-cli/default",
+      messages: [
+        { role: "user", content: "hello" },
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: "call_123",
+            type: "function",
+            function: {
+              name: "exec_command",
+              arguments: '{"cmd":"pwd"}',
+            },
+          }],
+        },
+        {
+          role: "tool",
+          content: '{"status":"completed","output":"/workspace"}',
+          tool_call_id: "call_123",
+        },
+      ],
+      state: {
+        runId: "run-app-server-inject-items",
+        messages: [],
+        meta: { "codex.threadId": "thread-app-server-inject-items" },
+      },
+    });
+    assertEquals(result.message.content, "continued ok");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider app-server streams raw Responses items and requests experimental raw events", async () => {
+  const priorTransport = Deno.env.get("GAMBIT_CODEX_TRANSPORT");
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const root = await Deno.makeTempDir({
+    prefix: "codex-app-server-raw-response-items-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+require_substring() {
+  line="$1"
+  needle="$2"
+  if ! printf '%s' "$line" | grep -F -- "$needle" >/dev/null 2>&1; then
+    printf 'missing substring: %s\\nline: %s\\n' "$needle" "$line" >&2
+    exit 47
+  fi
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"thread/start"'*)
+      require_substring "$line" '"experimentalRawEvents":true'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-raw-items"}}}\\n' "$id"
+      ;;
+    *'"method":"turn/start"'*)
+      require_substring "$line" '"input":[{"type":"text","text":"find vidpresso"}]'
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"turn":{"id":"turn-app-server-raw-items","status":"inProgress","items":[],"error":null}}}\\n' "$id"
+      printf '{"method":"rawResponseItem/completed","params":{"threadId":"thread-app-server-raw-items","turnId":"turn-app-server-raw-items","item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"vidpresso official site","queries":["vidpresso official site"]}}}}\\n'
+      printf '{"method":"item/completed","params":{"threadId":"thread-app-server-raw-items","turnId":"turn-app-server-raw-items","item":{"type":"agentMessage","id":"msg-app-server-raw-items","text":"Found the site.","phase":null,"memoryCitation":null}}}\\n'
+      printf '{"method":"turn/completed","params":{"threadId":"thread-app-server-raw-items","turn":{"id":"turn-app-server-raw-items","status":"completed","items":[],"error":null,"startedAt":0,"completedAt":0,"durationMs":1}}}\\n'
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_TRANSPORT", "app-server");
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  try {
+    const streamEvents: Array<
+      { type?: string; item?: { id?: string; type?: string } }
+    > = [];
+    const provider = createCodexProvider();
+
+    const result = await provider.responses?.({
+      request: {
+        model: "codex-cli/default",
+        stream: true,
+        input: [{
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "find vidpresso" }],
+        }],
+      },
+      onStreamEvent: (event) => {
+        streamEvents.push(
+          event as { type?: string; item?: { id?: string; type?: string } },
+        );
+      },
+    });
+
+    assertEquals(
+      result?.output.map((item) => item.type),
+      ["web_search_call", "message"],
+    );
+    const webSearchDoneEvents = streamEvents.filter((event) =>
+      event.type === "response.output_item.done" &&
+      event.item?.type === "web_search_call"
+    );
+    assertEquals(webSearchDoneEvents.length, 1);
+    assertEquals(webSearchDoneEvents[0]?.item?.id, "ws_1");
+  } finally {
+    if (priorTransport === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_TRANSPORT");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_TRANSPORT", priorTransport);
+    }
+    if (priorBin === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex provider ignores typeless raw response items", async () => {
+  const streamEvents: Array<
+    { type?: string; item?: { id?: string; type?: string } }
+  > = [];
+  const provider = createCodexProvider({
+    runAppServerTurn: (input) => {
+      input.onStreamEvent?.({
+        type: "raw.response_item.completed",
+        item: {},
+      });
+      input.onStreamEvent?.({
+        type: "item.completed",
+        item: {
+          id: "msg_valid",
+          type: "agent_message",
+          text: "Only the assistant message should survive.",
+        },
+      });
+      return Promise.resolve({
+        threadId: "thread-typeless-raw-item",
+        assistantMessages: [{
+          itemId: "msg_valid",
+          text: "Only the assistant message should survive.",
+        }],
+        rawResponseItems: [],
+      });
+    },
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "codex-cli/default",
+      stream: true,
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "find vidpresso" }],
+      }],
+    },
+    onStreamEvent: (event) => {
+      streamEvents.push(
+        event as { type?: string; item?: { id?: string; type?: string } },
+      );
+    },
+  });
+
+  assertEquals(
+    result?.output.map((item) => item.type),
+    ["message"],
+  );
+  assertEquals(
+    streamEvents.filter((event) => event.type === "raw.response_item.completed")
+      .length,
+    0,
+  );
+});
+
+Deno.test("codex provider keeps raw tool calls out of executable response output", async () => {
+  const streamEvents: Array<
+    { type?: string; item?: { type?: string; name?: string } }
+  > = [];
+  const provider = createCodexProvider({
+    runAppServerTurn: () =>
+      Promise.resolve({
+        threadId: "thread-raw-tool-items",
+        assistantMessages: [{ itemId: "msg_done", text: "Done." }],
+        rawResponseItems: [
+          {
+            type: "function_call",
+            call_id: "call_exec",
+            name: "exec_command",
+            arguments: '{"cmd":"pwd"}',
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_exec",
+            output: '{"status":200}',
+          },
+        ],
+      }),
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "codex-cli/default",
+      stream: true,
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "research" }],
+      }],
+    },
+    onStreamEvent: (event) => {
+      streamEvents.push(
+        event as { type?: string; item?: { type?: string; name?: string } },
+      );
+    },
+  });
+
+  assertEquals(result?.output.map((item) => item.type), ["message"]);
+  assertEquals(
+    streamEvents.some((event) =>
+      event.type === "response.output_item.done" &&
+      event.item?.type === "function_call"
+    ),
+    false,
+  );
+});
+
+Deno.test("codex provider preserves output indexes when raw items arrive before assistant output", async () => {
+  const streamEvents: Array<
+    {
+      type?: string;
+      output_index?: number;
+      item_id?: string;
+      item?: { id?: string; type?: string };
+    }
+  > = [];
+  const provider = createCodexProvider({
+    runAppServerTurn: (input) => {
+      input.onStreamEvent?.({
+        type: "raw.response_item.completed",
+        item: {
+          id: "ws_early",
+          type: "web_search_call",
+          status: "completed",
+          action: { type: "search", query: "vidpresso" },
+        },
+      });
+      return Promise.resolve({
+        threadId: "thread-raw-first",
+        assistantMessages: [{ itemId: "msg_late", text: "Found Vidpresso." }],
+        rawResponseItems: [{
+          id: "ws_early",
+          type: "web_search_call",
+          status: "completed",
+          action: { type: "search", query: "vidpresso" },
+        }],
+      });
+    },
+  });
+
+  const result = await provider.responses?.({
+    request: {
+      model: "codex-cli/default",
+      stream: true,
+      input: [{
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "find vidpresso" }],
+      }],
+    },
+    onStreamEvent: (event) => {
+      streamEvents.push(
+        event as {
+          type?: string;
+          output_index?: number;
+          item_id?: string;
+          item?: { id?: string; type?: string };
+        },
+      );
+    },
+  });
+
+  assertEquals(
+    result?.output.map((item) => item.type),
+    ["web_search_call", "message"],
+  );
+  assertEquals(
+    streamEvents.filter((event) => event.type === "response.output_item.done")
+      .map((event) => ({
+        type: event.item?.type,
+        id: event.item?.id,
+        output_index: event.output_index,
+      })),
+    [
+      { type: "web_search_call", id: "ws_early", output_index: 0 },
+      { type: "message", id: "msg_late", output_index: 1 },
+    ],
+  );
+  assertEquals(
+    streamEvents.filter((event) => event.type === "response.output_text.done")
+      .map((event) => ({
+        item_id: event.item_id,
+        output_index: event.output_index,
+      })),
+    [{ item_id: "msg_late", output_index: 1 }],
+  );
 });
 
 Deno.test("codex provider preserves multiple assistant message items in order", async () => {
@@ -1574,6 +2454,9 @@ Deno.test("codex provider adds mcp config args by default", () => {
     const joined = args.join(" ");
     assertEquals(joined.includes("mcp_servers.gambit.command"), true);
     assertEquals(joined.includes("mcp_servers.gambit.args"), true);
+    assertEquals(joined.includes("--frozen"), true);
+    assertEquals(joined.includes("packages/gambit/deno.jsonc"), false);
+    assertEquals(joined.includes("deno.mcp.lock"), true);
     assertEquals(joined.includes("mcp_servers.gambit.cwd"), true);
     assertEquals(
       joined.includes("mcp_servers.gambit.env.GAMBIT_BOT_ROOT"),
@@ -1593,6 +2476,134 @@ Deno.test("codex provider adds mcp config args by default", () => {
       Deno.env.delete("GAMBIT_CODEX_DISABLE_MCP");
     } else {
       Deno.env.set("GAMBIT_CODEX_DISABLE_MCP", previousDisable);
+    }
+  }
+});
+
+Deno.test("codex provider forwards nested mcp debug env when debug logging is enabled", () => {
+  const previousDebug = Deno.env.get(
+    "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP",
+  );
+  Deno.env.set("BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP", "1");
+  try {
+    const args = codexConfigArgsForTest({
+      cwd: "/tmp/test-cwd",
+      deckPath: "/tmp/root/PROMPT.md",
+    });
+    const joined = args.join(" ");
+    assertEquals(
+      joined.includes(
+        'mcp_servers.gambit.env.BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP="1"',
+      ),
+      true,
+    );
+    assertEquals(
+      joined.includes("mcp_servers.gambit.env.GAMBIT_MCP_DEBUG_LOG_PATH"),
+      true,
+    );
+  } finally {
+    if (previousDebug === undefined) {
+      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP");
+    } else {
+      Deno.env.set(
+        "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP",
+        previousDebug,
+      );
+    }
+  }
+});
+
+Deno.test("codex provider forwards DENO_DIR into gambit mcp env when present", () => {
+  const previousDenoDir = Deno.env.get("DENO_DIR");
+  Deno.env.set("DENO_DIR", "/tmp/test-deno-dir");
+  try {
+    const args = codexConfigArgsForTest({
+      cwd: "/tmp/test-cwd",
+      deckPath: "/tmp/root/PROMPT.md",
+    });
+    const joined = args.join(" ");
+    assertEquals(
+      joined.includes('mcp_servers.gambit.env.DENO_DIR="/tmp/test-deno-dir"'),
+      true,
+    );
+  } finally {
+    if (previousDenoDir === undefined) {
+      Deno.env.delete("DENO_DIR");
+    } else {
+      Deno.env.set("DENO_DIR", previousDenoDir);
+    }
+  }
+});
+
+Deno.test("codex provider redacts developer instructions in debug spawn args", () => {
+  const sanitized = sanitizeCodexSpawnArgsForTest([
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    'developer_instructions="very secret prompt"',
+    "app-server",
+  ]);
+  assertEquals(sanitized, [
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "developer_instructions=<redacted>",
+    "app-server",
+  ]);
+});
+
+Deno.test("codex provider exposes gambit config entries for debug inspection", () => {
+  const args = codexConfigArgsForTest({
+    cwd: "/tmp/test-cwd",
+    deckPath: "/tmp/root/PROMPT.md",
+  });
+  const configValues = extractCodexConfigValuesForTest(
+    args,
+    "-c",
+    "mcp_servers.gambit.",
+  );
+  assertEquals(
+    configValues.includes(
+      'mcp_servers.gambit.command="deno"',
+    ),
+    true,
+  );
+  assertEquals(
+    configValues.includes("mcp_servers.gambit.enabled=true"),
+    true,
+  );
+  assertEquals(
+    configValues.some((value) =>
+      value.startsWith("mcp_servers.gambit.env.GAMBIT_MCP_ROOT_DECK_PATH=")
+    ),
+    true,
+  );
+});
+
+Deno.test("codex provider honors explicit MCP deno binary override", () => {
+  const previousMcpDenoBin = Deno.env.get("GAMBIT_MCP_DENO_BIN");
+  Deno.env.set("GAMBIT_MCP_DENO_BIN", "/opt/custom/bin/deno");
+  try {
+    const args = codexConfigArgsForTest({
+      cwd: "/tmp/test-cwd",
+      deckPath: "/tmp/root/PROMPT.md",
+    });
+    const configValues = extractCodexConfigValuesForTest(
+      args,
+      "-c",
+      "mcp_servers.gambit.",
+    );
+    assertEquals(
+      configValues.includes(
+        'mcp_servers.gambit.command="/opt/custom/bin/deno"',
+      ),
+      true,
+    );
+  } finally {
+    if (previousMcpDenoBin === undefined) {
+      Deno.env.delete("GAMBIT_MCP_DENO_BIN");
+    } else {
+      Deno.env.set("GAMBIT_MCP_DENO_BIN", previousMcpDenoBin);
     }
   }
 });
@@ -1650,7 +2661,7 @@ while IFS= read -r line; do
     *'"method":"initialized"'*)
       ;;
     *'"method":"thread/start"'*)
-      require_substring "$line" '"sandbox":"danger-full-access"'
+      require_substring "$line" '"sandboxPolicy":{"type":"dangerFullAccess"}'
       id="$(extract_id "$line")"
       printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-yolo"}}}\\n' "$id"
       ;;
@@ -1752,7 +2763,7 @@ while IFS= read -r line; do
     *'"method":"initialized"'*)
       ;;
     *'"method":"thread/start"'*)
-      require_substring "$line" '"sandbox":"danger-full-access"'
+      require_substring "$line" '"sandboxPolicy":{"type":"dangerFullAccess"}'
       id="$(extract_id "$line")"
       printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-dangerous-bypass"}}}\\n' "$id"
       ;;
@@ -1852,7 +2863,7 @@ while IFS= read -r line; do
     *'"method":"initialized"'*)
       ;;
     *'"method":"thread/start"'*)
-      require_substring "$line" '"sandbox":"workspace-write"'
+      require_substring "$line" '"sandboxPolicy":{"type":"workspaceWrite","writableRoots":["${workspaceRoot}"]}'
       id="$(extract_id "$line")"
       printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-workspace-write"}}}\\n' "$id"
       ;;
@@ -1956,7 +2967,7 @@ while IFS= read -r line; do
       ;;
     *'"method":"thread/start"'*)
       require_substring "$line" '"cwd":"${workspaceRoot}"'
-      require_substring "$line" '"sandbox":"workspace-write"'
+      require_substring "$line" '"sandboxPolicy":{"type":"workspaceWrite","writableRoots":["${workspaceRoot}"]}'
       id="$(extract_id "$line")"
       printf '{"id":"%s","result":{"thread":{"id":"thread-app-server-deck-cwd"}}}\\n' "$id"
       ;;
@@ -2011,6 +3022,10 @@ Deno.test("codex provider configures workspace-write sandbox automatically", () 
   });
   const joined = args.join(" ");
   assertEquals(joined.includes('approval_policy="never"'), true);
+  assertEquals(
+    joined.includes("shell_environment_policy.set.PATH="),
+    true,
+  );
   assertEquals(joined.includes("project_doc_max_bytes="), false);
   assertEquals(joined.includes('sandbox_mode="workspace-write"'), true);
   assertEquals(

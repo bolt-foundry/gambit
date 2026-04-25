@@ -2,6 +2,19 @@ import { assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { handleCheckCommand } from "./check.ts";
 
+function supportedCodexStatus(input?: {
+  loggedIn?: boolean;
+  message?: string;
+}) {
+  return {
+    codexLoggedIn: input?.loggedIn ?? true,
+    codexLoginStatus: input?.message ?? "Logged in",
+    codexVersion: "0.121.0",
+    codexVersionSupported: true,
+    minimumSupportedCodexVersion: "0.121.0",
+  };
+}
+
 async function writeDeck(dir: string, name: string, model: string) {
   const deckPath = path.join(dir, name);
   const contents = `+++
@@ -102,11 +115,7 @@ Deno.test({
   await handleCheckCommand({
     deckPath,
     checkOnline: false,
-    codexLoginStatusChecker: () =>
-      Promise.resolve({
-        codexLoggedIn: true,
-        codexLoginStatus: "Logged in",
-      }),
+    codexLoginStatusChecker: () => Promise.resolve(supportedCodexStatus()),
   });
 });
 
@@ -142,11 +151,7 @@ Deno.test({
   await handleCheckCommand({
     deckPath,
     checkOnline: false,
-    codexLoginStatusChecker: () =>
-      Promise.resolve({
-        codexLoggedIn: true,
-        codexLoginStatus: "Logged in",
-      }),
+    codexLoginStatusChecker: () => Promise.resolve(supportedCodexStatus()),
   });
 });
 
@@ -163,10 +168,10 @@ Deno.test({
         deckPath,
         checkOnline: false,
         codexLoginStatusChecker: () =>
-          Promise.resolve({
-            codexLoggedIn: false,
-            codexLoginStatus: "Not logged in. Run `codex login`.",
-          }),
+          Promise.resolve(supportedCodexStatus({
+            loggedIn: false,
+            message: "Not logged in. Run `codex login`.",
+          })),
       }),
     Error,
     "Not logged in",
@@ -185,10 +190,10 @@ Deno.test({
     checkOnline: false,
     json: true,
     codexLoginStatusChecker: () =>
-      Promise.resolve({
-        codexLoggedIn: false,
-        codexLoginStatus: "Not logged in. Run `codex login`.",
-      }),
+      Promise.resolve(supportedCodexStatus({
+        loggedIn: false,
+        message: "Not logged in. Run `codex login`.",
+      })),
   });
 
   if (report.ok) {
@@ -200,6 +205,41 @@ Deno.test({
   if (report.failures[0].code !== "not_logged_in") {
     throw new Error(
       `expected not_logged_in code, got ${report.failures[0].code}`,
+    );
+  }
+});
+
+Deno.test({
+  name: "check json mode returns unsupported_version for outdated codex cli",
+  permissions: { read: true, write: true },
+}, async () => {
+  const dir = await Deno.makeTempDir();
+  const deckPath = await writeDeck(dir, "root.deck.md", "codex-cli/default");
+
+  const report = await handleCheckCommand({
+    deckPath,
+    checkOnline: false,
+    json: true,
+    codexLoginStatusChecker: () =>
+      Promise.resolve({
+        codexLoggedIn: false,
+        codexLoginStatus:
+          "Codex CLI 0.120.0 is too old; require >= 0.121.0 for Gambit's app-server transport.",
+        codexVersion: "0.120.0",
+        codexVersionSupported: false,
+        minimumSupportedCodexVersion: "0.121.0",
+      }),
+  });
+
+  if (report.ok) {
+    throw new Error("expected json-mode report to fail");
+  }
+  if (report.failures.length !== 1) {
+    throw new Error(`expected one failure, got ${report.failures.length}`);
+  }
+  if (report.failures[0].code !== "unsupported_version") {
+    throw new Error(
+      `expected unsupported_version code, got ${report.failures[0].code}`,
     );
   }
 });

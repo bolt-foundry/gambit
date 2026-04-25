@@ -57,6 +57,7 @@ export type CheckFailure = {
     | "model_not_installed"
     | "missing_api_key"
     | "not_logged_in"
+    | "unsupported_version"
     | "provider_error"
     | "unknown_provider";
   message: string;
@@ -436,6 +437,15 @@ export async function handleCheckCommand(opts: {
         return;
       }
       const login = await getCodexLoginStatus();
+      if (!login.codexVersionSupported) {
+        addFailure(
+          candidate,
+          "codex-cli",
+          "unsupported_version",
+          login.codexLoginStatus,
+        );
+        return;
+      }
       if (!login.codexLoggedIn) {
         addFailure(
           candidate,

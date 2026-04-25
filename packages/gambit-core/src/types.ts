@@ -246,11 +246,15 @@ export type ResponseTextContent =
   | { type: "summary_text"; text: string }
   | { type: "reasoning_text"; text: string };
 
+export type ResponseMessagePhase = "commentary" | "final_answer";
+
 export type ResponseMessageItem = {
   type: "message";
   role: "system" | "user" | "assistant";
   content: Array<ResponseTextContent>;
   id?: string;
+  end_turn?: boolean | null;
+  phase?: ResponseMessagePhase | null;
 };
 
 export type ResponseFunctionCallItem = {
@@ -276,6 +280,95 @@ export type ResponseReasoningItem = {
   encrypted_content?: string | null;
 };
 
+export type ResponseLocalShellCallItem = {
+  type: "local_shell_call";
+  action: JSONValue;
+  status: "completed" | "in_progress" | "incomplete";
+  call_id?: string | null;
+  id?: string;
+};
+
+export type ResponseToolSearchCallItem = {
+  type: "tool_search_call";
+  arguments: JSONValue;
+  execution: string;
+  call_id?: string | null;
+  status?: string | null;
+  id?: string;
+};
+
+export type ResponseCustomToolCallItem = {
+  type: "custom_tool_call";
+  call_id: string;
+  name: string;
+  input: string;
+  status?: string | null;
+  id?: string;
+};
+
+export type ResponseCustomToolCallOutputItem = {
+  type: "custom_tool_call_output";
+  call_id: string;
+  output: JSONValue;
+  name?: string | null;
+};
+
+export type ResponseToolSearchOutputItem = {
+  type: "tool_search_output";
+  execution: string;
+  status: string;
+  tools: Array<JSONValue>;
+  call_id?: string | null;
+};
+
+export type ResponseWebSearchAction =
+  | {
+    type: "search";
+    query?: string | null;
+    queries?: Array<string> | null;
+  }
+  | {
+    type: "open_page";
+    url?: string | null;
+  }
+  | {
+    type: "find_in_page";
+    url?: string | null;
+    pattern?: string | null;
+  }
+  | {
+    type: "other";
+  };
+
+export type ResponseWebSearchCallItem = {
+  type: "web_search_call";
+  action?: ResponseWebSearchAction | null;
+  status?: string | null;
+  id?: string;
+};
+
+export type ResponseImageGenerationCallItem = {
+  type: "image_generation_call";
+  id: string;
+  result: string;
+  status: string;
+  revised_prompt?: string | null;
+};
+
+export type ResponseGhostSnapshotItem = {
+  type: "ghost_snapshot";
+  ghost_commit: JSONValue;
+};
+
+export type ResponseCompactionItem = {
+  type: "compaction";
+  encrypted_content: string;
+};
+
+export type ResponseOtherItem = {
+  type: "other";
+};
+
 export type ResponseExtensionItem = {
   // Namespaced extension item type (for example "gambit:followups").
   type: `${string}:${string}`;
@@ -287,7 +380,17 @@ export type ResponseCoreItem =
   | ResponseMessageItem
   | ResponseFunctionCallItem
   | ResponseFunctionCallOutputItem
-  | ResponseReasoningItem;
+  | ResponseReasoningItem
+  | ResponseLocalShellCallItem
+  | ResponseToolSearchCallItem
+  | ResponseCustomToolCallItem
+  | ResponseCustomToolCallOutputItem
+  | ResponseToolSearchOutputItem
+  | ResponseWebSearchCallItem
+  | ResponseImageGenerationCallItem
+  | ResponseGhostSnapshotItem
+  | ResponseCompactionItem
+  | ResponseOtherItem;
 
 export type ResponseItem = ResponseCoreItem | ResponseExtensionItem;
 
@@ -419,12 +522,18 @@ export type ResponseEvent =
     actionCallId: string;
     name: string;
     args?: JSONValue;
+    toolKind?: ToolKind;
+    runId?: string;
+    parentActionCallId?: string;
   }
   | {
     type: "tool.result";
     actionCallId: string;
     name: string;
     result?: JSONValue;
+    toolKind?: ToolKind;
+    runId?: string;
+    parentActionCallId?: string;
   }
   | {
     type: "response.output_text.delta";
@@ -517,6 +626,10 @@ export type ResponseEvent =
     type: "response.failed";
     error: { code?: string; message?: string };
     sequence_number?: number;
+  }
+  | {
+    type: "codex.event";
+    payload: Record<string, JSONValue>;
   };
 
 export type ModelProvider = {
@@ -820,6 +933,17 @@ const responseAssistantFixture: ResponseMessageItem = {
   id: "msg_2",
 };
 
+const responseWebSearchFixture: ResponseWebSearchCallItem = {
+  type: "web_search_call",
+  id: "ws_1",
+  status: "completed",
+  action: {
+    type: "search",
+    query: "vidpresso official site",
+    queries: ["vidpresso official site"],
+  },
+};
+
 const responseToolFixture: ResponseToolDefinition = {
   type: "function",
   function: {
@@ -857,7 +981,7 @@ const createResponseResponseFixture: CreateResponseResponse = {
   model: "gpt-4o-mini",
   created: 1_700_000_000,
   status: "completed",
-  output: [responseAssistantFixture],
+  output: [responseAssistantFixture, responseWebSearchFixture],
   usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
 };
 
@@ -896,6 +1020,7 @@ export const openResponsesTypeFixtures = {
     responseFunctionCallFixture,
     responseFunctionOutputFixture,
     responseAssistantFixture,
+    responseWebSearchFixture,
   ],
   events: responseEventsFixture,
   tool: responseToolFixture,

@@ -284,6 +284,16 @@ const CORE_RESPONSE_ITEM_TYPES = new Set([
   "function_call",
   "function_call_output",
   "reasoning",
+  "local_shell_call",
+  "tool_search_call",
+  "custom_tool_call",
+  "custom_tool_call_output",
+  "tool_search_output",
+  "web_search_call",
+  "image_generation_call",
+  "ghost_snapshot",
+  "compaction",
+  "other",
 ]);
 
 function normalizeResponseItemExtensions(
@@ -357,12 +367,12 @@ async function loadCardInternal(
   const cardLabel = card.label;
 
   const actionDecks = normalizeActionDecks(
-    card.actionDecks ?? card.actions,
+    card.actions ?? card.actionDecks,
     resolved,
   );
-  if (!card.actionDecks && card.actions?.length) {
+  if (card.actionDecks?.length) {
     logger.warn(
-      `[gambit] card at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
+      `[gambit] card at ${resolved} uses deprecated "actionDecks"; use "[[actions]]" instead.`,
     );
   }
   const testDecks = normalizeCompanionDecks<TestDeckDefinition>(

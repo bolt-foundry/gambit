@@ -1,4 +1,5 @@
 import { TextLineStream } from "@std/streams/text-line-stream";
+import * as path from "@std/path";
 import {
   loadDeck,
   type ModelProvider,
@@ -38,6 +39,9 @@ type McpTool = {
 const encoder = new TextEncoder();
 const MCP_ALLOW_MODELS_ENV = "GAMBIT_MCP_ALLOW_MODELS";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
+const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
+const DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
+const DEBUG_MCP_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
   "2024-11-05",
@@ -49,6 +53,47 @@ type ToolCatalog = {
   actionToDeck: Map<string, string>;
   externalToolNames: Set<string>;
 };
+
+function shouldDebugMcpBridge(): boolean {
+  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  return Boolean(debugMcpLogPath());
+}
+
+function debugMcpLogPath(): string | null {
+  const raw = Deno.env.get(DEBUG_MCP_LOG_PATH_ENV)?.trim();
+  return raw ? raw : null;
+}
+
+function appendMcpDebugFile(
+  event: string,
+  details?: Record<string, unknown>,
+): void {
+  const logPath = debugMcpLogPath();
+  if (!logPath) return;
+  try {
+    Deno.mkdirSync(path.dirname(logPath), { recursive: true });
+    Deno.writeTextFileSync(
+      logPath,
+      `${
+        JSON.stringify({
+          timestamp: new Date().toISOString(),
+          event,
+          details: details ?? {},
+        })
+      }\n`,
+      { append: true },
+    );
+  } catch {
+    // Debug logging must not break MCP handling.
+  }
+}
+
+function logMcpDebug(event: string, details?: Record<string, unknown>): void {
+  if (!shouldDebugMcpBridge()) return;
+  globalThis.console.error("[gambit-mcp-server]", event, details ?? {});
+  appendMcpDebugFile(event, details);
+}
 
 async function resolveActionInputSchema(action: {
   path: string;
@@ -103,11 +148,18 @@ async function resolveToolCatalog(): Promise<ToolCatalog> {
     });
   }
 
-  return {
+  const catalog = {
     tools: Array.from(toolMap.values()),
     actionToDeck,
     externalToolNames,
   };
+  logMcpDebug("resolveToolCatalog", {
+    actionNames: deck.actionDecks.map((action) => action.name),
+    externalToolNames: Array.from(externalToolNames),
+    rootDeckPath,
+    toolNames: catalog.tools.map((tool) => tool.name),
+  });
+  return catalog;
 }
 
 async function writeJsonRpcResponse(response: JsonRpcResponse): Promise<void> {
@@ -245,6 +297,8 @@ async function runActionTool(input: {
   const deckPath = input.actionToDeck.get(input.name);
   if (!deckPath) {
     if (input.externalToolNames.has(input.name)) {
+      const bridgeResult = await runExternalToolBridge(input.name, input.args);
+      if (bridgeResult) return bridgeResult;
       return {
         isError: true,
         text: JSON.stringify({
@@ -301,6 +355,55 @@ async function runActionTool(input: {
   }
 }
 
+async function runExternalToolBridge(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<{ isError: boolean; text: string } | null> {
+  const socketPath = Deno.env.get(EXTERNAL_TOOL_BRIDGE_ENV)?.trim();
+  if (!socketPath) return null;
+
+  let conn: Deno.Conn | null = null;
+  try {
+    conn = await Deno.connect({ transport: "unix", path: socketPath });
+    const writer = conn.writable.getWriter();
+    await writer.write(encoder.encode(`${JSON.stringify({ args, name })}\n`));
+    writer.releaseLock();
+
+    const reader = conn.readable
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextLineStream())
+      .getReader();
+    const { value } = await reader.read();
+    reader.releaseLock();
+    if (!value) {
+      throw new Error("External tool bridge closed without a response.");
+    }
+
+    const parsed = JSON.parse(value) as {
+      isError?: unknown;
+      text?: unknown;
+    };
+    return {
+      isError: parsed.isError === true,
+      text: typeof parsed.text === "string" ? parsed.text : "{}",
+    };
+  } catch (error) {
+    return {
+      isError: true,
+      text: JSON.stringify({
+        status: 500,
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    };
+  } finally {
+    try {
+      conn?.close();
+    } catch {
+      // ignore close failure
+    }
+  }
+}
+
 export async function handleMcpRequest(
   request: JsonRpcRequest,
 ): Promise<JsonRpcResponse | null> {
@@ -340,6 +443,10 @@ export async function handleMcpRequest(
     if (request.id === undefined) return null;
     try {
       const toolCatalog = await resolveToolCatalog();
+      logMcpDebug("tools/list", {
+        count: toolCatalog.tools.length,
+        toolNames: toolCatalog.tools.map((tool) => tool.name),
+      });
       return toRpcResult(id, { tools: toolCatalog.tools });
     } catch (err) {
       return toRpcError(
@@ -357,11 +464,19 @@ export async function handleMcpRequest(
       const toolCatalog = await resolveToolCatalog();
       const toolName = typeof params.name === "string" ? params.name : "";
       const args = asRecord(params.arguments);
+      logMcpDebug("tools/call:start", {
+        availableToolNames: toolCatalog.tools.map((tool) => tool.name),
+        toolName,
+      });
       const toolResult = await runActionTool({
         name: toolName,
         args,
         actionToDeck: toolCatalog.actionToDeck,
         externalToolNames: toolCatalog.externalToolNames,
+      });
+      logMcpDebug("tools/call:complete", {
+        isError: toolResult.isError,
+        toolName,
       });
       return toRpcResult(id, {
         content: [{ type: "text", text: toolResult.text }],

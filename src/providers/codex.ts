@@ -5,12 +5,16 @@ import type {
   JSONValue,
   ModelMessage,
   ModelProvider,
+  ProviderTraceEvent,
   ResponseEvent,
   ResponseItem,
   ResponseMessageItem,
   SavedState,
 } from "@bolt-foundry/gambit-core";
 import { loadDeck } from "@bolt-foundry/gambit-core";
+import type { CodexChatgptAuthTokens } from "../codex_auth.ts";
+import { logCodexAppServerDebug } from "../codex_app_server_debug.ts";
+import { ensureTempMcpDenoConfigSync } from "../mcp_deno_config.ts";
 
 export const CODEX_PREFIX = "codex-cli/";
 const CODEX_THREAD_META_KEY = "codex.threadId";
@@ -24,7 +28,12 @@ const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
 const CODEX_DANGEROUS_BYPASS_ENV =
   "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX";
+const MCP_DENO_BIN_ENV = "GAMBIT_MCP_DENO_BIN";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
+const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
+const MCP_DEBUG_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
+const DENO_DIR_ENV = "DENO_DIR";
+const DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
 const MCP_SERVER_PATH = (() => {
   try {
     const moduleUrl = new URL(import.meta.url);
@@ -33,6 +42,27 @@ const MCP_SERVER_PATH = (() => {
       path.dirname(path.fromFileUrl(moduleUrl)),
       "../mcp_server.ts",
     );
+  } catch {
+    return null;
+  }
+})();
+const MCP_SERVER_DENO_CONFIG_PATH = (() => {
+  try {
+    return ensureTempMcpDenoConfigSync();
+  } catch {
+    return null;
+  }
+})();
+const MCP_SERVER_DENO_LOCK_PATH = (() => {
+  try {
+    const moduleUrl = new URL(import.meta.url);
+    if (moduleUrl.protocol !== "file:") return null;
+    const candidate = path.resolve(
+      path.dirname(path.fromFileUrl(moduleUrl)),
+      "../../deno.mcp.lock",
+    );
+    const stat = Deno.statSync(candidate);
+    return stat.isFile ? candidate : null;
   } catch {
     return null;
   }
@@ -58,6 +88,7 @@ type AppServerTurnRunnerInput = {
   onStreamEvent?: (event: Record<string, JSONValue>) => void;
   instructions?: string;
   prompt: string;
+  injectItems?: Array<ResponseItem>;
   cwd: string;
   priorThreadId?: string;
 };
@@ -65,6 +96,7 @@ type AppServerTurnRunnerInput = {
 type AppServerTurnRunnerOutput = {
   threadId?: string;
   assistantMessages: Array<CodexAssistantMessage>;
+  rawResponseItems?: Array<ResponseItem>;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -75,6 +107,16 @@ type AppServerTurnRunnerOutput = {
 type AppServerTurnRunner = (
   input: AppServerTurnRunnerInput,
 ) => Promise<AppServerTurnRunnerOutput>;
+
+export type CodexHostAuthBridge = {
+  readAuthTokens: (input: {
+    reason: string;
+  }) => Promise<CodexChatgptAuthTokens>;
+  refreshAuthTokens: (input: {
+    previousAccountId?: string | null;
+    reason: string;
+  }) => Promise<CodexChatgptAuthTokens>;
+};
 
 const REASONING_EFFORT_VALUES = new Set([
   "none",
@@ -91,6 +133,22 @@ const REASONING_SUMMARY_VALUES = new Set([
   "detailed",
 ]);
 const VERBOSITY_VALUES = new Set(["low", "medium", "high"]);
+let codexHostAuthBridge: CodexHostAuthBridge | null = null;
+
+export function setCodexHostAuthBridgeForTests(
+  bridge: CodexHostAuthBridge | null,
+): void {
+  codexHostAuthBridge = bridge;
+}
+
+function requireCodexHostAuthBridge(): CodexHostAuthBridge {
+  if (!codexHostAuthBridge) {
+    throw new Error(
+      "Codex host auth bridge is required for app-server external auth bootstrap.",
+    );
+  }
+  return codexHostAuthBridge;
+}
 
 function runCwd(): string {
   const botRoot = Deno.env.get(BOT_ROOT_ENV);
@@ -123,6 +181,33 @@ function shouldEnableMcpBridge(): boolean {
   if (!enableRaw) return true;
   const normalized = enableRaw.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+function shouldDebugMcpBridge(): boolean {
+  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
+function logCodexMcpDebug(
+  event: string,
+  details?: Record<string, unknown>,
+): void {
+  if (!shouldDebugMcpBridge()) return;
+  globalThis.console.error("[gambit-codex-mcp]", event, details ?? {});
+}
+
+function codexMcpDebugLogPath(cwd: string): string {
+  return path.join(
+    cwd,
+    ".boltfoundry",
+    "runtime",
+    "chief-runtime",
+    "gambit-mcp-debug.log",
+  );
+}
+
+function mcpServerDenoBin(): string {
+  return Deno.env.get(MCP_DENO_BIN_ENV)?.trim() || "deno";
 }
 
 function parseTruthy(value: string): boolean {
@@ -202,6 +287,33 @@ function tomlValue(value: unknown): string {
   );
 }
 
+function sanitizeCodexSpawnArgsForDebug(args: Array<string>): Array<string> {
+  const sanitized = [...args];
+  for (let idx = 0; idx < sanitized.length; idx += 1) {
+    if (sanitized[idx] !== "-c") continue;
+    const next = sanitized[idx + 1];
+    if (!next?.startsWith("developer_instructions=")) continue;
+    sanitized[idx + 1] = "developer_instructions=<redacted>";
+  }
+  return sanitized;
+}
+
+function extractCodexConfigValues(
+  args: Array<string>,
+  flag: string,
+  prefix?: string,
+): Array<string> {
+  const values: Array<string> = [];
+  for (let idx = 0; idx < args.length; idx += 1) {
+    if (args[idx] !== flag) continue;
+    const value = args[idx + 1];
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (typeof prefix === "string" && !value.startsWith(prefix)) continue;
+    values.push(value);
+  }
+  return values;
+}
+
 function codexAdditionalConfigArgs(
   params?: Record<string, unknown>,
 ): Array<string> {
@@ -243,6 +355,10 @@ function codexConfigArgs(input: {
   const args: Array<string> = [];
   args.push(...codexAdditionalConfigArgs(input.params));
   args.push("-c", `approval_policy=${tomlString("never")}`);
+  const pathEnv = Deno.env.get("PATH")?.trim();
+  if (pathEnv) {
+    args.push("-c", `shell_environment_policy.set.PATH=${tomlString(pathEnv)}`);
+  }
   if (!shouldSkipCodexSandboxConfig(input.params)) {
     args.push("-c", `sandbox_mode=${tomlString("workspace-write")}`);
     args.push(
@@ -290,18 +406,55 @@ function codexConfigArgs(input: {
   }
 
   if (shouldEnableMcpBridge() && MCP_SERVER_PATH) {
-    args.push("-c", `mcp_servers.gambit.command=${tomlString("deno")}`);
+    const debugLogPath = shouldDebugMcpBridge()
+      ? codexMcpDebugLogPath(input.cwd)
+      : null;
+    logCodexMcpDebug("configArgs:enableServer", {
+      cwd: input.cwd,
+      deckPath: input.deckPath?.trim() || null,
+      debugLogPath,
+      mcpServerCommand: mcpServerDenoBin(),
+      mcpServerConfigPath: MCP_SERVER_DENO_CONFIG_PATH,
+      mcpServerLockPath: MCP_SERVER_DENO_LOCK_PATH,
+      mcpServerPath: MCP_SERVER_PATH,
+    });
     args.push(
       "-c",
-      `mcp_servers.gambit.args=${
-        tomlStringArray(["run", "-A", MCP_SERVER_PATH])
-      }`,
+      `mcp_servers.gambit.command=${tomlString(mcpServerDenoBin())}`,
+    );
+    const mcpServerArgs = ["run", "-A", "--frozen"];
+    if (MCP_SERVER_DENO_LOCK_PATH) {
+      mcpServerArgs.push("--lock", MCP_SERVER_DENO_LOCK_PATH);
+    }
+    if (MCP_SERVER_DENO_CONFIG_PATH) {
+      mcpServerArgs.push("--config", MCP_SERVER_DENO_CONFIG_PATH);
+    }
+    mcpServerArgs.push(MCP_SERVER_PATH);
+    args.push(
+      "-c",
+      `mcp_servers.gambit.args=${tomlStringArray(mcpServerArgs)}`,
     );
     args.push("-c", `mcp_servers.gambit.cwd=${tomlString(input.cwd)}`);
     args.push(
       "-c",
       `mcp_servers.gambit.env.GAMBIT_BOT_ROOT=${tomlString(input.cwd)}`,
     );
+    const denoDir = Deno.env.get(DENO_DIR_ENV)?.trim();
+    if (denoDir) {
+      args.push(
+        "-c",
+        `mcp_servers.gambit.env.${DENO_DIR_ENV}=${tomlString(denoDir)}`,
+      );
+    }
+    const externalToolBridge = Deno.env.get(EXTERNAL_TOOL_BRIDGE_ENV)?.trim();
+    if (externalToolBridge) {
+      args.push(
+        "-c",
+        `mcp_servers.gambit.env.${EXTERNAL_TOOL_BRIDGE_ENV}=${
+          tomlString(externalToolBridge)
+        }`,
+      );
+    }
     const rootDeckPath = input.deckPath?.trim();
     if (rootDeckPath) {
       args.push(
@@ -311,9 +464,36 @@ function codexConfigArgs(input: {
         }`,
       );
     }
+    if (debugLogPath) {
+      args.push(
+        "-c",
+        `mcp_servers.gambit.env.${DEBUG_MCP_ENV}=${tomlString("1")}`,
+      );
+      args.push(
+        "-c",
+        `mcp_servers.gambit.env.${MCP_DEBUG_LOG_PATH_ENV}=${
+          tomlString(debugLogPath)
+        }`,
+      );
+    }
     args.push("-c", "mcp_servers.gambit.enabled=true");
     args.push("-c", "mcp_servers.gambit.startup_timeout_sec=30");
     args.push("-c", "mcp_servers.gambit.tool_timeout_sec=30");
+    const sanitizedArgs = sanitizeCodexSpawnArgsForDebug(args);
+    logCodexMcpDebug("configArgs:final", {
+      cwd: input.cwd,
+      deckPath: input.deckPath?.trim() || null,
+      gambitConfigArgs: extractCodexConfigValues(
+        sanitizedArgs,
+        "-c",
+        "mcp_servers.gambit.",
+      ),
+      gambitGlobalConfigArgs: extractCodexConfigValues(
+        codexGlobalConfigArgs(sanitizedArgs),
+        "--config",
+        "mcp_servers.gambit.",
+      ),
+    });
   }
   return args;
 }
@@ -326,10 +506,20 @@ async function prepareCodexMcpRootDeck(input: {
 }> {
   const rootDeckPath = input.deckPath?.trim();
   if (!rootDeckPath || !shouldEnableMcpBridge()) {
+    logCodexMcpDebug("prepareRootDeck:skip", {
+      deckPath: rootDeckPath ?? null,
+      mcpEnabled: shouldEnableMcpBridge(),
+    });
     return {};
   }
   const deck = await loadDeck(rootDeckPath);
   if (deck.actionDecks.length === 0) {
+    logCodexMcpDebug("prepareRootDeck:reuseOriginal", {
+      actionCount: 0,
+      deckPath: rootDeckPath,
+      toolCount: deck.tools.length,
+      toolNames: deck.tools.map((tool) => tool.name),
+    });
     return { deckPath: rootDeckPath };
   }
   const tempDir = await Deno.makeTempDir({ prefix: "gambit-codex-mcp-root-" });
@@ -365,6 +555,14 @@ async function prepareCodexMcpRootDeck(input: {
   }
   frontmatter.push("+++", "", "Codex MCP tool surface.");
   await Deno.writeTextFile(tempDeckPath, frontmatter.join("\n"));
+  logCodexMcpDebug("prepareRootDeck:synthesized", {
+    actionCount: deck.actionDecks.length,
+    actionNames: deck.actionDecks.map((action) => action.name),
+    rootDeckPath,
+    synthesizedDeckPath: tempDeckPath,
+    toolCount: deck.tools.length,
+    toolNames: deck.tools.map((tool) => tool.name),
+  });
   return {
     deckPath: tempDeckPath,
     cleanup: async () => {
@@ -373,12 +571,17 @@ async function prepareCodexMcpRootDeck(input: {
   };
 }
 
-function appServerThreadSandbox(
-  params?: Record<string, unknown>,
-): "workspace-write" | "danger-full-access" {
-  return shouldSkipCodexSandboxConfig(params)
-    ? "danger-full-access"
-    : "workspace-write";
+function appServerThreadSandboxPolicy(input: {
+  cwd: string;
+  params?: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (shouldSkipCodexSandboxConfig(input.params)) {
+    return { type: "dangerFullAccess" };
+  }
+  return {
+    type: "workspaceWrite",
+    writableRoots: [input.cwd],
+  };
 }
 
 function appServerTurnSandboxPolicy(input: {
@@ -394,16 +597,22 @@ function appServerTurnSandboxPolicy(input: {
   };
 }
 
-function appServerRequestResult(input: {
+async function appServerRequestResult(input: {
   method: string;
   params: Record<string, unknown>;
-}): {
+}): Promise<{
   result?: Record<string, JSONValue>;
   error?: {
     code: number;
     message: string;
   };
-} {
+}> {
+  if (input.method.startsWith("mcp")) {
+    logCodexMcpDebug("appServer:request", {
+      method: input.method,
+      params: safeJsonObjectFromRecord(input.params),
+    });
+  }
   if (input.method === "mcpServer/elicitation/request") {
     const mode = typeof input.params.mode === "string" ? input.params.mode : "";
     const requestedSchema = asRecord(input.params.requestedSchema);
@@ -417,12 +626,52 @@ function appServerRequestResult(input: {
       };
     }
   }
+  if (input.method === "account/chatgptAuthTokens/refresh") {
+    const bridge = requireCodexHostAuthBridge();
+    const refreshed = await bridge.refreshAuthTokens({
+      previousAccountId: typeof input.params.previousAccountId === "string"
+        ? input.params.previousAccountId
+        : null,
+      reason: typeof input.params.reason === "string" && input.params.reason
+        ? input.params.reason
+        : "account/chatgptAuthTokens/refresh",
+    });
+    return {
+      result: {
+        accessToken: refreshed.accessToken,
+        chatgptAccountId: refreshed.chatgptAccountId,
+        chatgptPlanType: refreshed.chatgptPlanType,
+        type: "chatgptAuthTokens",
+      },
+    };
+  }
   return {
     error: {
       code: -32601,
       message: `Unsupported app-server request: ${input.method}`,
     },
   };
+}
+
+async function bootstrapCodexExternalAuth(input: {
+  request: (
+    method: string,
+    params: Record<string, unknown>,
+  ) => Promise<unknown>;
+}): Promise<void> {
+  if (!codexHostAuthBridge) {
+    return;
+  }
+  const bridge = codexHostAuthBridge;
+  const auth = await bridge.readAuthTokens({
+    reason: "account/login/start",
+  });
+  await input.request("account/login/start", {
+    accessToken: auth.accessToken,
+    chatgptAccountId: auth.chatgptAccountId,
+    chatgptPlanType: auth.chatgptPlanType,
+    type: "chatgptAuthTokens",
+  });
 }
 
 function codexGlobalConfigArgs(configArgs: Array<string>): Array<string> {
@@ -520,6 +769,74 @@ function asRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function codexResponseItemKey(item: ResponseItem): string {
+  const record = asRecord(item);
+  const id = typeof record.id === "string" ? record.id : "";
+  const callId = typeof record.call_id === "string" ? record.call_id : "";
+  if (id || callId) {
+    return `${item.type}:${id}:${callId}`;
+  }
+  return `${item.type}:${JSON.stringify(record)}`;
+}
+
+function isCodexRawResponseItemRenderable(item: ResponseItem): boolean {
+  return item.type !== "message" && item.type !== "reasoning" &&
+    item.type !== "function_call" && item.type !== "function_call_output";
+}
+
+function codexRawResponseItemRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  const item = asRecord(value);
+  const type = typeof item.type === "string" ? item.type.trim() : "";
+  return type ? item : null;
+}
+
+function isProviderTraceEvent(
+  event: ResponseEvent,
+): event is Extract<ResponseEvent, { type: "tool.call" | "tool.result" }> {
+  return (event.type === "tool.call" || event.type === "tool.result") &&
+    typeof event.toolKind === "string";
+}
+
+function responseEventToJsonRecord(
+  event: ResponseEvent,
+): Record<string, JSONValue> {
+  return safeJsonObject(JSON.stringify(event));
+}
+
+function responseEventToProviderTraceEvent(
+  event: Extract<ResponseEvent, { type: "tool.call" | "tool.result" }>,
+): ProviderTraceEvent | null {
+  if (typeof event.toolKind !== "string") return null;
+  if (event.type === "tool.call") {
+    if (typeof event.args === "undefined") return null;
+    return {
+      type: "tool.call",
+      actionCallId: event.actionCallId,
+      name: event.name,
+      args: event.args,
+      toolKind: event.toolKind,
+      ...(typeof event.runId === "string" ? { runId: event.runId } : {}),
+      ...(typeof event.parentActionCallId === "string"
+        ? { parentActionCallId: event.parentActionCallId }
+        : {}),
+    };
+  }
+  if (typeof event.result === "undefined") return null;
+  return {
+    type: "tool.result",
+    actionCallId: event.actionCallId,
+    name: event.name,
+    result: event.result,
+    toolKind: event.toolKind,
+    ...(typeof event.runId === "string" ? { runId: event.runId } : {}),
+    ...(typeof event.parentActionCallId === "string"
+      ? { parentActionCallId: event.parentActionCallId }
+      : {}),
+  };
+}
+
 function parseUsageBreakdown(value: unknown): {
   promptTokens: number;
   completionTokens: number;
@@ -609,6 +926,15 @@ function appServerNotificationToCodexEvent(
   method: string,
   params: Record<string, unknown>,
 ): Record<string, JSONValue> | null {
+  if (method === "rawResponseItem/completed") {
+    const item = codexRawResponseItemRecord(params.item);
+    if (!item) return null;
+    return {
+      type: "raw.response_item.completed",
+      item: safeJsonObjectFromRecord(item),
+    };
+  }
+
   if (method === "item/agentMessage/delta") {
     return {
       type: "item.delta",
@@ -659,6 +985,10 @@ function appServerNotificationToCodexEvent(
   }
 
   if (method === "item/mcpToolCall/progress") {
+    logCodexMcpDebug("appServer:item.mcpToolCall.progress", {
+      itemId: typeof params.itemId === "string" ? params.itemId : "",
+      message: typeof params.message === "string" ? params.message : "",
+    });
     return {
       type: "item.delta",
       item: {
@@ -674,6 +1004,14 @@ function appServerNotificationToCodexEvent(
     const item = asRecord(params.item);
     const mapped = appServerThreadItemToCodexItem(item);
     if (!mapped) return null;
+    if (mapped.type === "mcp_tool_call") {
+      logCodexMcpDebug(`appServer:${method}`, {
+        itemId: mapped.id ?? "",
+        server: mapped.server ?? "",
+        tool: mapped.tool ?? "",
+        status: mapped.status ?? "",
+      });
+    }
     return {
       type: method === "item/started" ? "item.started" : "item.completed",
       item: mapped,
@@ -705,6 +1043,16 @@ async function defaultAppServerTurnRunner(
       : []),
     "app-server",
   ];
+  logCodexMcpDebug("appServer:spawn", {
+    argv: [codexBin, ...sanitizeCodexSpawnArgsForDebug(spawnArgs)],
+    codexBin,
+    cwd: input.cwd,
+    dangerousBypass,
+    gambitConfigArgs: spawnArgs.filter((arg) =>
+      arg.includes("mcp_servers.gambit")
+    ),
+    skipSandboxConfig,
+  });
   const child = new Deno.Command(codexBin, {
     args: spawnArgs,
     cwd: input.cwd,
@@ -741,6 +1089,8 @@ async function defaultAppServerTurnRunner(
   const stderrChunks: Array<string> = [];
   const assistantMessages: Array<CodexAssistantMessage> = [];
   const assistantIndexById = new Map<string, number>();
+  const rawResponseItems: Array<ResponseItem> = [];
+  const rawResponseItemKeys = new Set<string>();
   const turnState: {
     id?: string;
     completed: boolean;
@@ -754,27 +1104,52 @@ async function defaultAppServerTurnRunner(
   let nextRequestId = 1;
   let cleanupError: Error | null = null;
   let output: AppServerTurnRunnerOutput | null = null;
-  const childStatus = child.status.then((status) => {
-    childExitStatus = status;
-    return status;
-  });
+  let childClosedError: Error | null = null;
 
   const appServerClosedError = () => {
+    if (childClosedError) {
+      return childClosedError;
+    }
     const stderr = stderrChunks.join("").trim();
     if (stderr) {
-      return new Error(`codex app-server failed: ${stderr}`);
+      childClosedError = new Error(`codex app-server failed: ${stderr}`);
+      return childClosedError;
     }
     const detail = childExitStatus
       ? childExitStatus.code === 0
         ? "exited successfully"
         : `exited with code ${childExitStatus.code}`
       : "closed unexpectedly";
-    return new Error(
+    childClosedError = new Error(
       `Codex app-server exited before the request completed (${detail}).`,
     );
+    return childClosedError;
   };
 
+  let rejectChildClosed: ((error: Error) => void) | null = null;
+  const childClosed = new Promise<never>((_, reject) => {
+    rejectChildClosed = reject;
+  });
+  // Some request paths can fail before they start awaiting `childClosed`
+  // (for example, if writing to the child stdin fails immediately). Keep the
+  // shared shutdown promise locally handled so a later child exit does not
+  // surface as an unhandled rejection in those early-failure cases.
+  childClosed.catch(() => undefined);
+  const childStatus = child.status.then((status) => {
+    childExitStatus = status;
+    const error = appServerClosedError();
+    for (const pendingRequest of pending.values()) {
+      pendingRequest.reject(error);
+    }
+    pending.clear();
+    rejectChildClosed?.(error);
+    return status;
+  });
+
   const writeMessage = async (message: Record<string, unknown>) => {
+    logCodexAppServerDebug("message:out", {
+      message,
+    });
     await stdinWriter.write(encoder.encode(`${JSON.stringify(message)}\n`));
   };
 
@@ -786,19 +1161,13 @@ async function defaultAppServerTurnRunner(
     const requestPromise = promise.finally(() => {
       pending.delete(id);
     });
-    const exitPromise = childStatus.then(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        throw appServerClosedError();
-      }
-      return requestPromise;
-    });
-    return writeMessage({ id, method, params })
+    requestPromise.catch(() => undefined);
+    return Promise.race([writeMessage({ id, method, params }), childClosed])
       .catch((error) => {
         pending.delete(id);
         throw error;
       })
-      .then(() => Promise.race([requestPromise, exitPromise]));
+      .then(() => Promise.race([requestPromise, childClosed]));
   };
 
   const readLoop = async () => {
@@ -816,9 +1185,16 @@ async function defaultAppServerTurnRunner(
         let parsed: Record<string, unknown>;
         try {
           parsed = JSON.parse(trimmed) as Record<string, unknown>;
-        } catch {
+        } catch (error) {
+          logCodexAppServerDebug("message:in:parse_failed", {
+            error: error instanceof Error ? error.message : String(error),
+            lineLength: trimmed.length,
+          });
           continue;
         }
+        logCodexAppServerDebug("message:in", {
+          message: parsed,
+        });
         const method = typeof parsed.method === "string" ? parsed.method : "";
         const params = asRecord(parsed.params);
         if (method) {
@@ -833,7 +1209,12 @@ async function defaultAppServerTurnRunner(
               method,
               params: safeJsonObjectFromRecord(params),
             });
-            const response = appServerRequestResult({ method, params });
+            const response = await appServerRequestResult({ method, params });
+            logCodexAppServerDebug("message:host_response", {
+              method,
+              requestId,
+              response,
+            });
             await writeMessage({
               id: requestId,
               ...(response.result ? { result: response.result } : {}),
@@ -845,7 +1226,18 @@ async function defaultAppServerTurnRunner(
           if (pseudoEvent) {
             input.onStreamEvent?.(pseudoEvent);
           }
-          if (method === "item/completed") {
+          if (method === "rawResponseItem/completed") {
+            const rawItem = codexRawResponseItemRecord(params.item);
+            if (!rawItem) continue;
+            const item = safeJsonObjectFromRecord(rawItem) as ResponseItem;
+            if (isCodexRawResponseItemRenderable(item)) {
+              const key = codexResponseItemKey(item);
+              if (!rawResponseItemKeys.has(key)) {
+                rawResponseItemKeys.add(key);
+                rawResponseItems.push(item);
+              }
+            }
+          } else if (method === "item/completed") {
             const item = asRecord(params.item);
             if (item.type === "agentMessage" && typeof item.id === "string") {
               const entry: CodexAssistantMessage = {
@@ -900,12 +1292,20 @@ async function defaultAppServerTurnRunner(
         pending.delete(responseId);
         if (parsed.error) {
           const error = asRecord(parsed.error);
+          logCodexAppServerDebug("message:in:error", {
+            responseId,
+            error,
+          });
           const message = typeof error.message === "string" && error.message
             ? error.message
             : "Codex app-server request failed";
           resolver.reject(new Error(message));
           continue;
         }
+        logCodexAppServerDebug("message:in:result", {
+          responseId,
+          result: parsed.result,
+        });
         resolver.resolve(parsed.result);
       }
     }
@@ -913,10 +1313,27 @@ async function defaultAppServerTurnRunner(
 
   const stderrLoop = (async () => {
     const decoder = new TextDecoder();
+    let buffered = "";
     while (true) {
       const { value, done } = await stderrReader.read();
       if (done) break;
-      stderrChunks.push(decoder.decode(value, { stream: true }));
+      const chunk = decoder.decode(value, { stream: true });
+      stderrChunks.push(chunk);
+      buffered += chunk;
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        logCodexAppServerDebug("stderr", {
+          line: trimmed,
+        });
+      }
+    }
+    if (buffered.trim()) {
+      logCodexAppServerDebug("stderr", {
+        line: buffered.trim(),
+      });
     }
   })();
 
@@ -934,6 +1351,7 @@ async function defaultAppServerTurnRunner(
       },
     });
     await writeMessage({ method: "initialized", params: {} });
+    await bootstrapCodexExternalAuth({ request });
 
     const model = normalizeCodexModel(input.model);
     const threadResult = input.priorThreadId
@@ -942,16 +1360,22 @@ async function defaultAppServerTurnRunner(
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
-        sandbox: appServerThreadSandbox(input.params),
+        sandboxPolicy: appServerThreadSandboxPolicy({
+          cwd: input.cwd,
+          params: input.params,
+        }),
         persistExtendedHistory: false,
       }) as Record<string, unknown>
       : await request("thread/start", {
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
-        sandbox: appServerThreadSandbox(input.params),
+        sandboxPolicy: appServerThreadSandboxPolicy({
+          cwd: input.cwd,
+          params: input.params,
+        }),
         ephemeral: false,
-        experimentalRawEvents: false,
+        experimentalRawEvents: true,
         persistExtendedHistory: false,
       }) as Record<string, unknown>;
 
@@ -963,9 +1387,13 @@ async function defaultAppServerTurnRunner(
       throw new Error("Codex app-server did not return a thread id.");
     }
 
+    const turnInput: Array<{ type: "text"; text: string }> = input.prompt
+      ? [{ type: "text", text: input.prompt }]
+      : [];
+
     await request("turn/start", {
       threadId,
-      input: [{ type: "text", text: input.prompt }],
+      input: turnInput,
       cwd: input.cwd,
       approvalPolicy: "never",
       sandboxPolicy: appServerTurnSandboxPolicy({
@@ -1003,6 +1431,7 @@ async function defaultAppServerTurnRunner(
     output = {
       threadId,
       assistantMessages,
+      rawResponseItems,
       usage: turnState.usage,
     };
   } finally {
@@ -1069,7 +1498,7 @@ function codexToolResultForItem(
 
 function emitCodexToolEvents(input: {
   event: Record<string, JSONValue>;
-  emit: (event: Record<string, JSONValue>) => void;
+  emit: (event: ResponseEvent) => void;
   toolNames: Map<string, string>;
   emittedCalls: Set<string>;
   emittedTerminalResults: Set<string>;
@@ -1203,6 +1632,8 @@ type CodexAssistantStreamState = {
   sawAssistantTextStream: boolean;
   assistantOutputIndexByItemId: Map<string, number>;
   emittedTerminalAssistantItemIds: Set<string>;
+  rawOutputIndexByItemKey: Map<string, number>;
+  emittedTerminalRawItemKeys: Set<string>;
 };
 
 function requireCodexAssistantItemId(input: {
@@ -1254,7 +1685,7 @@ function resolveCodexAssistantItemIdentity(input: {
 
 function emitCodexAssistantTextEvents(input: {
   event: Record<string, JSONValue>;
-  emit: (event: Record<string, JSONValue>) => void;
+  emit: (event: ResponseEvent) => void;
   emitText?: (text: string) => void;
   assistantState: CodexAssistantStreamState;
   nextOutputIndexRef: { value: number };
@@ -1321,7 +1752,7 @@ function emitCodexAssistantTextEvents(input: {
 
 function emitCodexReasoningEvents(input: {
   event: Record<string, JSONValue>;
-  emit: (event: Record<string, JSONValue>) => void;
+  emit: (event: ResponseEvent) => void;
 }): void {
   const payloadType = typeof input.event.type === "string"
     ? input.event.type
@@ -1409,6 +1840,43 @@ function emitCodexReasoningEvents(input: {
   }
 }
 
+function emitCodexRawResponseItemEvents(input: {
+  event: Record<string, JSONValue>;
+  emit: (event: ResponseEvent) => void;
+  assistantState: Pick<
+    CodexAssistantStreamState,
+    "rawOutputIndexByItemKey" | "emittedTerminalRawItemKeys"
+  >;
+  nextOutputIndexRef: { value: number };
+}): void {
+  if (input.event.type !== "raw.response_item.completed") return;
+  const item = asRecord(input.event.item);
+  const type = typeof item.type === "string" ? item.type : "";
+  if (!type) return;
+  const responseItem = safeJsonObjectFromRecord(item) as ResponseItem;
+  if (!isCodexRawResponseItemRenderable(responseItem)) return;
+  const itemKey = codexResponseItemKey(responseItem);
+  if (input.assistantState.emittedTerminalRawItemKeys.has(itemKey)) return;
+  const existing = input.assistantState.rawOutputIndexByItemKey.get(itemKey);
+  const outputIndex = typeof existing === "number" ? existing : (() => {
+    const next = input.nextOutputIndexRef.value;
+    input.nextOutputIndexRef.value += 1;
+    input.assistantState.rawOutputIndexByItemKey.set(itemKey, next);
+    return next;
+  })();
+  input.emit({
+    type: "response.output_item.added",
+    output_index: outputIndex,
+    item: responseItem,
+  });
+  input.emit({
+    type: "response.output_item.done",
+    output_index: outputIndex,
+    item: responseItem,
+  });
+  input.assistantState.emittedTerminalRawItemKeys.add(itemKey);
+}
+
 function responseItemsToChatMessages(
   items: Array<ResponseItem>,
   instructions?: string,
@@ -1487,6 +1955,103 @@ function responseItemsFromAssistantMessages(
     );
 }
 
+function codexResponseOutputLocator(item: ResponseItem): string {
+  if (
+    item.type === "message" && item.role === "assistant" &&
+    typeof item.id === "string" && item.id.trim().length > 0
+  ) {
+    return `assistant:${item.id}`;
+  }
+  if (isCodexRawResponseItemRenderable(item)) {
+    return `raw:${codexResponseItemKey(item)}`;
+  }
+  return `synthetic:${codexResponseItemKey(item)}`;
+}
+
+function codexResponseOutputIndexes(input: {
+  items: Array<ResponseItem>;
+  assistantState?: Pick<
+    CodexAssistantStreamState,
+    "assistantOutputIndexByItemId" | "rawOutputIndexByItemKey"
+  >;
+}): Map<string, number> {
+  const indexes = new Map<string, number>();
+  const claimed = new Set<number>();
+  const state = input.assistantState;
+  if (state) {
+    for (const item of input.items) {
+      const locator = codexResponseOutputLocator(item);
+      if (indexes.has(locator)) continue;
+      if (
+        item.type === "message" && item.role === "assistant" &&
+        typeof item.id === "string"
+      ) {
+        const index = state.assistantOutputIndexByItemId.get(item.id);
+        if (typeof index === "number") {
+          indexes.set(locator, index);
+          claimed.add(index);
+        }
+        continue;
+      }
+      if (isCodexRawResponseItemRenderable(item)) {
+        const index = state.rawOutputIndexByItemKey.get(
+          codexResponseItemKey(item),
+        );
+        if (typeof index === "number") {
+          indexes.set(locator, index);
+          claimed.add(index);
+        }
+      }
+    }
+  }
+  let nextIndex = claimed.size === 0 ? 0 : Math.max(...claimed) + 1;
+  for (const item of input.items) {
+    const locator = codexResponseOutputLocator(item);
+    if (indexes.has(locator)) continue;
+    while (claimed.has(nextIndex)) nextIndex += 1;
+    indexes.set(locator, nextIndex);
+    claimed.add(nextIndex);
+    nextIndex += 1;
+  }
+  return indexes;
+}
+
+function mergeCodexResponseOutput(input: {
+  assistantMessages: Array<CodexAssistantMessage>;
+  assistantMessage: ModelMessage;
+  rawResponseItems?: Array<ResponseItem>;
+  assistantState?: Pick<
+    CodexAssistantStreamState,
+    "assistantOutputIndexByItemId" | "rawOutputIndexByItemKey"
+  >;
+}): Array<ResponseItem> {
+  const assistantOutput = input.assistantMessages.length > 0
+    ? responseItemsFromAssistantMessages(input.assistantMessages)
+    : responseItemsFromAssistantMessage(input.assistantMessage);
+  const rawOutput = (input.rawResponseItems ?? []).filter(
+    isCodexRawResponseItemRenderable,
+  );
+  if (rawOutput.length === 0) return assistantOutput;
+  const seen = new Set(assistantOutput.map(codexResponseItemKey));
+  const mergedOutput = [
+    ...assistantOutput,
+    ...rawOutput.filter((item) => {
+      const key = codexResponseItemKey(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ];
+  const outputIndexes = codexResponseOutputIndexes({
+    items: mergedOutput,
+    assistantState: input.assistantState,
+  });
+  return mergedOutput.sort((left, right) =>
+    (outputIndexes.get(codexResponseOutputLocator(left)) ?? 0) -
+    (outputIndexes.get(codexResponseOutputLocator(right)) ?? 0)
+  );
+}
+
 function stringContent(content: ModelMessage["content"]): string {
   if (typeof content === "string") return content.trim();
   return "";
@@ -1496,20 +2061,6 @@ function codexInstructionsForMessages(messages: Array<ModelMessage>): string {
   return messages
     .filter((message) => message.role === "system")
     .map((message) => stringContent(message.content))
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function renderNonSystemMessagesForPrompt(
-  messages: Array<ModelMessage>,
-): string {
-  return messages
-    .filter((message) => message.role !== "system")
-    .map((message) => {
-      const content = stringContent(message.content);
-      if (!content) return "";
-      return `${message.role.toUpperCase()}:\n${content}`;
-    })
     .filter(Boolean)
     .join("\n\n");
 }
@@ -1530,6 +2081,12 @@ function promptForCodexTurn(input: {
 }): string {
   if (input.priorThreadId) {
     // Thread resume should be incremental: only send the newest user turn.
+    for (let idx = input.messages.length - 1; idx >= 0; idx -= 1) {
+      const msg = input.messages[idx];
+      if (msg.role === "system") continue;
+      if (msg.role !== "user") return "";
+      return stringContent(msg.content);
+    }
     return latestUserPrompt(input.messages);
   }
   const nonSystemMessages = input.messages.filter((message) =>
@@ -1542,7 +2099,9 @@ function promptForCodexTurn(input: {
   ) {
     return latestUser;
   }
-  return renderNonSystemMessagesForPrompt(nonSystemMessages);
+  throw new Error(
+    "Codex fresh-thread continuation is unsupported; missing codex.threadId for prior conversation state.",
+  );
 }
 
 function buildUpdatedState(input: {
@@ -1583,7 +2142,7 @@ function buildUpdatedState(input: {
 
 function buildCodexStreamHandler(input: {
   emitRaw: (event: Record<string, JSONValue>) => void;
-  emitTool: (event: Record<string, JSONValue>) => void;
+  emitTool: (event: ResponseEvent) => void;
   emitText?: (text: string) => void;
   assistantState: CodexAssistantStreamState;
 }): (event: Record<string, JSONValue>) => void {
@@ -1604,6 +2163,12 @@ function buildCodexStreamHandler(input: {
     emitCodexReasoningEvents({
       event,
       emit: input.emitTool,
+    });
+    emitCodexRawResponseItemEvents({
+      event,
+      emit: input.emitTool,
+      assistantState: input.assistantState,
+      nextOutputIndexRef,
     });
     emitCodexToolEvents({
       event,
@@ -1628,6 +2193,7 @@ export function createCodexProvider(opts?: {
   ): Promise<
     Awaited<ReturnType<NonNullable<ModelProvider["chat"]>>> & {
       assistantMessages: Array<CodexAssistantMessage>;
+      rawResponseItems: Array<ResponseItem>;
     }
   > => {
     if (input.signal?.aborted) {
@@ -1638,17 +2204,21 @@ export function createCodexProvider(opts?: {
       sawAssistantTextStream: false,
       assistantOutputIndexByItemId: new Map<string, number>(),
       emittedTerminalAssistantItemIds: new Set<string>(),
+      rawOutputIndexByItemKey: new Map<string, number>(),
+      emittedTerminalRawItemKeys: new Set<string>(),
     };
     const streamHandler = (input.onStreamEvent || input.onTraceEvent ||
         (input.stream && input.onStreamText))
       ? buildCodexStreamHandler({
         emitRaw: (event) => input.onStreamEvent?.(event),
         emitTool: (event) => {
-          input.onStreamEvent?.(event);
-          input.onTraceEvent?.(
-            // this predates the lint rule
-            event as unknown as import("@bolt-foundry/gambit-core").ProviderTraceEvent,
-          );
+          input.onStreamEvent?.(responseEventToJsonRecord(event));
+          if (isProviderTraceEvent(event)) {
+            const traceEvent = responseEventToProviderTraceEvent(event);
+            if (traceEvent) {
+              input.onTraceEvent?.(traceEvent);
+            }
+          }
         },
         emitText: input.stream
           ? (text) => input.onStreamText?.(text)
@@ -1681,6 +2251,7 @@ export function createCodexProvider(opts?: {
         onStreamEvent: streamHandler,
         instructions,
         prompt,
+        injectItems: [],
         cwd,
         priorThreadId,
       });
@@ -1707,6 +2278,7 @@ export function createCodexProvider(opts?: {
         updatedState,
         usage: result.usage,
         assistantMessages: result.assistantMessages,
+        rawResponseItems: result.rawResponseItems ?? [],
       };
     } finally {
       await preparedMcpRoot.cleanup?.();
@@ -1737,6 +2309,8 @@ export function createCodexProvider(opts?: {
             sawAssistantTextStream: false,
             assistantOutputIndexByItemId: new Map<string, number>(),
             emittedTerminalAssistantItemIds: new Set<string>(),
+            rawOutputIndexByItemKey: new Map<string, number>(),
+            emittedTerminalRawItemKeys: new Set<string>(),
           };
           return {
             assistantState,
@@ -1745,12 +2319,10 @@ export function createCodexProvider(opts?: {
                 input.onStreamEvent?.({
                   type: "codex.event",
                   payload: event,
-                  // this predates the lint rule
-                } as unknown as ResponseEvent);
+                });
               },
               emitTool: (event) => {
-                // this predates the lint rule
-                input.onStreamEvent?.(event as unknown as ResponseEvent);
+                input.onStreamEvent?.(event);
               },
               assistantState,
             }),
@@ -1771,9 +2343,16 @@ export function createCodexProvider(opts?: {
         onStreamEvent: streamHandler?.handle,
       });
 
-      const output = result.assistantMessages.length > 0
-        ? responseItemsFromAssistantMessages(result.assistantMessages)
-        : responseItemsFromAssistantMessage(result.message);
+      const output = mergeCodexResponseOutput({
+        assistantMessages: result.assistantMessages,
+        assistantMessage: result.message,
+        rawResponseItems: result.rawResponseItems,
+        assistantState: streamHandler?.assistantState,
+      });
+      const outputIndexes = codexResponseOutputIndexes({
+        items: output,
+        assistantState: streamHandler?.assistantState,
+      });
       const responseId = `codex-${crypto.randomUUID()}`;
       const createdAt = Math.floor(Date.now() / 1000);
       if (input.request.stream) {
@@ -1802,23 +2381,34 @@ export function createCodexProvider(opts?: {
             : [];
           fallbackMessages.forEach((message, index) => {
             if (!message.text) return;
+            const fallbackItem = {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: message.text }],
+              ...(message.itemId ? { id: message.itemId } : {}),
+            } satisfies ResponseMessageItem;
+            const outputIndex =
+              outputIndexes.get(codexResponseOutputLocator(fallbackItem)) ??
+                output.length + index;
             input.onStreamEvent?.({
               type: "response.output_text.delta",
               sequence_number: 1 + (index * 2),
-              output_index: index,
+              output_index: outputIndex,
               delta: message.text,
               ...(message.itemId ? { item_id: message.itemId } : {}),
             });
             input.onStreamEvent?.({
               type: "response.output_text.done",
               sequence_number: 2 + (index * 2),
-              output_index: index,
+              output_index: outputIndex,
               text: message.text,
               ...(message.itemId ? { item_id: message.itemId } : {}),
             });
           });
         }
         output.forEach((item, index) => {
+          const outputIndex =
+            outputIndexes.get(codexResponseOutputLocator(item)) ?? index;
           if (
             item.type === "message" &&
             item.role === "assistant" &&
@@ -1829,16 +2419,24 @@ export function createCodexProvider(opts?: {
           ) {
             return;
           }
+          if (
+            isCodexRawResponseItemRenderable(item) &&
+            streamHandler?.assistantState.emittedTerminalRawItemKeys.has(
+              codexResponseItemKey(item),
+            )
+          ) {
+            return;
+          }
           input.onStreamEvent?.({
             type: "response.output_item.added",
             sequence_number: 3 + (index * 2),
-            output_index: index,
+            output_index: outputIndex,
             item,
           });
           input.onStreamEvent?.({
             type: "response.output_item.done",
             sequence_number: 4 + (index * 2),
-            output_index: index,
+            output_index: outputIndex,
             item,
           });
         });
@@ -1897,4 +2495,18 @@ export function codexConfigArgsForTest(input: {
 
 export function safeJsonForTest(text: string): Record<string, JSONValue> {
   return safeJsonObject(text);
+}
+
+export function sanitizeCodexSpawnArgsForTest(
+  args: Array<string>,
+): Array<string> {
+  return sanitizeCodexSpawnArgsForDebug(args);
+}
+
+export function extractCodexConfigValuesForTest(
+  args: Array<string>,
+  flag: string,
+  prefix?: string,
+): Array<string> {
+  return extractCodexConfigValues(args, flag, prefix);
 }

@@ -389,6 +389,16 @@ const CORE_RESPONSE_ITEM_TYPES = new Set([
   "function_call",
   "function_call_output",
   "reasoning",
+  "local_shell_call",
+  "tool_search_call",
+  "custom_tool_call",
+  "custom_tool_call_output",
+  "tool_search_output",
+  "web_search_call",
+  "image_generation_call",
+  "ghost_snapshot",
+  "compaction",
+  "other",
 ]);
 
 async function normalizeResponseItemExtensions(
@@ -514,15 +524,15 @@ export async function loadMarkdownCard(
       `Card at ${resolved} cannot declare handlers (deck-only)`,
     );
   }
-  const hasNewActionField = (attrs as { actionDecks?: unknown }).actionDecks;
-  const legacyActions = (attrs as { actions?: unknown }).actions;
+  const legacyActionDecks = (attrs as { actionDecks?: unknown }).actionDecks;
+  const canonicalActions = (attrs as { actions?: unknown }).actions;
   const actionDecks = await normalizeActionDecks(
-    hasNewActionField ?? legacyActions,
+    canonicalActions ?? legacyActionDecks,
     resolved,
   );
-  if (!hasNewActionField && legacyActions) {
+  if (legacyActionDecks) {
     logger.warn(
-      `[gambit] card at ${resolved} uses deprecated "actions"; rename to "actionDecks"`,
+      `[gambit] card at ${resolved} uses deprecated "actionDecks"; use "[[actions]]" instead.`,
     );
   }
   actionDecks.forEach((a) => {

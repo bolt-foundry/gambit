@@ -7,21 +7,16 @@ routingPrefix = "codex-cli/"
 bareAlias = "codex-cli"
 
 [auth]
-mode = "runtime-auth-state"
+mode = "chatgpt-auth-tokens"
 storageAuthority = "bfdesktop"
 attachmentAuthority = "bfdesktop-mitm"
 destinationScope = "declared-destinations"
 
-[auth.runtimeAuthState]
-runtimeHomeEnv = "CODEX_HOME"
-runtimePath = "codex/auth.json"
-
-[auth.runtimeAuthState.source]
-kind = "json-file"
-path = "$CODEX_HOME/auth.json"
-
 [[destinations]]
 url = "https://api.openai.com/v1/responses"
+
+[[destinations]]
+url = "https://auth.openai.com/oauth/token"
 
 [[destinations]]
 url = "https://chatgpt.com/backend-api/codex/"

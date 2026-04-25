@@ -212,6 +212,10 @@ Import the helpers from JSR:
 import { defineDeck, defineCard } from "jsr:@bolt-foundry/gambit";
 ```
 
+## Related
+
+- `reviews/2026-04-15-AAR-raw-response-items.md`
+
 Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
 `run`/`execute` for compute decks. To call a child deck from code, use\
 `ctx.spawnAndWait({ path, input })`. Emit structured trace events with\

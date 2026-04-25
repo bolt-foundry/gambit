@@ -1,4 +1,4 @@
-import { waitForPath } from "@bolt-foundry/demo-runner";
+import { waitForPath } from "@bolt-foundry/browser-runtime";
 
 type WaitFn = (ms: number) => Promise<void>;
 

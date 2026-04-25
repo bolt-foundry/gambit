@@ -76,6 +76,7 @@
     "lineWidth": 80,
     "exclude": [
       "packages/gambit-simulator/simulator-ui/__generated__",
+      "packages/gambit-simulator/simulator-ui/dist",
       "packages/gambit-simulator/simulator-ui/subscriptions/__generated__"
     ]
   },
@@ -113,7 +114,12 @@
     "@std/front_matter": "jsr:@std/front_matter@^0.224.4",
     "@std/tar": "jsr:@std/tar@^0.1.9",
     "@std/toml": "jsr:@std/toml@^1.0.9",
+    "@bolt-foundry/browser-runtime": "./packages/browser-runtime/mod.ts",
+    "@bolt-foundry/browser-runtime/browser-cli": "./packages/browser-runtime/src/browserCliMain.ts",
+    "@bolt-foundry/browser-runtime/": "./packages/browser-runtime/",
     "@bolt-foundry/gambit-core": "./packages/gambit-core/mod.ts",
+    "@bolt-foundry/gambit-simulator": "./packages/gambit-simulator/mod.ts",
+    "@bolt-foundry/gambit-simulator/": "./packages/gambit-simulator/",
     "playwright-core": "npm:playwright-core@^1.57.0", // dev
     "zod": "npm:zod@^3.23.8",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.23.0",

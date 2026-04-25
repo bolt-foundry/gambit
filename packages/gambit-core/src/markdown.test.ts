@@ -5,7 +5,7 @@ import {
   assertStringIncludes,
 } from "@std/assert";
 import * as path from "@std/path";
-import { loadMarkdownDeck } from "./markdown.ts";
+import { loadMarkdownCard, loadMarkdownDeck } from "./markdown.ts";
 
 async function writeTempDeck(dir: string, filename: string, contents: string) {
   const target = path.join(dir, filename);
@@ -382,6 +382,67 @@ Root deck.
   assert(deck.testDecks[0].path.endsWith("scenarios/happy/PROMPT.md"));
   assertEquals(deck.graderDecks.length, 1);
   assert(deck.graderDecks[0].path.endsWith("graders/qa/PROMPT.md"));
+});
+
+Deno.test("markdown card treats [[actions]] as canonical and warns on legacy actionDecks", async () => {
+  const dir = await Deno.makeTempDir();
+  const canonicalCardPath = await writeTempDeck(
+    dir,
+    "canonical.card.md",
+    `+++
+label = "canonical"
+
+[[actions]]
+name = "do_thing"
+path = "./actions/do/PROMPT.md"
++++
+`,
+  );
+  const legacyCardPath = await writeTempDeck(
+    dir,
+    "legacy.card.md",
+    `+++
+label = "legacy"
+
+[[actionDecks]]
+name = "do_thing"
+path = "./actions/do/PROMPT.md"
++++
+`,
+  );
+
+  const warnings: Array<string> = [];
+  const consoleObject = Reflect.get(globalThis, "console") as {
+    warn: (message?: unknown, ...rest: Array<unknown>) => void;
+  };
+  const originalWarn = consoleObject.warn;
+  consoleObject.warn = (message?: unknown, ...rest: Array<unknown>) => {
+    warnings.push([message, ...rest].map((value) => String(value)).join(" "));
+  };
+
+  try {
+    const canonicalCard = await loadMarkdownCard(canonicalCardPath);
+    const legacyCard = await loadMarkdownCard(legacyCardPath);
+    assertEquals(canonicalCard.actionDecks.length, 1);
+    assertEquals(legacyCard.actionDecks.length, 1);
+  } finally {
+    consoleObject.warn = originalWarn;
+  }
+
+  assertEquals(
+    warnings.some((line) =>
+      line.includes("canonical.card.md") && line.includes("deprecated")
+    ),
+    false,
+  );
+  assertEquals(
+    warnings.some((line) =>
+      line.includes("legacy.card.md") &&
+      line.includes('deprecated "actionDecks"') &&
+      line.includes('use "[[actions]]" instead')
+    ),
+    true,
+  );
 });
 
 Deno.test("markdown deck loads without front matter", async () => {
