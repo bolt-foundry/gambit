@@ -1,6 +1,6 @@
 {
   "name": "@bolt-foundry/gambit-simulator",
-  "version": "0.8.6-rc.7",
+  "version": "0.8.6",
   "description": "Simulator app and local debug UI for Gambit.",
   "license": "Apache-2.0",
   "repository": {
