@@ -58,7 +58,7 @@ for (const relPath of docIncludeCandidates) {
   }
 }
 
-const includePaths = [
+const includeCandidates = [
   "deno.jsonc",
   ...docIncludes,
   coreCards,
@@ -70,6 +70,17 @@ const includePaths = [
   "src/decks",
   "scaffolds",
 ];
+
+const includePaths: string[] = [];
+for (const includePath of includeCandidates) {
+  try {
+    await Deno.stat(path.join(packageRoot, includePath));
+    includePaths.push(includePath);
+  } catch (err) {
+    if (err instanceof Deno.errors.NotFound) continue;
+    throw err;
+  }
+}
 
 const baseArgs = includePaths.flatMap((includePath) => [
   "--include",
