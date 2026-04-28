@@ -4,20 +4,20 @@
 
 - Added raw Responses item support to the Codex app-server provider path in
   `packages/gambit`.
-- Preserved BFDesktop's existing fallback transcript rendering by ensuring
+- Preserved Workloop's existing fallback transcript rendering by ensuring
   built-in non-message/non-reasoning response items now flow through
   `response.output_item.*`.
 
 ## Governing context
 
 - `packages/gambit` does not currently have a package-local `INTENT.md`.
-- BFDesktop's active app intent in `apps/bfdesktop/INTENT.md` still applies to
-  the desktop-facing symptom: this fix stays on the Gambit runtime side of the
-  boundary and does not move runtime ownership into BFDesktop.
+- Workloop's active app intent in `apps/workloop/INTENT.md` still applies to the
+  desktop-facing symptom: this fix stays on the Gambit runtime side of the
+  boundary and does not move runtime ownership into Workloop.
 - README checklist review:
   - `packages/gambit/README.md`: no checklist items
   - `packages/gambit/packages/gambit-core/README.md`: no checklist items
-  - `apps/bfdesktop/README.md`: no checklist items
+  - `apps/workloop/README.md`: no checklist items
   - Result: no README checkbox work was applicable for this task.
 
 ## What changed
@@ -65,9 +65,9 @@
   - Passed: `122 passed, 0 failed`
   - Validates that widening the core `ResponseItem` set did not break runtime
     response-item validation or responses-mode execution.
-- `deno test -A apps/bfdesktop/sidecar/graphql/desktopThreadTranscript_test.ts`
+- `deno test -A apps/workloop/sidecar/graphql/desktopThreadTranscript_test.ts`
   - Passed: `7 passed, 0 failed`
-  - Confirms the existing BFDesktop fallback projector still renders unknown
+  - Confirms the existing Workloop fallback projector still renders unknown
     output items through the tool transcript UI.
 - `deno lint packages/gambit/src/providers/codex.ts packages/gambit/packages/gambit-core/src/types.ts`
   - Passed: `Checked 2 files`
@@ -82,6 +82,6 @@
 
 - New Codex app-server threads can now emit built-in raw Responses items through
   Gambit without being dropped.
-- BFDesktop should now receive `web_search_call` and related raw built-in items
+- Workloop should now receive `web_search_call` and related raw built-in items
   through the normal transcript event path and render them with the existing
   tool fallback UI.

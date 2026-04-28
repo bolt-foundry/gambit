@@ -54,7 +54,7 @@ export function providerAuthUsesRuntimeEnvPlaceholders(
 export function providerAuthUsesMitmRequestTimeAttachment(
   requirements: ProviderRequirements,
 ): boolean {
-  return requirements.auth.attachmentAuthority === "bfdesktop-mitm";
+  return requirements.auth.attachmentAuthority === "workloop-mitm";
 }
 
 export function resolveProviderRequirements(input: {

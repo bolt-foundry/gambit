@@ -1,4 +1,7 @@
-import { isRunCanceledError, runDeck } from "@bolt-foundry/gambit-core";
+import {
+  isRunCanceledError,
+  runDeckResponses,
+} from "@bolt-foundry/gambit-core";
 import type {
   ModelProvider,
   SavedState,
@@ -309,7 +312,7 @@ export const createWorkspaceBuildService = (deps: {
           run,
           state: entry.state ?? undefined,
         });
-        await runDeck({
+        await runDeckResponses({
           path: deps.buildAssistantDeckPath,
           input: deps.initialContext,
           inputProvided: deps.hasInitialContext,

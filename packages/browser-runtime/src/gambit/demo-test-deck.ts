@@ -1,7 +1,8 @@
 import {
   createDefaultedRuntime,
   isGambitEndSignal,
-  runDeck,
+  runDeckResponses,
+  stringifyResponseOutput,
 } from "@bolt-foundry/gambit";
 import type { SavedState } from "@bolt-foundry/gambit-core";
 
@@ -72,7 +73,7 @@ export function createDemoTestDeckSession(opts: {
     const result = await withPromptDriverBotRoot(
       opts.workspaceRoot,
       async () =>
-        await runDeck({
+        await runDeckResponses({
           runtime,
           path: opts.deckPath,
           input: undefined,
@@ -87,10 +88,14 @@ export function createDemoTestDeckSession(opts: {
           workspacePermissions: workspacePermissions.permissions,
         }),
     );
-    if (isGambitEndSignal(result)) {
+    if (isGambitEndSignal(result.legacyResult)) {
       return "";
     }
-    const text = typeof result === "string" ? result : JSON.stringify(result);
+    const outputText = stringifyResponseOutput(result.output);
+    const text = outputText ||
+      (typeof result.legacyResult === "string"
+        ? result.legacyResult
+        : JSON.stringify(result.legacyResult));
     const normalized = text.replace(/\s+/g, " ").trim();
     if (!normalized) {
       return "";
@@ -119,7 +124,7 @@ export async function resolveDemoTestDeckPrompt(opts: {
   const result = await withPromptDriverBotRoot(
     opts.workspaceRoot,
     async () =>
-      await runDeck({
+      await runDeckResponses({
         runtime,
         path: opts.deckPath,
         input: undefined,
@@ -131,12 +136,16 @@ export async function resolveDemoTestDeckPrompt(opts: {
       }),
   );
 
-  if (isGambitEndSignal(result)) {
+  if (isGambitEndSignal(result.legacyResult)) {
     throw new Error(
       `Test deck prompt output ended early for ${opts.deckPath}.`,
     );
   }
-  const text = typeof result === "string" ? result : JSON.stringify(result);
+  const outputText = stringifyResponseOutput(result.output);
+  const text = outputText ||
+    (typeof result.legacyResult === "string"
+      ? result.legacyResult
+      : JSON.stringify(result.legacyResult));
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) {
     throw new Error(

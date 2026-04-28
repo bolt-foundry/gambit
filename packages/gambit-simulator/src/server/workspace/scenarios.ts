@@ -2,7 +2,7 @@ import * as path from "@std/path";
 import {
   isGambitEndSignal,
   isRunCanceledError,
-  runDeck,
+  runDeckResponses,
 } from "@bolt-foundry/gambit-core";
 import type {
   FeedbackEntry,
@@ -390,7 +390,7 @@ export const createWorkspaceScenarioService = (deps: {
         workerSandbox: deps.workerSandbox,
         signal: controller.signal,
       });
-      if (isGambitEndSignal(result)) {
+      if (isGambitEndSignal(result.legacyResult)) {
         sessionEnded = true;
         return "";
       }
@@ -404,7 +404,7 @@ export const createWorkspaceScenarioService = (deps: {
         const shouldRunInitial = effectiveStartMode !== "user" ||
           Boolean(initialUserMessage);
         if (!controller.signal.aborted && shouldRunInitial) {
-          const initialResult = await runDeck({
+          const initialResult = await runDeckResponses({
             path: deps.getResolvedDeckPath(),
             input: assistantInit,
             inputProvided: hasAssistantInit,
@@ -455,7 +455,7 @@ export const createWorkspaceScenarioService = (deps: {
               appendFromState(enriched);
             },
           });
-          if (isGambitEndSignal(initialResult)) {
+          if (isGambitEndSignal(initialResult.legacyResult)) {
             sessionEnded = true;
           }
         }
@@ -486,7 +486,7 @@ export const createWorkspaceScenarioService = (deps: {
             ts: Date.now(),
           });
           if (!userMessage) break;
-          const rootResult = await runDeck({
+          const rootResult = await runDeckResponses({
             path: deps.getResolvedDeckPath(),
             input: assistantInit,
             inputProvided: hasAssistantInit,
@@ -547,7 +547,7 @@ export const createWorkspaceScenarioService = (deps: {
                 ts: Date.now(),
               }),
           });
-          if (isGambitEndSignal(rootResult)) {
+          if (isGambitEndSignal(rootResult.legacyResult)) {
             sessionEnded = true;
             break;
           }
@@ -940,7 +940,7 @@ export const createWorkspaceScenarioService = (deps: {
     entry.promise = (async () => {
       try {
         emitTestBot({ type: "testBotStatus", run });
-        const rootResult = await runDeck({
+        const rootResult = await runDeckResponses({
           path: scenarioDeckPath,
           input: undefined,
           inputProvided: false,
@@ -1024,7 +1024,7 @@ export const createWorkspaceScenarioService = (deps: {
             });
           },
         });
-        if (!isGambitEndSignal(rootResult)) {
+        if (!isGambitEndSignal(rootResult.legacyResult)) {
           emitTestBot({
             type: "testBotStreamEnd",
             workspaceId: args.workspaceId,

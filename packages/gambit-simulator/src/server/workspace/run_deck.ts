@@ -1,8 +1,26 @@
-import { runDeck } from "@bolt-foundry/gambit-core";
-import type { ModelProvider, SavedState } from "@bolt-foundry/gambit-core";
+import {
+  runDeckResponses,
+  stringifyResponseOutput,
+} from "@bolt-foundry/gambit-core";
+import type {
+  ModelProvider,
+  SavedState,
+  StructuredRuntimeResult,
+} from "@bolt-foundry/gambit-core";
 
 export function stringifyOutput(output: unknown): string {
   if (output === null || output === undefined) return "";
+  if (
+    output && typeof output === "object" &&
+    "output" in (output as Record<string, unknown>) &&
+    Array.isArray((output as { output?: unknown }).output)
+  ) {
+    const text = stringifyResponseOutput(
+      (output as StructuredRuntimeResult).output,
+    );
+    if (text) return text;
+    return stringifyOutput((output as StructuredRuntimeResult).legacyResult);
+  }
   if (
     output &&
     typeof output === "object" &&
@@ -52,13 +70,13 @@ export async function runDeckWithFallback(args: {
   workerSandbox?: boolean;
   signal?: AbortSignal;
   onCancel?: () => unknown | Promise<unknown>;
-}): Promise<unknown> {
+}): Promise<StructuredRuntimeResult> {
   const workerSandbox = resolveWorkerSandboxForSignalAwareRun({
     workerSandbox: args.workerSandbox,
     signal: args.signal,
   });
   try {
-    return await runDeck({
+    return await runDeckResponses({
       path: args.path,
       input: args.input,
       inputProvided: args.inputProvided,
@@ -76,7 +94,7 @@ export async function runDeckWithFallback(args: {
     });
   } catch (error) {
     if (args.input === undefined && shouldRetryWithStringInput(error)) {
-      return await runDeck({
+      return await runDeckResponses({
         path: args.path,
         input: "",
         inputProvided: true,

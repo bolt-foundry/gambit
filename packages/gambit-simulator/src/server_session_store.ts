@@ -9,6 +9,7 @@ import type {
 } from "@bolt-foundry/gambit-core";
 import {
   isOpenResponsesRunEventPayload,
+  joinTextParts,
   toOpenResponsesRunEventV0,
 } from "@bolt-foundry/gambit-core";
 import type {
@@ -556,14 +557,15 @@ function asFiniteNumber(value: unknown): number | null {
 function toEventMessageText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value.map((entry) => {
+    const parts = value.map((entry) => {
       if (typeof entry === "string") return entry;
       const record = asRecord(entry);
       if (!record) return "";
       const text = asString(record.text);
       if (text.length > 0) return text;
       return toEventMessageText(record.content);
-    }).join("");
+    });
+    return joinTextParts(parts);
   }
   const record = asRecord(value);
   if (!record) return "";

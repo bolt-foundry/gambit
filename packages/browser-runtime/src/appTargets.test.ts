@@ -67,12 +67,12 @@ Deno.test("getBrowserAppTargetBaseUrl keeps explicit ports on localhost", () => 
   assertEquals(baseUrl, "http://127.0.0.1:43123");
 });
 
-Deno.test("getBrowserAppTargetBaseUrl accepts bfdesktop", () => {
+Deno.test("getBrowserAppTargetBaseUrl accepts workloop", () => {
   const baseUrl = withEnv({
     WORKSPACE: "shipmore",
     WORKSPACE_ID: undefined,
     HOSTNAME: undefined,
-  }, () => getBrowserAppTargetBaseUrl("bfdesktop", 41234));
+  }, () => getBrowserAppTargetBaseUrl("workloop", 41234));
 
   assertEquals(baseUrl, "http://127.0.0.1:41234");
 });

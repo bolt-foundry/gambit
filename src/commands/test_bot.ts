@@ -1,5 +1,13 @@
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
-import type { ModelProvider, TraceEvent } from "@bolt-foundry/gambit-core";
+import {
+  isGambitEndSignal,
+  runDeckResponses,
+  stringifyResponseOutput,
+} from "@bolt-foundry/gambit-core";
+import type {
+  ModelProvider,
+  StructuredRuntimeResult,
+  TraceEvent,
+} from "@bolt-foundry/gambit-core";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { loadDeck } from "@bolt-foundry/gambit-core";
 import * as path from "@std/path";
@@ -378,6 +386,14 @@ function buildInitFillPrompt(args: {
 }
 
 function unwrapRespondPayload(output: unknown): unknown {
+  if (
+    output && typeof output === "object" &&
+    "legacyResult" in (output as Record<string, unknown>)
+  ) {
+    return unwrapRespondPayload(
+      (output as StructuredRuntimeResult).legacyResult,
+    );
+  }
   if (!output || typeof output !== "object") return output;
   const record = output as Record<string, unknown>;
   if ("payload" in record) {
@@ -389,6 +405,14 @@ function unwrapRespondPayload(output: unknown): unknown {
 function parseInitFillOutput(
   output: unknown,
 ): { data?: unknown; error?: string } {
+  if (
+    output && typeof output === "object" &&
+    "legacyResult" in (output as Record<string, unknown>)
+  ) {
+    return parseInitFillOutput(
+      (output as StructuredRuntimeResult).legacyResult,
+    );
+  }
   if (output === null || output === undefined) {
     return { error: "Persona returned empty init fill output." };
   }
@@ -452,9 +476,9 @@ export async function runDeckWithFallback(args: {
   sessionPermissions?: PermissionDeclarationInput;
   sessionPermissionsBaseDir?: string;
   workerSandbox?: boolean;
-}): Promise<unknown> {
+}): Promise<StructuredRuntimeResult> {
   try {
-    return await runDeck({
+    return await runDeckResponses({
       path: args.path,
       input: args.input,
       inputProvided: args.inputProvided,
@@ -477,7 +501,7 @@ export async function runDeckWithFallback(args: {
     });
   } catch (error) {
     if (args.input === undefined && shouldRetryWithStringInput(error)) {
-      return await runDeck({
+      return await runDeckResponses({
         path: args.path,
         input: "",
         inputProvided: true,
@@ -745,7 +769,7 @@ export async function runTestBotLoop(opts: {
   }
 
   if (shouldRunRoot) {
-    const initialResult = await runDeck({
+    const initialResult = await runDeckResponses({
       path: opts.rootDeckPath,
       input: resolvedContext,
       inputProvided: resolvedContextProvided,
@@ -765,7 +789,7 @@ export async function runTestBotLoop(opts: {
       sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
       workerSandbox: opts.workerSandbox,
     });
-    if (isGambitEndSignal(initialResult)) {
+    if (isGambitEndSignal(initialResult.legacyResult)) {
       sessionEnded = true;
     }
   }
@@ -797,16 +821,18 @@ export async function runTestBotLoop(opts: {
       sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
       workerSandbox: opts.workerSandbox,
     });
-    if (isGambitEndSignal(botResult)) {
+    if (isGambitEndSignal(botResult.legacyResult)) {
       sessionEnded = true;
       break;
     }
-    const botText = typeof botResult === "string"
-      ? botResult
-      : JSON.stringify(botResult);
+    const botOutputText = stringifyResponseOutput(botResult.output);
+    const botText = botOutputText ||
+      (typeof botResult.legacyResult === "string"
+        ? botResult.legacyResult
+        : JSON.stringify(botResult.legacyResult));
     const userMessage = botText.trim();
     if (!userMessage) break;
-    const rootResult = await runDeck({
+    const rootResult = await runDeckResponses({
       path: opts.rootDeckPath,
       input: resolvedContext,
       inputProvided: resolvedContextProvided,
@@ -826,7 +852,7 @@ export async function runTestBotLoop(opts: {
       sessionPermissionsBaseDir: opts.sessionPermissionsBaseDir,
       workerSandbox: opts.workerSandbox,
     });
-    if (isGambitEndSignal(rootResult)) {
+    if (isGambitEndSignal(rootResult.legacyResult)) {
       sessionEnded = true;
       break;
     }

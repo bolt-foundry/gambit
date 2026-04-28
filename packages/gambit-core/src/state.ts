@@ -1,4 +1,5 @@
 import * as path from "@std/path";
+import { joinTextParts } from "./text.ts";
 import type { ModelMessage, ResponseItem, TraceEvent } from "./types.ts";
 
 export type SavedState = {
@@ -48,10 +49,10 @@ function deriveMessagesFromItems(
     if (item.type === "message") {
       const text = item.content
         .map((part) => part.text)
-        .join("");
+        .filter(Boolean);
       messages.push({
         role: item.role,
-        content: text || null,
+        content: text.length ? joinTextParts(text) : null,
       });
       continue;
     }

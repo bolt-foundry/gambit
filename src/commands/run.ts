@@ -1,4 +1,8 @@
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
+import {
+  isGambitEndSignal,
+  runDeckResponses,
+  stringifyResponseOutput,
+} from "@bolt-foundry/gambit-core";
 import type { ModelProvider } from "@bolt-foundry/gambit-core";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { enrichStateMeta } from "../cli_utils.ts";
@@ -41,7 +45,7 @@ export async function handleRunCommand(opts: {
     }
     : undefined;
 
-  const result = await runDeck({
+  const result = await runDeckResponses({
     path: opts.deckPath,
     input: opts.context,
     inputProvided: opts.contextProvided,
@@ -62,21 +66,26 @@ export async function handleRunCommand(opts: {
     workerSandbox: opts.workerSandbox,
   });
 
-  if (isGambitEndSignal(result)) {
-    if (result.message) {
-      logger.log(result.message);
-    } else if (result.payload !== undefined) {
-      if (typeof result.payload === "string") {
-        logger.log(result.payload);
+  const outputText = stringifyResponseOutput(result.output);
+  if (outputText) {
+    logger.log(outputText);
+    return;
+  }
+  if (isGambitEndSignal(result.legacyResult)) {
+    if (result.legacyResult.message) {
+      logger.log(result.legacyResult.message);
+    } else if (result.legacyResult.payload !== undefined) {
+      if (typeof result.legacyResult.payload === "string") {
+        logger.log(result.legacyResult.payload);
       } else {
-        logger.log(JSON.stringify(result.payload, null, 2));
+        logger.log(JSON.stringify(result.legacyResult.payload, null, 2));
       }
     } else {
-      logger.log(JSON.stringify(result, null, 2));
+      logger.log(JSON.stringify(result.legacyResult, null, 2));
     }
-  } else if (typeof result === "string") {
-    logger.log(result);
+  } else if (typeof result.legacyResult === "string") {
+    logger.log(result.legacyResult);
   } else {
-    logger.log(JSON.stringify(result, null, 2));
+    logger.log(JSON.stringify(result.legacyResult, null, 2));
   }
 }

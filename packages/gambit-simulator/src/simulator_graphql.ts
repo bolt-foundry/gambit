@@ -6,6 +6,7 @@ import type {
   FeedbackEntry,
   OpenResponsesRunEventV0,
 } from "@bolt-foundry/gambit-core";
+import { joinTextParts } from "@bolt-foundry/gambit-core";
 import {
   asGambitID,
   asGambitStreamID,
@@ -843,13 +844,14 @@ function asString(value: unknown): string {
 function toEventMessageText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
-    return value.map((entry) => {
+    const parts = value.map((entry) => {
       const record = asRecord(entry);
       if (!record) return "";
       const text = asString(record.text);
       if (text.length > 0) return text;
       return toEventMessageText(record.content);
-    }).join("");
+    });
+    return joinTextParts(parts);
   }
   const record = asRecord(value);
   if (!record) return "";

@@ -75,14 +75,23 @@ export {
 } from "./src/permissions.ts";
 /** Check if a value is an explicit end-of-run signal. */
 export { isGambitEndSignal } from "./src/runtime.ts";
-/** Run a deck and return its execution result. */
+/** Legacy compatibility wrapper that returns the deck's presentation result. */
 export { runDeck } from "./src/runtime.ts";
+/** Run a deck and return the structured Responses-shaped runtime result. */
+export { runDeckResponses } from "./src/runtime.ts";
+/** Project assistant output text from Responses items for presentation. */
+export { stringifyResponseOutput } from "./src/runtime.ts";
 /** Cancellation error type surfaced when a run is aborted. */
 export { isRunCanceledError, RunCanceledError } from "./src/runtime.ts";
 /** Signal for explicitly ending a Gambit run. */
 export type { GambitEndSignal } from "./src/runtime.ts";
-/** Runtime run options accepted by `runDeck`. */
-export type { RunOptions } from "./src/runtime.ts";
+/** Runtime run options accepted by runtime entrypoints. */
+export type {
+  RunOptions,
+  StructuredRuntimeEffect,
+  StructuredRuntimeResult,
+  StructuredRuntimeStatus,
+} from "./src/runtime.ts";
 /** Default guardrail settings applied to deck runs. */
 export { DEFAULT_GUARDRAILS } from "./src/constants.ts";
 /** Reserved tool name prefix for Gambit tools. */
@@ -93,6 +102,8 @@ export { renderDeck } from "./src/render.ts";
 export type { RenderDeckOptions } from "./src/render.ts";
 /** Result data from rendering a deck. */
 export type { RenderDeckResult } from "./src/render.ts";
+/** Join structured text parts into readable text. */
+export { joinTextParts } from "./src/text.ts";
 /** Schema helpers for ensuring Zod input/output shapes. */
 export { assertZodSchema, toJsonSchema } from "./src/schema.ts";
 /** Gambit CLI helpers and internal primitives. */
@@ -110,7 +121,7 @@ export type { LoadedDeck } from "./src/types.ts";
 /** Model message exchanged with providers. */
 export type { ModelMessage } from "./src/types.ts";
 /** Model provider interface for LLM backends. */
-export type { ModelProvider } from "./src/types.ts";
+export type { ModelProvider, ModelResolver } from "./src/types.ts";
 /** Tool definition passed to model providers. */
 export type { ToolDefinition } from "./src/types.ts";
 /** Trace events emitted during execution. */

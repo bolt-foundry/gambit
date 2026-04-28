@@ -23,8 +23,8 @@ export type { GraderDeckDefinition } from "@bolt-foundry/gambit-core";
 export type { Guardrails } from "@bolt-foundry/gambit-core";
 /** JSON-serializable value type used throughout Gambit. */
 export type { JSONValue } from "@bolt-foundry/gambit-core";
-/** Model provider interface for LLM backends. */
-export type { ModelProvider } from "@bolt-foundry/gambit-core";
+/** Model provider and resolver interfaces for LLM backends. */
+export type { ModelProvider, ModelResolver } from "@bolt-foundry/gambit-core";
 /** Scenario deck definition shape. */
 export type { TestDeckDefinition } from "@bolt-foundry/gambit-core";
 /** Check if a value is an explicit end-of-run signal. */
@@ -41,10 +41,22 @@ export type {
   RunDeckWithDefaultsOptions,
   SessionArtifactsConfig,
 } from "./src/default_runtime.ts";
-/** Run a deck with default provider/model/runtime behavior. */
+/** Legacy compatibility wrapper with default provider/model/runtime behavior. */
 export { runDeck } from "./src/default_runtime.ts";
+/** Run a deck with defaults and return the structured Responses result. */
+export { runDeckResponses } from "./src/default_runtime.ts";
+/** Project assistant output text from Responses items for presentation. */
+export { stringifyResponseOutput } from "@bolt-foundry/gambit-core";
 /** Run a deck directly through gambit-core without gambit defaults. */
 export { runDeck as runDeckCore } from "@bolt-foundry/gambit-core";
+/** Run a deck directly through gambit-core and return structured Responses. */
+export { runDeckResponses as runDeckResponsesCore } from "@bolt-foundry/gambit-core";
+/** Structured Responses runtime result. */
+export type {
+  StructuredRuntimeEffect,
+  StructuredRuntimeResult,
+  StructuredRuntimeStatus,
+} from "@bolt-foundry/gambit-core";
 /** Signal for explicitly ending a Gambit run. */
 export type { GambitEndSignal } from "@bolt-foundry/gambit-core";
 /** OpenAI Chat Completions compatibility helper for a deck. */

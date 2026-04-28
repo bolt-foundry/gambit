@@ -1,5 +1,6 @@
 // deno-lint-ignore-file gambit/no-useeffect-setstate gambit/no-useeffect-setstate
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { joinTextParts } from "@bolt-foundry/gambit-core";
 import {
   classNames,
   flattenSchemaLeaves,
@@ -528,12 +529,12 @@ export function TraceList(props: { traces: Array<TraceEvent> }) {
         let text = "";
         const summary = item.summary;
         if (Array.isArray(summary)) {
-          text = summary.map((part) => {
+          text = joinTextParts(summary.map((part) => {
             const partRecord = asRecord(part);
             return partRecord && typeof partRecord.text === "string"
               ? partRecord.text
               : "";
-          }).join("");
+          }));
         } else if (typeof summary === "string") {
           text = summary;
         } else if (typeof item.text === "string") {

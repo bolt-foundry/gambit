@@ -1,11 +1,14 @@
-import { runDeck as runDeckCore } from "@bolt-foundry/gambit-core";
+import {
+  runDeck as runDeckCore,
+  runDeckResponses as runDeckResponsesCore,
+} from "@bolt-foundry/gambit-core";
 import type {
   CreateResponseRequest,
-  ModelMessage,
   ModelProvider,
+  ModelResolver,
   ResponseEvent,
   SavedState,
-  ToolDefinition,
+  StructuredRuntimeResult,
 } from "@bolt-foundry/gambit-core";
 import { createProviderMatchers } from "./model_matchers.ts";
 import {
@@ -57,6 +60,7 @@ type ProviderCapability = {
 };
 
 type CoreRunDeckOptions = Parameters<typeof runDeckCore>[0];
+type CoreRunDeckResponsesOptions = Parameters<typeof runDeckResponsesCore>[0];
 
 export type DefaultedRuntimeRunOptions =
   & Omit<
@@ -78,6 +82,7 @@ export type CreateDefaultedRuntimeOptions = {
   configHint?: string;
   projectConfig?: LoadedProjectConfig | null;
   modelProvider?: ModelProvider;
+  modelResolver?: ModelResolver;
   defaultModel?: string;
   modelOverride?: string;
   responsesMode?: boolean;
@@ -92,12 +97,16 @@ export type DefaultedRuntime = {
   configuredFallbackProvider: ProviderKey | null | undefined;
   effectiveFallbackProvider: ProviderKey | null;
   modelProvider: ModelProvider;
+  modelResolver: ModelResolver;
   defaultModel?: string;
   modelOverride?: string;
   responsesMode: boolean;
   sessionArtifacts?: SessionArtifactsConfig;
   resolveRunOptions: (opts: DefaultedRuntimeRunOptions) => CoreRunDeckOptions;
   runDeck: (opts: DefaultedRuntimeRunOptions) => Promise<unknown>;
+  runDeckResponses: (
+    opts: DefaultedRuntimeRunOptions,
+  ) => Promise<StructuredRuntimeResult>;
 };
 
 export type RunDeckWithDefaultsOptions = DefaultedRuntimeRunOptions & {
@@ -114,6 +123,14 @@ function mergeParams(
   }
   return baseParams ?? aliasParams;
 }
+
+const passthroughModelResolver: ModelResolver = {
+  resolveModel: (input) =>
+    Promise.resolve({
+      model: Array.isArray(input.model) ? input.model[0] ?? "" : input.model,
+      params: input.params,
+    }),
+};
 
 function parseFallbackProviderFromConfig(
   fallbackProviderRaw: unknown,
@@ -176,13 +193,13 @@ function resolveSessionArtifactsConfig(opts: {
   );
 }
 
-function buildDefaultModelProvider(opts: {
+function buildDefaultModelProviderAndResolver(opts: {
   modelAliasResolver: ModelAliasResolver;
   configuredFallbackProvider: ProviderKey | null | undefined;
   effectiveFallbackProvider: ProviderKey | null;
   responsesMode: boolean;
   logger: WarnLogger;
-}): ModelProvider {
+}): { modelProvider: ModelProvider; modelResolver: ModelResolver } {
   const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY")?.trim();
   const googleApiKey = (Deno.env.get("GOOGLE_API_KEY") ??
     Deno.env.get("GEMINI_API_KEY"))?.trim();
@@ -430,13 +447,15 @@ function buildDefaultModelProvider(opts: {
     return Boolean(resolution.applied || resolution.missingAlias);
   };
 
-  return {
+  const modelResolver: ModelResolver = {
     resolveModel: async (input) =>
       await resolveModelSelection(
         input.model,
         input.params,
         input.deckPath,
       ),
+  };
+  const modelProvider: ModelProvider = {
     responses: async (input: {
       request: CreateResponseRequest;
       state?: SavedState;
@@ -473,34 +492,8 @@ function buildDefaultModelProvider(opts: {
         },
       });
     },
-    chat: async (input: {
-      model: string;
-      messages: Array<ModelMessage>;
-      tools?: Array<ToolDefinition>;
-      stream?: boolean;
-      state?: SavedState;
-      deckPath?: string;
-      onStreamText?: (chunk: string) => void;
-      params?: Record<string, unknown>;
-    }) => {
-      const applied = shouldResolveModel(input.model)
-        ? await resolveModelSelection(input.model, input.params, input.deckPath)
-        : { model: input.model, params: input.params };
-      const request = {
-        ...input,
-        model: applied.model ?? input.model,
-        params: applied.params,
-      };
-      if (typeof request.model !== "string" || !request.model) {
-        throw new Error("Model is required.");
-      }
-      const selection = providerRouter.resolve({ model: request.model });
-      return await selection.provider.chat({
-        ...request,
-        model: selection.model,
-      });
-    },
   };
+  return { modelProvider, modelResolver };
 }
 
 export async function createDefaultedRuntime(
@@ -520,14 +513,16 @@ export async function createDefaultedRuntime(
     ? "openrouter"
     : configuredFallbackProvider;
   const responsesMode = opts.responsesMode ?? resolveDefaultResponsesMode();
-  const modelProvider = opts.modelProvider ??
-    buildDefaultModelProvider({
-      modelAliasResolver,
-      configuredFallbackProvider,
-      effectiveFallbackProvider,
-      responsesMode,
-      logger,
-    });
+  const defaults = buildDefaultModelProviderAndResolver({
+    modelAliasResolver,
+    configuredFallbackProvider,
+    effectiveFallbackProvider,
+    responsesMode,
+    logger,
+  });
+  const modelProvider = opts.modelProvider ?? defaults.modelProvider;
+  const modelResolver = opts.modelResolver ??
+    (opts.modelProvider ? passthroughModelResolver : defaults.modelResolver);
   const defaultModel = opts.defaultModel;
   const modelOverride = opts.modelOverride;
   const runtimeSessionArtifacts = opts.sessionArtifacts;
@@ -539,6 +534,8 @@ export async function createDefaultedRuntime(
     return {
       ...coreRunOpts,
       modelProvider: runOpts.modelProvider ?? modelProvider,
+      modelResolver: runOpts.modelResolver ??
+        (runOpts.modelProvider ? undefined : modelResolver),
       defaultModel: runOpts.defaultModel ?? defaultModel,
       modelOverride: runOpts.modelOverride ?? modelOverride,
       responsesMode: runOpts.responsesMode ?? responsesMode,
@@ -551,6 +548,7 @@ export async function createDefaultedRuntime(
     configuredFallbackProvider,
     effectiveFallbackProvider,
     modelProvider,
+    modelResolver,
     defaultModel,
     modelOverride,
     responsesMode,
@@ -564,6 +562,21 @@ export async function createDefaultedRuntime(
       });
       if (!effectiveSessionArtifacts) {
         return await runDeckCore(resolved);
+      }
+      throw new Error(
+        "sessionArtifacts persistence has been removed. Use sqlite-backed workspace flows instead.",
+      );
+    },
+    runDeckResponses: async (runOpts) => {
+      const resolved = resolveRunOptions(
+        runOpts,
+      ) satisfies CoreRunDeckResponsesOptions;
+      const effectiveSessionArtifacts = resolveSessionArtifactsConfig({
+        runtimeConfig: runtimeSessionArtifacts,
+        runConfig: runOpts.sessionArtifacts,
+      });
+      if (!effectiveSessionArtifacts) {
+        return await runDeckResponsesCore(resolved);
       }
       throw new Error(
         "sessionArtifacts persistence has been removed. Use sqlite-backed workspace flows instead.",
@@ -588,4 +601,22 @@ export async function runDeck(
   const { runtime: _runtime, runtimeOptions: _runtimeOptions, ...runOpts } =
     opts;
   return await runtime.runDeck(runOpts);
+}
+
+export async function runDeckResponses(
+  opts: RunDeckWithDefaultsOptions,
+): Promise<StructuredRuntimeResult> {
+  if (opts.runtime && opts.runtimeOptions) {
+    throw new Error(
+      "runDeckResponses received both runtime and runtimeOptions. Pass only one.",
+    );
+  }
+  const runtime = opts.runtime ??
+    await createDefaultedRuntime({
+      ...opts.runtimeOptions,
+      configHint: opts.runtimeOptions?.configHint ?? opts.path,
+    });
+  const { runtime: _runtime, runtimeOptions: _runtimeOptions, ...runOpts } =
+    opts;
+  return await runtime.runDeckResponses(runOpts);
 }

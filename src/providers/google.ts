@@ -8,6 +8,7 @@ import type {
   ResponseMessageItem,
   ResponseToolChoice,
 } from "@bolt-foundry/gambit-core";
+import { joinTextParts } from "@bolt-foundry/gambit-core";
 
 export const GOOGLE_PREFIX = "google/";
 const DEFAULT_GOOGLE_BASE_URL =
@@ -41,9 +42,11 @@ function extractContent(
 ): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
-    return (content as Array<string | { text?: string }>)
-      .map((part) => (typeof part === "string" ? part : part.text ?? ""))
-      .join("");
+    return joinTextParts(
+      (content as Array<string | { text?: string }>)
+        .map((part) => (typeof part === "string" ? part : part.text ?? ""))
+        .filter(Boolean),
+    );
   }
   return "";
 }
@@ -86,9 +89,7 @@ function responseItemsToChatMessages(
   }
   for (const item of items) {
     if (item.type === "message") {
-      const content = item.content
-        .map((part) => part.text)
-        .join("");
+      const content = joinTextParts(item.content.map((part) => part.text));
       messages.push({ role: item.role, content });
       continue;
     }
@@ -269,11 +270,13 @@ export function createGoogleProvider(opts: {
               sequence_number: sequence++,
             });
           } else if (Array.isArray(delta.content)) {
-            const text = (delta.content as Array<string | { text?: string }>)
-              .map((
-                part,
-              ) => (typeof part === "string" ? part : part.text ?? ""))
-              .join("");
+            const text = joinTextParts(
+              (delta.content as Array<string | { text?: string }>)
+                .map((
+                  part,
+                ) => (typeof part === "string" ? part : part.text ?? ""))
+                .filter(Boolean),
+            );
             if (text) {
               contentParts.push(text);
               input.onStreamEvent?.({
@@ -310,7 +313,7 @@ export function createGoogleProvider(opts: {
         }));
         const message = normalizeMessage({
           role: "assistant",
-          content: contentParts.length ? contentParts.join("") : null,
+          content: contentParts.length ? joinTextParts(contentParts) : null,
           tool_calls,
         } as OpenAI.Chat.Completions.ChatCompletionMessage);
         const toolCalls = tool_calls.length > 0
@@ -401,150 +404,6 @@ export function createGoogleProvider(opts: {
           }
           : null,
         error: null,
-        usage: mapChatUsage(response.usage),
-      };
-    },
-    async chat(input) {
-      const params = input.params ?? {};
-      if (input.stream) {
-        const stream = await client.chat.completions.create(
-          {
-            model: input.model,
-            messages: input.messages as Array<
-              OpenAI.Chat.Completions.ChatCompletionMessageParam
-            >,
-            tools: input
-              // this predates the lint rule
-              .tools as unknown as Array<
-                OpenAI.Chat.Completions.ChatCompletionTool
-              >,
-            tool_choice: "auto",
-            stream: true,
-            ...(params as Record<string, unknown>),
-          },
-          input.signal ? { signal: input.signal } : undefined,
-        ) as AsyncIterable<
-          OpenAI.Chat.Completions.ChatCompletionChunk
-        >;
-
-        let finishReason: "stop" | "tool_calls" | "length" | null = null;
-        const contentParts: Array<string> = [];
-        const toolCallMap = new Map<
-          number,
-          {
-            id?: string;
-            function: { name?: string; arguments: string };
-          }
-        >();
-
-        for await (const chunk of stream) {
-          const choice = chunk.choices[0];
-          const fr = choice.finish_reason;
-          if (
-            fr === "stop" || fr === "tool_calls" || fr === "length" ||
-            fr === null
-          ) {
-            finishReason = fr ?? finishReason;
-          }
-          const delta = choice.delta;
-
-          if (typeof delta.content === "string") {
-            contentParts.push(delta.content);
-            input.onStreamText?.(delta.content);
-          } else if (Array.isArray(delta.content)) {
-            const chunkStr =
-              (delta.content as Array<string | { text?: string }>)
-                .map((c) => (typeof c === "string" ? c : c.text ?? ""))
-                .join("");
-            if (chunkStr) {
-              contentParts.push(chunkStr);
-              input.onStreamText?.(chunkStr);
-            }
-          }
-
-          for (const tc of delta.tool_calls ?? []) {
-            const idx = tc.index ?? 0;
-            const existing = toolCallMap.get(idx) ??
-              {
-                id: tc.id,
-                function: { name: tc.function?.name, arguments: "" },
-              };
-            if (tc.id) existing.id = tc.id;
-            if (tc.function?.name) existing.function.name = tc.function.name;
-            if (tc.function?.arguments) {
-              existing.function.arguments += tc.function.arguments;
-            }
-            toolCallMap.set(idx, existing);
-          }
-        }
-
-        const tool_calls = Array.from(toolCallMap.values()).map((tc) => ({
-          id: tc.id ?? crypto.randomUUID().replace(/-/g, "").slice(0, 24),
-          type: "function" as const,
-          function: {
-            name: tc.function.name ?? "",
-            arguments: tc.function.arguments,
-          },
-        }));
-
-        const message = normalizeMessage({
-          role: "assistant",
-          content: contentParts.length ? contentParts.join("") : null,
-          tool_calls,
-        } as OpenAI.Chat.Completions.ChatCompletionMessage);
-
-        const toolCalls = tool_calls.length > 0
-          ? tool_calls.map((tc) => ({
-            id: tc.id,
-            name: tc.function.name,
-            args: safeJson(tc.function.arguments),
-          }))
-          : undefined;
-
-        return {
-          message,
-          finishReason: finishReason ?? "stop",
-          toolCalls,
-        };
-      }
-
-      const response = await client.chat.completions.create(
-        {
-          model: input.model,
-          messages: input
-            // this predates the lint rule
-            .messages as unknown as Array<
-              OpenAI.Chat.Completions.ChatCompletionMessageParam
-            >,
-          tools: input
-            // this predates the lint rule
-            .tools as unknown as Array<
-              OpenAI.Chat.Completions.ChatCompletionTool
-            >,
-          tool_choice: "auto",
-          stream: false,
-          ...(params as Record<string, unknown>),
-        },
-        input.signal ? { signal: input.signal } : undefined,
-      ) as OpenAI.Chat.Completions.ChatCompletion;
-
-      const choice = response.choices[0];
-      const message = normalizeMessage(choice.message);
-      const toolCalls = choice.message.tool_calls?.map((
-        tc: OpenAI.Chat.Completions.ChatCompletionMessageToolCall,
-      ) => ({
-        id: tc.id,
-        name: tc.function.name,
-        args: safeJson(tc.function.arguments),
-      }));
-
-      return {
-        message,
-        finishReason: (choice.finish_reason ?? "stop") as
-          | "stop"
-          | "tool_calls"
-          | "length",
-        toolCalls,
         usage: mapChatUsage(response.usage),
       };
     },

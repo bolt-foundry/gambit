@@ -7,7 +7,7 @@ routingPrefix = "openrouter/"
 
 [auth]
 mode = "secret"
-storageAuthority = "bfdesktop"
+storageAuthority = "workloop"
 attachmentAuthority = "runtime-env-placeholder"
 destinationScope = "declared-destinations"
 

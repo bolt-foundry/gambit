@@ -3,7 +3,6 @@ import type {
   CreateResponseRequest,
   CreateResponseResponse,
   JSONValue,
-  ModelMessage,
   ModelProvider,
   ResponseEvent,
   ResponseItem,
@@ -112,18 +111,6 @@ export async function ensureOllamaModel(
       }
     }
   }
-}
-
-function safeJson(input: string): Record<string, JSONValue> {
-  try {
-    const parsed = JSON.parse(input);
-    if (parsed && typeof parsed === "object") {
-      return parsed as Record<string, JSONValue>;
-    }
-  } catch {
-    // fall through
-  }
-  return {};
 }
 
 function toJsonValue(value: unknown): JSONValue {
@@ -545,104 +532,6 @@ function toOpenAIInputItems(
   return mapped;
 }
 
-function chatMessagesToResponseItems(
-  messages: Array<ModelMessage>,
-): Array<ResponseItem> {
-  const items: Array<ResponseItem> = [];
-  for (const message of messages) {
-    if (message.role === "tool") {
-      if (
-        message.tool_call_id &&
-        typeof message.content === "string"
-      ) {
-        items.push({
-          type: "function_call_output",
-          call_id: message.tool_call_id,
-          output: message.content,
-        });
-      }
-      continue;
-    }
-    if (
-      message.role === "system" || message.role === "user" ||
-      message.role === "assistant"
-    ) {
-      const content: Array<ResponseTextContent> = [];
-      if (typeof message.content === "string" && message.content.length > 0) {
-        content.push({
-          type: message.role === "assistant" ? "output_text" : "input_text",
-          text: message.content,
-        });
-      }
-      if (content.length > 0) {
-        items.push({
-          type: "message",
-          role: message.role,
-          content,
-        });
-      }
-    }
-    if (message.role === "assistant" && message.tool_calls) {
-      for (const call of message.tool_calls) {
-        items.push({
-          type: "function_call",
-          call_id: call.id,
-          name: call.function.name,
-          arguments: call.function.arguments,
-        });
-      }
-    }
-  }
-  return items;
-}
-
-function responseItemsToChat(items: Array<ResponseItem>): {
-  message: ModelMessage;
-  toolCalls?: Array<
-    { id: string; name: string; args: Record<string, JSONValue> }
-  >;
-} {
-  const textParts: Array<string> = [];
-  const toolCalls: Array<
-    { id: string; name: string; args: Record<string, JSONValue> }
-  > = [];
-  const messageToolCalls: ModelMessage["tool_calls"] = [];
-
-  for (const item of items) {
-    if (item.type === "message" && item.role === "assistant") {
-      for (const part of item.content) {
-        if (part.type === "output_text") {
-          textParts.push(part.text);
-        }
-      }
-    }
-    if (item.type === "function_call") {
-      toolCalls.push({
-        id: item.call_id,
-        name: item.name,
-        args: safeJson(item.arguments),
-      });
-      messageToolCalls.push({
-        id: item.call_id,
-        type: "function",
-        function: { name: item.name, arguments: item.arguments },
-      });
-    }
-  }
-
-  const content = textParts.length > 0 ? textParts.join("") : null;
-  const message: ModelMessage = {
-    role: "assistant",
-    content,
-    tool_calls: messageToolCalls.length > 0 ? messageToolCalls : undefined,
-  };
-
-  return {
-    message,
-    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-  };
-}
-
 async function createResponse(
   client: OpenAIClient,
   request: CreateResponseRequest,
@@ -912,31 +801,6 @@ export function createOllamaProvider(opts: {
         input.signal,
         input.onStreamEvent,
       );
-    },
-    async chat(input) {
-      const response = await createResponse(
-        client,
-        {
-          model: input.model,
-          input: chatMessagesToResponseItems(input.messages),
-          tools: input.tools as Array<ResponseToolDefinition> | undefined,
-          stream: input.stream,
-          params: input.params ?? {},
-        },
-        input.signal,
-        (event) => {
-          if (event.type === "response.output_text.delta") {
-            input.onStreamText?.(event.delta);
-          }
-        },
-      );
-      const mapped = responseItemsToChat(response.output);
-      return {
-        message: mapped.message,
-        finishReason: mapped.toolCalls ? "tool_calls" : "stop",
-        toolCalls: mapped.toolCalls,
-        usage: response.usage,
-      };
     },
   };
 }

@@ -9,6 +9,7 @@ import {
   GAMBIT_TOOL_RESPOND,
 } from "./constants.ts";
 import { loadDeck } from "./loader.ts";
+import { joinTextParts } from "./text.ts";
 import {
   canReadPath,
   canRunCommand,
@@ -39,13 +40,16 @@ import type {
   LoadedDeck,
   ModelMessage,
   ModelProvider,
+  ModelResolver,
   ResponseEvent,
   ResponseItem,
   ResponseTextConfig,
   ResponseToolDefinition,
+  ResponseUsage,
   ToolCallResult,
   ToolDefinition,
   ToolKind,
+  TraceEvent,
 } from "./types.ts";
 import type { MessageRef, SavedState } from "./state.ts";
 import type {
@@ -218,6 +222,7 @@ export type RunOptions = {
   inputProvided?: boolean;
   initialUserMessage?: unknown;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   isRoot?: boolean;
   guardrails?: Partial<Guardrails>;
   depth?: number;
@@ -258,6 +263,49 @@ export type RunOptions = {
   }) => unknown | Promise<unknown>;
   runtimeTools?: ReadonlyArray<ExternalToolDefinition>;
 };
+
+export type StructuredRuntimeStatus = "completed";
+
+export type StructuredRuntimeEffect = Extract<
+  TraceEvent,
+  | { type: "action.start" }
+  | { type: "action.end" }
+  | { type: "tool.call" }
+  | { type: "tool.result" }
+>;
+
+export type StructuredRuntimeResult = {
+  runId: string;
+  status: StructuredRuntimeStatus;
+  output: Array<ResponseItem>;
+  traceEvents: Array<TraceEvent>;
+  responseEvents: Array<TraceEvent>;
+  state?: SavedState;
+  usage?: ResponseUsage;
+  finishReason?: "stop" | "tool_calls" | "length";
+  effects: Array<StructuredRuntimeEffect>;
+  /**
+   * Compatibility value returned by the legacy `runDeck` entrypoint.
+   * Presentation layers may use this only as a fallback while they migrate to
+   * `output`.
+   */
+  legacyResult: unknown;
+};
+
+export function stringifyResponseOutput(
+  output: ReadonlyArray<ResponseItem>,
+): string {
+  const parts: Array<string> = [];
+  for (const item of output) {
+    if (item.type !== "message" || item.role !== "assistant") continue;
+    for (const content of item.content) {
+      if (content.type === "output_text") {
+        parts.push(content.text);
+      }
+    }
+  }
+  return parts.join("");
+}
 
 const WORKER_SANDBOX_ENV = "GAMBIT_DECK_WORKER_SANDBOX";
 const WORKER_TIMEOUT_MESSAGE = "Timeout exceeded";
@@ -746,6 +794,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
           initialUserMessage: opts.initialUserMessage,
           parentActionCallId: opts.parentActionCallId,
           modelProvider: opts.modelProvider,
+          modelResolver: opts.modelResolver,
           input: resolvedInput,
           defaultModel: opts.defaultModel,
           modelOverride: opts.modelOverride,
@@ -779,6 +828,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
           runId,
           parentActionCallId: opts.parentActionCallId,
           modelProvider: opts.modelProvider,
+          modelResolver: opts.modelResolver,
           input: resolvedInput,
           inputProvided: opts.inputProvided ?? true,
           initialUserMessage: opts.initialUserMessage,
@@ -812,7 +862,12 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
     const deck = opts.runtimeTools?.length
       ? {
         ...loadedDeck,
-        tools: [...loadedDeck.tools, ...opts.runtimeTools],
+        tools: Array.from(
+          [...loadedDeck.tools, ...opts.runtimeTools].reduce(
+            (byName, tool) => byName.set(tool.name, tool),
+            new Map<string, ExternalToolDefinition>(),
+          ).values(),
+        ),
       }
       : loadedDeck;
     const permissions = resolveEffectivePermissions({
@@ -885,6 +940,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         runId,
         parentActionCallId: opts.parentActionCallId,
         modelProvider: opts.modelProvider,
+        modelResolver: opts.modelResolver,
         input: validatedInput,
         inputProvided: opts.inputProvided ?? true,
         initialUserMessage: opts.initialUserMessage,
@@ -932,6 +988,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
         runId,
         parentActionCallId: opts.parentActionCallId,
         modelProvider: opts.modelProvider,
+        modelResolver: opts.modelResolver,
         input: validatedInput,
         inputProvided: opts.inputProvided ?? true,
         initialUserMessage: opts.initialUserMessage,
@@ -973,6 +1030,7 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
       initialUserMessage: opts.initialUserMessage,
       parentActionCallId: opts.parentActionCallId,
       modelProvider: opts.modelProvider,
+      modelResolver: opts.modelResolver,
       input: validatedInput,
       defaultModel: opts.defaultModel,
       modelOverride: opts.modelOverride,
@@ -1012,6 +1070,68 @@ export async function runDeck(opts: RunOptions): Promise<unknown> {
   }
 }
 
+export async function runDeckResponses(
+  opts: RunOptions,
+): Promise<StructuredRuntimeResult> {
+  const runId = opts.runId ?? opts.state?.runId ?? randomId("run");
+  const traceEvents: Array<TraceEvent> = [];
+  const responseEvents: Array<TraceEvent> = [];
+  let output: Array<ResponseItem> = [];
+  let state = opts.state;
+  let usage: ResponseUsage | undefined;
+  let finishReason: StructuredRuntimeResult["finishReason"];
+  const trace = (event: TraceEvent) => {
+    traceEvents.push(event);
+    if (
+      event.type === "model.result" &&
+      event.mode === "responses" &&
+      !event.parentActionCallId
+    ) {
+      output = event.responseItems ?? [];
+      usage = event.usage;
+      finishReason = event.finishReason;
+    }
+    if (
+      event.type === "model.stream.event" ||
+      event.type.startsWith("response.")
+    ) {
+      responseEvents.push(event);
+    }
+    opts.trace?.(event);
+  };
+  const onStateUpdate = (nextState: SavedState) => {
+    state = nextState;
+    opts.onStateUpdate?.(nextState);
+  };
+  const legacyResult = await runDeck({
+    ...opts,
+    runId,
+    responsesMode: true,
+    trace,
+    onStateUpdate,
+  });
+  const effects = traceEvents.filter((
+    event,
+  ): event is StructuredRuntimeEffect =>
+    event.type === "action.start" ||
+    event.type === "action.end" ||
+    event.type === "tool.call" ||
+    event.type === "tool.result"
+  );
+  return {
+    runId,
+    status: "completed",
+    output,
+    traceEvents,
+    responseEvents,
+    state,
+    usage,
+    finishReason,
+    effects,
+    legacyResult,
+  };
+}
+
 function toProviderParams(
   params: import("./types.ts").ModelParams | undefined,
 ): Record<string, unknown> | undefined {
@@ -1047,9 +1167,10 @@ async function resolveModelChoice(args: {
   model: string | Array<string>;
   params?: Record<string, unknown>;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   deckPath: string;
 }): Promise<{ model: string; params?: Record<string, unknown> }> {
-  const resolver = args.modelProvider.resolveModel;
+  const resolver = args.modelResolver?.resolveModel;
   if (resolver) {
     return await resolver({
       model: args.model,
@@ -1072,10 +1193,8 @@ async function resolveModelChoice(args: {
   return { model: args.model, params: args.params };
 }
 
-function shouldExposeProviderToolArray(model: string): boolean {
-  const normalized = model.trim().toLowerCase();
-  if (!normalized) return true;
-  return normalized !== "codex-cli" && !normalized.startsWith("codex-cli/");
+function shouldExposeProviderToolArray(_model: string): boolean {
+  return true;
 }
 
 function resolveContextSchema(deck: LoadedDeck) {
@@ -1300,7 +1419,7 @@ function messagesFromResponseItems(
   const callNameById = new Map<string, string>();
   for (const item of items) {
     if (item.type === "message") {
-      const text = item.content.map((part) => part.text).join("");
+      const text = joinTextParts(item.content.map((part) => part.text));
       messages.push({
         role: item.role,
         content: text || null,
@@ -2522,7 +2641,7 @@ function mapResponseOutput(
   return {
     message: {
       role: "assistant",
-      content: textParts.length ? textParts.join("") : null,
+      content: textParts.length ? joinTextParts(textParts) : null,
     },
     toolCalls: toolCalls.length ? toolCalls : undefined,
   };
@@ -2589,6 +2708,7 @@ type RuntimeCtxBase = {
   initialUserMessage?: unknown;
   parentActionCallId?: string;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   input: unknown;
   defaultModel?: string;
   modelOverride?: string;
@@ -2629,6 +2749,7 @@ async function runComputeDeck(ctx: RuntimeCtxBase): Promise<unknown> {
       initialUserMessage: ctx.initialUserMessage,
       parentActionCallId: ctx.parentActionCallId,
       modelProvider: ctx.modelProvider,
+      modelResolver: ctx.modelResolver,
       input: ctx.input,
       defaultModel: ctx.defaultModel,
       modelOverride: ctx.modelOverride,
@@ -3427,21 +3548,6 @@ type OrchestrationRunStartMessage = {
   permissionCeiling: WirePermissionSet;
 };
 
-type OrchestrationModelChatRequest = {
-  type: "model.chat.request";
-  bridgeSession: string;
-  requestId: string;
-  input: {
-    model: string;
-    messages: Array<ModelMessage>;
-    tools?: Array<ToolDefinition>;
-    stream?: boolean;
-    state?: SavedState;
-    deckPath?: string;
-    params?: Record<string, unknown>;
-  };
-};
-
 type OrchestrationModelResponsesRequest = {
   type: "model.responses.request";
   bridgeSession: string;
@@ -3478,7 +3584,6 @@ type OrchestrationWorkerMessageToParent =
   }
   | { type: "state.update"; bridgeSession: string; state: SavedState }
   | { type: "stream.text"; bridgeSession: string; chunk: string }
-  | OrchestrationModelChatRequest
   | OrchestrationModelResponsesRequest
   | OrchestrationModelResolveRequest
   | OrchestrationModelCancelRequest
@@ -3498,11 +3603,6 @@ type OrchestrationWorkerMessageToParent =
 type OrchestrationParentMessage =
   | OrchestrationRunStartMessage
   | {
-    type: "model.chat.result";
-    requestId: string;
-    result: Awaited<ReturnType<ModelProvider["chat"]>>;
-  }
-  | {
     type: "model.responses.result";
     requestId: string;
     result: CreateResponseResponse;
@@ -3516,18 +3616,12 @@ type OrchestrationParentMessage =
     };
   }
   | {
-    type: "model.chat.stream";
-    requestId: string;
-    chunk: string;
-  }
-  | {
     type: "model.responses.event";
     requestId: string;
     event: ResponseEvent;
   }
   | {
     type:
-      | "model.chat.error"
       | "model.responses.error"
       | "model.resolveModel.error";
     requestId: string;
@@ -3640,61 +3734,11 @@ async function runLlmDeckInWorker(
         return;
       }
 
-      if (msg.type === "model.chat.request") {
-        (async () => {
-          const controller = new AbortController();
-          modelRequestControllers.set(msg.requestId, controller);
-          try {
-            const result = await ctx.modelProvider.chat({
-              ...msg.input,
-              signal: mergeAbortSignals(ctx.signal, controller.signal),
-              onStreamText: (chunk) => {
-                worker.postMessage(
-                  {
-                    type: "model.chat.stream",
-                    requestId: msg.requestId,
-                    chunk,
-                  } satisfies OrchestrationParentMessage,
-                );
-              },
-            });
-            worker.postMessage(
-              {
-                type: "model.chat.result",
-                requestId: msg.requestId,
-                result,
-              } satisfies OrchestrationParentMessage,
-            );
-          } catch (err) {
-            worker.postMessage(
-              {
-                type: "model.chat.error",
-                requestId: msg.requestId,
-                error: {
-                  source: "model",
-                  name: err instanceof Error ? err.name : undefined,
-                  message: err instanceof Error ? err.message : String(err),
-                  code: (err as { code?: unknown })?.code,
-                },
-              } satisfies OrchestrationParentMessage,
-            );
-          } finally {
-            modelRequestControllers.delete(msg.requestId);
-          }
-        })();
-        return;
-      }
-
       if (msg.type === "model.responses.request") {
         (async () => {
           const controller = new AbortController();
           modelRequestControllers.set(msg.requestId, controller);
           try {
-            if (!ctx.modelProvider.responses) {
-              throw new Error(
-                "Responses API unavailable for current model provider",
-              );
-            }
             const result = await ctx.modelProvider.responses({
               ...msg.input,
               signal: mergeAbortSignals(ctx.signal, controller.signal),
@@ -3743,8 +3787,8 @@ async function runLlmDeckInWorker(
       if (msg.type === "model.resolveModel.request") {
         (async () => {
           try {
-            const result = ctx.modelProvider.resolveModel
-              ? await ctx.modelProvider.resolveModel(msg.input)
+            const result = ctx.modelResolver?.resolveModel
+              ? await ctx.modelResolver.resolveModel(msg.input)
               : {
                 model: Array.isArray(msg.input.model)
                   ? msg.input.model[0]
@@ -4005,6 +4049,7 @@ async function runComputeDeckInWorker(ctx: WorkerRuntimeCtx): Promise<unknown> {
               path: req.payload.path,
               input: req.payload.input,
               modelProvider: ctx.modelProvider,
+              modelResolver: ctx.modelResolver,
               isRoot: false,
               guardrails: ctx.guardrails,
               depth: ctx.depth + 1,
@@ -4305,6 +4350,7 @@ async function runComputeDeckInProcess(ctx: RuntimeCtxBase): Promise<unknown> {
         path: childPath,
         input: opts.input,
         modelProvider: ctx.modelProvider,
+        modelResolver: ctx.modelResolver,
         isRoot: false,
         guardrails: ctx.guardrails,
         depth: ctx.depth + 1,
@@ -4382,8 +4428,7 @@ async function runLlmDeck(
   } = ctx;
   const actionCallId = randomId("action");
   const start = performance.now();
-  const useResponses = Boolean(ctx.responsesMode) ||
-    ctx.state?.format === "responses";
+  const useResponses = true;
   const validateResponseItemEmission = createResponseItemEmissionValidator(
     deck,
   );
@@ -4550,6 +4595,7 @@ async function runLlmDeck(
         model: modelCandidate,
         params: toProviderParams(deck.modelParams),
         modelProvider,
+        modelResolver: ctx.modelResolver,
         deckPath: deck.path,
       });
       const model = resolved.model;
@@ -4580,155 +4626,120 @@ async function runLlmDeck(
       });
 
       let responseOutputItems: Array<ResponseItem> | undefined;
-      const responses = modelProvider.responses;
       const projectedToolCalls = new Set<string>();
       const projectedToolResults = new Set<string>();
       const projectedToolNames = new Map<string, string>();
       const canonicalizeStreamEvent = createCanonicalStreamEventController();
-      type ModelCallResult = Awaited<ReturnType<ModelProvider["chat"]>>;
-      const result: ModelCallResult = (useResponses && responses)
-        ? await (async () => {
-          const responseItems = responseItemsFromMessages(messages);
-          let sawDelta = false;
-          const response = await responses({
-            request: {
-              model,
-              input: responseItems,
-              tools: providerResponseTools,
-              text: responseTextConfig,
-              stream: ctx.stream,
-              params: providerParams,
-            },
-            state: ctx.state,
-            deckPath: deck.path,
-            signal: ctx.signal,
-            onStreamEvent:
-              (ctx.trace || ctx.onStreamText || deck.handlers?.onIdle)
-                ? (event) => {
-                  const normalizedEvent = validateResponseEventItems(
-                    event,
-                    validateResponseItemEmission,
-                  );
-                  const streamEvent = canonicalizeStreamEvent(
-                    normalizedEvent as unknown as Record<
-                      string,
-                      import("./types.ts").JSONValue
-                    >,
-                  );
-                  if (!streamEvent) return;
-                  if (ctx.trace) {
-                    const handledAsResponse = traceOpenResponsesStreamEvent({
-                      streamEvent,
+      type ModelCallResult = {
+        message: ModelMessage;
+        finishReason: "stop" | "tool_calls" | "length";
+        toolCalls?: Array<{
+          id: string;
+          name: string;
+          args: Record<string, JSONValue>;
+        }>;
+        updatedState?: SavedState;
+        usage?: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+          reasoningTokens?: number;
+        };
+      };
+      const result: ModelCallResult = await (async () => {
+        const responseItems = responseItemsFromMessages(messages);
+        let sawDelta = false;
+        const response = await modelProvider.responses({
+          request: {
+            model,
+            input: responseItems,
+            tools: providerResponseTools,
+            text: responseTextConfig,
+            stream: ctx.stream,
+            params: providerParams,
+          },
+          state: ctx.state,
+          deckPath: deck.path,
+          signal: ctx.signal,
+          onStreamEvent:
+            (ctx.trace || ctx.onStreamText || deck.handlers?.onIdle)
+              ? (event) => {
+                const normalizedEvent = validateResponseEventItems(
+                  event,
+                  validateResponseItemEmission,
+                );
+                const streamEvent = canonicalizeStreamEvent(
+                  normalizedEvent as unknown as Record<
+                    string,
+                    import("./types.ts").JSONValue
+                  >,
+                );
+                if (!streamEvent) return;
+                if (ctx.trace) {
+                  const handledAsResponse = traceOpenResponsesStreamEvent({
+                    streamEvent,
+                    runId,
+                    actionCallId,
+                    deckPath: deck.path,
+                    model,
+                    parentActionCallId: ctx.parentActionCallId,
+                    trace: ctx.trace,
+                  });
+                  if (!handledAsResponse) {
+                    ctx.trace({
+                      type: "model.stream.event",
                       runId,
                       actionCallId,
                       deckPath: deck.path,
                       model,
+                      event: streamEvent,
                       parentActionCallId: ctx.parentActionCallId,
-                      trace: ctx.trace,
-                    });
-                    if (!handledAsResponse) {
-                      ctx.trace({
-                        type: "model.stream.event",
-                        runId,
-                        actionCallId,
-                        deckPath: deck.path,
-                        model,
-                        event: streamEvent,
-                        parentActionCallId: ctx.parentActionCallId,
-                      });
-                    }
-                    projectStreamToolTraceEvents({
-                      streamEvent,
-                      runId,
-                      parentActionCallId: actionCallId,
-                      trace: ctx.trace,
-                      emittedCalls: projectedToolCalls,
-                      emittedResults: projectedToolResults,
-                      toolNames: projectedToolNames,
                     });
                   }
-                  const eventType = typeof streamEvent.type === "string"
-                    ? streamEvent.type
-                    : "";
-                  if (eventType === "response.output_text.delta") {
-                    sawDelta = true;
-                    const delta = typeof streamEvent.delta === "string"
-                      ? streamEvent.delta
-                      : "";
-                    if (delta) wrappedOnStreamText(delta);
-                  } else if (
-                    eventType === "response.output_text.done" && !sawDelta
-                  ) {
-                    const text = typeof streamEvent.text === "string"
-                      ? streamEvent.text
-                      : "";
-                    if (text) wrappedOnStreamText(text);
-                  }
+                  projectStreamToolTraceEvents({
+                    streamEvent,
+                    runId,
+                    parentActionCallId: actionCallId,
+                    trace: ctx.trace,
+                    emittedCalls: projectedToolCalls,
+                    emittedResults: projectedToolResults,
+                    toolNames: projectedToolNames,
+                  });
                 }
-                : undefined,
-          });
-          responseOutputItems = validateResponseOutputItems(
-            response.output ?? [],
-            validateResponseItemEmission,
-            "response.output",
-          );
-          const mapped = mapResponseOutput(responseOutputItems);
-          return {
-            message: mapped.message,
-            finishReason: mapped.toolCalls?.length ? "tool_calls" : "stop",
-            toolCalls: mapped.toolCalls,
-            usage: response.usage,
-            updatedState: response.updatedState,
-          };
-        })()
-        : await modelProvider.chat({
-          model,
-          messages,
-          tools,
-          stream: ctx.stream,
-          state: ctx.state,
-          deckPath: deck.path,
-          signal: ctx.signal,
-          params: providerParams,
-          onStreamText: (ctx.onStreamText || deck.handlers?.onIdle)
-            ? wrappedOnStreamText
-            : undefined,
-          onStreamEvent: ctx.trace
-            ? (event) => {
-              const streamEvent = canonicalizeStreamEvent(event);
-              if (!streamEvent) return;
-              const handledAsResponse = traceOpenResponsesStreamEvent({
-                streamEvent,
-                runId,
-                actionCallId,
-                deckPath: deck.path,
-                model,
-                parentActionCallId: ctx.parentActionCallId,
-                trace: ctx.trace,
-              });
-              if (!handledAsResponse) {
-                ctx.trace?.({
-                  type: "model.stream.event",
-                  runId,
-                  actionCallId,
-                  deckPath: deck.path,
-                  model,
-                  event: streamEvent,
-                  parentActionCallId: ctx.parentActionCallId,
-                });
+                const eventType = typeof streamEvent.type === "string"
+                  ? streamEvent.type
+                  : "";
+                if (eventType === "response.output_text.delta") {
+                  sawDelta = true;
+                  const delta = typeof streamEvent.delta === "string"
+                    ? streamEvent.delta
+                    : "";
+                  if (delta) wrappedOnStreamText(delta);
+                } else if (
+                  eventType === "response.output_text.done" && !sawDelta
+                ) {
+                  const text = typeof streamEvent.text === "string"
+                    ? streamEvent.text
+                    : "";
+                  if (text) wrappedOnStreamText(text);
+                }
               }
-              projectStreamToolTraceEvents({
-                streamEvent,
-                runId,
-                parentActionCallId: actionCallId,
-                trace: ctx.trace,
-                emittedCalls: projectedToolCalls,
-                emittedResults: projectedToolResults,
-                toolNames: projectedToolNames,
-              });
-            }
-            : undefined,
+              : undefined,
         });
+        responseOutputItems = validateResponseOutputItems(
+          response.output ?? [],
+          validateResponseItemEmission,
+          "response.output",
+        );
+        const mapped = mapResponseOutput(responseOutputItems);
+        return {
+          message: mapped.message,
+          finishReason: mapped.toolCalls?.length ? "tool_calls" : "stop",
+          toolCalls: mapped.toolCalls,
+          usage: response.usage,
+          updatedState: response.updatedState,
+        };
+      })();
       idleController.touch();
       let message = result.message;
       ctx.trace?.({
@@ -5030,6 +5041,7 @@ async function handleToolCall(
     runId: string;
     parentActionCallId?: string;
     modelProvider: ModelProvider;
+    modelResolver?: ModelResolver;
     defaultModel?: string;
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
@@ -5713,6 +5725,7 @@ async function handleToolCall(
           path: action.path,
           input: actionInput,
           modelProvider: ctx.modelProvider,
+          modelResolver: ctx.modelResolver,
           isRoot: false,
           guardrails: ctx.guardrails,
           depth: ctx.depth + 1,
@@ -5818,6 +5831,7 @@ async function handleToolCall(
         path: action.path,
         input: actionInput,
         modelProvider: ctx.modelProvider,
+        modelResolver: ctx.modelResolver,
         isRoot: false,
         guardrails: ctx.guardrails,
         depth: ctx.depth + 1,
@@ -5865,6 +5879,7 @@ async function handleToolCall(
         parentActionCallId: ctx.parentActionCallId,
         handlerPath: busyCfg!.path,
         modelProvider: ctx.modelProvider,
+        modelResolver: ctx.modelResolver,
         guardrails: ctx.guardrails,
         depth: ctx.depth,
         defaultModel: ctx.defaultModel,
@@ -5974,6 +5989,7 @@ async function handleToolCall(
           parentActionCallId: ctx.parentActionCallId,
           handlerPath: busyCfg.path,
           modelProvider: ctx.modelProvider,
+          modelResolver: ctx.modelResolver,
           guardrails: ctx.guardrails,
           depth: ctx.depth,
           defaultModel: ctx.defaultModel,
@@ -6073,6 +6089,7 @@ async function runBusyHandler(args: {
   parentActionCallId?: string;
   handlerPath: string;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   guardrails: Guardrails;
   depth: number;
   defaultModel?: string;
@@ -6112,6 +6129,7 @@ async function runBusyHandler(args: {
       path: args.handlerPath,
       input,
       modelProvider: args.modelProvider,
+      modelResolver: args.modelResolver,
       isRoot: false,
       guardrails: args.guardrails,
       depth: args.depth + 1,
@@ -6174,6 +6192,7 @@ function createIdleController(args: {
   runId: string;
   parentActionCallId?: string;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   defaultModel?: string;
   modelOverride?: string;
   trace?: (event: import("./types.ts").TraceEvent) => void;
@@ -6230,6 +6249,7 @@ function createIdleController(args: {
           runId: args.runId,
           parentActionCallId: args.parentActionCallId,
           modelProvider: args.modelProvider,
+          modelResolver: args.modelResolver,
           guardrails: args.guardrails,
           depth: args.depth,
           defaultModel: args.defaultModel,
@@ -6292,6 +6312,7 @@ async function runIdleHandler(args: {
   runId: string;
   parentActionCallId?: string;
   modelProvider: ModelProvider;
+  modelResolver?: ModelResolver;
   guardrails: Guardrails;
   depth: number;
   defaultModel?: string;
@@ -6329,6 +6350,7 @@ async function runIdleHandler(args: {
       path: args.handlerPath,
       input,
       modelProvider: args.modelProvider,
+      modelResolver: args.modelResolver,
       isRoot: false,
       guardrails: args.guardrails,
       depth: args.depth + 1,
@@ -6393,6 +6415,7 @@ async function maybeHandleError(args: {
     runId: string;
     parentActionCallId?: string;
     modelProvider: ModelProvider;
+    modelResolver?: ModelResolver;
     defaultModel?: string;
     modelOverride?: string;
     trace?: (event: import("./types.ts").TraceEvent) => void;
@@ -6437,6 +6460,7 @@ async function maybeHandleError(args: {
       path: handlerPath,
       input: envelopeInput,
       modelProvider: args.ctx.modelProvider,
+      modelResolver: args.ctx.modelResolver,
       isRoot: false,
       guardrails: args.ctx.guardrails,
       depth: args.ctx.depth + 1,

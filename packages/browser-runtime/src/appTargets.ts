@@ -1,6 +1,6 @@
 export type BrowserAppTargetName =
   | "boltfoundry-com"
-  | "bfdesktop"
+  | "workloop"
   | "gambit-serve";
 
 export type ManagedDevMode = "dev" | "ssr";
@@ -53,7 +53,7 @@ export function getDefaultBrowserBaseUrl(): string {
 
 const APP_TARGETS = {
   "boltfoundry-com": {},
-  "bfdesktop": {},
+  "workloop": {},
   "gambit-serve": {},
 } as const satisfies Record<
   BrowserAppTargetName,

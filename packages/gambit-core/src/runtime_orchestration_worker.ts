@@ -4,8 +4,8 @@ import type { NormalizedPermissionSet } from "./permissions.ts";
 import type {
   CreateResponseResponse,
   Guardrails,
-  ModelMessage,
   ModelProvider,
+  ModelResolver,
   ProviderTraceEvent,
   ResponseEvent,
   TraceEvent,
@@ -57,26 +57,6 @@ type RunStartMessage = {
   permissionCeiling: WirePermissionSet;
 };
 
-type ModelChatResultMessage = {
-  type: "model.chat.result";
-  requestId: string;
-  result: {
-    message: ModelMessage;
-    finishReason: "stop" | "tool_calls" | "length";
-    toolCalls?: Array<{
-      id: string;
-      name: string;
-      args: Record<string, unknown>;
-    }>;
-    updatedState?: SavedState;
-    usage?: {
-      promptTokens: number;
-      completionTokens: number;
-      totalTokens: number;
-    };
-  };
-};
-
 type ModelResponsesResultMessage = {
   type: "model.responses.result";
   requestId: string;
@@ -92,35 +72,20 @@ type ModelResolveResultMessage = {
   };
 };
 
-type ModelStreamMessage = {
-  type: "model.chat.stream";
-  requestId: string;
-  chunk: string;
-};
-
 type ModelResponsesEventMessage = {
   type: "model.responses.event";
   requestId: string;
   event: ResponseEvent;
 };
 
-type ModelTraceMessage =
-  | {
-    type: "model.chat.trace";
-    requestId: string;
-    event: ProviderTraceEvent;
-  }
-  | {
-    type: "model.responses.trace";
-    requestId: string;
-    event: ProviderTraceEvent;
-  };
+type ModelTraceMessage = {
+  type: "model.responses.trace";
+  requestId: string;
+  event: ProviderTraceEvent;
+};
 
 type ModelErrorMessage = {
-  type:
-    | "model.chat.error"
-    | "model.responses.error"
-    | "model.resolveModel.error";
+  type: "model.responses.error" | "model.resolveModel.error";
   requestId: string;
   error: {
     source?: string;
@@ -132,16 +97,14 @@ type ModelErrorMessage = {
 
 type ParentMessage =
   | RunStartMessage
-  | ModelChatResultMessage
   | ModelResponsesResultMessage
   | ModelResolveResultMessage
-  | ModelStreamMessage
   | ModelResponsesEventMessage
   | ModelTraceMessage
   | ModelErrorMessage;
 
 type PendingRequest = {
-  kind: "chat" | "responses" | "resolveModel";
+  kind: "responses" | "resolveModel";
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   onStreamText?: (chunk: string) => void;
@@ -238,49 +201,6 @@ function workerErrorPayload(err: unknown) {
 }
 
 const requestModelProvider: ModelProvider = {
-  chat(input) {
-    const requestId = randomId("model-chat");
-    const {
-      onStreamText,
-      onStreamEvent: _onStreamEvent,
-      onTraceEvent,
-      signal,
-      ...wireInput
-    } = input;
-    return new Promise<Awaited<ReturnType<ModelProvider["chat"]>>>(
-      (resolve, reject) => {
-        const onAbort = () => {
-          const pendingReq = clearPendingRequest(requestId);
-          if (!pendingReq) return;
-          pendingReq.reject(cancelError());
-          postBridgeMessage({
-            type: "model.request.cancel",
-            requestId,
-          });
-        };
-        if (signal?.aborted) {
-          reject(cancelError());
-          return;
-        }
-        pending.set(requestId, {
-          kind: "chat",
-          resolve: (value) =>
-            resolve(value as Awaited<ReturnType<ModelProvider["chat"]>>),
-          reject: (error) => reject(error),
-          onStreamText,
-          onTraceEvent,
-          signal,
-          onAbort,
-        });
-        if (signal) signal.addEventListener("abort", onAbort, { once: true });
-        postBridgeMessage({
-          type: "model.chat.request",
-          requestId,
-          input: wireInput,
-        });
-      },
-    );
-  },
   responses(input) {
     const requestId = randomId("model-responses");
     const { onStreamEvent, onTraceEvent, signal, ...wireInput } = input;
@@ -315,6 +235,9 @@ const requestModelProvider: ModelProvider = {
       });
     });
   },
+};
+
+const requestModelResolver: ModelResolver = {
   resolveModel(input) {
     const requestId = randomId("model-resolve");
     return new Promise<{ model: string; params?: Record<string, unknown> }>(
@@ -344,6 +267,7 @@ async function runOrchestration(msg: RunStartMessage): Promise<unknown> {
     inputProvided: msg.options.inputProvided,
     initialUserMessage: msg.options.initialUserMessage,
     modelProvider: requestModelProvider,
+    modelResolver: requestModelResolver,
     isRoot: msg.options.isRoot,
     guardrails: msg.options.guardrails,
     depth: msg.options.depth,
@@ -409,13 +333,6 @@ self.addEventListener("message", (event: MessageEvent<ParentMessage>) => {
     return;
   }
 
-  if (data.type === "model.chat.stream") {
-    const req = pending.get(data.requestId);
-    if (!req || req.kind !== "chat") return;
-    req.onStreamText?.(data.chunk);
-    return;
-  }
-
   if (data.type === "model.responses.event") {
     const req = pending.get(data.requestId);
     if (!req || req.kind !== "responses") return;
@@ -423,24 +340,10 @@ self.addEventListener("message", (event: MessageEvent<ParentMessage>) => {
     return;
   }
 
-  if (data.type === "model.chat.trace") {
-    const req = pending.get(data.requestId);
-    if (!req || req.kind !== "chat") return;
-    req.onTraceEvent?.(data.event);
-    return;
-  }
-
   if (data.type === "model.responses.trace") {
     const req = pending.get(data.requestId);
     if (!req || req.kind !== "responses") return;
     req.onTraceEvent?.(data.event);
-    return;
-  }
-
-  if (data.type === "model.chat.result") {
-    const req = clearPendingRequest(data.requestId);
-    if (!req || req.kind !== "chat") return;
-    req.resolve(data.result);
     return;
   }
 
@@ -459,7 +362,7 @@ self.addEventListener("message", (event: MessageEvent<ParentMessage>) => {
   }
 
   if (
-    data.type === "model.chat.error" || data.type === "model.responses.error" ||
+    data.type === "model.responses.error" ||
     data.type === "model.resolveModel.error"
   ) {
     const req = clearPendingRequest(data.requestId);

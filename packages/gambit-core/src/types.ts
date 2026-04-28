@@ -146,6 +146,7 @@ export type BaseDefinition = {
 export type DeckDefinition<Input = unknown> = BaseDefinition & {
   kind: "gambit.deck";
   modelParams?: ModelParams;
+  workloop?: unknown;
   tools?: ReadonlyArray<ExternalToolDefinition>;
   responseItemExtensions?: ReadonlyArray<ResponseItemExtensionDefinition>;
   handlers?: HandlersConfig;
@@ -633,7 +634,7 @@ export type ResponseEvent =
   };
 
 export type ModelProvider = {
-  responses?: (input: {
+  responses: (input: {
     request: CreateResponseRequest;
     state?: SavedState;
     deckPath?: string;
@@ -641,6 +642,9 @@ export type ModelProvider = {
     onStreamEvent?: (event: ResponseEvent) => void;
     onTraceEvent?: (event: ProviderTraceEvent) => void;
   }) => Promise<CreateResponseResponse>;
+};
+
+export type ModelResolver = {
   resolveModel?: (input: {
     model: string | Array<string>;
     params?: Record<string, unknown>;
@@ -648,38 +652,6 @@ export type ModelProvider = {
   }) => Promise<{
     model: string;
     params?: Record<string, unknown>;
-  }>;
-  chat: (input: {
-    model: string;
-    messages: Array<ModelMessage>;
-    tools?: Array<ToolDefinition>;
-    stream?: boolean;
-    state?: SavedState;
-    deckPath?: string;
-    signal?: AbortSignal;
-    onStreamText?: (chunk: string) => void;
-    onStreamEvent?: (event: Record<string, JSONValue>) => void;
-    onTraceEvent?: (event: ProviderTraceEvent) => void;
-    /**
-     * Provider-specific pass-through parameters (e.g. OpenAI chat completion
-     * fields like temperature/max_tokens).
-     */
-    params?: Record<string, unknown>;
-  }) => Promise<{
-    message: ModelMessage;
-    finishReason: "stop" | "tool_calls" | "length";
-    toolCalls?: Array<{
-      id: string;
-      name: string;
-      args: Record<string, JSONValue>;
-    }>;
-    updatedState?: SavedState;
-    usage?: {
-      promptTokens: number;
-      completionTokens: number;
-      totalTokens: number;
-      reasoningTokens?: number;
-    };
   }>;
 };
 

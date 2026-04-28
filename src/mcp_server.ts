@@ -40,7 +40,8 @@ const encoder = new TextEncoder();
 const MCP_ALLOW_MODELS_ENV = "GAMBIT_MCP_ALLOW_MODELS";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
-const DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
+const DEBUG_MCP_ENV = "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP";
+const LEGACY_DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
 const DEBUG_MCP_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
@@ -55,8 +56,10 @@ type ToolCatalog = {
 };
 
 function shouldDebugMcpBridge(): boolean {
-  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
-  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  for (const envName of [DEBUG_MCP_ENV, LEGACY_DEBUG_MCP_ENV]) {
+    const raw = Deno.env.get(envName)?.trim().toLowerCase();
+    if (raw === "1" || raw === "true" || raw === "yes") return true;
+  }
   return Boolean(debugMcpLogPath());
 }
 
@@ -242,28 +245,28 @@ function createMcpModelProvider(): ModelProvider {
   });
 
   return {
-    chat: async (input) => {
-      const model = input.model ?? "";
+    responses: async (input) => {
+      const model = input.request.model ?? "";
       if (model.startsWith("openrouter/")) {
         if (!openrouter) {
           throw new Error("OPENROUTER_API_KEY is required for openrouter/*");
         }
-        return await openrouter.chat(input);
+        return await openrouter.responses(input);
       }
       if (model.startsWith("google/")) {
         if (!google) {
           throw new Error("GOOGLE_API_KEY is required for google/*");
         }
-        return await google.chat(input);
+        return await google.responses(input);
       }
       if (model.startsWith("ollama/")) {
-        return await ollama.chat(input);
+        return await ollama.responses(input);
       }
       if (openrouter) {
-        return await openrouter.chat(input);
+        return await openrouter.responses(input);
       }
       if (google) {
-        return await google.chat(input);
+        return await google.responses(input);
       }
       throw new Error(
         "No model provider available for MCP deck execution. Set OPENROUTER_API_KEY or GOOGLE_API_KEY.",
@@ -281,11 +284,11 @@ async function runActionTool(input: {
   isError: boolean;
   text: string;
 }> {
-  const { isGambitEndSignal, runDeck } = await import(
+  const { isGambitEndSignal, runDeckResponses } = await import(
     "@bolt-foundry/gambit-core"
   );
-  const noModelProvider = {
-    chat: () => {
+  const noModelProvider: ModelProvider = {
+    responses: () => {
       throw new Error(
         "MCP action deck execution cannot invoke model-backed decks.",
       );
@@ -328,7 +331,7 @@ async function runActionTool(input: {
     }
   }
   try {
-    const result = await runDeck({
+    const result = await runDeckResponses({
       path: deckPath,
       input: input.args,
       inputProvided: true,
@@ -336,7 +339,9 @@ async function runActionTool(input: {
       isRoot: false,
     });
 
-    const payload = isGambitEndSignal(result) ? result.payload : result;
+    const payload = isGambitEndSignal(result.legacyResult)
+      ? result.legacyResult.payload
+      : result.legacyResult;
     const record = asRecord(payload);
     const status = typeof record.status === "number" ? record.status : 200;
     const isError = status >= 400;

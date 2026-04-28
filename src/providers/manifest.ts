@@ -25,10 +25,10 @@ export type ProviderRuntimeAuthStateSource = {
   path: string;
 };
 
-export type ProviderStorageAuthority = "bfdesktop";
+export type ProviderStorageAuthority = "workloop";
 
 export type ProviderAttachmentAuthority =
-  | "bfdesktop-mitm"
+  | "workloop-mitm"
   | "runtime-env-placeholder";
 
 export type ProviderDestinationScope = "declared-destinations";
@@ -108,8 +108,8 @@ bareAlias = "codex-cli"
 
 [auth]
 mode = "chatgpt-auth-tokens"
-storageAuthority = "bfdesktop"
-attachmentAuthority = "bfdesktop-mitm"
+storageAuthority = "workloop"
+attachmentAuthority = "workloop-mitm"
 destinationScope = "declared-destinations"
 
 [[destinations]]
@@ -144,7 +144,7 @@ routingPrefix = "openrouter/"
 
 [auth]
 mode = "secret"
-storageAuthority = "bfdesktop"
+storageAuthority = "workloop"
 attachmentAuthority = "runtime-env-placeholder"
 destinationScope = "declared-destinations"
 
@@ -165,13 +165,13 @@ function isSupportedProviderKey(value: string): value is ProviderKey {
 function isSupportedStorageAuthority(
   value: string,
 ): value is ProviderStorageAuthority {
-  return value === "bfdesktop";
+  return value === "workloop";
 }
 
 function isSupportedAttachmentAuthority(
   value: string,
 ): value is ProviderAttachmentAuthority {
-  return value === "bfdesktop-mitm" || value === "runtime-env-placeholder";
+  return value === "workloop-mitm" || value === "runtime-env-placeholder";
 }
 
 function isSupportedDestinationScope(

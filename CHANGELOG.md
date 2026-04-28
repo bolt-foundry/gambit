@@ -1,15 +1,38 @@
 +++
 [release]
-since = "71cdddc2e7c84e60f9ec674ffea7dfb600a6fc86"
+since = "b6ed5a3a8d6a9b272ce520d885d3953d27c2c0d4"
 +++
 
 # Changelog
 
-## Unreleased (v0.8.7)
+## Unreleased
+
+- TBD
+
+## v1.0.0-rc.1
+
+- BREAKING: make Gambit runtime execution Responses-only.
+- BREAKING: remove provider `chat` and provider-owned `resolveModel` from the
+  public `ModelProvider` contract.
+- feat(gambit): add `runDeckResponses` as the canonical structured runtime
+  entrypoint with response output items, trace evidence, saved state, usage,
+  finish reason, effects, and a legacy fallback result.
+- feat(gambit): add separate `ModelResolver` plumbing for model alias and
+  provider fallback resolution.
+- feat(gambit): migrate core runtime, action recursion, MCP, OpenAI
+  compatibility, CLI/TUI, simulator workspace flows, website FAQ chat, and
+  Workloop completion projection to Responses-shaped execution.
+
+## v0.8.7
 
 - TBD
 
 ## v0.8.6
+
+- fix(gambit): preserve spaces when flattening structured text parts
+- fix(gambit-release): repair local compile preflight for nested core packages
+
+## v0.8.6-rc.7
 
 - TBD
 

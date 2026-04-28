@@ -842,6 +842,7 @@ export async function loadMarkdownDeck(
     ),
     cards: allCards,
     label: deckMeta.label,
+    workloop: deckMeta.workloop,
     startMode: deckMeta.startMode,
     modelParams: deckMeta.modelParams,
     guardrails: deckMeta.guardrails,
