@@ -127,7 +127,7 @@ any `ModelProvider` implementation; the OpenRouter adapter lives in
 `@bolt-foundry/gambit`.
 
 ```
-import { runDeck } from "jsr:@bolt-foundry/gambit-core";
+import { runDeckResponses } from "jsr:@bolt-foundry/gambit-core";
 import { createOpenRouterProvider } from "jsr:@bolt-foundry/gambit";
 
 const provider = createOpenRouterProvider({
@@ -136,7 +136,7 @@ const provider = createOpenRouterProvider({
   title: "My Gambit Runner",
 });
 
-const result = await runDeck({
+const result = await runDeckResponses({
   path: "./hello.deck.ts",
   input: { user: "Casey" },
   modelProvider: provider,
@@ -146,7 +146,7 @@ const result = await runDeck({
   onStreamText: (chunk) => Deno.stdout.write(new TextEncoder().encode(chunk)),
 });
 
-console.log(result);
+console.log(result.output);
 ```
 
 When the deck defines `run`/`execute`, the runtime hands you an

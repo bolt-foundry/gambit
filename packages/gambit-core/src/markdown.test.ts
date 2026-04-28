@@ -33,6 +33,34 @@ label = "builtin-snippets"
   assertStringIncludes(deck.body ?? "", "gambit_respond");
 });
 
+Deno.test("markdown deck preserves workloop metadata", async () => {
+  const dir = await Deno.makeTempDir();
+
+  const deckPath = await writeTempDeck(
+    dir,
+    "workloop-metadata.deck.md",
+    `+++
+label = "workloop-metadata"
+
+[workloop]
+defaultTools = false
+
+[workloop.tools]
+browser = true
++++
+
+Body.
+`,
+  );
+
+  const deck = await loadMarkdownDeck(deckPath);
+
+  assertEquals(deck.workloop, {
+    defaultTools: false,
+    tools: { browser: true },
+  });
+});
+
 Deno.test("markdown deck resolves scenario participant snippet embed", async () => {
   const dir = await Deno.makeTempDir();
 

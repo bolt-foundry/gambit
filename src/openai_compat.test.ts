@@ -2,7 +2,11 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import * as path from "@std/path";
 import { chatCompletionsWithDeck } from "../mod.ts";
 import { logger as openaiLogger } from "./openai_compat.ts";
-import type { ModelProvider, ToolDefinition } from "@bolt-foundry/gambit-core";
+import type {
+  ModelProvider,
+  ResponseItem,
+  ToolDefinition,
+} from "@bolt-foundry/gambit-core";
 
 function modImportPath() {
   const here = path.dirname(path.fromFileUrl(import.meta.url));
@@ -28,6 +32,23 @@ async function writeTempDeck(dir: string, filename: string, contents: string) {
   return target;
 }
 
+function modelResponse(output: Array<ResponseItem>) {
+  return Promise.resolve({
+    id: "test-response",
+    object: "response" as const,
+    status: "completed" as const,
+    output,
+  });
+}
+
+function assistantText(text: string): ResponseItem {
+  return {
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text }],
+  };
+}
+
 Deno.test("chatCompletionsWithDeck returns an OpenAI-shaped response", async () => {
   const dir = await Deno.makeTempDir();
   const modHref = modImportPath();
@@ -47,14 +68,12 @@ Deno.test("chatCompletionsWithDeck returns an OpenAI-shaped response", async () 
 
   let sawSystem = false;
   const provider: ModelProvider = {
-    chat(input) {
-      sawSystem = input.messages.some((m) =>
-        m.role === "system" && m.content?.includes("You are concise.")
+    responses(input) {
+      sawSystem = input.request.input.some((item) =>
+        item.type === "message" && item.role === "system" &&
+        item.content.some((part) => part.text.includes("You are concise."))
       );
-      return Promise.resolve({
-        message: { role: "assistant", content: "ok" },
-        finishReason: "stop",
-      });
+      return modelResponse([assistantText("ok")]);
     },
   };
 
@@ -100,17 +119,15 @@ Deno.test("chatCompletionsWithDeck warns on mismatched system message and still 
   try {
     let sawDeckSystem = false;
     const provider: ModelProvider = {
-      chat(input) {
-        const systemMessages = input.messages.filter((m) =>
-          m.role === "system"
+      responses(input) {
+        const systemMessages = input.request.input.filter((item) =>
+          item.type === "message" && item.role === "system"
         );
-        sawDeckSystem = systemMessages.some((m) =>
-          m.content === "Deck system prompt."
+        sawDeckSystem = systemMessages.some((item) =>
+          item.type === "message" &&
+          item.content.some((part) => part.text === "Deck system prompt.")
         );
-        return Promise.resolve({
-          message: { role: "assistant", content: "ok" },
-          finishReason: "stop",
-        });
+        return modelResponse([assistantText("ok")]);
       },
     };
 
@@ -170,33 +187,28 @@ Deno.test("chatCompletionsWithDeck executes deck tool calls and continues", asyn
 
   let callCount = 0;
   let secondCallSawToolResult = false;
+  let secondCallSawFunctionCall = false;
   const provider: ModelProvider = {
-    chat(input) {
+    responses(input) {
       callCount++;
       if (callCount === 1) {
-        return Promise.resolve({
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: { name: "child", arguments: '{"text":"hi"}' },
-            }],
-          },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "call-1", name: "child", args: { text: "hi" } }],
-        });
+        return modelResponse([{
+          type: "function_call",
+          call_id: "call-1",
+          name: "child",
+          arguments: '{"text":"hi"}',
+        }]);
       }
-      secondCallSawToolResult = input.messages.some((m) =>
-        m.role === "tool" && m.name === "child" &&
-        m.tool_call_id === "call-1" &&
-        m.content === "child:hi"
+      secondCallSawFunctionCall = input.request.input.some((item) =>
+        item.type === "function_call" && item.call_id === "call-1" &&
+        item.name === "child" && item.arguments === '{"text":"hi"}'
       );
-      return Promise.resolve({
-        message: { role: "assistant", content: "done" },
-        finishReason: "stop",
-      });
+      secondCallSawToolResult = input.request.input.some((item) =>
+        item.type === "function_call_output" &&
+        item.call_id === "call-1" &&
+        item.output === "child:hi"
+      );
+      return modelResponse([assistantText("done")]);
     },
   };
 
@@ -210,6 +222,7 @@ Deno.test("chatCompletionsWithDeck executes deck tool calls and continues", asyn
   });
 
   assertEquals(callCount, 2);
+  assertEquals(secondCallSawFunctionCall, true);
   assertEquals(secondCallSawToolResult, true);
   assertEquals(resp.choices[0].message.content, "done");
   assertEquals(resp.choices[0].finish_reason, "stop");
@@ -247,21 +260,14 @@ Deno.test("chatCompletionsWithDeck returns external tool calls without executing
 
   let calls = 0;
   const provider: ModelProvider = {
-    chat() {
+    responses() {
       calls++;
-      return Promise.resolve({
-        message: {
-          role: "assistant",
-          content: null,
-          tool_calls: [{
-            id: "ext-1",
-            type: "function",
-            function: { name: "external_tool", arguments: '{"x":1}' },
-          }],
-        },
-        finishReason: "tool_calls",
-        toolCalls: [{ id: "ext-1", name: "external_tool", args: { x: 1 } }],
-      });
+      return modelResponse([{
+        type: "function_call",
+        call_id: "ext-1",
+        name: "external_tool",
+        arguments: '{"x":1}',
+      }]);
     },
   };
 
@@ -315,7 +321,7 @@ Deno.test("chatCompletionsWithDeck rejects tool name collisions", async () => {
   );
 
   const provider: ModelProvider = {
-    chat() {
+    responses() {
       throw new Error("should not be called");
     },
   };
@@ -380,32 +386,23 @@ Deno.test("chatCompletionsWithDeck action calls inherit root permission denials"
   let pass = 0;
   let toolPayload = "";
   const provider: ModelProvider = {
-    chat(input) {
+    responses(input) {
       pass++;
       if (pass === 1) {
-        return Promise.resolve({
-          message: {
-            role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: { name: "child", arguments: "{}" },
-            }],
-          },
-          finishReason: "tool_calls",
-          toolCalls: [{ id: "call-1", name: "child", args: {} }],
-        });
+        return modelResponse([{
+          type: "function_call",
+          call_id: "call-1",
+          name: "child",
+          arguments: "{}",
+        }]);
       }
-      toolPayload = String(
-        input.messages.find((message) =>
-          message.role === "tool" && message.name === "child"
-        )?.content ?? "",
+      const outputItem = input.request.input.find((item) =>
+        item.type === "function_call_output" && item.call_id === "call-1"
       );
-      return Promise.resolve({
-        message: { role: "assistant", content: "done" },
-        finishReason: "stop",
-      });
+      toolPayload = outputItem?.type === "function_call_output"
+        ? outputItem.output
+        : "";
+      return modelResponse([assistantText("done")]);
     },
   };
 

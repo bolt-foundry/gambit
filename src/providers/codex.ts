@@ -9,9 +9,11 @@ import type {
   ResponseEvent,
   ResponseItem,
   ResponseMessageItem,
+  ResponseToolDefinition,
   SavedState,
+  ToolDefinition,
 } from "@bolt-foundry/gambit-core";
-import { loadDeck } from "@bolt-foundry/gambit-core";
+import { joinTextParts, loadDeck } from "@bolt-foundry/gambit-core";
 import type { CodexChatgptAuthTokens } from "../codex_auth.ts";
 import { logCodexAppServerDebug } from "../codex_app_server_debug.ts";
 import { ensureTempMcpDenoConfigSync } from "../mcp_deno_config.ts";
@@ -33,7 +35,8 @@ const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
 const MCP_DEBUG_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
 const DENO_DIR_ENV = "DENO_DIR";
-const DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
+const DEBUG_MCP_ENV = "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP";
+const LEGACY_DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
 const MCP_SERVER_PATH = (() => {
   try {
     const moduleUrl = new URL(import.meta.url);
@@ -81,6 +84,7 @@ type CodexAssistantMessage = {
 type AppServerTurnRunnerInput = {
   model: string;
   messages: Array<ModelMessage>;
+  tools?: Array<ToolDefinition>;
   state?: SavedState;
   params?: Record<string, unknown>;
   deckPath?: string;
@@ -184,8 +188,22 @@ function shouldEnableMcpBridge(): boolean {
 }
 
 function shouldDebugMcpBridge(): boolean {
-  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
+  return [DEBUG_MCP_ENV, LEGACY_DEBUG_MCP_ENV].some((envName) => {
+    const raw = Deno.env.get(envName)?.trim().toLowerCase();
+    return raw === "1" || raw === "true" || raw === "yes";
+  });
+}
+
+function isCodexNativeOrGambitBuiltinTool(name: string): boolean {
+  return new Set([
+    "apply_patch",
+    "exec",
+    "gambit_consume_async_action",
+    "gambit_emit_output_item",
+    "grep_files",
+    "list_dir",
+    "read_file",
+  ]).has(name);
 }
 
 function logCodexMcpDebug(
@@ -500,6 +518,7 @@ function codexConfigArgs(input: {
 
 async function prepareCodexMcpRootDeck(input: {
   deckPath?: string;
+  tools?: Array<ToolDefinition>;
 }): Promise<{
   deckPath?: string;
   cleanup?: () => Promise<void>;
@@ -513,7 +532,19 @@ async function prepareCodexMcpRootDeck(input: {
     return {};
   }
   const deck = await loadDeck(rootDeckPath);
-  if (deck.actionDecks.length === 0) {
+  const deckActionNames = new Set(
+    deck.actionDecks.map((action) => action.name),
+  );
+  const deckToolNames = new Set(deck.tools.map((tool) => tool.name));
+  const extraExternalTools = (input.tools ?? [])
+    .map((tool) => tool.function)
+    .filter((tool) =>
+      tool &&
+      !isCodexNativeOrGambitBuiltinTool(tool.name) &&
+      !deckActionNames.has(tool.name) &&
+      !deckToolNames.has(tool.name)
+    );
+  if (deck.actionDecks.length === 0 && extraExternalTools.length === 0) {
     logCodexMcpDebug("prepareRootDeck:reuseOriginal", {
       actionCount: 0,
       deckPath: rootDeckPath,
@@ -553,15 +584,32 @@ async function prepareCodexMcpRootDeck(input: {
     }
     frontmatter.push("");
   }
+  for (const externalTool of extraExternalTools) {
+    frontmatter.push("[[tools]]");
+    frontmatter.push(`name = ${tomlString(externalTool.name)}`);
+    if (
+      typeof externalTool.description === "string" &&
+      externalTool.description.trim()
+    ) {
+      frontmatter.push(
+        `description = ${tomlString(externalTool.description.trim())}`,
+      );
+    }
+    frontmatter.push("");
+  }
   frontmatter.push("+++", "", "Codex MCP tool surface.");
   await Deno.writeTextFile(tempDeckPath, frontmatter.join("\n"));
   logCodexMcpDebug("prepareRootDeck:synthesized", {
     actionCount: deck.actionDecks.length,
     actionNames: deck.actionDecks.map((action) => action.name),
+    extraToolNames: extraExternalTools.map((tool) => tool.name),
     rootDeckPath,
     synthesizedDeckPath: tempDeckPath,
-    toolCount: deck.tools.length,
-    toolNames: deck.tools.map((tool) => tool.name),
+    toolCount: deck.tools.length + extraExternalTools.length,
+    toolNames: [
+      ...deck.tools.map((tool) => tool.name),
+      ...extraExternalTools.map((tool) => tool.name),
+    ],
   });
   return {
     deckPath: tempDeckPath,
@@ -1624,7 +1672,7 @@ function extractTextParts(value: JSONValue | undefined): Array<string> {
 function extractCodexItemText(record: Record<string, JSONValue>): string {
   return typeof record.text === "string"
     ? record.text
-    : extractTextParts(record.content).join("");
+    : joinTextParts(extractTextParts(record.content));
 }
 
 type CodexAssistantStreamState = {
@@ -1770,7 +1818,7 @@ function emitCodexReasoningEvents(input: {
   if (payloadType === "item.delta") {
     const deltaText = typeof record.text === "string"
       ? record.text
-      : extractTextParts(record.content).join("");
+      : joinTextParts(extractTextParts(record.content));
     if (deltaText) {
       input.emit({
         type: "response.reasoning.delta",
@@ -1785,7 +1833,7 @@ function emitCodexReasoningEvents(input: {
   if (payloadType === "item.completed" || payloadType === "item.done") {
     const doneText = typeof record.text === "string"
       ? record.text
-      : extractTextParts(record.content).join("");
+      : joinTextParts(extractTextParts(record.content));
     input.emit({
       type: "response.reasoning.done",
       output_index: outputIndex,
@@ -1887,7 +1935,7 @@ function responseItemsToChatMessages(
   }
   for (const item of items) {
     if (item.type === "message") {
-      const content = item.content.map((part) => part.text).join("");
+      const content = joinTextParts(item.content.map((part) => part.text));
       messages.push({ role: item.role, content });
       continue;
     }
@@ -2188,10 +2236,34 @@ export function createCodexProvider(opts?: {
   runAppServerTurn?: AppServerTurnRunner;
 }): ModelProvider {
   const runAppServerTurn = opts?.runAppServerTurn ?? defaultAppServerTurnRunner;
+  type LegacyChatInput = {
+    model: string;
+    messages: Array<ModelMessage>;
+    stream?: boolean;
+    state?: SavedState;
+    deckPath?: string;
+    signal?: AbortSignal;
+    onStreamText?: (chunk: string) => void;
+    onStreamEvent?: (event: Record<string, JSONValue>) => void;
+    onTraceEvent?: (event: ProviderTraceEvent) => void;
+    params?: Record<string, unknown>;
+    tools?: Array<ResponseToolDefinition>;
+  };
+  type LegacyChatResult = {
+    message: ModelMessage;
+    finishReason: "stop" | "tool_calls" | "length";
+    updatedState?: SavedState;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+      reasoningTokens?: number;
+    };
+  };
   const runCodexTurn = async (
-    input: Parameters<NonNullable<ModelProvider["chat"]>>[0],
+    input: LegacyChatInput,
   ): Promise<
-    Awaited<ReturnType<NonNullable<ModelProvider["chat"]>>> & {
+    LegacyChatResult & {
       assistantMessages: Array<CodexAssistantMessage>;
       rawResponseItems: Array<ResponseItem>;
     }
@@ -2239,11 +2311,13 @@ export function createCodexProvider(opts?: {
     const cwd = codexRunCwd({ deckPath: input.deckPath });
     const preparedMcpRoot = await prepareCodexMcpRootDeck({
       deckPath: input.deckPath,
+      tools: input.tools,
     });
     try {
       const result = await runAppServerTurn({
         model: input.model,
         messages: input.messages,
+        tools: input.tools,
         state: input.state,
         params: input.params,
         deckPath: preparedMcpRoot.deckPath ?? input.deckPath,
@@ -2255,9 +2329,9 @@ export function createCodexProvider(opts?: {
         cwd,
         priorThreadId,
       });
-      const assistantText = result.assistantMessages.map((message) =>
-        message.text
-      ).join("");
+      const assistantText = joinTextParts(
+        result.assistantMessages.map((message) => message.text),
+      );
       if (
         input.stream && input.onStreamText && assistantText &&
         !assistantState.sawAssistantTextStream
@@ -2284,16 +2358,6 @@ export function createCodexProvider(opts?: {
       await preparedMcpRoot.cleanup?.();
     }
   };
-  const runChat: ModelProvider["chat"] = async (input) => {
-    const result = await runCodexTurn(input);
-    return {
-      message: result.message,
-      finishReason: result.finishReason,
-      updatedState: result.updatedState,
-      usage: result.usage,
-    };
-  };
-
   return {
     async responses(input: {
       request: CreateResponseRequest;
@@ -2335,6 +2399,7 @@ export function createCodexProvider(opts?: {
           input.request.input,
           input.request.instructions,
         ),
+        tools: input.request.tools,
         stream: input.request.stream,
         params: input.request.params,
         state: input.state,
@@ -2463,7 +2528,6 @@ export function createCodexProvider(opts?: {
       }
       return response;
     },
-    chat: runChat,
   };
 }
 

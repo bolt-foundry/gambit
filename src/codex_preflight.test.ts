@@ -1,6 +1,10 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import {
+  CODEX_HOST_AUTH_BUNDLE_ENV,
+  LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV,
+} from "./codex_auth.ts";
+import {
   MINIMUM_SUPPORTED_CODEX_CLI_VERSION,
   readCodexLoginStatus,
 } from "./codex_preflight.ts";
@@ -18,7 +22,7 @@ fi
 
 Deno.test("codex preflight uses app-server account state when host auth bundle is present", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-app-server-",
   });
@@ -73,7 +77,7 @@ done
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.set(
-    "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE",
+    CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
       accessToken: "preflight-access-token",
       refreshToken: "refresh-token",
@@ -98,9 +102,9 @@ done
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -108,7 +112,7 @@ done
 
 Deno.test("codex preflight responds to app-server refresh RPCs before account/read completes", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-refresh-rpc-",
   });
@@ -169,7 +173,7 @@ done
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.set(
-    "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE",
+    CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
       accessToken: "preflight-access-token",
       refreshToken: "refresh-token",
@@ -211,9 +215,9 @@ done
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -221,7 +225,7 @@ done
 
 Deno.test("codex preflight treats host auth bootstrap as ready even when account/read still reports requires auth", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-requires-auth-",
   });
@@ -276,7 +280,7 @@ done
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.set(
-    "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE",
+    CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
       accessToken: "preflight-access-token",
       refreshToken: "refresh-token",
@@ -301,9 +305,9 @@ done
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -311,7 +315,7 @@ done
 
 Deno.test("codex preflight does not mark login ready when account/read requires auth and returns no account id", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-requires-auth-no-account-",
   });
@@ -366,7 +370,7 @@ done
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.set(
-    "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE",
+    CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
       accessToken: "preflight-access-token",
       refreshToken: "refresh-token",
@@ -391,9 +395,9 @@ done
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -401,7 +405,8 @@ done
 
 Deno.test("codex preflight falls back to login status when no host auth bundle is present", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
+  const priorLegacyBundle = Deno.env.get(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({ prefix: "codex-preflight-legacy-" });
   const fakeCodexPath = join(root, "fake-codex");
 
@@ -420,7 +425,8 @@ exit 64
   await Deno.chmod(fakeCodexPath, 0o755);
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
-  Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
+  Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
 
   try {
     const status = await readCodexLoginStatus();
@@ -433,9 +439,14 @@ exit 64
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    if (priorLegacyBundle == null) {
+      Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
+    } else {
+      Deno.env.set(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV, priorLegacyBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -443,7 +454,8 @@ exit 64
 
 Deno.test("codex preflight rejects unsupported codex cli versions before login checks", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
+  const priorLegacyBundle = Deno.env.get(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-unsupported-version-",
   });
@@ -464,7 +476,8 @@ exit 64
   await Deno.chmod(fakeCodexPath, 0o755);
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
-  Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
+  Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
 
   try {
     const status = await readCodexLoginStatus();
@@ -482,9 +495,14 @@ exit 64
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    if (priorLegacyBundle == null) {
+      Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
+    } else {
+      Deno.env.set(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV, priorLegacyBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
@@ -492,11 +510,11 @@ exit 64
 
 Deno.test("codex preflight returns a normal failure when host auth is present but Codex CLI is missing", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
-  const priorBundle = Deno.env.get("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
 
   Deno.env.set("GAMBIT_CODEX_BIN", "/definitely/missing/codex-binary");
   Deno.env.set(
-    "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE",
+    CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
       accessToken: "access-token",
       refreshToken: "refresh-token",
@@ -518,9 +536,9 @@ Deno.test("codex preflight returns a normal failure when host auth is present bu
       Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
     }
     if (priorBundle == null) {
-      Deno.env.delete("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE");
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
-      Deno.env.set("BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE", priorBundle);
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
   }
 });

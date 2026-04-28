@@ -1,4 +1,8 @@
-import { isGambitEndSignal, runDeck } from "@bolt-foundry/gambit-core";
+import {
+  isGambitEndSignal,
+  runDeckResponses,
+  stringifyResponseOutput,
+} from "@bolt-foundry/gambit-core";
 import type { SavedState } from "@bolt-foundry/gambit-core";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import * as path from "@std/path";
@@ -219,7 +223,7 @@ export async function startTui(opts: {
       const effectiveInput = deckInput === undefined && !providedFlag
         ? ""
         : deckInput;
-      const result = await runDeck({
+      const result = await runDeckResponses({
         path: opts.deckPath,
         input: effectiveInput,
         inputProvided: providedFlag,
@@ -253,10 +257,13 @@ export async function startTui(opts: {
           updateAssistant(chunk);
         },
       });
-      const formatted = formatDisplay(result);
-      if (isGambitEndSignal(result)) {
-        const endMessage = result.message ??
-          (typeof result.payload === "string" ? result.payload : formatted);
+      const outputText = stringifyResponseOutput(result.output);
+      const formatted = outputText || formatDisplay(result.legacyResult);
+      if (isGambitEndSignal(result.legacyResult)) {
+        const endMessage = result.legacyResult.message ??
+          (typeof result.legacyResult.payload === "string"
+            ? result.legacyResult.payload
+            : formatted);
         if (streamed) {
           updateAssistant(
             (messages[messages.length - 1]?.text.endsWith("\n") ? "" : "\n") +

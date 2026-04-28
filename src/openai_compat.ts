@@ -2,10 +2,12 @@ import * as path from "@std/path";
 import {
   assertZodSchema,
   DEFAULT_GUARDRAILS,
+  joinTextParts,
   loadDeck,
   RESERVED_TOOL_PREFIX,
   resolveEffectivePermissions,
-  runDeck,
+  runDeckResponses,
+  stringifyResponseOutput,
   toJsonSchema,
 } from "@bolt-foundry/gambit-core";
 import type {
@@ -15,6 +17,7 @@ import type {
   ModelProvider,
   PermissionDeclarationInput,
   PermissionTrace,
+  ResponseItem,
   ToolDefinition,
 } from "@bolt-foundry/gambit-core";
 
@@ -83,9 +86,11 @@ function normalizeContent(
   if (content === null) return null;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return String(content);
-  return content
-    .map((c) => (typeof c === "string" ? c : (c.text ?? "")))
-    .join("");
+  return joinTextParts(
+    content
+      .map((c) => (typeof c === "string" ? c : (c.text ?? "")))
+      .filter(Boolean),
+  );
 }
 
 function normalizeMessages(
@@ -100,6 +105,100 @@ function normalizeMessages(
       ? m.tool_calls
       : undefined,
   }));
+}
+
+function responseItemsFromMessages(
+  messages: Array<ModelMessage>,
+): Array<ResponseItem> {
+  return messages.flatMap((message) => {
+    if (message.role === "tool") {
+      return [{
+        type: "function_call_output",
+        call_id: message.tool_call_id ?? randomId("tool"),
+        output: message.content ?? "",
+      }];
+    }
+    const items: Array<ResponseItem> = [];
+    if (message.content) {
+      items.push({
+        type: "message",
+        role: message.role,
+        content: [{
+          type: message.role === "assistant" ? "output_text" : "input_text",
+          text: message.content,
+        }],
+      });
+    }
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      for (const toolCall of message.tool_calls) {
+        items.push({
+          type: "function_call",
+          call_id: toolCall.id,
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments,
+        });
+      }
+    }
+    if (items.length) return items;
+    return {
+      type: "message",
+      role: message.role,
+      content: [],
+    };
+  });
+}
+
+function responseOutputToChatResult(output: Array<ResponseItem>): {
+  message: ModelMessage;
+  finishReason: "stop" | "tool_calls" | "length";
+  toolCalls?: Array<
+    { id: string; name: string; args: Record<string, unknown> }
+  >;
+} {
+  const textParts: Array<string> = [];
+  const toolCalls: Array<
+    { id: string; name: string; args: Record<string, unknown> }
+  > = [];
+  for (const item of output) {
+    if (item.type === "message" && item.role === "assistant") {
+      for (const part of item.content) {
+        if (
+          part.type === "output_text" || part.type === "summary_text" ||
+          part.type === "reasoning_text"
+        ) {
+          textParts.push(part.text);
+        }
+      }
+    }
+    if (item.type === "function_call") {
+      let args: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(item.arguments || "{}");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>;
+        }
+      } catch {
+        args = {};
+      }
+      toolCalls.push({ id: item.call_id, name: item.name, args });
+    }
+  }
+  const message: ModelMessage = {
+    role: "assistant",
+    content: textParts.length ? joinTextParts(textParts) : null,
+    tool_calls: toolCalls.length
+      ? toolCalls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: JSON.stringify(call.args) },
+      }))
+      : undefined,
+  };
+  return {
+    message,
+    finishReason: toolCalls.length ? "tool_calls" : "stop",
+    toolCalls: toolCalls.length ? toolCalls : undefined,
+  };
 }
 
 function providerParamsFromRequest(
@@ -234,6 +333,19 @@ function warnIfSystemMismatch(args: {
 }
 
 function toolResultContent(result: unknown): string {
+  if (
+    result && typeof result === "object" &&
+    "legacyResult" in (result as Record<string, unknown>) &&
+    "output" in (result as Record<string, unknown>)
+  ) {
+    const text = stringifyResponseOutput(
+      (result as { output: Array<ResponseItem> }).output,
+    );
+    if (text) return text;
+    return toolResultContent(
+      (result as { legacyResult: unknown }).legacyResult,
+    );
+  }
   if (typeof result === "string") return result;
   try {
     return JSON.stringify(result);
@@ -334,15 +446,25 @@ export async function chatCompletionsWithDeck(args: {
         throw new Error("No model provided");
       })();
 
-    const result = await args.modelProvider.chat({
-      model,
-      messages,
-      tools: tools.length ? tools : undefined,
-      stream: Boolean(args.request.stream),
+    const response = await args.modelProvider.responses({
+      request: {
+        model,
+        input: responseItemsFromMessages(messages),
+        tools: tools.length ? tools : undefined,
+        stream: Boolean(args.request.stream),
+        params: providerParamsFromRequest(args.request),
+      },
       deckPath: deck.path,
-      onStreamText: args.onStreamText,
-      params: providerParamsFromRequest(args.request),
+      onStreamEvent: (event) => {
+        if (event.type === "response.output_text.delta") {
+          args.onStreamText?.(event.delta);
+        }
+      },
     });
+    const result = {
+      ...responseOutputToChatResult(response.output),
+      usage: response.usage,
+    };
 
     messages.push(result.message);
 
@@ -399,7 +521,7 @@ export async function chatCompletionsWithDeck(args: {
             type: "openai_compat.action.permissions",
             permissions: actionPermissions.trace,
           });
-          const childResult = await runDeck({
+          const childResult = await runDeckResponses({
             path: actionPath,
             input: call.args,
             modelProvider: args.modelProvider,

@@ -11,6 +11,24 @@ import {
 const leakTolerantTest = (name: string, fn: () => Promise<void> | void) =>
   Deno.test({ name, sanitizeOps: false, sanitizeResources: false, fn });
 
+function textProvider(getText: () => string): ModelProvider {
+  return {
+    responses() {
+      const text = getText();
+      return Promise.resolve({
+        id: "test-response",
+        object: "response",
+        status: "completed",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text }],
+        }],
+      });
+    },
+  };
+}
+
 leakTolerantTest(
   "scenario loop stamps scenario metadata and user message sources",
   async () => {
@@ -33,15 +51,10 @@ leakTolerantTest(
     await Deno.writeTextFile(scenarioDeckPath, deckSource);
 
     let callCount = 0;
-    const provider: ModelProvider = {
-      chat() {
-        callCount += 1;
-        return Promise.resolve({
-          message: { role: "assistant", content: `msg-${callCount}` },
-          finishReason: "stop",
-        });
-      },
-    };
+    const provider = textProvider(() => {
+      callCount += 1;
+      return `msg-${callCount}`;
+    });
 
     await runTestBotLoop({
       rootDeckPath,
@@ -104,14 +117,7 @@ leakTolerantTest(
       meta: {},
     });
 
-    const provider: ModelProvider = {
-      chat() {
-        return Promise.resolve({
-          message: { role: "assistant", content: "unused" },
-          finishReason: "stop",
-        });
-      },
-    };
+    const provider = textProvider(() => "unused");
 
     await runTestBotLoop({
       rootDeckPath,
@@ -153,16 +159,10 @@ leakTolerantTest(
     await Deno.writeTextFile(scenarioDeckPath, deckSource);
 
     let callCount = 0;
-    const provider: ModelProvider = {
-      chat() {
-        callCount += 1;
-        const content = callCount === 2 ? "   " : "assistant-turn";
-        return Promise.resolve({
-          message: { role: "assistant", content },
-          finishReason: "stop",
-        });
-      },
-    };
+    const provider = textProvider(() => {
+      callCount += 1;
+      return callCount === 2 ? "   " : "assistant-turn";
+    });
 
     await runTestBotLoop({
       rootDeckPath,

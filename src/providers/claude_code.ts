@@ -10,6 +10,7 @@ import type {
   ResponseMessageItem,
   SavedState,
 } from "@bolt-foundry/gambit-core";
+import { joinTextParts } from "@bolt-foundry/gambit-core";
 
 export const CLAUDE_CODE_PREFIX = "claude-code-cli/";
 export const CLAUDE_CODE_ALIAS = "claude-code-cli";
@@ -141,7 +142,7 @@ function extractAssistantTextFromClaudeMessage(
       if (text) parts.push(text);
     }
   }
-  return parts.join("").trim();
+  return joinTextParts(parts).trim();
 }
 
 function extractBestText(input: unknown): string | undefined {
@@ -500,7 +501,7 @@ function responseItemsToChatMessages(
   }
   for (const item of items) {
     if (item.type === "message") {
-      const content = item.content.map((part) => part.text).join("");
+      const content = joinTextParts(item.content.map((part) => part.text));
       messages.push({ role: item.role, content });
       continue;
     }
@@ -557,7 +558,30 @@ export function createClaudeCodeProvider(opts?: {
   runCommand?: CommandRunner;
 }): ModelProvider {
   const runCommand = opts?.runCommand ?? defaultCommandRunner;
-  const runChat: ModelProvider["chat"] = async (input) => {
+  type LegacyChatInput = {
+    model: string;
+    messages: Array<ModelMessage>;
+    stream?: boolean;
+    state?: SavedState;
+    deckPath?: string;
+    signal?: AbortSignal;
+    onStreamText?: (chunk: string) => void;
+    onStreamEvent?: (event: Record<string, JSONValue>) => void;
+    onTraceEvent?: (event: ProviderTraceEvent) => void;
+    params?: Record<string, unknown>;
+  };
+  type LegacyChatResult = {
+    message: ModelMessage;
+    finishReason: "stop" | "tool_calls" | "length";
+    updatedState?: SavedState;
+    usage?: {
+      promptTokens: number;
+      completionTokens: number;
+      totalTokens: number;
+      reasoningTokens?: number;
+    };
+  };
+  const runChat = async (input: LegacyChatInput): Promise<LegacyChatResult> => {
     if (input.signal?.aborted) {
       throw new DOMException("Run canceled", "AbortError");
     }
@@ -757,7 +781,6 @@ export function createClaudeCodeProvider(opts?: {
       }
       return response;
     },
-    chat: runChat,
   };
 }
 

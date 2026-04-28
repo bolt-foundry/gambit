@@ -8,8 +8,8 @@ bareAlias = "codex-cli"
 
 [auth]
 mode = "chatgpt-auth-tokens"
-storageAuthority = "bfdesktop"
-attachmentAuthority = "bfdesktop-mitm"
+storageAuthority = "workloop"
+attachmentAuthority = "workloop-mitm"
 destinationScope = "declared-destinations"
 
 [[destinations]]

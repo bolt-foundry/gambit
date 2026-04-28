@@ -3,6 +3,7 @@ import {
   parseWorkspaceRoute,
   WORKSPACE_ROUTE_BASE,
 } from "../../src/workspace_routes.ts";
+import { joinTextParts } from "@bolt-foundry/gambit-core";
 
 export type NormalizedSchema = {
   kind:
@@ -1328,7 +1329,7 @@ export function deriveBuildDisplayMessages(
       if (!partRecord) return "";
       return typeof partRecord.text === "string" ? partRecord.text : "";
     }).filter((part) => part.length > 0);
-    return textParts.join("");
+    return joinTextParts(textParts);
   };
 
   for (const trace of safeTraces) {
@@ -1437,12 +1438,12 @@ export function deriveBuildDisplayMessages(
     let text = "";
     const summary = item.summary;
     if (Array.isArray(summary)) {
-      text = summary.map((part) => {
+      text = joinTextParts(summary.map((part) => {
         const partRecord = asRecord(part);
         return partRecord && typeof partRecord.text === "string"
           ? partRecord.text
           : "";
-      }).join("");
+      }));
     } else if (typeof item.text === "string") {
       text = item.text;
     }
@@ -1573,10 +1574,10 @@ export function deriveReasoningByAssistant(
     const summary = item.summary;
     let text = "";
     if (Array.isArray(summary)) {
-      text = summary.map((part) => {
+      text = joinTextParts(summary.map((part) => {
         const partRecord = asRecord(part);
         return partRecord ? asString(partRecord.text) : "";
-      }).join("");
+      }));
     } else if (typeof summary === "string") {
       text = summary;
     } else if (typeof item.text === "string") {

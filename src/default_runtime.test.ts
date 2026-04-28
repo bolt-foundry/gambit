@@ -1,8 +1,12 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import * as path from "@std/path";
 import { existsSync } from "@std/fs";
-import type { ModelProvider } from "@bolt-foundry/gambit-core";
-import { createDefaultedRuntime, runDeck } from "./default_runtime.ts";
+import type { ModelProvider, ModelResolver } from "@bolt-foundry/gambit-core";
+import {
+  createDefaultedRuntime,
+  runDeck,
+  runDeckResponses,
+} from "./default_runtime.ts";
 
 type EnvPatch = Record<string, string | undefined>;
 
@@ -51,6 +55,27 @@ ${body}
   return deckPath;
 }
 
+function textProvider(
+  text: string,
+  onModel?: (model: string) => void,
+): ModelProvider {
+  return {
+    responses: (input) => {
+      onModel?.(input.request.model);
+      return Promise.resolve({
+        id: "test-response",
+        object: "response",
+        status: "completed",
+        output: [{
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text }],
+        }],
+      });
+    },
+  };
+}
+
 Deno.test({
   name:
     "default runtime provider resolves codex-cli and prefixed/fallback providers like CLI",
@@ -65,10 +90,10 @@ Deno.test({
     },
     async () => {
       const runtime = await createDefaultedRuntime();
-      const resolver = runtime.modelProvider.resolveModel;
+      const resolver = runtime.modelResolver.resolveModel;
       if (!resolver) {
         throw new Error(
-          "Expected runtime model provider to expose resolveModel",
+          "Expected runtime model resolver to expose resolveModel",
         );
       }
 
@@ -120,13 +145,7 @@ Deno.test({
       assertEquals(runtimeOverride.configuredFallbackProvider, null);
       assertEquals(runtimeOverride.responsesMode, true);
 
-      const perRunProvider: ModelProvider = {
-        chat: () =>
-          Promise.resolve({
-            message: { role: "assistant", content: "per-run" },
-            finishReason: "stop",
-          }),
-      };
+      const perRunProvider = textProvider("per-run");
       const resolved = runtimeOverride.resolveRunOptions({
         path: path.join(dir, "unused.deck.md"),
         input: undefined,
@@ -162,15 +181,10 @@ Deno.test({
         "Reply with one word.",
       );
       const models: Array<string> = [];
-      const provider: ModelProvider = {
-        chat: (input) => {
-          models.push(input.model);
-          return Promise.resolve({
-            message: { role: "assistant", content: "override-ok" },
-            finishReason: "stop",
-          });
-        },
-      };
+      const provider = textProvider(
+        "override-ok",
+        (model) => models.push(model),
+      );
 
       const output = await runDeck({
         path: deckPath,
@@ -182,6 +196,84 @@ Deno.test({
       assertEquals(models, ["openrouter/openai/gpt-5.1-chat"]);
       const text = typeof output === "string" ? output : JSON.stringify(output);
       assertStringIncludes(text, "override-ok");
+    },
+  );
+});
+
+Deno.test({
+  name: "runDeckResponses wrapper returns structured output with defaults",
+  permissions: { read: true, write: true, env: true },
+}, async () => {
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: undefined,
+      GOOGLE_API_KEY: undefined,
+      GEMINI_API_KEY: undefined,
+    },
+    async () => {
+      const dir = await Deno.makeTempDir();
+      const deckPath = await writeDeck(dir, "test/model");
+      const result = await runDeckResponses({
+        path: deckPath,
+        input: undefined,
+        inputProvided: false,
+        initialUserMessage: "hello",
+        modelProvider: textProvider("structured-default"),
+      });
+      assertEquals(result.status, "completed");
+      assertEquals(result.output.length, 1);
+      assertEquals(result.finishReason, "stop");
+      assertStringIncludes(JSON.stringify(result.output), "structured-default");
+    },
+  );
+});
+
+Deno.test({
+  name: "per-run model resolver is forwarded with a custom provider",
+  permissions: { read: true, write: true, env: true },
+}, async () => {
+  await withEnv(
+    {
+      OPENROUTER_API_KEY: undefined,
+      GOOGLE_API_KEY: undefined,
+      GEMINI_API_KEY: undefined,
+    },
+    async () => {
+      const dir = await Deno.makeTempDir();
+      const deckPath = await writeDeck(dir, "alias/model");
+      let sawModel = "";
+      let sawParams: Record<string, unknown> | undefined;
+      const provider = textProvider("resolved", (model) => {
+        sawModel = model;
+      });
+      const wrappedProvider: ModelProvider = {
+        responses: async (input) => {
+          sawParams = input.request.params;
+          return await provider.responses(input);
+        },
+      };
+      const resolver: ModelResolver = {
+        resolveModel: (input) => {
+          assertEquals(input.model, "alias/model");
+          return Promise.resolve({
+            model: "resolved/model",
+            params: { temperature: 0.25 },
+          });
+        },
+      };
+
+      const result = await runDeckResponses({
+        path: deckPath,
+        input: undefined,
+        inputProvided: false,
+        initialUserMessage: "hello",
+        modelProvider: wrappedProvider,
+        modelResolver: resolver,
+      });
+
+      assertEquals(result.status, "completed");
+      assertEquals(sawModel, "resolved/model");
+      assertEquals(sawParams, { temperature: 0.25 });
     },
   );
 });
@@ -210,13 +302,7 @@ Deno.test({
 }, async () => {
   const dir = await Deno.makeTempDir();
   const deckPath = await writeDeck(dir, "test/model");
-  const provider: ModelProvider = {
-    chat: () =>
-      Promise.resolve({
-        message: { role: "assistant", content: "no-artifacts" },
-        finishReason: "stop",
-      }),
-  };
+  const provider = textProvider("no-artifacts");
   const runtime = await createDefaultedRuntime({ modelProvider: provider });
   await runtime.runDeck({
     path: deckPath,
@@ -233,13 +319,7 @@ Deno.test({
 }, async () => {
   const dir = await Deno.makeTempDir();
   const deckPath = await writeDeck(dir, "test/model");
-  const provider: ModelProvider = {
-    chat: () =>
-      Promise.resolve({
-        message: { role: "assistant", content: "artifact-ok" },
-        finishReason: "stop",
-      }),
-  };
+  const provider = textProvider("artifact-ok");
   const runtime = await createDefaultedRuntime({
     modelProvider: provider,
     sessionArtifacts: { rootDir: path.join(dir, "artifacts") },
@@ -265,13 +345,7 @@ Deno.test({
   const dir = await Deno.makeTempDir();
   const deckPath = await writeDeck(dir, "test/model");
   const runtime = await createDefaultedRuntime({
-    modelProvider: {
-      chat: () =>
-        Promise.resolve({
-          message: { role: "assistant", content: "ok" },
-          finishReason: "stop",
-        }),
-    },
+    modelProvider: textProvider("ok"),
   });
 
   await assertRejects(

@@ -221,20 +221,26 @@ Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
 `ctx.spawnAndWait({ path, input })`. Emit structured trace events with\
 `ctx.log(...)`.
 
-### Runtime defaults for programmatic `runDeck`
+### Runtime defaults for programmatic `runDeckResponses`
 
-`runDeck` from `@bolt-foundry/gambit` now uses CLI-equivalent provider/model
-defaults (alias expansion, provider routing, fallback behavior).
+`runDeckResponses` from `@bolt-foundry/gambit` is the canonical Gambit 1.0
+runtime entrypoint. It uses CLI-equivalent provider/model defaults (alias
+expansion, provider routing, fallback behavior) and returns structured Responses
+output. Single-string assistant text is a presentation projection, not runtime
+state.
 
 Before (direct-provider setup in each caller):
 
 ```ts
-import { createOpenRouterProvider, runDeck } from "jsr:@bolt-foundry/gambit";
+import {
+  createOpenRouterProvider,
+  runDeckResponses,
+} from "jsr:@bolt-foundry/gambit";
 
 const provider = createOpenRouterProvider({
   apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
 });
-await runDeck({
+await runDeckResponses({
   path: "./root.deck.md",
   input: { message: "hi" },
   modelProvider: provider,
@@ -244,24 +250,29 @@ await runDeck({
 After (defaulted wrapper):
 
 ```ts
-import { runDeck } from "jsr:@bolt-foundry/gambit";
+import { runDeckResponses } from "jsr:@bolt-foundry/gambit";
 
-await runDeck({
+const result = await runDeckResponses({
   path: "./root.deck.md",
   input: { message: "hi" },
 });
+
+console.log(result.output);
 ```
 
 Per-runtime override (shared runtime object):
 
 ```ts
-import { createDefaultedRuntime, runDeck } from "jsr:@bolt-foundry/gambit";
+import {
+  createDefaultedRuntime,
+  runDeckResponses,
+} from "jsr:@bolt-foundry/gambit";
 
 const runtime = await createDefaultedRuntime({
   fallbackProvider: "codex-cli",
 });
 
-await runDeck({
+await runDeckResponses({
   runtime,
   path: "./root.deck.md",
   input: { message: "hi" },
@@ -271,7 +282,8 @@ await runDeck({
 Replacement mapping:
 
 - Legacy direct core passthrough export: `runDeck` -> `runDeckCore`
-- Defaulted wrapper export: `runDeck`
+- Canonical structured defaulted export: `runDeckResponses`
+- Legacy defaulted compatibility export: `runDeck`
 - Runtime builder: `createDefaultedRuntime`
 
 ---

@@ -25,9 +25,6 @@ Deno.test("run command uses responses mode when enabled", async () => {
         ],
       });
     },
-    chat: () => {
-      throw new Error("chat should not be called in responses mode");
-    },
   };
 
   await handleRunCommand({
