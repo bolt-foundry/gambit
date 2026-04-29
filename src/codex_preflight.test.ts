@@ -8,6 +8,10 @@ import {
   MINIMUM_SUPPORTED_CODEX_CLI_VERSION,
   readCodexLoginStatus,
 } from "./codex_preflight.ts";
+import {
+  RUNTIME_HOST_SERVICE_SOCKET_ENV,
+  RUNTIME_HOST_SERVICE_TOKEN_ENV,
+} from "./runtime_host_service.ts";
 
 const SUPPORTED_FAKE_CODEX_VERSION = MINIMUM_SUPPORTED_CODEX_CLI_VERSION;
 const UNSUPPORTED_FAKE_CODEX_VERSION = "0.120.0";
@@ -113,6 +117,8 @@ done
 Deno.test("codex preflight responds to app-server refresh RPCs before account/read completes", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
   const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
+  const priorHostServiceSocket = Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV);
+  const priorHostServiceToken = Deno.env.get(RUNTIME_HOST_SERVICE_TOKEN_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-refresh-rpc-",
   });
@@ -172,6 +178,8 @@ done
   await Deno.chmod(fakeCodexPath, 0o755);
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set(RUNTIME_HOST_SERVICE_SOCKET_ENV, join(root, "missing.sock"));
+  Deno.env.delete(RUNTIME_HOST_SERVICE_TOKEN_ENV);
   Deno.env.set(
     CODEX_HOST_AUTH_BUNDLE_ENV,
     JSON.stringify({
@@ -218,6 +226,16 @@ done
       Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
       Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    if (priorHostServiceSocket == null) {
+      Deno.env.delete(RUNTIME_HOST_SERVICE_SOCKET_ENV);
+    } else {
+      Deno.env.set(RUNTIME_HOST_SERVICE_SOCKET_ENV, priorHostServiceSocket);
+    }
+    if (priorHostServiceToken == null) {
+      Deno.env.delete(RUNTIME_HOST_SERVICE_TOKEN_ENV);
+    } else {
+      Deno.env.set(RUNTIME_HOST_SERVICE_TOKEN_ENV, priorHostServiceToken);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }

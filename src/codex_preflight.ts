@@ -9,6 +9,7 @@ import {
   CODEX_REFRESH_HOST_SERVICE_METHOD,
   type CodexRefreshHostServiceResult,
   RUNTIME_HOST_SERVICE_SOCKET_ENV,
+  RUNTIME_HOST_SERVICE_TOKEN_ENV,
 } from "./runtime_host_service.ts";
 
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
@@ -75,6 +76,13 @@ function buildUnsupportedCodexVersionMessage(version: string | null): string {
   return `Codex CLI ${rendered} is too old; require >= ${MINIMUM_SUPPORTED_CODEX_CLI_VERSION} for Gambit's app-server transport.`;
 }
 
+function hasRuntimeHostServiceRefreshConfig(): boolean {
+  return Boolean(
+    Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV)?.trim() &&
+      Deno.env.get(RUNTIME_HOST_SERVICE_TOKEN_ENV)?.trim(),
+  );
+}
+
 async function appServerPreflightRequestResult(input: {
   bundle: NonNullable<ReturnType<typeof readCodexAuthBundleFromEnv>>;
   method: string;
@@ -95,17 +103,10 @@ async function appServerPreflightRequestResult(input: {
       typeof input.params.reason === "string" && input.params.reason
         ? input.params.reason
         : "account/chatgptAuthTokens/refresh";
-    const hostServiceSocket = Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV)
-      ?.trim();
-    const hostRefreshed = hostServiceSocket
-      ? await callRuntimeHostService({
-        method: CODEX_REFRESH_HOST_SERVICE_METHOD,
-        params: {
-          previousAccountId,
-          reason,
-        },
-      })
-      : null;
+    const hostRefreshed = await refreshCodexPreflightViaHost({
+      previousAccountId,
+      reason,
+    });
     const refreshed = hostRefreshed
       ? {
         ...input.bundle,
@@ -143,7 +144,7 @@ async function refreshCodexPreflightViaHost(input: {
   previousAccountId?: string | null;
   reason: string;
 }): Promise<CodexRefreshHostServiceResult | null> {
-  if (!Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV)?.trim()) return null;
+  if (!hasRuntimeHostServiceRefreshConfig()) return null;
   return await callRuntimeHostService({
     method: CODEX_REFRESH_HOST_SERVICE_METHOD,
     params: input,
