@@ -4,6 +4,12 @@ import {
   summarizeCodexAuthBundle,
 } from "./codex_auth.ts";
 import { logCodexAppServerDebug } from "./codex_app_server_debug.ts";
+import {
+  callRuntimeHostService,
+  CODEX_REFRESH_HOST_SERVICE_METHOD,
+  type CodexRefreshHostServiceResult,
+  RUNTIME_HOST_SERVICE_SOCKET_ENV,
+} from "./runtime_host_service.ts";
 
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 export const MINIMUM_SUPPORTED_CODEX_CLI_VERSION = "0.121.0";
@@ -82,15 +88,37 @@ async function appServerPreflightRequestResult(input: {
   };
 }> {
   if (input.method === "account/chatgptAuthTokens/refresh") {
-    const refreshed = await refreshCodexChatgptAuthTokens({
-      bundle: input.bundle,
-      previousAccountId: typeof input.params.previousAccountId === "string"
-        ? input.params.previousAccountId
-        : null,
-      reason: typeof input.params.reason === "string" && input.params.reason
+    const previousAccountId = typeof input.params.previousAccountId === "string"
+      ? input.params.previousAccountId
+      : null;
+    const reason =
+      typeof input.params.reason === "string" && input.params.reason
         ? input.params.reason
-        : "account/chatgptAuthTokens/refresh",
-    });
+        : "account/chatgptAuthTokens/refresh";
+    const hostServiceSocket = Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV)
+      ?.trim();
+    const hostRefreshed = hostServiceSocket
+      ? await callRuntimeHostService({
+        method: CODEX_REFRESH_HOST_SERVICE_METHOD,
+        params: {
+          previousAccountId,
+          reason,
+        },
+      })
+      : null;
+    const refreshed = hostRefreshed
+      ? {
+        ...input.bundle,
+        accessToken: hostRefreshed.accessToken,
+        chatgptAccountId: hostRefreshed.chatgptAccountId,
+        chatgptPlanType: hostRefreshed.chatgptPlanType,
+        lastRefresh: new Date().toISOString(),
+      }
+      : await refreshCodexChatgptAuthTokens({
+        bundle: input.bundle,
+        previousAccountId,
+        reason,
+      });
     return {
       bundle: refreshed,
       result: {
@@ -109,6 +137,17 @@ async function appServerPreflightRequestResult(input: {
       message: `Unsupported app-server request: ${input.method}`,
     },
   };
+}
+
+async function refreshCodexPreflightViaHost(input: {
+  previousAccountId?: string | null;
+  reason: string;
+}): Promise<CodexRefreshHostServiceResult | null> {
+  if (!Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV)?.trim()) return null;
+  return await callRuntimeHostService({
+    method: CODEX_REFRESH_HOST_SERVICE_METHOD,
+    params: input,
+  });
 }
 
 async function readLegacyCodexLoginStatus(): Promise<CodexLoginStatus> {
@@ -337,26 +376,49 @@ export async function readCodexLoginStatus(): Promise<CodexLoginStatus> {
         capabilities: { experimentalApi: true },
       });
       await writeMessage({ method: "initialized", params: {} });
-      await request("account/login/start", {
-        accessToken: bundle.accessToken,
-        chatgptAccountId: bundle.chatgptAccountId,
-        chatgptPlanType: bundle.chatgptPlanType,
-        type: "chatgptAuthTokens",
-      });
-      const result = await request("account/read", {
-        type: "chatgptAuthTokens",
-      }) as Record<
-        string,
-        unknown
-      >;
+      let loginBundle = bundle;
+      const loginAndRead = async () => {
+        await request("account/login/start", {
+          accessToken: loginBundle.accessToken,
+          chatgptAccountId: loginBundle.chatgptAccountId,
+          chatgptPlanType: loginBundle.chatgptPlanType,
+          type: "chatgptAuthTokens",
+        });
+        return await request("account/read", {
+          type: "chatgptAuthTokens",
+        }) as Record<string, unknown>;
+      };
+      let result = await loginAndRead();
       const account = asRecord(result.account);
-      const requiresOpenaiAuth = result.requiresOpenaiAuth === true;
-      const confirmedAccountId = typeof account.id === "string"
+      let requiresOpenaiAuth = result.requiresOpenaiAuth === true;
+      let confirmedAccountId = typeof account.id === "string"
         ? account.id.trim()
         : "";
-      const planType = typeof account.planType === "string"
-        ? account.planType
-        : bundle.chatgptPlanType;
+      if (requiresOpenaiAuth || !confirmedAccountId) {
+        const refreshed = await refreshCodexPreflightViaHost({
+          previousAccountId: confirmedAccountId || bundle.chatgptAccountId,
+          reason: "codex-preflight-account-read-stale",
+        });
+        if (refreshed) {
+          loginBundle = {
+            ...loginBundle,
+            accessToken: refreshed.accessToken,
+            chatgptAccountId: refreshed.chatgptAccountId,
+            chatgptPlanType: refreshed.chatgptPlanType,
+            lastRefresh: new Date().toISOString(),
+          };
+          result = await loginAndRead();
+          const retryAccount = asRecord(result.account);
+          requiresOpenaiAuth = result.requiresOpenaiAuth === true;
+          confirmedAccountId = typeof retryAccount.id === "string"
+            ? retryAccount.id.trim()
+            : "";
+        }
+      }
+      const finalAccount = asRecord(result.account);
+      const planType = typeof finalAccount.planType === "string"
+        ? finalAccount.planType
+        : loginBundle.chatgptPlanType;
       const hasConfirmedAccountId = confirmedAccountId.length > 0;
       return {
         codexLoggedIn: hasConfirmedAccountId,
