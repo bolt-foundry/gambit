@@ -676,14 +676,21 @@ async function appServerRequestResult(input: {
   }
   if (input.method === "account/chatgptAuthTokens/refresh") {
     const bridge = requireCodexHostAuthBridge();
-    const refreshed = await bridge.refreshAuthTokens({
-      previousAccountId: typeof input.params.previousAccountId === "string"
-        ? input.params.previousAccountId
-        : null,
-      reason: typeof input.params.reason === "string" && input.params.reason
-        ? input.params.reason
-        : "account/chatgptAuthTokens/refresh",
-    });
+    let refreshed: CodexChatgptAuthTokens;
+    try {
+      refreshed = await bridge.refreshAuthTokens({
+        previousAccountId: typeof input.params.previousAccountId === "string"
+          ? input.params.previousAccountId
+          : null,
+        reason: typeof input.params.reason === "string" && input.params.reason
+          ? input.params.reason
+          : "account/chatgptAuthTokens/refresh",
+      });
+    } catch (error) {
+      return {
+        error: appServerHostRequestFailure(error),
+      };
+    }
     return {
       result: {
         accessToken: refreshed.accessToken,
@@ -698,6 +705,18 @@ async function appServerRequestResult(input: {
       code: -32601,
       message: `Unsupported app-server request: ${input.method}`,
     },
+  };
+}
+
+function appServerHostRequestFailure(error: unknown): {
+  code: number;
+  message: string;
+} {
+  return {
+    code: -32000,
+    message: error instanceof Error && error.message
+      ? error.message
+      : String(error),
   };
 }
 
@@ -1257,7 +1276,14 @@ async function defaultAppServerTurnRunner(
               method,
               params: safeJsonObjectFromRecord(params),
             });
-            const response = await appServerRequestResult({ method, params });
+            let response: Awaited<ReturnType<typeof appServerRequestResult>>;
+            try {
+              response = await appServerRequestResult({ method, params });
+            } catch (error) {
+              response = {
+                error: appServerHostRequestFailure(error),
+              };
+            }
             logCodexAppServerDebug("message:host_response", {
               method,
               requestId,
@@ -2559,6 +2585,19 @@ export function codexConfigArgsForTest(input: {
 
 export function safeJsonForTest(text: string): Record<string, JSONValue> {
   return safeJsonObject(text);
+}
+
+export async function appServerRequestResultForTest(input: {
+  method: string;
+  params: Record<string, unknown>;
+}): Promise<{
+  result?: Record<string, JSONValue>;
+  error?: {
+    code: number;
+    message: string;
+  };
+}> {
+  return await appServerRequestResult(input);
 }
 
 export function sanitizeCodexSpawnArgsForTest(
