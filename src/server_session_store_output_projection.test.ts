@@ -387,3 +387,89 @@ leakTolerantTest(
     }
   },
 );
+
+leakTolerantTest(
+  "openresponses output projection preserves whitespace across streamed deltas and final text",
+  async () => {
+    const dir = await Deno.makeTempDir();
+    const sessionsRoot = path.join(dir, "sessions");
+    const workspaceId = "workspace-output-delta-whitespace";
+    const sessionDir = path.join(sessionsRoot, workspaceId);
+    const statePath = path.join(sessionDir, "state.json");
+    const eventsPath = path.join(sessionDir, "events.jsonl");
+    const sqlitePath = path.join(sessionDir, "workspace.sqlite");
+    const store = createProjectionStore({
+      sessionsRoot,
+      workspaceId,
+      sessionDir,
+      statePath,
+      eventsPath,
+    });
+
+    const initialState = store.persistSessionState({
+      runId: workspaceId,
+      messages: [],
+      meta: { workspaceId, sessionId: workspaceId },
+    });
+    const runId = "run-1";
+    const itemId = "msg-assistant-1";
+
+    for (const [index, delta] of ["Hello", " ", "world"].entries()) {
+      await store.appendOpenResponsesRunEvent(initialState, {
+        workspace_id: workspaceId,
+        run_id: runId,
+        event_type: "response.output_text.delta",
+        payload: {
+          type: "response.output_text.delta",
+          output_index: 0,
+          item_id: itemId,
+          delta,
+        },
+        idempotency_key: `${runId}:delta:${index}`,
+      });
+    }
+    await store.appendOpenResponsesRunEvent(initialState, {
+      workspace_id: workspaceId,
+      run_id: runId,
+      event_type: "response.output_text.done",
+      payload: {
+        type: "response.output_text.done",
+        output_index: 0,
+        item_id: itemId,
+        text: "Hello world ",
+      },
+      idempotency_key: `${runId}:done`,
+    });
+
+    const outputItems = store.listOpenResponsesOutputItems({
+      workspaceId,
+      runId,
+    });
+    const assistantMessages = outputItems.filter((item): item is {
+      __typename: "OutputMessage";
+      id: string;
+      role: string;
+      content: string;
+      messageRefId?: string;
+      feedbackEligible: boolean;
+    } =>
+      item.__typename === "OutputMessage" &&
+      item.role === "assistant"
+    );
+    assertEquals(assistantMessages.length, 1);
+    assertEquals(assistantMessages[0]?.content, "Hello world ");
+
+    const db = new DatabaseSync(sqlitePath);
+    try {
+      const rows = db.prepare(`
+        SELECT content
+        FROM openresponses_output_items_v0
+        WHERE workspace_id = ? AND run_id = ?
+      `).all(workspaceId, runId) as Array<{ content: string | null }>;
+      assertEquals(rows.length, 1);
+      assertEquals(rows[0]?.content, "Hello world ");
+    } finally {
+      db.close();
+    }
+  },
+);

@@ -162,8 +162,8 @@ export const createOpenResponsesEventPersistence = (deps: {
       ) {
         continue;
       }
-      const content = stringifyMessageContent(message.content).trim();
-      if (!content) continue;
+      const content = stringifyMessageContent(message.content);
+      if (content.trim().length === 0) continue;
       const ref = refs[index];
       const messageRefId =
         typeof ref?.id === "string" && ref.id.trim().length > 0

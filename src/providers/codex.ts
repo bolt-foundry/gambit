@@ -28,6 +28,7 @@ const CODEX_REASONING_SUMMARY_ENV = "GAMBIT_CODEX_REASONING_SUMMARY";
 const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
+const CODEX_DISABLE_WEBSOCKETS_ENV = "GAMBIT_CODEX_DISABLE_WEBSOCKETS";
 const CODEX_DANGEROUS_BYPASS_ENV =
   "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX";
 const MCP_DENO_BIN_ENV = "GAMBIT_MCP_DENO_BIN";
@@ -265,6 +266,11 @@ function shouldSkipCodexSandboxConfig(
   return Boolean(envRaw && parseTruthy(envRaw));
 }
 
+function shouldDisableCodexWebsockets(): boolean {
+  const envRaw = Deno.env.get(CODEX_DISABLE_WEBSOCKETS_ENV);
+  return Boolean(envRaw && parseTruthy(envRaw));
+}
+
 function tomlString(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
@@ -372,6 +378,9 @@ function codexConfigArgs(input: {
 }): Array<string> {
   const args: Array<string> = [];
   args.push(...codexAdditionalConfigArgs(input.params));
+  if (shouldDisableCodexWebsockets()) {
+    args.push("-c", "model_providers.openai.supports_websockets=false");
+  }
   args.push("-c", `approval_policy=${tomlString("never")}`);
   const pathEnv = Deno.env.get("PATH")?.trim();
   if (pathEnv) {
