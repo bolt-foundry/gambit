@@ -1119,20 +1119,29 @@ export function deriveBuildDisplayMessages(
       return String(value);
     }
   };
+  const hasVisibleText = (value: string): boolean => value.trim().length > 0;
   const pushAssistantMessage = (content: string) => {
+    if (!hasVisibleText(content)) return;
     const normalized = content.trim();
-    if (!normalized) return;
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i];
       if (entry?.kind !== "message") continue;
       if (entry.role !== "assistant") continue;
-      if ((entry.content ?? "").trim() === normalized) return;
+      if ((entry.content ?? "").trim() === normalized) {
+        if (entry.content !== content) {
+          entries[i] = {
+            ...entry,
+            content,
+          };
+        }
+        return;
+      }
       break;
     }
     entries.push({
       kind: "message",
       role: "assistant",
-      content: normalized,
+      content,
     });
   };
   const extractReasoningText = (payload: Record<string, unknown>): string => {
@@ -1282,28 +1291,45 @@ export function deriveBuildDisplayMessages(
     };
   };
   const upsertAssistantMessage = (
-    input: { messageId: string; text: string },
+    input: { messageId: string; text: string; mode?: "append" | "replace" },
   ) => {
-    const text = input.text.trim();
-    if (!text) return;
     const messageId = input.messageId || `assistant-${entries.length}`;
+    const existingIndex = assistantIndexById.get(messageId);
+    if (
+      !hasVisibleText(input.text) &&
+      existingIndex === undefined &&
+      input.mode !== "append"
+    ) return;
     for (let i = entries.length - 1; i >= 0; i -= 1) {
       const entry = entries[i];
       if (entry?.kind !== "message") continue;
       if (entry.role !== "assistant") continue;
-      if ((entry.content ?? "").trim() === text) {
+      if (
+        hasVisibleText(input.text) &&
+        (entry.content ?? "").trim() === input.text.trim()
+      ) {
+        if (entry.content !== input.text) {
+          entries[i] = {
+            ...entry,
+            content: input.text,
+          };
+        }
         assistantIndexById.set(messageId, i);
         return;
       }
       break;
     }
-    const existingIndex = assistantIndexById.get(messageId);
     if (existingIndex !== undefined) {
       const existing = entries[existingIndex];
       if (existing?.kind === "message" && existing.role === "assistant") {
+        const previousText = existing.content ?? "";
+        const nextText = input.mode === "append"
+          ? `${previousText}${input.text}`
+          : input.text;
+        if (!hasVisibleText(nextText)) return;
         entries[existingIndex] = {
           ...existing,
-          content: text,
+          content: nextText,
         };
       }
       return;
@@ -1311,7 +1337,7 @@ export function deriveBuildDisplayMessages(
     entries.push({
       kind: "message",
       role: "assistant",
-      content: text,
+      content: input.text,
     });
     assistantIndexById.set(messageId, entries.length - 1);
   };
@@ -1382,6 +1408,32 @@ export function deriveBuildDisplayMessages(
         text: extractReasoningText(payload),
         raw: payload,
         mode: payloadType.endsWith(".delta") ? "append" : "replace",
+      });
+      continue;
+    }
+    if (
+      payloadType === "response.output_text.delta" ||
+      payloadType === "response.output_text.done"
+    ) {
+      const outputIndex = typeof payload.output_index === "number"
+        ? String(payload.output_index)
+        : "";
+      const actionScope = asString(record.actionCallId) ||
+        asString(record.runId);
+      const baseMessageId = asString(payload.item_id) ||
+        (outputIndex ? `output-${outputIndex}` : payloadType);
+      const text = payloadType === "response.output_text.delta"
+        ? asString(payload.delta)
+        : asString(payload.text);
+      if (payloadType === "response.output_text.delta" && text.length === 0) {
+        continue;
+      }
+      upsertAssistantMessage({
+        messageId: scopedId(actionScope, baseMessageId),
+        text,
+        mode: payloadType === "response.output_text.delta"
+          ? "append"
+          : "replace",
       });
       continue;
     }

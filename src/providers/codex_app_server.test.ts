@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   appServerRequestResultForTest,
+  codexConfigArgsForTest,
   setCodexHostAuthBridgeForTests,
 } from "./codex.ts";
 
@@ -31,5 +32,25 @@ Deno.test("codex app-server refresh host failures are returned as RPC errors", a
     });
   } finally {
     setCodexHostAuthBridgeForTests(null);
+  }
+});
+
+Deno.test("codex config can disable OpenAI websocket responses", () => {
+  const previous = Deno.env.get("GAMBIT_CODEX_DISABLE_WEBSOCKETS");
+  Deno.env.set("GAMBIT_CODEX_DISABLE_WEBSOCKETS", "1");
+
+  try {
+    const args = codexConfigArgsForTest({ cwd: "/workspace" });
+
+    assertEquals(
+      args.includes("model_providers.openai.supports_websockets=false"),
+      true,
+    );
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("GAMBIT_CODEX_DISABLE_WEBSOCKETS");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_DISABLE_WEBSOCKETS", previous);
+    }
   }
 });

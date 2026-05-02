@@ -225,6 +225,62 @@ Deno.test("deriveBuildDisplayMessages dedupes model.result after streamed output
   assertEquals(assistantRows[0]?.content, "hi there");
 });
 
+Deno.test("deriveBuildDisplayMessages preserves whitespace in streamed output text deltas", () => {
+  const traces: Array<TraceEvent> = [
+    {
+      type: "model.stream.event",
+      actionCallId: "action-1",
+      event: {
+        type: "codex.event",
+        payload: {
+          type: "response.output_text.delta",
+          output_index: 0,
+          item_id: "msg_1",
+          delta: "Hello",
+        },
+      },
+    },
+    {
+      type: "model.stream.event",
+      actionCallId: "action-1",
+      event: {
+        type: "codex.event",
+        payload: {
+          type: "response.output_text.delta",
+          output_index: 0,
+          item_id: "msg_1",
+          delta: " ",
+        },
+      },
+    },
+    {
+      type: "model.stream.event",
+      actionCallId: "action-1",
+      event: {
+        type: "codex.event",
+        payload: {
+          type: "response.output_text.delta",
+          output_index: 0,
+          item_id: "msg_1",
+          delta: "world",
+        },
+      },
+    },
+    {
+      type: "model.result",
+      actionCallId: "action-1",
+      message: { role: "assistant", content: "Hello world " },
+    },
+  ];
+
+  const display = deriveBuildDisplayMessages([], traces);
+  const assistantRows = display.filter((row) =>
+    row.kind === "message" && row.role === "assistant"
+  );
+  assertEquals(assistantRows.length, 1);
+  assertEquals(assistantRows[0]?.content, "Hello world ");
+});
+
 Deno.test("deriveBuildDisplayMessages projects namespaced extension items", () => {
   const traces: Array<TraceEvent> = [
     {

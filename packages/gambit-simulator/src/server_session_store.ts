@@ -1046,6 +1046,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
     itemKind: "message" | "reasoning" | "tool_call";
     role: string | null;
     content: string | null;
+    contentMode?: "replace" | "append";
     messageRefId: string | null;
     reasoningType: string | null;
     summary: string | null;
@@ -1080,6 +1081,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         itemKind: "message",
         role,
         content: text,
+        contentMode: "replace",
         messageRefId: asString(payload.message_id).trim() ||
           asString(payload.messageRefId).trim() ||
           null,
@@ -1093,6 +1095,49 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         resultText: null,
         errorText: null,
         outputIndex: null,
+        sequence: event.sequence,
+      }];
+    }
+    if (
+      payloadType === "response.output_text.delta" ||
+      payloadType === "response.output_text.done"
+    ) {
+      const outputIndex = asFiniteNumber(payload.output_index);
+      const itemId = asString(payload.item_id).trim() ||
+        `message-${outputIndex ?? event.sequence}`;
+      const text = payloadType === "response.output_text.delta"
+        ? asString(payload.delta)
+        : asString(payload.text);
+      if (payloadType === "response.output_text.delta" && text.length === 0) {
+        return [];
+      }
+      if (
+        text.trim().length === 0 && payloadType !== "response.output_text.delta"
+      ) {
+        return [];
+      }
+      return [{
+        workspaceId: event.workspace_id,
+        runId: event.run_id,
+        itemKey: `message:assistant:${itemId}`,
+        itemId,
+        itemKind: "message",
+        role: "assistant",
+        content: text,
+        contentMode: payloadType === "response.output_text.delta"
+          ? "append"
+          : "replace",
+        messageRefId: null,
+        reasoningType: null,
+        summary: null,
+        summaryMode: "replace",
+        toolCallId: null,
+        toolName: null,
+        toolStatus: null,
+        argumentsText: null,
+        resultText: null,
+        errorText: null,
+        outputIndex,
         sequence: event.sequence,
       }];
     }
@@ -1200,9 +1245,10 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       itemType === "message" || itemType === "agent_message" ||
       itemType === "assistant_message"
     ) {
-      const text = toEventMessageText(item.content).trim() ||
-        toEventMessageText(item.text).trim();
-      if (!text) return [];
+      const contentText = toEventMessageText(item.content);
+      const fallbackText = toEventMessageText(item.text);
+      const text = contentText.trim().length > 0 ? contentText : fallbackText;
+      if (text.trim().length === 0) return [];
       const role = asString(item.role).trim() || "assistant";
       const rawItemId = asString(item.id).trim() || null;
       const canonicalBackfill = event.idempotency_key.includes(":canonical:");
@@ -1225,6 +1271,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         itemKind: "message",
         role,
         content: text,
+        contentMode: "replace",
         messageRefId,
         reasoningType: null,
         summary: null,
@@ -1334,6 +1381,18 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
         | undefined;
       summary = `${existing?.summary ?? ""}${row.summary ?? ""}`;
     }
+    let content = row.content;
+    if (row.itemKind === "message" && row.contentMode === "append") {
+      const existing = db.prepare(`
+        SELECT content
+        FROM ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE}
+        WHERE workspace_id = ? AND run_id = ? AND item_key = ?
+        LIMIT 1
+      `).get(row.workspaceId, row.runId, itemKey) as
+        | { content?: string | null }
+        | undefined;
+      content = `${existing?.content ?? ""}${row.content ?? ""}`;
+    }
     db.prepare(`
       INSERT INTO ${OPENRESPONSES_OUTPUT_ITEMS_SQLITE_TABLE} (
         workspace_id,
@@ -1381,7 +1440,7 @@ export const createSessionStore = (deps: SessionStoreDeps) => {
       row.itemId,
       row.itemKind,
       row.role,
-      row.content,
+      content,
       row.messageRefId,
       row.reasoningType,
       summary,
