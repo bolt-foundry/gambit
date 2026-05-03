@@ -99,6 +99,35 @@ Deno.test("parseCliArgs parses yolo flag", () => {
   assertEquals(args.yolo, true);
 });
 
+Deno.test("parseCliArgs parses chat runtime tools and open flag", () => {
+  const args = parseCliArgs([
+    "chat",
+    "root.deck.md",
+    "--runtime-tools",
+    "./workloop-tools.md",
+    "--runtime-tools",
+    "./taxo-tools.md",
+    "--repro-message",
+    "original user ask",
+    "--open",
+    "--port",
+    "9797",
+  ]);
+  assertEquals(args.cmd, "chat");
+  assertEquals(args.deckPath, "root.deck.md");
+  assertEquals(args.runtimeToolsPaths, [
+    "./workloop-tools.md",
+    "./taxo-tools.md",
+  ]);
+  assertEquals(args.open, true);
+  assertEquals(args.port, 9797);
+  assertEquals(args.reproMessage, "original user ask");
+});
+
+Deno.test("CLI command registry exposes chat", () => {
+  assertEquals(isKnownCommand("chat"), true);
+});
+
 Deno.test("parseCliArgs rejects conflicting worker flags", () => {
   assertThrows(
     () =>

@@ -1,14 +1,15 @@
 # Runtime and guardrails
 
-How Gambit, an agent harness framework, runs decks and keeps them
-safe/observable.
+How Gambit runs native agent definitions and keeps behavior safe, observable,
+and reproducible. The runtime still uses `deck` in exact file names, CLI
+arguments, config fields, and API names.
 
 ## Guardrails and flow
 
 - Defaults: `maxDepth=3`, `maxPasses=10`, `timeoutMs≈120s`; override per deck
   with `guardrails`.
-- Compute vs LLM: a deck with `modelParams` runs as LLM; otherwise it must
-  expose `run`/`execute` for compute.
+- Compute vs LLM: an agent definition with `modelParams` runs as LLM; otherwise
+  it must expose `run`/`execute` for compute.
 - Non-root decks must declare both `contextSchema` and `responseSchema`; roots
   allow looser IO but should still use schemas.
 - Child calls use `actionDecks` (LLM tool calls) or `spawnAndWait` in compute
@@ -58,8 +59,8 @@ safe/observable.
 
 ## Streaming and tracing
 
-- Streaming is supported for LLM decks; callbacks are invoked per chunk and
-  handler messages also stream.
+- Streaming is supported for LLM agent definitions; callbacks are invoked per
+  chunk and handler messages also stream.
 - Tracing: `--verbose` prints trace events; `--trace <file>` writes JSONL.
   Useful events include `model.call/result`, `tool.call/result`, and handler
   triggers.

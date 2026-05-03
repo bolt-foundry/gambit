@@ -21,7 +21,7 @@ the needed context and tone.
 ## Applying to Gambit
 
 - Use separate snippets for assistant persona, user persona, and behavior; embed
-  them into the deck body to keep concerns isolated.
+  them into the agent body to keep concerns isolated.
 - Keep the “pinch” (behavior/constraints) closest to the model call, and keep
   personas above it so they influence style without diluting instructions.
 - Make the behavior section concrete: steps, priorities, stopping conditions,
@@ -29,12 +29,12 @@ the needed context and tone.
 - Keep schemas tight so actions/tools stay aligned with the narrow middle of the
   hourglass.
 
-## Skeleton (deck + snippets)
+## Skeleton (agent definition + snippets)
 
 ```
 src/decks/
   gambit-assistant.deck.md     # root deck embeds the snippets below
-  cards/
+  cards/                       # legacy directory name for snippet files
     assistant_persona.card.md  # who the assistant is
     user_persona.card.md       # who the user is / goals / constraints
     behavior.card.md           # steps, guardrails, outputs, when to ask vs act

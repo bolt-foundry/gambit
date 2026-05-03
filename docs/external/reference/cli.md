@@ -1,6 +1,7 @@
 # CLI, REPL, and debug UI
 
-How to run Gambit, the agent harness framework, locally and observe runs.
+How to run Gambit locally, generate scenario runs, grade behavior, and preserve
+the evidence needed to debug regressions.
 
 ## Commands
 
@@ -48,7 +49,7 @@ How to run Gambit, the agent harness framework, locally and observe runs.
 - `GAMBIT_RESPONSES_MODE=1`: env alternative to `--responses` for runtime/state.
 - `GAMBIT_OPENROUTER_RESPONSES=1`: route OpenRouter calls through the Responses
   API (experimental; chat remains the default path).
-- Worker execution defaults on for deck-executing surfaces. Use
+- Worker execution defaults on for CLI commands that execute decks. Use
   `--no-worker-sandbox` (or `--legacy-exec`) to roll back to legacy in-process
   execution. `--sandbox/--no-sandbox` still work as deprecated aliases.
 - `gambit.toml` config equivalent:

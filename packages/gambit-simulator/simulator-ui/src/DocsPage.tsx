@@ -24,8 +24,8 @@ export default function DocsPage() {
         </p>
         <h1>Test an agent. See where it fails. Fix it fast.</h1>
         <p className="docs-subtitle">
-          Gambit is an open-source agent harness framework. It's designed to
-          make it simple to create, debug, and fix AI workflows, agents and
+          Gambit runs synthetic scenarios, grades behavior, and preserves the
+          evidence you need to debug regressions in AI workflows, agents, and
           assistants.
         </p>
       </section>
@@ -60,7 +60,9 @@ export default function DocsPage() {
           <h3>If something looks wrong</h3>
           <ul>
             <li>Leave a quick rating and a short note explaining why.</li>
-            <li>Failures get captured for evaluation.</li>
+            <li>
+              Failures get captured as evidence for evaluation and replay.
+            </li>
           </ul>
           <h3>Grade the agent</h3>
           <ul>

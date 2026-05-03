@@ -16,7 +16,7 @@ Deno.test("defaultSessionRoot anchors restored artifact decks to workspace root"
     "a337dcb7-6d06-4b01-adb9-7154366d1ba1",
     "deck",
     "apps",
-    "boltfoundry-com",
+    "getworkloop-com",
     "gambit",
     "faq",
     "decks",

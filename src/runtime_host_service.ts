@@ -1,7 +1,7 @@
 export const RUNTIME_HOST_SERVICE_SOCKET_ENV =
-  "WORKLOOP_RUNTIME_HOST_SERVICE_SOCKET";
+  "GAMBIT_RUNTIME_HOST_SERVICE_SOCKET";
 export const RUNTIME_HOST_SERVICE_TOKEN_ENV =
-  "WORKLOOP_RUNTIME_HOST_SERVICE_TOKEN";
+  "GAMBIT_RUNTIME_HOST_SERVICE_TOKEN";
 
 export const CODEX_REFRESH_HOST_SERVICE_METHOD =
   "providerAuth.codex.refreshChatgptTokens";
@@ -170,7 +170,7 @@ export async function callRuntimeHostService(input: {
   const token = input.token?.trim() ||
     Deno.env.get(RUNTIME_HOST_SERVICE_TOKEN_ENV)?.trim();
   if (!socketPath || !token) {
-    throw new Error("Workloop host service bridge is not configured.");
+    throw new Error("Runtime host service bridge is not configured.");
   }
   const request: RuntimeHostServiceRequest = {
     id: crypto.randomUUID(),
@@ -185,7 +185,7 @@ export async function callRuntimeHostService(input: {
     const line = await readFirstLine(conn.readable);
     if (!line) {
       throw new Error(
-        "Workloop host service bridge closed without a response.",
+        "Runtime host service bridge closed without a response.",
       );
     }
     const response = JSON.parse(line) as RuntimeHostServiceResponse;

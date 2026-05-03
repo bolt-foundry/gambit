@@ -1,30 +1,40 @@
-# Authoring Gambit decks
+# Authoring Native Gambit Agents
 
-Audience: new deck authors who want to build runnable Gambit assistants quickly.
-Gambit is an agent harness framework, so decks are the unit of execution and
-verification.
+Audience: authors who want to build runnable native Gambit agents, create
+synthetic scenarios, validate scenario quality, and verify behavior with
+graders, traces, and local reproduction.
+
+Gambit still uses `deck` in file names, CLI syntax, and TypeScript helper names.
+Think of a deck as a Gambit agent definition.
 
 ## Mental model
 
-- Decks are single units of work. They can be LLM-powered (via `modelParams`) or
-  compute-only (via `run`/`execute`).
-- Snippets are reusable prompt fragments. Embedding snippets merges their deck
-  references (action/scenario/grader) and schema fragments into the parent deck.
-- Action decks are child decks exposed as model tools. Names must match
+- Agent definitions are single units of work. They can be LLM-powered (via
+  `modelParams`) or compute-only (via `run`/`execute`).
+- Scenarios describe synthetic users, tasks, personas, workflows, policy
+  pressure, or edge cases that exercise the behavior you care about.
+- Scenario-quality graders check whether generated or hand-authored scenarios
+  are realistic, novel, grounded, clear, and worth keeping.
+- Behavior graders score transcripts or artifacts so scenario runs can become
+  release checks.
+- Snippets are reusable prompt fragments. Embedding snippets merges their
+  action/scenario/grader references and schema fragments into the parent agent
+  definition.
+- Actions are child agent definitions exposed as model tools. Names must match
   `^[A-Za-z_][A-Za-z0-9_]*$` and avoid the `gambit_` prefix (reserved).
-- Persona/scenario decks may accept free-form user turns. Use the
+- Persona/scenario agents may accept free-form user turns. Use the
   `acceptsUserTurns` flag to control this behavior: root decks default to
   `true`, while action decks default to `false`. Set it explicitly to `true` for
   persona/bot decks or to `false` for workflow-only decks.
 
 ## Pick a format
 
-- Markdown deck/snippet: great for quick prompt-first flows. Front matter
-  declares label/model/actions/scenarios/graders/handlers; body is the prompt.
-  Embeds via image syntax pull in snippets or special markers.
-- TypeScript deck/snippet: best when you need compute logic or co-locate
-  schemas. Export `defineDeck`/`defineCard` with Zod schemas and a
-  `run`/`execute` for compute decks.
+- Markdown agent definition/snippet: great for quick prompt-first flows. Front
+  matter declares label/model/actions/scenarios/graders/handlers; body is the
+  prompt. Embeds via image syntax pull in snippets or special markers.
+- TypeScript agent definition/snippet: best when you need compute logic or
+  co-locate schemas. Export `defineDeck`/`defineCard` with Zod schemas and a
+  `run`/`execute` for compute agent definitions.
 
 ## Minimal examples
 
@@ -77,18 +87,19 @@ migrate a repository, run:
 deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
 ```
 
-## Action decks, scenario decks, grader decks
+## Actions, scenarios, and graders
 
-- Add action decks in front matter or TS definitions:
+- Add action references in front matter or TS definitions:
   `actions = [{ name = "get_time", path = "./get_time.deck.ts" }]`.
-- Action decks defined on embedded snippets are merged into the deck; duplicates
-  are overridden by the deck’s own entries.
+- Actions defined on embedded snippets are merged into the agent definition;
+  duplicates are overridden by the agent definition's own entries.
 - In compute decks, call child decks with `ctx.spawnAndWait({ path, input })`.
 - In LLM decks, the model chooses action decks via tool calls. Provide clear
   descriptions so the model routes correctly.
-- `scenarios` describe persona decks (synthetic users/bots). Each entry points
-  to a deck that produces user turns/scenarios—use them for automated QA,
-  persona-vs-workflow simulations, or even bot-vs-bot runs.
+- `scenarios` describe persona agents (synthetic users/bots). Each entry points
+  to an agent definition that produces user turns, tasks, edge cases, or
+  workflow pressure; use them for automated QA, persona-vs-workflow simulations,
+  or even bot-vs-bot runs.
 - Example (see `init/examples/advanced/voice_front_desk/decks/root.deck.md`):
   ```toml
   [[scenarios]]
@@ -101,7 +112,7 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   should set `acceptsUserTurns = true` and may declare its own `contextSchema`
   (for example `contextSchema = "../schemas/my_persona_test.zod.ts"`) so the
   Test tab renders a schema-driven “Scenario” form for that persona.
-- For persona/scenario decks, embed `![init](gambit://snippets/init.md)` to
+- For persona/scenario agents, embed `![init](gambit://snippets/init.md)` to
   include the scenario init-fill contract instructions.
 - To keep personas in the participant role and standardize completion, embed
   `![scenario-participant](gambit://snippets/scenario-participant.md)`.
@@ -123,8 +134,9 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   The persona should respond with **JSON only**, returning values for the
   missing fields (nested by path). Explicit init values are never overwritten;
   invalid JSON or schema-violating output blocks the run with a clear error.
-- `graderDecks` describe calibration decks that score transcripts/artifacts. The
-  simulator Calibrate page will run these decks against stored runs.
+- `graders` describe calibration agents that score transcripts, artifacts, or
+  scenario data. The simulator Calibrate page runs these graders against stored
+  runs.
 - For graders that inspect assistant tool usage, set
   `contextSchema = "gambit://schemas/graders/contexts/turn_tools.zod.ts"` so
   `session.messages[*].tool_calls` is available in the grader input.
@@ -134,7 +146,7 @@ deno run -A packages/gambit/scripts/migrate-schema-terms.ts <repo-root>
   - Markdown roots default to `true`; TypeScript decks default to `false`
     everywhere. Set it to `false` for any workflow deck that should never accept
     user turns (regardless of how it's run).
-  - Persona/scenario decks should set `acceptsUserTurns = true` so they can
+  - Persona/scenario agents should set `acceptsUserTurns = true` so they can
     receive messages even when invoked as non-root bots.
 
 ## Synthetic tools and handlers

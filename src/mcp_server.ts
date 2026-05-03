@@ -40,8 +40,7 @@ const encoder = new TextEncoder();
 const MCP_ALLOW_MODELS_ENV = "GAMBIT_MCP_ALLOW_MODELS";
 const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
-const DEBUG_MCP_ENV = "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP";
-const LEGACY_DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
+const DEBUG_MCP_ENV = "GAMBIT_MCP_DEBUG";
 const DEBUG_MCP_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
 const SUPPORTED_PROTOCOL_VERSIONS = new Set([
   "2025-06-18",
@@ -56,11 +55,9 @@ type ToolCatalog = {
 };
 
 function shouldDebugMcpBridge(): boolean {
-  for (const envName of [DEBUG_MCP_ENV, LEGACY_DEBUG_MCP_ENV]) {
-    const raw = Deno.env.get(envName)?.trim().toLowerCase();
-    if (raw === "1" || raw === "true" || raw === "yes") return true;
-  }
-  return Boolean(debugMcpLogPath());
+  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" ||
+    Boolean(debugMcpLogPath());
 }
 
 function debugMcpLogPath(): string | null {

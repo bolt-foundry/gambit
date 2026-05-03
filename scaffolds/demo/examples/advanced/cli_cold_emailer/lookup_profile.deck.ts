@@ -17,9 +17,9 @@ type Profile = {
 
 const profiles: Record<string, Profile> = {
   randall: {
-    summary: "Co-founder at Bolt Foundry building AI telemetry and analytics.",
+    summary: "Co-founder at Northstar AI Labs building eval data tooling.",
     role: "Co-founder",
-    company: "Bolt Foundry",
+    company: "Northstar AI Labs",
     industry: "AI tooling",
     challenges: ["Proving LLM quality", "Scaling AI reliability"],
     initiatives: ["Telemetry SDK rollout", "Developer adoption"],

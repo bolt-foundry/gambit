@@ -36,8 +36,7 @@ const MCP_ROOT_DECK_PATH_ENV = "GAMBIT_MCP_ROOT_DECK_PATH";
 const EXTERNAL_TOOL_BRIDGE_ENV = "GAMBIT_EXTERNAL_TOOL_BRIDGE";
 const MCP_DEBUG_LOG_PATH_ENV = "GAMBIT_MCP_DEBUG_LOG_PATH";
 const DENO_DIR_ENV = "DENO_DIR";
-const DEBUG_MCP_ENV = "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP";
-const LEGACY_DEBUG_MCP_ENV = "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_MCP";
+const DEBUG_MCP_ENV = "GAMBIT_MCP_DEBUG";
 const MCP_SERVER_PATH = (() => {
   try {
     const moduleUrl = new URL(import.meta.url);
@@ -189,10 +188,8 @@ function shouldEnableMcpBridge(): boolean {
 }
 
 function shouldDebugMcpBridge(): boolean {
-  return [DEBUG_MCP_ENV, LEGACY_DEBUG_MCP_ENV].some((envName) => {
-    const raw = Deno.env.get(envName)?.trim().toLowerCase();
-    return raw === "1" || raw === "true" || raw === "yes";
-  });
+  const raw = Deno.env.get(DEBUG_MCP_ENV)?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
 function isCodexNativeOrGambitBuiltinTool(name: string): boolean {
@@ -218,7 +215,7 @@ function logCodexMcpDebug(
 function codexMcpDebugLogPath(cwd: string): string {
   return path.join(
     cwd,
-    ".boltfoundry",
+    ".workloop",
     "runtime",
     "chief-runtime",
     "gambit-mcp-debug.log",

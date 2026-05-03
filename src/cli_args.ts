@@ -9,6 +9,7 @@ let workerSandboxAliasWarningShown = false;
 
 const COMMANDS = [
   "bot",
+  "chat",
   "check",
   "demo",
   "run",
@@ -27,6 +28,7 @@ function isKnownCommand(cmd?: string): cmd is Command {
 
 const HELP_COMMANDS = [
   "bot",
+  "chat",
   "check",
   "demo",
   "run",
@@ -65,11 +67,14 @@ type Args = {
   statePath?: string;
   outPath?: string;
   artifactPath?: string;
+  reproMessage?: string;
+  runtimeToolsPaths?: Array<string>;
   verbose?: boolean;
   online?: boolean;
   json?: boolean;
   port?: number;
   watch?: boolean;
+  open?: boolean;
   bundle?: boolean;
   sourcemap?: boolean;
   platform?: string;
@@ -126,6 +131,8 @@ const STRING_OPTION_FLAGS = [
   "state",
   "out",
   "artifact",
+  "repro-message",
+  "runtime-tools",
   "port",
 ] as const;
 const OPTION_VALUE_FLAGS = new Set(
@@ -427,11 +434,13 @@ export function parseCliArgs(argv: Array<string>): Args {
       "help",
       "version",
       "watch",
+      "open",
       "bundle",
       "no-bundle",
       "sourcemap",
     ],
     string: [...STRING_OPTION_FLAGS],
+    collect: ["grade", "runtime-tools"],
     alias: {
       help: "h",
       version: "V",
@@ -522,11 +531,16 @@ export function parseCliArgs(argv: Array<string>): Args {
     statePath: parsed.state as string | undefined,
     outPath: parsed.out as string | undefined,
     artifactPath: parsed.artifact as string | undefined,
+    reproMessage: parsed["repro-message"] as string | undefined,
+    runtimeToolsPaths: normalizeFlagList(
+      parsed["runtime-tools"] as string | Array<string> | undefined,
+    ),
     verbose: Boolean(parsed.verbose),
     online: Boolean(parsed.online),
     json: Boolean(parsed.json),
     port: parsePortValue(parsed.port),
     watch: Boolean(parsed.watch),
+    open: Boolean(parsed.open),
     bundle: hasNoBundleFlag ? false : hasBundleFlag ? true : undefined,
     sourcemap: hasNoSourceMapFlag ? false : hasSourceMapFlag ? true : undefined,
     platform: parsed.platform as string | undefined,

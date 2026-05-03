@@ -1,6 +1,6 @@
 # Handlers: error, busy, idle
 
-Gambit decks can register optional handler decks to surface status or recover
+Gambit decks can register optional handler decks to report status or recover
 from failures without blocking the main turn. They run as child decks with
 structured inputs.
 

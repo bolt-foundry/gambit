@@ -1,13 +1,42 @@
 +++
 [release]
-since = "b6ed5a3a8d6a9b272ce520d885d3953d27c2c0d4"
+since = "00872eb8b2190de2ba0904c0ac4f4cdbc611718b"
 +++
 
 # Changelog
 
-## Unreleased
+## Unreleased (v1.0.0)
 
 - TBD
+
+## v1.0.0-rc.2
+
+- fix(gambit): preserve structured text spacing
+- fix(gambit): pass codex runtime tools
+- feat(gambit): make provider execution responses-only
+- feat(gambit): expose structured responses runtime
+- fix(gambit): preserve responses continuation context
+- chore(gambit): remove dead chat provider adapters
+- test(gambit): remove legacy chat suites
+- chore(browser): move runtime out of Gambit
+- feat(gambit): add live browser pointer refs
+- feat(workloop): bridge runtime Codex refresh to host services
+- feat(gambit): add browser introspection live commands
+- fix(gambit): fall back without host service token
+- fix(workloop): preserve Codex auth refresh failures
+- fix(gambit): preserve whitespace in streamed assistant deltas
+- fix(workloop): disable Codex websockets in chief runtime
+- feat(gambit): add local deck chat repro server
+- feat(gambit): stream and control chat turns
+- feat(gambit): improve chat event observability
+- docs(gambit): use canonical graders frontmatter
+- fix(gambit): reject sandboxed chat runs
+- docs(gambit): reposition around scenarios and graders
+- docs(gambit): record agent file naming feedback
+- chore(gambit): record full precommit verification
+- fix(gambit): hydrate chat transcript from persisted state
+- chore(gambit): use generic runtime env names
+- docs(workloop): align Gambit brand hierarchy
 
 ## v1.0.0-rc.1
 

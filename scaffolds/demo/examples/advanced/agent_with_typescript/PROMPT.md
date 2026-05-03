@@ -9,7 +9,7 @@ description = "Return the current ISO timestamp."
 label = "Typescript agent scenario"
 path = "./tests/agent_with_typescript_test.deck.md"
 description = "Synthetic user that asks for the current time."
-[[graderDecks]]
+[[graders]]
 label = "Time greeting guard"
 path = "./graders/time_greeting_guard_llm.deck.md"
 description = "Checks get_time usage, timestamp echo, and brief reply."

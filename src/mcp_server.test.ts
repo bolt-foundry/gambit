@@ -146,11 +146,11 @@ leakTolerantTest(
     const logPath = path.join(fixture.dir, "gambit-mcp-debug.log");
     const previousRootDeck = Deno.env.get("GAMBIT_MCP_ROOT_DECK_PATH");
     const previousDebug = Deno.env.get(
-      "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP",
+      "GAMBIT_MCP_DEBUG",
     );
     const previousLogPath = Deno.env.get("GAMBIT_MCP_DEBUG_LOG_PATH");
     Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", fixture.rootDeckPath);
-    Deno.env.set("WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP", "1");
+    Deno.env.set("GAMBIT_MCP_DEBUG", "1");
     Deno.env.set("GAMBIT_MCP_DEBUG_LOG_PATH", logPath);
     try {
       const response = await handleMcpRequest({
@@ -177,10 +177,10 @@ leakTolerantTest(
         Deno.env.set("GAMBIT_MCP_ROOT_DECK_PATH", previousRootDeck);
       }
       if (previousDebug === undefined) {
-        Deno.env.delete("WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP");
+        Deno.env.delete("GAMBIT_MCP_DEBUG");
       } else {
         Deno.env.set(
-          "WORKLOOP_CHIEF_RUNTIME_DEBUG_MCP",
+          "GAMBIT_MCP_DEBUG",
           previousDebug,
         );
       }

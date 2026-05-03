@@ -18,11 +18,11 @@ Notes:
   (advanced demos in `.../advanced/`, FAQ bot in `.../faq-bot-example/`).
 - When `gambit demo` seeds a workspace, generated copies live under
   `gambit/examples/`.
-- Examples show how to use Gambit as an agent harness for workflow execution and
-  verification.
+- Examples show how to author agents, run synthetic scenarios, grade behavior,
+  inspect traces, and keep regressions reproducible.
 - Routing examples rely on tight action descriptions and schemas so the model
   picks the right tool.
 - Handler examples show how busy/idle status streams and how handled errors
-  surface as envelopes.
+  return structured envelopes.
 - All examples default to `openai/gpt-4o-mini`; override with `--model` or
   `--model-force` to test other providers.

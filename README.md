@@ -1,9 +1,15 @@
 # <img src="./gambit_1color_bg.png" alt="Gambit logo" height="50" />
 
-Gambit is an open-source, developer-first framework that helps you build\
-reliable LLM workflows by composing small, typed “decks”\
-with clear inputs/outputs and guardrails. Run decks locally, stream traces, and\
-debug with a built-in UI.
+Agent frameworks help you build agents. Gambit helps you create the evidence
+that they work.
+
+Gambit is the synthetic scenario and evaluation layer for agent systems: create
+realistic scenarios, validate their quality, run agents against them, grade the
+behavior, capture trace evidence, and turn failures into regression suites.
+
+Native Gambit agents are still the fastest path to the fully integrated loop:
+typed inputs and outputs, local runs, scenarios, graders, traces, permission
+evidence, and the simulator's Build/Test/Grade/Verify workflow.
 
 [Watch the demo video](https://youtu.be/J_hQ2L_yy60).
 
@@ -19,8 +25,8 @@ export OPENROUTER_API_KEY=...
 npx @bolt-foundry/gambit demo
 ```
 
-Downloads example files (hello decks plus the `examples/` gallery) and sets
-environment variables.
+Downloads example files (hello agent definitions plus the `examples/` gallery)
+and sets environment variables.
 
 To start onboarding with the simulator, run:
 
@@ -29,7 +35,7 @@ npx @bolt-foundry/gambit-simulator serve gambit/hello.deck.md
 open http://localhost:8000/debug
 ```
 
-Use the Build tab to draft your own workspace decks and scenarios.
+Use the Build tab to draft your own workspace agents and scenarios.
 
 Run an example in the terminal (`repl`):
 
@@ -48,35 +54,102 @@ open http://localhost:8000/debug
 
 ---
 
+## Why Gambit
+
+Agent teams already have many ways to build and orchestrate agents: native
+Gambit, Mastra, LangGraph, OpenAI Agents SDK, CrewAI, Google ADK, LlamaIndex,
+Pydantic AI, and custom stacks. The harder product problem is creating the
+situations those agents need to survive, checking whether those situations are
+good tests, and preserving the evidence when behavior regresses.
+
+Gambit focuses on that reliability loop:
+
+- **Generate scenarios** for realistic user, tool, workflow, policy, and edge
+  case pressure.
+- **Evaluate the scenario data** for realism, coverage, difficulty, grounding,
+  duplication, and expected-outcome clarity.
+- **Run agent evals** against native Gambit, Mastra, LangGraph, OpenAI, or
+  custom agents.
+- **Grade behavior** from transcripts, artifacts, traces, and typed outputs.
+- **Diagnose failures** with trace evidence and permission evidence.
+- **Regenerate regression suites** from failures so the same behavior does not
+  quietly break again.
+
+For a native Gambit agent, the same system defines, runs, traces, tests, grades,
+and debugs the agent end to end. For a Mastra, LangGraph, OpenAI, or custom
+agent, Gambit sits on the other side of the framework: the test-data engine,
+grader loop, local reproduction harness, and CI behavior check.
+
+## Common workflows
+
+### Native Gambit path
+
+Define the agent in Gambit, run it locally, add scenarios for the behavior that
+must keep working, attach graders, inspect traces in the simulator, and reuse
+the same checks in CI. This is the most direct path when you want Gambit to own
+both the agent definition and the verification loop.
+
+### Bring your own agent
+
+Use Mastra to build the TypeScript agent application. Use Gambit to create and
+validate scenario suites around the important Mastra behaviors, then grade the
+transcripts and artifacts those runs produce. A thin wrapper can record run
+inputs, transcript turns, artifacts, state paths, and trace references so Gambit
+can grade them and keep failing cases reproducible.
+
+### Pull request gate
+
+Run important scenarios on every pull request, grade the resulting transcripts
+or artifacts, and fail the check when behavior drops below the expected
+standard. Failed checks should keep the trace, state, and reproduction inputs so
+the regression can be debugged locally.
+
+```yaml
+# Proposed workflow shape. This is positioning guidance, not a published
+# bolt-foundry/gambit-action release.
+name: Agent behavior checks
+
+on:
+  pull_request:
+
+jobs:
+  gambit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npx @bolt-foundry/gambit scenario gambit/root.deck.md --test-deck gambit/scenarios/smoke.deck.md --grade gambit/graders/smoke.deck.md --state .gambit/ci-smoke.json --trace .gambit/ci-smoke.jsonl
+```
+
 ## Status quo
 
-- Most teams wire one long prompt to several tools and hope the model routes\
-  correctly.
-- Context often arrives as a single giant fetch or RAG blob, so costs climb and\
-  hallucinations slip in.
-- Input/outputs are rarely typed, which makes orchestration brittle and hard to\
-  test offline.
-- Debugging leans on provider logs instead of local traces, so reproducing\
-  failures is slow.
+- Teams have more ways than ever to build agents, but fewer ways to know whether
+  their eval data covers the behavior that will matter in production.
+- Synthetic scenarios can look plausible while duplicating each other, missing
+  policy edges, or failing to state the expected outcome clearly.
+- Agent failures often disappear into provider logs, so the team cannot replay
+  the exact inputs, transcript, tool calls, and artifacts that caused the
+  regression.
+- CI usually checks code shape more reliably than agent behavior.
 
 ## Our vision
 
-- Treat each step as a small deck with explicit inputs/outputs and guardrails;\
-  model calls are just one kind of action.
-- Mix LLM and compute tasks interchangeably and effortlessly inside the same\
-  deck tree.
-- Feed models only what they need per step; inject references and cards instead\
-  of dumping every document.
-- Keep orchestration logic local and testable; run decks offline with\
-  predictable traces.
-- Ship with built-in observability (streaming, REPL, debug UI) so debugging\
-  feels like regular software, not guesswork.
+- Generate the situations your agents need to survive: users, tasks, workflows,
+  tool pressure, policy edges, and hard failure modes.
+- Grade the scenario data itself before it becomes trusted eval data.
+- Run any target agent against the curated suite and preserve the transcript,
+  state, artifacts, trace events, and permission evidence.
+- Diagnose failures by capability gap, tool issue, prompt issue, policy
+  ambiguity, retrieval miss, or unsafe action.
+- Feed those failures back into sharper follow-up scenarios and regression
+  checks.
 
 ---
 
 ## Using the CLI
 
-Use the CLI to run decks locally, stream output, and capture traces/state.
+Use the CLI to run agent definitions locally, stream output, and capture
+traces/state. The current CLI and file format still use `deck` as the exact
+implementation term.
 
 Run with npx (no install):
 
@@ -84,7 +157,7 @@ Run with npx (no install):
 npx @bolt-foundry/gambit <command>
 ```
 
-Run a deck once:
+Run an agent definition once:
 
 ```
 npx @bolt-foundry/gambit run <deck> --context <json|string> --message <json|string>
@@ -99,7 +172,34 @@ Drop into a REPL (streams by default):
 npx @bolt-foundry/gambit repl <deck>
 ```
 
-Run a persona against a root deck (scenario):
+Start a focused browser chat for an agent definition:
+
+```
+npx @bolt-foundry/gambit chat <deck> --state .gambit/chat/workspace.sqlite --trace .gambit/chat/trace.jsonl
+```
+
+Use `chat` when you need a localhost transcript, saved state, trace output, and
+runtime-supplied tools without the full simulator workbench. Use `repl` for a
+terminal loop, `run` for one-shot automation, and `gambit-simulator serve` for
+Build/Test/Grade/Verify workflows.
+
+For repeatable repros, pass `--repro-message <text>` to attach the original user
+ask to the session payload without sending it automatically.
+
+Supply runtime tools with Markdown/TOML files:
+
+```
+npx @bolt-foundry/gambit chat MANAGER.md --runtime-tools ./workloop-runtime-tools.mock.md
+npx @bolt-foundry/gambit chat support.deck.md --runtime-tools ./taxo-runtime-tools.mock.md
+```
+
+The runtime-tool file uses `[[tools]]` entries with `name`, `description`,
+optional `inputSchema`, and optional `action`. Action bindings run Gambit agent
+definitions with the tool arguments as context, keeping product-specific tools
+outside the portable root agent. See `examples/local-chat/` for Workloop-style
+and Taxo-style mock tool fixtures.
+
+Run a scenario persona against a root agent:
 
 ```
 npx @bolt-foundry/gambit scenario <root-deck> --test-deck <persona-deck>
@@ -125,7 +225,7 @@ Tracing and state: 
 
 ### Worker sandbox defaults
 
-- Deck-executing CLI surfaces default to worker sandbox execution.
+- CLI commands that execute decks default to worker sandbox execution.
 - Use `--no-worker-sandbox` (or `--legacy-exec`) to force legacy in-process
   execution.
 - `--worker-sandbox` explicitly forces worker execution on.
@@ -204,7 +304,9 @@ header (left of `New chat`).
 
 ## Using the Library
 
-Use the library when you want TypeScript decks/cards or custom compute steps.
+Use the library when you want TypeScript agent definitions, reusable instruction
+snippets, or custom compute steps. The exported helper names remain `defineDeck`
+and `defineCard` for compatibility.
 
 Import the helpers from JSR:
 
@@ -216,10 +318,10 @@ import { defineDeck, defineCard } from "jsr:@bolt-foundry/gambit";
 
 - `reviews/2026-04-15-AAR-raw-response-items.md`
 
-Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement\
-`run`/`execute` for compute decks. To call a child deck from code, use\
-`ctx.spawnAndWait({ path, input })`. Emit structured trace events with\
-`ctx.log(...)`.
+Define `contextSchema`/`responseSchema` with Zod to validate IO, and implement
+`run`/`execute` for compute agent definitions. To call a child agent definition
+from code, use `ctx.spawnAndWait({ path, input })`. Emit structured trace events
+with `ctx.log(...)`.
 
 ### Runtime defaults for programmatic `runDeckResponses`
 
@@ -288,9 +390,9 @@ Replacement mapping:
 
 ---
 
-## Author your first deck
+## Author your first native Gambit agent
 
-### Minimal Markdown deck (model-powered): `hello_world.deck.md`
+### Minimal Markdown agent definition (model-powered): `hello_world.deck.md`
 
 ```
 +++
@@ -310,7 +412,7 @@ Run it:
 npx @bolt-foundry/gambit run ./hello_world.deck.md --context '"Gambit"' --stream
 ```
 
-### Compute deck in TypeScript (no model call): `echo.deck.ts`
+### Compute agent definition in TypeScript (no model call): `echo.deck.ts`
 
 ```typescript
 // echo.deck.ts
@@ -333,7 +435,7 @@ Run it:
 npx @bolt-foundry/gambit run ./echo.deck.ts --context '{"text":"ping"}'
 ```
 
-### Deck with a child action (calls a TypeScript tool): `agent_with_time.deck.md`
+### Agent definition with a child action (calls a TypeScript tool): `agent_with_time.deck.md`
 
 ```
 +++
@@ -374,8 +476,9 @@ npx @bolt-foundry/gambit run ./agent_with_time.deck.md --context '"hello"' --str
 ### Legacy respond-flow demo (historical compatibility)
 
 `packages/gambit/examples/respond_flow/` is kept as a legacy compatibility
-example for historical transcript/grader behavior. New decks should return
-schema-valid assistant output directly instead of calling `gambit_respond`.
+example for historical transcript/grader behavior. New agent definitions should
+return schema-valid assistant output directly instead of calling
+`gambit_respond`.
 
 ```
 cd packages/gambit

@@ -28,6 +28,7 @@ Deno.test({
   assert(output.includes("gambit <command> [options]"));
   assert(output.includes("gambit help <command>"));
   assert(output.includes("bot       Run the Gambit bot assistant"));
+  assert(output.includes("chat      Start a local deck chat server"));
   assert(output.includes("run       Run a deck once"));
   assert(output.includes("scenario  Run a scenario loop with a persona deck"));
   assert(!output.includes("init"));
@@ -43,7 +44,19 @@ Deno.test({
   });
   assert(output.includes("Details:"));
   assert(output.includes("Usage:\n  gambit run"));
+  assert(output.includes("Usage:\n  gambit chat"));
   assert(output.includes("--state <file>"));
+});
+
+Deno.test({
+  name: "CLI help output renders chat command usage",
+  permissions: { read: true },
+}, () => {
+  const output = captureConsoleLog(() => {
+    printCommandUsage("chat");
+  });
+  assert(output.includes("Usage:\n  gambit chat"));
+  assert(output.includes("--runtime-tools <file>"));
 });
 
 Deno.test({

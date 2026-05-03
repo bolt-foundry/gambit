@@ -2,21 +2,22 @@
 
 What it shows
 
-- Mixing a Markdown LLM deck with a TypeScript compute action.
-- Embedding a card to steer tool usage and reply style.
+- Mixing a Markdown LLM agent definition with a TypeScript compute action.
+- Embedding a reusable instruction snippet to steer tool usage and reply style.
 
 Key files
 
 - `init/examples/advanced/agent_with_typescript/agent_with_typescript.deck.md` —
-  root LLM deck and workflow steps.
+  root LLM agent definition and workflow steps.
 - `init/examples/advanced/agent_with_typescript/get_time.deck.ts` — TS compute
   action (returns ISO timestamp with Zod schemas).
 - `init/examples/advanced/agent_with_typescript/tooling.card.md` — card that
-  defines how/when to call the tool and how to respond.
+  defines how/when to call the tool and how to respond. The `.card.md` suffix is
+  a legacy compatibility filename for a prompt snippet.
 
 Why it’s structured this way
 
-- The card keeps routing guidance separate from the deck body, making it
+- The snippet keeps routing guidance separate from the agent body, making it
   reusable.
 - The TS action uses strict `contextSchema`/`responseSchema` to guarantee a
   deterministic payload from compute code.

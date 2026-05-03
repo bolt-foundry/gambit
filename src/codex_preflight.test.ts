@@ -1,9 +1,6 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
-import {
-  CODEX_HOST_AUTH_BUNDLE_ENV,
-  LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV,
-} from "./codex_auth.ts";
+import { CODEX_HOST_AUTH_BUNDLE_ENV } from "./codex_auth.ts";
 import {
   MINIMUM_SUPPORTED_CODEX_CLI_VERSION,
   readCodexLoginStatus,
@@ -424,7 +421,6 @@ done
 Deno.test("codex preflight falls back to login status when no host auth bundle is present", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
   const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
-  const priorLegacyBundle = Deno.env.get(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({ prefix: "codex-preflight-legacy-" });
   const fakeCodexPath = join(root, "fake-codex");
 
@@ -444,7 +440,6 @@ exit 64
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
-  Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
 
   try {
     const status = await readCodexLoginStatus();
@@ -461,11 +456,6 @@ exit 64
     } else {
       Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
     }
-    if (priorLegacyBundle == null) {
-      Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
-    } else {
-      Deno.env.set(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV, priorLegacyBundle);
-    }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
@@ -473,7 +463,6 @@ exit 64
 Deno.test("codex preflight rejects unsupported codex cli versions before login checks", async () => {
   const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
   const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
-  const priorLegacyBundle = Deno.env.get(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
   const root = await Deno.makeTempDir({
     prefix: "codex-preflight-unsupported-version-",
   });
@@ -495,7 +484,6 @@ exit 64
 
   Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
   Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
-  Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
 
   try {
     const status = await readCodexLoginStatus();
@@ -516,11 +504,6 @@ exit 64
       Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
       Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
-    }
-    if (priorLegacyBundle == null) {
-      Deno.env.delete(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV);
-    } else {
-      Deno.env.set(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV, priorLegacyBundle);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }

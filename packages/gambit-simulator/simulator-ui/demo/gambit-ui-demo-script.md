@@ -20,8 +20,8 @@ Gambit answers one question: what happened, exactly, when this AI system ran. It
 is open source, deterministic, stateless, and code-first. It produces ground
 truth artifacts like runs, traces, and grades.
 
-Gambit is not a system of record or a multi-user product. Bolt Foundry stores
-and compares artifacts over time. Gambit executes and tells the truth.
+Gambit is not a system of record or a multi-user product. Hosted products can
+store and compare artifacts over time. Gambit executes and tells the truth.
 
 If you can run it, you can inspect it. That is the core promise.
 
