@@ -9,7 +9,7 @@ description = "Retrieve the most relevant AcmeFlow FAQ entries with confidence s
 label = "New account persona"
 path = "./tests/new_account_persona.deck.md"
 description = "Synthetic user that asks an in-scope FAQ question."
-[[graderDecks]]
+[[graders]]
 label = "FAQ grounding guard"
 path = "./graders/faq_grounding_guard_llm.deck.md"
 description = "Ensures answers are grounded to FAQ results or refuse when missing."

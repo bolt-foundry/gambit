@@ -432,9 +432,9 @@ Reserved (future, not currently executable):
 
 - Build tab scaffolding and deck discovery treat `PROMPT.md` as the canonical
   entrypoint. `root.deck.md` is legacy-only during the pre-1.0 window.
-- Test tab discovery uses `[[scenarios]]` (or legacy `[[testDecks]]`) on the
-  root deck. Grade tab discovery uses `[[graders]]` (or legacy
-  `[[graderDecks]]`).
+- Test tab discovery uses `[[scenarios]]` on the root deck. Grade tab discovery
+  uses `[[graders]]`. Legacy `testDecks` and `graderDecks` remain accepted only
+  for pre-1.0 compatibility.
 - Scenario and grader references SHOULD point to `.../PROMPT.md` to keep the 1.0
   contract intact, even if those decks are executed directly.
 

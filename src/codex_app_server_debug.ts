@@ -1,7 +1,4 @@
-const CODEX_APP_SERVER_DEBUG_ENV =
-  "WORKLOOP_CHIEF_RUNTIME_DEBUG_CODEX_APP_SERVER";
-const LEGACY_CODEX_APP_SERVER_DEBUG_ENV =
-  "BOLT_FOUNDRY_DESKTOP_CHIEF_RUNTIME_DEBUG_CODEX_APP_SERVER";
+const CODEX_APP_SERVER_DEBUG_ENV = "GAMBIT_CODEX_APP_SERVER_DEBUG";
 
 const STRUCTURAL_STRING_KEYS = new Set([
   "error",
@@ -86,8 +83,7 @@ function summarizeDebugValue(
 }
 
 export function shouldDebugCodexAppServer(): boolean {
-  return parseTruthy(Deno.env.get(CODEX_APP_SERVER_DEBUG_ENV)) ||
-    parseTruthy(Deno.env.get(LEGACY_CODEX_APP_SERVER_DEBUG_ENV));
+  return parseTruthy(Deno.env.get(CODEX_APP_SERVER_DEBUG_ENV));
 }
 
 export function logCodexAppServerDebug(
@@ -103,4 +99,4 @@ export function summarizeCodexAppServerDebugValue(value: unknown): DebugValue {
   return summarizeDebugValue(value);
 }
 
-export { CODEX_APP_SERVER_DEBUG_ENV, LEGACY_CODEX_APP_SERVER_DEBUG_ENV };
+export { CODEX_APP_SERVER_DEBUG_ENV };

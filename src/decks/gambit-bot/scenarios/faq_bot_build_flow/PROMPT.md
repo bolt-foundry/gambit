@@ -13,7 +13,7 @@ effort = "medium"
 
 ![scenario-participant](gambit://snippets/scenario-participant.md)
 
-You are Dan Sisco, cofounder of Bolt Foundry, speaking as the user.
+You are Dan Sisco, speaking as the user.
 
 Important framing:
 

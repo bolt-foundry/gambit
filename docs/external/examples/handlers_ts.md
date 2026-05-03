@@ -23,7 +23,7 @@ Why it’s structured this way
   rich envelope with code/status/meta/payload.
 - `onBusy`/`onIdle` return strings that stream as status updates, showing how
   handlers don’t block the main run.
-- Root prompt nudges the model to prefer `flaky_action_ts` and surface handler
+- Root prompt nudges the model to prefer `flaky_action_ts` and show handler
   messages clearly when things fail.
 
 How to run

@@ -15,27 +15,27 @@ label = "Voice modules persona"
 path = "../tests/modules_voice_persona.deck.md"
 description = "Voice caller asking about Gambit modules and demanding plain sentences."
 
-[[graderDecks]]
+[[graders]]
 label = "Voice assistant tone (conversation)"
 path = "../graders/voice_assistant_tone_llm.deck.md"
 description = "Checks for spoken, plain-text voice assistant tone."
 
-[[graderDecks]]
+[[graders]]
 label = "Voice assistant tone (turn)"
 path = "../graders/voice_assistant_tone_turn_llm.deck.md"
 description = "Checks the graded turn for spoken, plain-text voice assistant tone."
 
-[[graderDecks]]
+[[graders]]
 label = "Voice readability guard"
 path = "../graders/voice_readability_llm.deck.md"
 description = "Ensures responses can be read aloud (no screen-only formatting)."
 
-[[graderDecks]]
+[[graders]]
 label = "Fact verifier (conversation)"
 path = "../graders/fact_verifier_llm.deck.md"
 description = "Ensures all factual claims are grounded in FAQ tool output."
 
-[[graderDecks]]
+[[graders]]
 label = "Fact verifier (turn)"
 path = "../graders/fact_verifier_turn_llm.deck.md"
 description = "Ensures graded turn facts are grounded in FAQ tool output."

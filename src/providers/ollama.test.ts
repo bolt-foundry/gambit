@@ -86,13 +86,13 @@ Deno.test("fetchOllamaTags preserves baseURL path prefix", async () => {
     });
   });
   try {
-    await fetchOllamaTags("https://host.boltfoundry.bflocal:8017/ollama/v1");
+    await fetchOllamaTags("https://host.workloop.bflocal:8017/ollama/v1");
   } finally {
     restore();
   }
   assertEquals(
     seen,
-    "https://host.boltfoundry.bflocal:8017/ollama/api/tags",
+    "https://host.workloop.bflocal:8017/ollama/api/tags",
   );
 });
 

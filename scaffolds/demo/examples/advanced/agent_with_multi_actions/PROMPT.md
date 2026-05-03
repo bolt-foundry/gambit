@@ -8,7 +8,7 @@ temperature = 0
 label = "Multi-actions scenario"
 path = "./tests/agent_with_multi_actions_test.deck.md"
 description = "Synthetic user that requests a simple translation."
-[[graderDecks]]
+[[graders]]
 label = "Action routing guard (turn)"
 path = "./graders/action_routing_guard_llm.deck.md"
 description = "Grades each assistant turn for single-action routing and result use."

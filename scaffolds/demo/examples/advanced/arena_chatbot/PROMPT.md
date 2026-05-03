@@ -9,7 +9,7 @@ temperature = 0.7
 label = "Arena challenger"
 path = "./tests/arena_challenger.deck.md"
 description = "Synthetic user that asks about a Pokemon and requests a tip."
-[[graderDecks]]
+[[graders]]
 label = "Pokemon response guard"
 path = "./graders/pokemon_response_guard_llm.deck.md"
 description = "Checks empty prompt handling and concise Pokemon tips."

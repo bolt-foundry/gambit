@@ -5,7 +5,7 @@ modelParams = { model = "openai/gpt-4o-mini", temperature = 0 }
 label = "Hello scenario"
 path = "./hello.test.deck.md"
 description = "Synthetic user that sends a single greeting input."
-[[graderDecks]]
+[[graders]]
 label = "Hello echo guard"
 path = "./hello.grader.deck.md"
 description = "Enforces the exact hello echo responses."

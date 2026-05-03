@@ -11,6 +11,7 @@ import { makeConsoleTracer, makeJsonlTracer } from "./trace.ts";
 import { startTui } from "./tui.ts";
 import type { PermissionDeclarationInput } from "@bolt-foundry/gambit-core";
 import { handleCheckCommand } from "./commands/check.ts";
+import { handleChatCommand } from "./commands/chat.ts";
 import { handleRunCommand } from "./commands/run.ts";
 import { runTestBotLoop } from "./commands/test_bot.ts";
 import { runGraderAgainstState } from "./commands/grade.ts";
@@ -439,6 +440,30 @@ async function main() {
         sessionPermissions,
         sessionPermissionsBaseDir,
         workerSandbox,
+      });
+      return;
+    }
+
+    if (args.cmd === "chat") {
+      await handleChatCommand({
+        deckPath,
+        context: args.context,
+        contextProvided: args.contextProvided,
+        modelProvider: provider,
+        model: args.model,
+        modelForce: args.modelForce,
+        port: args.port,
+        statePath: args.statePath,
+        tracePath: args.trace,
+        reproMessage: args.reproMessage,
+        runtimeToolsPaths: args.runtimeToolsPaths,
+        responsesMode,
+        open: args.open,
+        workspacePermissions,
+        workspacePermissionsBaseDir: projectConfig?.root,
+        sessionPermissions,
+        sessionPermissionsBaseDir,
+        workerSandbox: args.workerSandbox ?? workerSandboxFromConfig,
       });
       return;
     }

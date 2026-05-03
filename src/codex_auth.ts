@@ -1,9 +1,7 @@
 const CODEX_AUTH0_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const CODEX_AUTH0_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
-export const CODEX_HOST_AUTH_BUNDLE_ENV = "WORKLOOP_CODEX_AUTH_BUNDLE";
-export const LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV =
-  "BOLT_FOUNDRY_DESKTOP_CODEX_AUTH_BUNDLE";
+export const CODEX_HOST_AUTH_BUNDLE_ENV = "GAMBIT_CODEX_AUTH_BUNDLE";
 
 export type CodexChatgptAuthTokens = {
   accessToken: string;
@@ -175,8 +173,7 @@ export function serializeCodexAuthBundle(
 }
 
 export function readCodexAuthBundleFromEnv(): CodexChatgptAuthTokens | null {
-  const raw = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV)?.trim() ||
-    Deno.env.get(LEGACY_CODEX_HOST_AUTH_BUNDLE_ENV)?.trim();
+  const raw = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV)?.trim();
   if (!raw) return null;
   return parseCodexAuthBundle(raw);
 }

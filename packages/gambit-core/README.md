@@ -24,7 +24,7 @@ can live in any host.
   [`defineCard`](src/definitions.ts) that enforce Zod
   `contextSchema`/`responseSchema`.
 - Loader that understands Markdown decks/cards, inline embeds, and companion
-  decks (`actionDecks`, `testDecks`, `graderDecks`).
+  deck references (`[[actions]]`, `[[scenarios]]`, `[[graders]]`).
 - Guardrail-aware runtime (`runDeck`) that can mix LLM actions and pure compute
   decks with structured tracing and execution context helpers.
 - Response-first runtime helpers that plug into any model provider implementing
@@ -70,9 +70,9 @@ etc.).
   spawning child decks.
 - **Handlers**: Background decks triggered on busy/idle/error intervals. Paths
   are resolved relative to the parent deck file.
-- **Companion decks**: `actionDecks` expose tools (function calls) to the model,
-  `testDecks` house personas or scripted tests, and `graderDecks` evaluate saved
-  transcripts.
+- **Companion decks**: `[[actions]]` expose tools (function calls) to the model,
+  `[[scenarios]]` house personas or scripted tests, and `[[graders]]` evaluate
+  saved transcripts.
 
 All actual type definitions live under [`src/types.ts`](src/types.ts). Use them
 when scripting tooling or writing custom providers.
@@ -193,12 +193,16 @@ Embedded cards or system hints can be referenced with markdown image syntax.
 label: Support Triage
 contextSchema: ./schemas/triage_input.ts
 responseSchema: ./schemas/triage_output.ts
-actionDecks:
-  - name: escalate
-    description: Escalate to a manager
-    path: ./actions/escalate.deck.md
-testDecks:
-  - path: ./personas/test_bot.deck.md
+[[actions]]
+name = "escalate"
+description = "Escalate to a manager"
+path = "./actions/escalate.deck.md"
+
+[[scenarios]]
+path = "./personas/test_bot.deck.md"
+
+[[graders]]
+path = "./graders/support_triage.deck.md"
 ---
 ![](gambit://snippets/context.md)
 
@@ -209,11 +213,11 @@ clarifying questions before choosing an action.
 ```
 
 `loadDeck` normalizes relative paths, merges card fragments, enforces unique
-action names, and warns about deprecated fields (`actions`,
-`handlers.onInterval`, `intervalMs`). The Markdown loader also injects helper
-text for built-in tools like `gambit_context` when you add `gambit://` markers.
-Legacy `gambit_respond` and `gambit_end` markers are migration-only and now
-hard-fail in default runtime paths.
+action names, and warns about deprecated fields (`actionDecks`, `testDecks`,
+`graderDecks`, `handlers.onInterval`, `intervalMs`). The Markdown loader also
+injects helper text for built-in tools like `gambit_context` when you add
+`gambit://` markers. Legacy `gambit_respond` and `gambit_end` markers are
+migration-only and now hard-fail in default runtime paths.
 
 ## Compatibility and utilities
 
