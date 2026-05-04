@@ -264,8 +264,12 @@ function shouldSkipCodexSandboxConfig(
 }
 
 function shouldDisableCodexWebsockets(): boolean {
-  const envRaw = Deno.env.get(CODEX_DISABLE_WEBSOCKETS_ENV);
-  return Boolean(envRaw && parseTruthy(envRaw));
+  // Newer Codex releases reserve built-in provider IDs, so overriding
+  // `model_providers.openai.supports_websockets` now prevents app-server
+  // startup. Keep the env var harmless while the old transport workaround ages
+  // out.
+  Deno.env.get(CODEX_DISABLE_WEBSOCKETS_ENV);
+  return false;
 }
 
 function tomlString(value: string): string {
