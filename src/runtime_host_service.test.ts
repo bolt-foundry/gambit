@@ -4,7 +4,6 @@ import { join } from "@std/path";
 import {
   callRuntimeHostServiceRaw,
   CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD,
-  DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD,
   validateRuntimeHostServiceMethodAndParams,
 } from "./runtime_host_service.ts";
 
@@ -44,7 +43,7 @@ Deno.test("runtime host-service raw calls return non-Codex host results unchange
               error: null,
               id: request.id,
               result: {
-                payload: { taskId: "workspace-delegation-smoke" },
+                payload: { writebackId: "preview-smoke" },
                 status: 200,
               },
             })
@@ -60,19 +59,18 @@ Deno.test("runtime host-service raw calls return non-Codex host results unchange
 
   try {
     const result = await callRuntimeHostServiceRaw({
-      method: DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD,
+      method: CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD,
       params: {
-        targetCoworker: "assistant-to-chief-of-staff",
-        title: "Workspace delegation smoke",
-        purpose: "Verify host-owned task drafting.",
-        request: "Report the current working directory.",
+        changedPaths: ["README.md"],
+        summary: "Preview smoke.",
+        workspaceRoot: "/tmp/workspace",
       },
       socketPath,
       token: "test-token",
     });
 
     assertEquals(result, {
-      payload: { taskId: "workspace-delegation-smoke" },
+      payload: { writebackId: "preview-smoke" },
       status: 200,
     });
   } finally {
@@ -99,7 +97,7 @@ Deno.test("runtime host-service raw calls support TCP endpoints", async () => {
               error: null,
               id: request.id,
               result: {
-                payload: { taskId: "tcp-workspace-delegation-smoke" },
+                payload: { writebackId: "tcp-preview-smoke" },
                 status: 200,
               },
             })
@@ -115,19 +113,18 @@ Deno.test("runtime host-service raw calls support TCP endpoints", async () => {
 
   try {
     const result = await callRuntimeHostServiceRaw({
-      method: DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD,
+      method: CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD,
       params: {
-        targetCoworker: "assistant-to-chief-of-staff",
-        title: "TCP workspace delegation smoke",
-        purpose: "Verify host-owned task drafting over TCP.",
-        request: "Report the current working directory.",
+        changedPaths: ["README.md"],
+        summary: "TCP preview smoke.",
+        workspaceRoot: "/tmp/workspace",
       },
       socketPath: `tcp://127.0.0.1:${address.port}`,
       token: "test-token",
     });
 
     assertEquals(result, {
-      payload: { taskId: "tcp-workspace-delegation-smoke" },
+      payload: { writebackId: "tcp-preview-smoke" },
       status: 200,
     });
   } finally {
