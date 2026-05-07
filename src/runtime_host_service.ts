@@ -5,10 +5,6 @@ export const RUNTIME_HOST_SERVICE_TOKEN_ENV =
 
 export const CODEX_REFRESH_HOST_SERVICE_METHOD =
   "providerAuth.codex.refreshChatgptTokens";
-export const DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD =
-  "workloop.tasks.draftCoworkerTask";
-export const QUEUE_COWORKER_TASK_HOST_SERVICE_METHOD =
-  "workloop.tasks.queueCoworkerTask";
 export const CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD =
   "workloop.writebacks.createPreview";
 
@@ -31,20 +27,6 @@ export type CodexRefreshHostServiceResult = {
   type: "chatgptAuthTokens";
 };
 
-export type DraftCoworkerTaskHostServiceParams = {
-  targetCoworker: string;
-  taskId?: string | null;
-  title: string;
-  purpose: string;
-  request: string;
-  acceptanceCriteria?: Array<string>;
-};
-
-export type QueueCoworkerTaskHostServiceParams = {
-  targetCoworker: string;
-  taskId: string;
-};
-
 export type CreateWritebackPreviewHostServiceParams = {
   summary: string;
   workspaceRoot: string;
@@ -53,14 +35,10 @@ export type CreateWritebackPreviewHostServiceParams = {
 
 export type RuntimeHostServiceMethod =
   | typeof CODEX_REFRESH_HOST_SERVICE_METHOD
-  | typeof DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD
-  | typeof QUEUE_COWORKER_TASK_HOST_SERVICE_METHOD
   | typeof CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD;
 
 export type RuntimeHostServiceParams =
   | CodexRefreshHostServiceParams
-  | DraftCoworkerTaskHostServiceParams
-  | QueueCoworkerTaskHostServiceParams
   | CreateWritebackPreviewHostServiceParams;
 
 export type RuntimeHostServiceRequest = {
@@ -159,51 +137,6 @@ function normalizeStringArray(value: unknown, label: string): Array<string> {
   });
 }
 
-export function validateDraftCoworkerTaskHostServiceParams(
-  value: unknown,
-): DraftCoworkerTaskHostServiceParams {
-  if (!isRecord(value)) {
-    throw new Error("host service params must be a JSON object.");
-  }
-  const taskId = value.taskId == null
-    ? null
-    : normalizeOptionalString(value.taskId);
-  if (value.taskId != null && taskId == null) {
-    throw new Error(
-      "workloop.tasks.draftCoworkerTask taskId must be a non-empty string when provided.",
-    );
-  }
-  return {
-    targetCoworker: normalizeRequiredString(
-      value.targetCoworker,
-      "targetCoworker",
-    ),
-    taskId,
-    title: normalizeRequiredString(value.title, "title"),
-    purpose: normalizeRequiredString(value.purpose, "purpose"),
-    request: normalizeRequiredString(value.request, "request"),
-    acceptanceCriteria: normalizeStringArray(
-      value.acceptanceCriteria,
-      "acceptanceCriteria",
-    ),
-  };
-}
-
-export function validateQueueCoworkerTaskHostServiceParams(
-  value: unknown,
-): QueueCoworkerTaskHostServiceParams {
-  if (!isRecord(value)) {
-    throw new Error("host service params must be a JSON object.");
-  }
-  return {
-    targetCoworker: normalizeRequiredString(
-      value.targetCoworker,
-      "targetCoworker",
-    ),
-    taskId: normalizeRequiredString(value.taskId, "taskId"),
-  };
-}
-
 export function validateCreateWritebackPreviewHostServiceParams(
   value: unknown,
 ): CreateWritebackPreviewHostServiceParams {
@@ -229,14 +162,6 @@ export function validateRuntimeHostServiceMethodAndParams(input: {
     params: CodexRefreshHostServiceParams;
   }
   | {
-    method: typeof DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD;
-    params: DraftCoworkerTaskHostServiceParams;
-  }
-  | {
-    method: typeof QUEUE_COWORKER_TASK_HOST_SERVICE_METHOD;
-    params: QueueCoworkerTaskHostServiceParams;
-  }
-  | {
     method: typeof CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD;
     params: CreateWritebackPreviewHostServiceParams;
   } {
@@ -245,16 +170,6 @@ export function validateRuntimeHostServiceMethodAndParams(input: {
       return {
         method: CODEX_REFRESH_HOST_SERVICE_METHOD,
         params: validateCodexRefreshHostServiceParams(input.params),
-      };
-    case DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD:
-      return {
-        method: DRAFT_COWORKER_TASK_HOST_SERVICE_METHOD,
-        params: validateDraftCoworkerTaskHostServiceParams(input.params),
-      };
-    case QUEUE_COWORKER_TASK_HOST_SERVICE_METHOD:
-      return {
-        method: QUEUE_COWORKER_TASK_HOST_SERVICE_METHOD,
-        params: validateQueueCoworkerTaskHostServiceParams(input.params),
       };
     case CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD:
       return {
