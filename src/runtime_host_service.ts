@@ -7,6 +7,8 @@ export const CODEX_REFRESH_HOST_SERVICE_METHOD =
   "providerAuth.codex.refreshChatgptTokens";
 export const CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD =
   "workloop.writebacks.createPreview";
+export const WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD = "workloop.tasks.draft";
+export const WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD = "workloop.tasks.queue";
 
 export type RuntimeHostServiceFailureReason =
   | "host_auth_missing"
@@ -33,13 +35,36 @@ export type CreateWritebackPreviewHostServiceParams = {
   changedPaths?: Array<string>;
 };
 
+export type WorkloopTasksDraftHostServiceParams = {
+  acceptanceCriteria?: Array<string>;
+  purpose?: string | null;
+  request: string;
+  scopePath?: string | null;
+  targetCoworker: string;
+  taskId?: string | null;
+  title: string;
+};
+
+export type WorkloopTasksQueueHostServiceParams = {
+  acceptanceCriteria?: Array<string>;
+  request?: string | null;
+  scopePath?: string | null;
+  targetCoworker: string;
+  taskId?: string | null;
+  title?: string | null;
+};
+
 export type RuntimeHostServiceMethod =
   | typeof CODEX_REFRESH_HOST_SERVICE_METHOD
-  | typeof CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD;
+  | typeof CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD
+  | typeof WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD
+  | typeof WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD;
 
 export type RuntimeHostServiceParams =
   | CodexRefreshHostServiceParams
-  | CreateWritebackPreviewHostServiceParams;
+  | CreateWritebackPreviewHostServiceParams
+  | WorkloopTasksDraftHostServiceParams
+  | WorkloopTasksQueueHostServiceParams;
 
 export type RuntimeHostServiceRequest = {
   id: string;
@@ -153,6 +178,59 @@ export function validateCreateWritebackPreviewHostServiceParams(
   };
 }
 
+function normalizeNullableOptionalString(
+  value: unknown,
+  label: string,
+): string | null | undefined {
+  if (value == null) return value === null ? null : undefined;
+  return normalizeRequiredString(value, label);
+}
+
+export function validateWorkloopTasksDraftHostServiceParams(
+  value: unknown,
+): WorkloopTasksDraftHostServiceParams {
+  if (!isRecord(value)) {
+    throw new Error("host service params must be a JSON object.");
+  }
+  return {
+    acceptanceCriteria: normalizeStringArray(
+      value.acceptanceCriteria,
+      "acceptanceCriteria",
+    ),
+    purpose: normalizeNullableOptionalString(value.purpose, "purpose"),
+    request: normalizeRequiredString(value.request, "request"),
+    scopePath: normalizeNullableOptionalString(value.scopePath, "scopePath"),
+    targetCoworker: normalizeRequiredString(
+      value.targetCoworker,
+      "targetCoworker",
+    ),
+    taskId: normalizeNullableOptionalString(value.taskId, "taskId"),
+    title: normalizeRequiredString(value.title, "title"),
+  };
+}
+
+export function validateWorkloopTasksQueueHostServiceParams(
+  value: unknown,
+): WorkloopTasksQueueHostServiceParams {
+  if (!isRecord(value)) {
+    throw new Error("host service params must be a JSON object.");
+  }
+  return {
+    acceptanceCriteria: normalizeStringArray(
+      value.acceptanceCriteria,
+      "acceptanceCriteria",
+    ),
+    request: normalizeNullableOptionalString(value.request, "request"),
+    scopePath: normalizeNullableOptionalString(value.scopePath, "scopePath"),
+    targetCoworker: normalizeRequiredString(
+      value.targetCoworker,
+      "targetCoworker",
+    ),
+    taskId: normalizeNullableOptionalString(value.taskId, "taskId"),
+    title: normalizeNullableOptionalString(value.title, "title"),
+  };
+}
+
 export function validateRuntimeHostServiceMethodAndParams(input: {
   method: string;
   params: unknown;
@@ -164,6 +242,14 @@ export function validateRuntimeHostServiceMethodAndParams(input: {
   | {
     method: typeof CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD;
     params: CreateWritebackPreviewHostServiceParams;
+  }
+  | {
+    method: typeof WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD;
+    params: WorkloopTasksDraftHostServiceParams;
+  }
+  | {
+    method: typeof WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD;
+    params: WorkloopTasksQueueHostServiceParams;
   } {
   switch (input.method) {
     case CODEX_REFRESH_HOST_SERVICE_METHOD:
@@ -175,6 +261,16 @@ export function validateRuntimeHostServiceMethodAndParams(input: {
       return {
         method: CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD,
         params: validateCreateWritebackPreviewHostServiceParams(input.params),
+      };
+    case WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD:
+      return {
+        method: WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD,
+        params: validateWorkloopTasksDraftHostServiceParams(input.params),
+      };
+    case WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD:
+      return {
+        method: WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD,
+        params: validateWorkloopTasksQueueHostServiceParams(input.params),
       };
     default:
       throw new Error(

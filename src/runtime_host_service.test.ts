@@ -5,6 +5,8 @@ import {
   callRuntimeHostServiceRaw,
   CREATE_WRITEBACK_PREVIEW_HOST_SERVICE_METHOD,
   validateRuntimeHostServiceMethodAndParams,
+  WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD,
+  WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD,
 } from "./runtime_host_service.ts";
 
 async function readJsonLine(conn: Deno.Conn): Promise<Record<string, unknown>> {
@@ -164,5 +166,66 @@ Deno.test("runtime host-service validates create writeback preview params", () =
       }),
     Error,
     "workspaceRoot",
+  );
+});
+
+Deno.test("runtime host-service validates Workloop task action params", () => {
+  assertEquals(
+    validateRuntimeHostServiceMethodAndParams({
+      method: WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD,
+      params: {
+        acceptanceCriteria: ["Confirm queued state."],
+        purpose: "Smoke the task action host bridge.",
+        request: "Draft this task.",
+        targetCoworker: "assistant-to-chief-of-staff",
+        taskId: "bridge-smoke",
+        title: "Bridge smoke",
+      },
+    }),
+    {
+      method: WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD,
+      params: {
+        acceptanceCriteria: ["Confirm queued state."],
+        purpose: "Smoke the task action host bridge.",
+        request: "Draft this task.",
+        scopePath: undefined,
+        targetCoworker: "assistant-to-chief-of-staff",
+        taskId: "bridge-smoke",
+        title: "Bridge smoke",
+      },
+    },
+  );
+  assertEquals(
+    validateRuntimeHostServiceMethodAndParams({
+      method: WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD,
+      params: {
+        request: "Queue this task.",
+        targetCoworker: "assistant-to-chief-of-staff",
+        taskId: "bridge-smoke",
+      },
+    }),
+    {
+      method: WORKLOOP_TASKS_QUEUE_HOST_SERVICE_METHOD,
+      params: {
+        acceptanceCriteria: [],
+        request: "Queue this task.",
+        scopePath: undefined,
+        targetCoworker: "assistant-to-chief-of-staff",
+        taskId: "bridge-smoke",
+        title: undefined,
+      },
+    },
+  );
+  assertThrows(
+    () =>
+      validateRuntimeHostServiceMethodAndParams({
+        method: WORKLOOP_TASKS_DRAFT_HOST_SERVICE_METHOD,
+        params: {
+          request: "Missing target coworker.",
+          title: "Invalid draft",
+        },
+      }),
+    Error,
+    "targetCoworker",
   );
 });
