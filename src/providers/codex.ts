@@ -629,17 +629,14 @@ async function prepareCodexMcpRootDeck(input: {
   };
 }
 
-function appServerThreadSandboxPolicy(input: {
+function appServerSandboxMode(input: {
   cwd: string;
   params?: Record<string, unknown>;
-}): Record<string, unknown> {
+}): "danger-full-access" | "workspace-write" {
   if (shouldSkipCodexSandboxConfig(input.params)) {
-    return { type: "dangerFullAccess" };
+    return "danger-full-access";
   }
-  return {
-    type: "workspaceWrite",
-    writableRoots: [input.cwd],
-  };
+  return "workspace-write";
 }
 
 function appServerTurnSandboxPolicy(input: {
@@ -652,6 +649,9 @@ function appServerTurnSandboxPolicy(input: {
   return {
     type: "workspaceWrite",
     writableRoots: [input.cwd],
+    networkAccess: true,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
   };
 }
 
@@ -1444,7 +1444,7 @@ async function defaultAppServerTurnRunner(
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
-        sandboxPolicy: appServerThreadSandboxPolicy({
+        sandbox: appServerSandboxMode({
           cwd: input.cwd,
           params: input.params,
         }),
@@ -1454,7 +1454,7 @@ async function defaultAppServerTurnRunner(
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
         approvalPolicy: "never",
-        sandboxPolicy: appServerThreadSandboxPolicy({
+        sandbox: appServerSandboxMode({
           cwd: input.cwd,
           params: input.params,
         }),

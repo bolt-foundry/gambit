@@ -391,6 +391,20 @@ Deno.test({
       defaultRun.requestLog.includes('"method":"thread/start"'),
       true,
     );
+    assertEquals(
+      defaultRun.requestLog.includes('"sandbox":"workspace-write"'),
+      true,
+    );
+    assertEquals(
+      defaultRun.requestLog.includes(
+        '"sandboxPolicy":{"type":"workspaceWrite","writableRoots":[',
+      ),
+      true,
+    );
+    assertEquals(
+      defaultRun.requestLog.includes('"networkAccess":true'),
+      true,
+    );
     assertEquals(defaultRun.requestLog.includes('"model":null'), true);
     assertEquals(
       defaultRun.requestLog.includes(
@@ -453,6 +467,40 @@ Deno.test({
     );
     assertEquals(
       projectDocRun.argsLog.includes("project_doc_max_bytes=0"),
+      true,
+    );
+
+    await Deno.remove(mock.requestLogPath).catch((err) => {
+      if (err instanceof Deno.errors.NotFound) return;
+      throw err;
+    });
+    const yoloDeck = await writeDeck(
+      dir,
+      "codex-cli/default",
+      undefined,
+      "Smoke deck.",
+      "additionalParams = { gambitYolo = true }",
+    );
+    const yoloRun = await runDeck({
+      deckPath: yoloDeck,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
+      cwd: dir,
+    });
+    assertEquals(
+      yoloRun.code,
+      0,
+      formatCommandDiagnostics("run codex-cli/default yolo", yoloRun),
+    );
+    assertEquals(
+      yoloRun.requestLog.includes('"sandbox":"danger-full-access"'),
+      true,
+    );
+    assertEquals(
+      yoloRun.requestLog.includes(
+        '"sandboxPolicy":{"type":"dangerFullAccess"}',
+      ),
       true,
     );
   } finally {
