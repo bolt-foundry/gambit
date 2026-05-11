@@ -170,9 +170,30 @@ function codexDeckDir(deckPath?: string): string | undefined {
   );
 }
 
+function codexBotRootCwd(deckPath?: string): string | undefined {
+  const botRootRaw = Deno.env.get(BOT_ROOT_ENV)?.trim();
+  if (!botRootRaw) return undefined;
+  const botRoot = path.resolve(botRootRaw);
+  const trimmedDeckPath = deckPath?.trim();
+  if (!trimmedDeckPath) return botRoot;
+  const deckAbsolutePath = path.isAbsolute(trimmedDeckPath)
+    ? path.resolve(trimmedDeckPath)
+    : path.resolve(botRoot, trimmedDeckPath);
+  const relative = path.relative(botRoot, deckAbsolutePath);
+  if (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  ) {
+    return botRoot;
+  }
+  return undefined;
+}
+
 function codexRunCwd(input: { cwd?: string; deckPath?: string }): string {
   const explicitCwd = input.cwd?.trim();
   if (explicitCwd) return explicitCwd;
+  const botRoot = codexBotRootCwd(input.deckPath);
+  if (botRoot) return botRoot;
   const deckDir = codexDeckDir(input.deckPath);
   if (deckDir) return deckDir;
   return runCwd();

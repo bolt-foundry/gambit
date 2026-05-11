@@ -222,6 +222,7 @@ async function runDeck(input: {
   cwd?: string;
   command?: "run" | "repl";
   extraArgs?: Array<string>;
+  env?: Record<string, string>;
 }): Promise<{
   code: number;
   stdout: string;
@@ -244,6 +245,7 @@ async function runDeck(input: {
       GAMBIT_CODEX_DISABLE_MCP: "1",
       CODEX_ARGS_LOG: input.argsLogPath,
       CODEX_REQUESTS_LOG: input.requestLogPath,
+      ...(input.env ?? {}),
     },
     stdout: "piped",
     stderr: "piped",
@@ -501,6 +503,48 @@ Deno.test({
       yoloRun.requestLog.includes(
         '"sandboxPolicy":{"type":"dangerFullAccess"}',
       ),
+      true,
+    );
+
+    await Deno.remove(mock.requestLogPath).catch((err) => {
+      if (err instanceof Deno.errors.NotFound) return;
+      throw err;
+    });
+    const nestedDeckDir = path.join(
+      dir,
+      "coworkers",
+      "agents",
+      "chief-of-staff",
+    );
+    await Deno.mkdir(nestedDeckDir, { recursive: true });
+    const nestedDeck = await writeDeck(
+      nestedDeckDir,
+      "codex-cli/default",
+      undefined,
+      "Nested Chief deck.",
+    );
+    const nestedRun = await runDeck({
+      deckPath: nestedDeck,
+      codexBinPath: mock.binPath,
+      argsLogPath: mock.argsLogPath,
+      requestLogPath: mock.requestLogPath,
+      cwd: dir,
+      env: { GAMBIT_BOT_ROOT: dir },
+    });
+    assertEquals(
+      nestedRun.code,
+      0,
+      formatCommandDiagnostics(
+        "run nested codex-cli/default under GAMBIT_BOT_ROOT",
+        nestedRun,
+      ),
+    );
+    assertEquals(
+      nestedRun.requestLog.includes(`"cwd":"${dir}"`),
+      true,
+    );
+    assertEquals(
+      nestedRun.requestLog.includes(`"writableRoots":["${dir}"]`),
       true,
     );
   } finally {
