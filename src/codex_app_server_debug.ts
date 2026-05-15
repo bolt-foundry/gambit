@@ -2,13 +2,21 @@ const CODEX_APP_SERVER_DEBUG_ENV = "GAMBIT_CODEX_APP_SERVER_DEBUG";
 
 const STRUCTURAL_STRING_KEYS = new Set([
   "error",
+  "file",
+  "filename",
+  "level",
   "method",
+  "message",
+  "module_path",
   "name",
   "phase",
   "reason",
   "role",
   "server",
   "status",
+  "target",
+  "timestamp",
+  "time",
   "tool",
   "type",
 ]);
@@ -97,6 +105,18 @@ export function logCodexAppServerDebug(
 
 export function summarizeCodexAppServerDebugValue(value: unknown): DebugValue {
   return summarizeDebugValue(value);
+}
+
+export function codexAppServerStderrDebugDetails(
+  line: string,
+): Record<string, unknown> {
+  const trimmed = line.trim();
+  if (!trimmed) return { line: "" };
+  try {
+    return { json: JSON.parse(trimmed) };
+  } catch {
+    return { line: trimmed };
+  }
 }
 
 export { CODEX_APP_SERVER_DEBUG_ENV };

@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { CODEX_HOST_AUTH_BUNDLE_ENV } from "./codex_auth.ts";
 import {
@@ -95,6 +95,94 @@ done
     assertEquals(
       status.codexLoginStatus,
       "Codex account ready via app-server external auth (account=acct-preflight plan=pro).",
+    );
+  } finally {
+    if (priorBin == null) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    if (priorBundle == null) {
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
+    } else {
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex preflight does not hang when app-server ignores SIGTERM after account read", async () => {
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
+  const root = await Deno.makeTempDir({
+    prefix: "codex-preflight-shutdown-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+${fakeCodexVersionBlock()}
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"account/login/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-preflight"}}}\\n' "$id"
+      ;;
+    *'"method":"account/read"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-preflight","planType":"pro"},"requiresOpenaiAuth":false}}\\n' "$id"
+      ;;
+  esac
+done
+
+trap '' TERM
+while :; do :; done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set(
+    CODEX_HOST_AUTH_BUNDLE_ENV,
+    JSON.stringify({
+      accessToken: "preflight-access-token",
+      refreshToken: "refresh-token",
+      idToken: "id-token",
+      chatgptAccountId: "acct-preflight",
+      chatgptPlanType: "pro",
+      lastRefresh: "2026-04-17T00:00:00Z",
+    }),
+  );
+
+  try {
+    const startedAt = performance.now();
+    const status = await readCodexLoginStatus();
+    assertEquals(status.codexLoggedIn, true);
+    assert(
+      performance.now() - startedAt < 2_000,
+      "preflight should not wait indefinitely for app-server shutdown",
     );
   } finally {
     if (priorBin == null) {
@@ -323,6 +411,129 @@ done
       Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
     } else {
       Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("codex preflight does not hang when stale-account host refresh is unresponsive", async () => {
+  const priorBin = Deno.env.get("GAMBIT_CODEX_BIN");
+  const priorBundle = Deno.env.get(CODEX_HOST_AUTH_BUNDLE_ENV);
+  const priorHostServiceSocket = Deno.env.get(RUNTIME_HOST_SERVICE_SOCKET_ENV);
+  const priorHostServiceToken = Deno.env.get(RUNTIME_HOST_SERVICE_TOKEN_ENV);
+  const root = await Deno.makeTempDir({
+    prefix: "codex-preflight-host-refresh-timeout-",
+  });
+  const fakeCodexPath = join(root, "fake-codex");
+  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const listenerAddress = listener.addr as Deno.NetAddr;
+  const heldConnections: Array<Deno.Conn> = [];
+  const acceptLoop = (async () => {
+    for await (const conn of listener) {
+      heldConnections.push(conn);
+    }
+  })().catch(() => undefined);
+
+  await Deno.writeTextFile(
+    fakeCodexPath,
+    `#!/bin/sh
+set -eu
+${fakeCodexVersionBlock()}
+
+extract_id() {
+  printf '%s\\n' "$1" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p'
+}
+
+mode=""
+for arg in "$@"; do
+  if [ "$arg" = "app-server" ]; then
+    mode="app-server"
+  fi
+done
+
+[ "$mode" = "app-server" ] || exit 64
+
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"capabilities":{"experimentalApi":true}}}\\n' "$id"
+      ;;
+    *'"method":"initialized"'*)
+      ;;
+    *'"method":"account/login/start"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-preflight"}}}\\n' "$id"
+      ;;
+    *'"method":"account/read"'*)
+      id="$(extract_id "$line")"
+      printf '{"id":"%s","result":{"account":{"id":"acct-preflight","planType":"pro"},"requiresOpenaiAuth":true}}\\n' "$id"
+      ;;
+  esac
+done
+`,
+  );
+  await Deno.chmod(fakeCodexPath, 0o755);
+
+  Deno.env.set("GAMBIT_CODEX_BIN", fakeCodexPath);
+  Deno.env.set(
+    RUNTIME_HOST_SERVICE_SOCKET_ENV,
+    `tcp://127.0.0.1:${listenerAddress.port}`,
+  );
+  Deno.env.set(RUNTIME_HOST_SERVICE_TOKEN_ENV, "host-service-token");
+  Deno.env.set(
+    CODEX_HOST_AUTH_BUNDLE_ENV,
+    JSON.stringify({
+      accessToken: "preflight-access-token",
+      refreshToken: "refresh-token",
+      idToken: "id-token",
+      chatgptAccountId: "acct-preflight",
+      chatgptPlanType: "pro",
+      lastRefresh: "2026-04-17T00:00:00Z",
+    }),
+  );
+
+  try {
+    const startedAt = performance.now();
+    const status = await readCodexLoginStatus();
+    assertEquals(status.codexLoggedIn, true);
+    assertStringIncludes(
+      status.codexLoginStatus,
+      "account/read still reports requiresOpenaiAuth",
+    );
+    assert(
+      performance.now() - startedAt < 2_500,
+      "preflight should not wait indefinitely for stale-account host refresh",
+    );
+  } finally {
+    listener.close();
+    for (const conn of heldConnections) {
+      try {
+        conn.close();
+      } catch {
+        // ignore
+      }
+    }
+    await acceptLoop;
+    if (priorBin == null) {
+      Deno.env.delete("GAMBIT_CODEX_BIN");
+    } else {
+      Deno.env.set("GAMBIT_CODEX_BIN", priorBin);
+    }
+    if (priorBundle == null) {
+      Deno.env.delete(CODEX_HOST_AUTH_BUNDLE_ENV);
+    } else {
+      Deno.env.set(CODEX_HOST_AUTH_BUNDLE_ENV, priorBundle);
+    }
+    if (priorHostServiceSocket == null) {
+      Deno.env.delete(RUNTIME_HOST_SERVICE_SOCKET_ENV);
+    } else {
+      Deno.env.set(RUNTIME_HOST_SERVICE_SOCKET_ENV, priorHostServiceSocket);
+    }
+    if (priorHostServiceToken == null) {
+      Deno.env.delete(RUNTIME_HOST_SERVICE_TOKEN_ENV);
+    } else {
+      Deno.env.set(RUNTIME_HOST_SERVICE_TOKEN_ENV, priorHostServiceToken);
     }
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
