@@ -1,9 +1,51 @@
 import { assertEquals } from "@std/assert";
 import type OpenAI from "@openai/openai";
-import { createCodexProvider } from "./codex.ts";
+import {
+  codexAppServerEnvOverridesForTests,
+  createCodexProvider,
+} from "./codex.ts";
 import { createGoogleProvider } from "./google.ts";
 import { createOllamaProvider } from "./ollama.ts";
 import { createOpenRouterProvider } from "./openrouter.ts";
+
+const CODEX_APP_SERVER_ENV_TEST_NAMES = [
+  "GAMBIT_CODEX_APP_SERVER_RUST_LOG",
+  "GAMBIT_CODEX_APP_SERVER_LOG_FORMAT",
+  "CODEX_CA_CERTIFICATE",
+  "SSL_CERT_FILE",
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+] as const;
+
+function withEnv(
+  updates: Partial<
+    Record<typeof CODEX_APP_SERVER_ENV_TEST_NAMES[number], string>
+  >,
+  run: () => void,
+): void {
+  const previous = new Map<string, string | undefined>();
+  for (const name of CODEX_APP_SERVER_ENV_TEST_NAMES) {
+    previous.set(name, Deno.env.get(name));
+    Deno.env.delete(name);
+  }
+  try {
+    for (const [name, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        Deno.env.set(name, value);
+      }
+    }
+    run();
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) {
+        Deno.env.delete(name);
+      } else {
+        Deno.env.set(name, value);
+      }
+    }
+  }
+}
 
 function buildResponseFixture(model: string): OpenAI.Responses.Response {
   return {
@@ -183,4 +225,33 @@ Deno.test("provider conformance: codex responses forwards abort signal", async (
   });
 
   assertEquals(seenSignal, controller.signal);
+});
+
+Deno.test("provider conformance: codex app-server env maps targeted tracing env to upstream names", () => {
+  withEnv({
+    GAMBIT_CODEX_APP_SERVER_RUST_LOG: "codex_app_server=debug,codex_core=debug",
+    GAMBIT_CODEX_APP_SERVER_LOG_FORMAT: "json",
+  }, () => {
+    assertEquals(codexAppServerEnvOverridesForTests(), {
+      RUST_LOG: "codex_app_server=debug,codex_core=debug",
+      LOG_FORMAT: "json",
+    });
+  });
+});
+
+Deno.test("provider conformance: codex app-server env forwards runtime CA trust env", () => {
+  withEnv({
+    SSL_CERT_FILE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+    CURL_CA_BUNDLE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+    REQUESTS_CA_BUNDLE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+    NODE_EXTRA_CA_CERTS: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+  }, () => {
+    assertEquals(codexAppServerEnvOverridesForTests(), {
+      CODEX_CA_CERTIFICATE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+      SSL_CERT_FILE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+      CURL_CA_BUNDLE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+      REQUESTS_CA_BUNDLE: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+      NODE_EXTRA_CA_CERTS: "/runtime/trust/workloop-cleanroom-egress-ca.pem",
+    });
+  });
 });

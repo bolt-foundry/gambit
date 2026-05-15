@@ -15,7 +15,10 @@ import type {
 } from "@bolt-foundry/gambit-core";
 import { joinTextParts, loadDeck } from "@bolt-foundry/gambit-core";
 import type { CodexChatgptAuthTokens } from "../codex_auth.ts";
-import { logCodexAppServerDebug } from "../codex_app_server_debug.ts";
+import {
+  codexAppServerStderrDebugDetails,
+  logCodexAppServerDebug,
+} from "../codex_app_server_debug.ts";
 import { ensureTempMcpDenoConfigSync } from "../mcp_deno_config.ts";
 
 export const CODEX_PREFIX = "codex-cli/";
@@ -29,7 +32,22 @@ const CODEX_VERBOSITY_ENV = "GAMBIT_CODEX_VERBOSITY";
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 const CODEX_SKIP_SANDBOX_CONFIG_ENV = "GAMBIT_CODEX_SKIP_SANDBOX_CONFIG";
 const CODEX_DISABLE_WEBSOCKETS_ENV = "GAMBIT_CODEX_DISABLE_WEBSOCKETS";
+const CODEX_NO_WEBSOCKET_PROVIDER_ID = "openai-no-ws";
 const CODEX_APP_SERVER_TIMING_ENV = "GAMBIT_CODEX_APP_SERVER_TIMING";
+const CODEX_APP_SERVER_RUST_LOG_ENV = "RUST_LOG";
+const CODEX_APP_SERVER_LOG_FORMAT_ENV = "LOG_FORMAT";
+const GAMBIT_CODEX_APP_SERVER_RUST_LOG_ENV = "GAMBIT_CODEX_APP_SERVER_RUST_LOG";
+const GAMBIT_CODEX_APP_SERVER_LOG_FORMAT_ENV =
+  "GAMBIT_CODEX_APP_SERVER_LOG_FORMAT";
+const CODEX_CA_CERTIFICATE_ENV = "CODEX_CA_CERTIFICATE";
+const SSL_CERT_FILE_ENV = "SSL_CERT_FILE";
+const CODEX_APP_SERVER_TRUST_ENV_NAMES = [
+  CODEX_CA_CERTIFICATE_ENV,
+  SSL_CERT_FILE_ENV,
+  "CURL_CA_BUNDLE",
+  "REQUESTS_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+] as const;
 const CODEX_DANGEROUS_BYPASS_ENV =
   "GAMBIT_CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX";
 const MCP_DENO_BIN_ENV = "GAMBIT_MCP_DENO_BIN";
@@ -275,6 +293,62 @@ function logCodexAppServerTiming(
   );
 }
 
+export function codexAppServerEnvOverridesForTests(): Record<string, string> {
+  const env: Record<string, string> = {};
+  const rustLog = Deno.env.get(GAMBIT_CODEX_APP_SERVER_RUST_LOG_ENV)?.trim();
+  if (rustLog) {
+    env[CODEX_APP_SERVER_RUST_LOG_ENV] = rustLog;
+  }
+  const logFormat = Deno.env.get(GAMBIT_CODEX_APP_SERVER_LOG_FORMAT_ENV)
+    ?.trim();
+  if (logFormat) {
+    env[CODEX_APP_SERVER_LOG_FORMAT_ENV] = logFormat;
+  }
+  for (const envName of CODEX_APP_SERVER_TRUST_ENV_NAMES) {
+    const value = Deno.env.get(envName)?.trim();
+    if (value) {
+      env[envName] = value;
+    }
+  }
+  if (!env[CODEX_CA_CERTIFICATE_ENV] && env[SSL_CERT_FILE_ENV]) {
+    env[CODEX_CA_CERTIFICATE_ENV] = env[SSL_CERT_FILE_ENV];
+  }
+  return env;
+}
+
+async function codexAppServerTrustEnvDetails(
+  env: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const selectedCaPath = env[CODEX_CA_CERTIFICATE_ENV] ??
+    env[SSL_CERT_FILE_ENV] ??
+    null;
+  const details: Record<string, unknown> = {
+    envNames: CODEX_APP_SERVER_TRUST_ENV_NAMES.filter((envName) =>
+      Boolean(env[envName])
+    ),
+    selectedCaEnv: env[CODEX_CA_CERTIFICATE_ENV]
+      ? CODEX_CA_CERTIFICATE_ENV
+      : env[SSL_CERT_FILE_ENV]
+      ? SSL_CERT_FILE_ENV
+      : null,
+    selectedCaPath,
+  };
+  if (!selectedCaPath) {
+    return details;
+  }
+  try {
+    const stat = await Deno.stat(selectedCaPath);
+    details.selectedCaReadable = stat.isFile;
+    details.selectedCaSize = stat.size;
+  } catch (error) {
+    details.selectedCaReadable = false;
+    details.selectedCaError = error instanceof Error
+      ? error.message
+      : String(error);
+  }
+  return details;
+}
+
 function shouldDangerouslyBypassCodexApprovalsAndSandbox(
   params?: Record<string, unknown>,
 ): boolean {
@@ -307,12 +381,30 @@ function shouldSkipCodexSandboxConfig(
 }
 
 function shouldDisableCodexWebsockets(): boolean {
-  // Newer Codex releases reserve built-in provider IDs, so overriding
-  // `model_providers.openai.supports_websockets` now prevents app-server
-  // startup. Keep the env var harmless while the old transport workaround ages
-  // out.
-  Deno.env.get(CODEX_DISABLE_WEBSOCKETS_ENV);
-  return false;
+  const raw = Deno.env.get(CODEX_DISABLE_WEBSOCKETS_ENV);
+  return Boolean(raw && parseTruthy(raw));
+}
+
+function codexNoWebsocketProviderConfigArgs(): Array<string> {
+  const providerKey = `model_providers.${
+    tomlKeySegment(CODEX_NO_WEBSOCKET_PROVIDER_ID)
+  }`;
+  return [
+    "-c",
+    `model_provider=${tomlString(CODEX_NO_WEBSOCKET_PROVIDER_ID)}`,
+    "-c",
+    `${providerKey}.name=${tomlString("OpenAI")}`,
+    "-c",
+    `${providerKey}.wire_api=${tomlString("responses")}`,
+    "-c",
+    `${providerKey}.requires_openai_auth=true`,
+    "-c",
+    `${providerKey}.supports_websockets=false`,
+  ];
+}
+
+function codexThreadModelProviderOverride(): string | null {
+  return shouldDisableCodexWebsockets() ? CODEX_NO_WEBSOCKET_PROVIDER_ID : null;
 }
 
 function tomlString(value: string): string {
@@ -423,7 +515,7 @@ function codexConfigArgs(input: {
   const args: Array<string> = [];
   args.push(...codexAdditionalConfigArgs(input.params));
   if (shouldDisableCodexWebsockets()) {
-    args.push("-c", "model_providers.openai.supports_websockets=false");
+    args.push(...codexNoWebsocketProviderConfigArgs());
   }
   args.push("-c", `approval_policy=${tomlString("never")}`);
   const pathEnv = Deno.env.get("PATH")?.trim();
@@ -1184,9 +1276,15 @@ async function defaultAppServerTurnRunner(
     skipSandboxConfig,
   });
   const spawnStartedAt = performance.now();
+  const appServerEnv = codexAppServerEnvOverridesForTests();
+  logCodexAppServerTiming(
+    "spawn:trust_env",
+    await codexAppServerTrustEnvDetails(appServerEnv),
+  );
   const child = new Deno.Command(codexBin, {
     args: spawnArgs,
     cwd: input.cwd,
+    env: appServerEnv,
     stdin: "piped",
     stdout: "piped",
     stderr: "piped",
@@ -1549,15 +1647,17 @@ async function defaultAppServerTurnRunner(
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        logCodexAppServerDebug("stderr", {
-          line: trimmed,
-        });
+        logCodexAppServerDebug(
+          "stderr",
+          codexAppServerStderrDebugDetails(trimmed),
+        );
       }
     }
     if (buffered.trim()) {
-      logCodexAppServerDebug("stderr", {
-        line: buffered.trim(),
-      });
+      logCodexAppServerDebug(
+        "stderr",
+        codexAppServerStderrDebugDetails(buffered),
+      );
     }
   })();
 
@@ -1591,6 +1691,7 @@ async function defaultAppServerTurnRunner(
     });
 
     const model = normalizeCodexModel(input.model);
+    const modelProvider = codexThreadModelProviderOverride();
     const threadOperation = input.priorThreadId
       ? "thread/resume"
       : "thread/start";
@@ -1600,6 +1701,7 @@ async function defaultAppServerTurnRunner(
         threadId: input.priorThreadId,
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
+        ...(modelProvider ? { modelProvider } : {}),
         approvalPolicy: "never",
         sandbox: appServerSandboxMode({
           cwd: input.cwd,
@@ -1610,6 +1712,7 @@ async function defaultAppServerTurnRunner(
       : await request("thread/start", {
         model: model && model !== "default" ? model : null,
         cwd: input.cwd,
+        ...(modelProvider ? { modelProvider } : {}),
         approvalPolicy: "never",
         sandbox: appServerSandboxMode({
           cwd: input.cwd,

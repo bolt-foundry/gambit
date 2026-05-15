@@ -3,7 +3,10 @@ import {
   refreshCodexChatgptAuthTokens,
   summarizeCodexAuthBundle,
 } from "./codex_auth.ts";
-import { logCodexAppServerDebug } from "./codex_app_server_debug.ts";
+import {
+  codexAppServerStderrDebugDetails,
+  logCodexAppServerDebug,
+} from "./codex_app_server_debug.ts";
 import {
   callRuntimeHostService,
   CODEX_REFRESH_HOST_SERVICE_METHOD,
@@ -14,6 +17,8 @@ import {
 
 const CODEX_BIN_ENV = "GAMBIT_CODEX_BIN";
 export const MINIMUM_SUPPORTED_CODEX_CLI_VERSION = "0.121.0";
+const APP_SERVER_PREFLIGHT_HOST_REFRESH_TIMEOUT_MS = 1_000;
+const APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS = 250;
 
 export type CodexLoginStatus = {
   codexLoggedIn: boolean;
@@ -145,9 +150,101 @@ async function refreshCodexPreflightViaHost(input: {
   reason: string;
 }): Promise<CodexRefreshHostServiceResult | null> {
   if (!hasRuntimeHostServiceRefreshConfig()) return null;
-  return await callRuntimeHostService({
+  const refreshPromise = callRuntimeHostService({
     method: CODEX_REFRESH_HOST_SERVICE_METHOD,
     params: input,
+  }).catch((error) => {
+    logCodexAppServerDebug("preflight:host_refresh_failed", {
+      error: error instanceof Error ? error.message : String(error),
+      reason: input.reason,
+    });
+    return null;
+  });
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    setTimeout(
+      () => resolve("timeout"),
+      APP_SERVER_PREFLIGHT_HOST_REFRESH_TIMEOUT_MS,
+    );
+  });
+  const result = await Promise.race([refreshPromise, timeoutPromise]);
+  if (result === "timeout") {
+    logCodexAppServerDebug("preflight:host_refresh_timeout", {
+      reason: input.reason,
+      timeoutMs: APP_SERVER_PREFLIGHT_HOST_REFRESH_TIMEOUT_MS,
+    });
+    return null;
+  }
+  return result;
+}
+
+async function settlesWithin(
+  promise: Promise<unknown>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true, () => true),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+async function waitForAppServerPreflightShutdown(input: {
+  child: Deno.ChildProcess;
+  stdoutLoop: Promise<void>;
+  stderrLoop: Promise<void>;
+  childStatus: Promise<unknown>;
+}): Promise<void> {
+  const shutdown = () =>
+    Promise.allSettled([
+      input.stdoutLoop,
+      input.stderrLoop,
+      input.childStatus,
+    ]);
+  if (
+    await settlesWithin(shutdown(), APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS)
+  ) {
+    return;
+  }
+  logCodexAppServerDebug("preflight:child_shutdown_timeout", {
+    signal: "SIGTERM",
+    timeoutMs: APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS,
+  });
+  try {
+    input.child.kill("SIGKILL");
+  } catch {
+    // ignore
+  }
+  if (
+    await settlesWithin(shutdown(), APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS)
+  ) {
+    return;
+  }
+  logCodexAppServerDebug("preflight:child_shutdown_timeout", {
+    signal: "SIGKILL",
+    timeoutMs: APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS,
+  });
+}
+
+async function closeAppServerPreflightStdin(
+  stdinWriter: WritableStreamDefaultWriter<Uint8Array>,
+): Promise<void> {
+  const closePromise = stdinWriter.close().catch(() => undefined);
+  if (
+    await settlesWithin(
+      closePromise,
+      APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS,
+    )
+  ) {
+    return;
+  }
+  logCodexAppServerDebug("preflight:stdin_close_timeout", {
+    timeoutMs: APP_SERVER_PREFLIGHT_SHUTDOWN_TIMEOUT_MS,
   });
 }
 
@@ -355,15 +452,17 @@ export async function readCodexLoginStatus(): Promise<CodexLoginStatus> {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
-          logCodexAppServerDebug("preflight:stderr", {
-            line: trimmed,
-          });
+          logCodexAppServerDebug(
+            "preflight:stderr",
+            codexAppServerStderrDebugDetails(trimmed),
+          );
         }
       }
       if (buffered.trim()) {
-        logCodexAppServerDebug("preflight:stderr", {
-          line: buffered.trim(),
-        });
+        logCodexAppServerDebug(
+          "preflight:stderr",
+          codexAppServerStderrDebugDetails(buffered),
+        );
       }
     })();
 
@@ -443,13 +542,18 @@ export async function readCodexLoginStatus(): Promise<CodexLoginStatus> {
         request.reject(new Error("Codex app-server session closed."));
       }
       pending.clear();
-      await stdinWriter.close().catch(() => undefined);
+      await closeAppServerPreflightStdin(stdinWriter);
       try {
         child.kill("SIGTERM");
       } catch {
         // ignore
       }
-      await Promise.allSettled([stdoutLoop, stderrLoop, childStatus]);
+      await waitForAppServerPreflightShutdown({
+        child,
+        stdoutLoop,
+        stderrLoop,
+        childStatus,
+      });
       if (childClosedError) {
         childClosedError = null;
       }

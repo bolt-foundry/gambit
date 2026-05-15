@@ -35,7 +35,7 @@ Deno.test("codex app-server refresh host failures are returned as RPC errors", a
   }
 });
 
-Deno.test("codex websocket disable env does not override built-in OpenAI provider", () => {
+Deno.test("codex websocket disable env uses a custom OpenAI provider", () => {
   const previous = Deno.env.get("GAMBIT_CODEX_DISABLE_WEBSOCKETS");
   Deno.env.set("GAMBIT_CODEX_DISABLE_WEBSOCKETS", "1");
 
@@ -45,6 +45,29 @@ Deno.test("codex websocket disable env does not override built-in OpenAI provide
     assertEquals(
       args.includes("model_providers.openai.supports_websockets=false"),
       false,
+    );
+    assertEquals(args.includes('model_provider="openai-no-ws"'), true);
+    assertEquals(
+      args.includes('model_providers.openai-no-ws.name="OpenAI"'),
+      true,
+    );
+    assertEquals(
+      args.includes(
+        'model_providers.openai-no-ws.wire_api="responses"',
+      ),
+      true,
+    );
+    assertEquals(
+      args.includes(
+        "model_providers.openai-no-ws.requires_openai_auth=true",
+      ),
+      true,
+    );
+    assertEquals(
+      args.includes(
+        "model_providers.openai-no-ws.supports_websockets=false",
+      ),
+      true,
     );
   } finally {
     if (previous === undefined) {
